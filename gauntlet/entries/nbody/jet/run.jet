@@ -1,78 +1,58 @@
-#CLI
-struct Args {
-    steps: Int
-}
+#CLI struct Args { steps: Int }
 
-fn energy(bodies: [(position: Vec3, velocity: Vec3, mass: Float)]) Float -> {
-    total := Float{0.0}
-    loop (i, body) in bodies {
-        total += Float{0.5} * body.mass * body.velocity.dot(body.velocity)
-        loop j in (i + 1)..<bodies.len() {
-            other :: bodies[j]
-            total -= body.mass * other.mass / (body.position - other.position).length()
+fn energy(b: [(p: Vec3, v: Vec3, m: Float)]) Float -> {
+    e := Float{0.0}
+    loop (i, x) in b {
+        e += Float{0.5} * x.m * x.v.dot(x.v)
+        loop j in (i + 1)..<5 {
+            y :: b[j]
+            e -= x.m * y.m / (x.p - y.p).length()
         }
     }
-    total
+    e
 }
 
-fn offset_momentum(bodies: &[(position: Vec3, velocity: Vec3, mass: Float)]) {
-    momentum := Vec3.splat(0.0)
-    loop i in 1..<bodies.len() {
-        body :: bodies[i]
-        momentum += body.velocity * Vec3.splat(body.mass)
-    }
-    sun := bodies[0]
-    sun.velocity = Vec3.splat(Float{-1.0} / sun.mass) * momentum
-    bodies[0] = sun
-}
-
-fn advance(bodies: &[(position: Vec3, velocity: Vec3, mass: Float)], steps: Int) {
-    dt :: Float{0.01}
-    loop _ in 0..<steps {
-        loop i in bodies.indexes() {
-            loop j in (i + 1)..<bodies.len() {
-                left := bodies[i]
-                right := bodies[j]
-                delta :: left.position - right.position
-                magnitude :: dt / (delta.dot(delta) * delta.length())
-                left.velocity = left.velocity - delta * Vec3.splat(right.mass * magnitude)
-                right.velocity = right.velocity + delta * Vec3.splat(left.mass * magnitude)
-                bodies[i] = left
-                bodies[j] = right
+fn advance(b: &[(p: Vec3, v: Vec3, m: Float)], n: Int) {
+    d := Float{0.01}
+    loop _ in 0..<n {
+        loop i in 0..<5 {
+            loop j in (i + 1)..<5 {
+                x := b[i]
+                y := b[j]
+                r :: x.p - y.p
+                g :: d / (r.dot(r) * r.length())
+                x.v -= r * Vec3.splat(y.m * g)
+                y.v += r * Vec3.splat(x.m * g)
+                b[i] = x
+                b[j] = y
             }
         }
-        loop i in bodies.indexes() {
-            body := bodies[i]
-            body.position = body.position + body.velocity * Vec3.splat(dt)
-            bodies[i] = body
+        loop i in 0..<5 {
+            x := b[i]
+            x.p += x.v * Vec3.splat(d)
+            b[i] = x
         }
     }
 }
 
 fn run(args: Args) {
-    steps :: args.steps
     pi :: Float{3.141592653589793}
-    solar_mass :: Float{4.0} * pi * pi
-    year :: Float{365.24}
-    bodies := [
-        (position: Vec3(0.0, 0.0, 0.0), velocity: Vec3(0.0, 0.0, 0.0), mass: solar_mass),
-        (position: Vec3(4.84143144246472090, -1.16032004402742839, -0.103622044471123109),
-            velocity: Vec3(0.00166007664274403694 * year, 0.00769901118419740425 * year, -0.0000690460016972063023 * year),
-            mass: Float{0.000954791938424326609} * solar_mass),
-        (position: Vec3(8.34336671824457987, 4.12479856412430479, -0.403523417114321381),
-            velocity: Vec3(-0.00276742510726862411 * year, 0.00499852801234917238 * year, 0.0000230417297573763929 * year),
-            mass: Float{0.000285885980666130812} * solar_mass),
-        (position: Vec3(12.8943695621391310, -15.1111514016986312, -0.223307578892655734),
-            velocity: Vec3(0.00296460137564761618 * year, 0.00237847173959480950 * year, -0.0000296589568540237556 * year),
-            mass: Float{0.0000436624404335156298} * solar_mass),
-        (position: Vec3(15.3796971148509165, -25.9193146099879641, 0.179258772950371181),
-            velocity: Vec3(0.00268067772490389322 * year, 0.00162824170038242201 * year, -0.0000951592254519715870 * year),
-            mass: Float{0.0000515138902046611451} * solar_mass)
+    s :: Float{4.0} * pi * pi
+    y :: Float{365.24}
+    b := [
+        (p: Vec3(0.0, 0.0, 0.0), v: Vec3(0.0, 0.0, 0.0), m: s),
+        (p: Vec3(4.84143144246472090, -1.16032004402742839, -0.103622044471123109), v: Vec3(0.00166007664274403694 * y, 0.00769901118419740425 * y, -0.0000690460016972063023 * y), m: Float{0.000954791938424326609} * s),
+        (p: Vec3(8.34336671824457987, 4.12479856412430479, -0.403523417114321381), v: Vec3(-0.00276742510726862411 * y, 0.00499852801234917238 * y, 0.0000230417297573763929 * y), m: Float{0.000285885980666130812} * s),
+        (p: Vec3(12.8943695621391310, -15.1111514016986312, -0.223307578892655734), v: Vec3(0.00296460137564761618 * y, 0.00237847173959480950 * y, -0.0000296589568540237556 * y), m: Float{0.0000436624404335156298} * s),
+        (p: Vec3(15.3796971148509165, -25.9193146099879641, 0.179258772950371181), v: Vec3(0.00268067772490389322 * y, 0.00162824170038242201 * y, -0.0000951592254519715870 * y), m: Float{0.0000515138902046611451} * s)
     ]
-    offset_momentum(&bodies)
-    initial_energy :: energy(bodies)
-    print("{initial_energy:Fixed(9)}")
-    advance(&bodies, steps)
-    final_energy :: energy(bodies)
-    print("{final_energy:Fixed(9)}")
+    q := Vec3.splat(0.0)
+    q += b[1].v * Vec3.splat(b[1].m)
+    q += b[2].v * Vec3.splat(b[2].m)
+    q += b[3].v * Vec3.splat(b[3].m)
+    q += b[4].v * Vec3.splat(b[4].m)
+    b[0].v = Vec3.splat(-1.0 / b[0].m) * q
+    print("{energy(b):Fixed(9)}")
+    advance(&b, args.steps)
+    print("{energy(b):Fixed(9)}")
 }

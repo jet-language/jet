@@ -40,12 +40,12 @@ execution as Metal success.
 
 | Surface | Status | Notes |
 |---------|--------|-------|
-| `core.db` connection + parameter binding | shipped | parameter-only queries (no string concat) |
+| `core.db` connection + typed SQL binding | shipped | checked SQL carries template text and ordered `DBValue` bindings |
 | `Driver` trait + `DBConnection` impl | shipped | D-DBDRIVER1=A: `T: Driver` bounds; SQLite first backend; AOT + default `jet run` |
-| ORM / query builder | non-goal | one mechanism: typed SQL + params |
+| ORM / query builder | non-goal | one mechanism: typed SQL carrier; builders may produce the same value |
 
-Evidence: `docs/reference/core-library.md` DB section; `tests/corelib.rs` DB cases
-(`db_checked_sql_params_feed_parameterized_execute`, `core_db_implements_driver_trait`).
+Evidence: `docs/reference/core-library.md` DB section; `tests/corelib_parts/system.rs` DB cases
+(`db_checked_sql_execute_uses_typed_sql`, `core_db_implements_driver_trait`).
 
 ## Rubric / parity closeout (#1119)
 

@@ -11,6 +11,18 @@
     "fixtureGen": null,
     "expected": null
   },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this service replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."}
+    }
+  },
   "service": {
     "protocol": "line",
     "portArg": true,
@@ -22,7 +34,7 @@
     ]
   },
   "authoring": {
-    "jet": {"author": "luna-max", "turns": 4, "retries": 0, "diagnosticsHit": [], "notes": "Long-lived raw TCP line service; each batch uses the existing bounded task-group/channel worker pattern."},
+    "jet": {"author": "luna-max", "turns": 4, "retries": 0, "diagnosticsHit": [], "notes": "Long-lived raw TCP line service; starts four persistent workers over bounded channels, then queues each batch through that pool."},
     "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib TCP listener and four-worker channel."},
     "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only TCP listener, sync channel, and four worker threads."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib socket listener and four worker threads."},

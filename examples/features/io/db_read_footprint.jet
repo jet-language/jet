@@ -12,7 +12,7 @@ use core.db as db
 // are the whole set. A `conn.execute` hiding in here would need `DB.Write` and be
 // rejected by E0740, which is the point.
 fn person_count(conn: DBScope) Int -[DB.Read]> {
-    row_opt :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count failed")
+    row_opt :: conn.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count failed")
     if row_opt == .Val(row) {
         n_val :: row.get("n") ?? panic("missing n")
         return n_val.int() ?? 0
@@ -24,9 +24,11 @@ fn run() {
     conn :: db.open_memory()
     policy :: db.policy("person", "true") ?? panic("policy")
     scoped :: conn.with_policy(policy, "owner")
-    _created :: db.migrate(scoped, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"]) ?? panic("create failed")
-    _a :: scoped.execute("INSERT INTO person (name) VALUES (?)", [DBValue.Text("Ada")]) ?? panic("insert failed")
-    _b :: scoped.execute("INSERT INTO person (name) VALUES (?)", [DBValue.Text("Grace")]) ?? panic("insert failed")
+    _created :: db.migrate(scoped, "person-v1", [SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"}]) ?? panic("create failed")
+    ada :: "Ada"
+    _a :: scoped.execute(SQL{"INSERT INTO person (name) VALUES ({ada})"}) ?? panic("insert failed")
+    grace :: "Grace"
+    _b :: scoped.execute(SQL{"INSERT INTO person (name) VALUES ({grace})"}) ?? panic("insert failed")
     print("people: {person_count(scoped)}")
     _closed :: scoped.close()
 }

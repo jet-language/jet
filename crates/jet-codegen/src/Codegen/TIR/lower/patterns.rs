@@ -832,6 +832,7 @@ pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
     if matches!(
         type_name,
         "HTTPError"
+            | "WsError"
             | "HTTPOperation"
             | "HTTPProxy"
             | "HTTPCorsOrigins"

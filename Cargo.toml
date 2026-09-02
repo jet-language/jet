@@ -25,6 +25,7 @@ members = [
     "crates/jet-cli",
     "crates/jet-canvas",
     "crates/jet-devserver",
+    "crates/jet-store",
 ]
 # Card #367 / D-PRODUCT-SPLIT1=C: Jetpack/JetOS own their binaries now (were
 # thin root-package shims). Jetpack's binary-only package keeps host-only
@@ -97,6 +98,7 @@ jetpack = { path = "crates/jetpack" }
 jet-env-model = { path = "crates/jet-env-model" }
 jet-foundation = { path = "crates/jet-foundation" }
 jet-jit = { path = "crates/jet-jit" }
+jet-net = { path = "crates/jet-net" }
 jet-queries = { path = "crates/jet-queries" }
 jet-semindex = { path = "crates/jet-semindex" }
 jet-impact = { path = "crates/jet-impact" }
@@ -105,6 +107,7 @@ jet-debug = { path = "crates/jet-debug" }
 jet-cli = { path = "crates/jet-cli" }
 jet-canvas = { path = "crates/jet-canvas" }
 jet-devserver = { path = "crates/jet-devserver" }
+jet-store = { path = "crates/jet-store" }
 
 # Card #650: `test-seam` unlocks a test-only hangar backdating API
 # (jetpack::Store::test_backdate_last_used_at) for `cargo test`'s
@@ -116,3 +119,7 @@ jetpack = { path = "crates/jetpack", features = ["test-seam"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # D-DEP1: PEM load for the same test-only lifecycle HTTPS e2e peer.
 rustls-pemfile = "2"
+# D-DEP1 / D-DX5-HOOK1: hostile plugin component fixtures are parsed at test
+# runtime; this is already locked as a tool-only dev dependency elsewhere in
+# the workspace.
+wat = "1"

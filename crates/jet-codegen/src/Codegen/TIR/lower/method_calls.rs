@@ -7,6 +7,7 @@ use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
 use crate::Codegen::Cx;
+use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::builtin_result_ty;
 use crate::Codegen::TIR::call_return_type_with_args;
@@ -101,6 +102,17 @@ fn progress_return_ty(args: &[TExpr]) -> Type {
             crate::Collections::iter_ty(args[0].clone())
         }
         _ => unit_type(),
+    }
+}
+/// Imported C functions execute through the hidden bridge, whose call edge
+/// carries Jet's ordinary `Result` failure ABI even though their source
+/// declarations retain the C success type. Keep that carrier in TIR so emit
+/// remains a dumb projection of the already-resolved call shape.
+fn imported_extern_call_type(c_abi: bool, declared: Type) -> Type {
+    if c_abi {
+        jet_foundation::AST::FailureContract::from_return_type(Some(&declared)).effective_type()
+    } else {
+        declared
     }
 }
 use crate::Codegen::TIR::fixed_list_elem_compatible;
@@ -478,6 +490,35 @@ fn host_generic_owner(path: impl Into<String>, generics: Vec<TPreludeArg>) -> TS
     }
 }
 
+/// A String rvalue with no view provenance can transfer its buffer directly to
+/// `Vec<u8>`. Places stay on the borrowing helper so the source remains usable.
+fn string_bytes_receiver_is_owned(receiver: &TExpr, cx: &Cx) -> bool {
+    if !matches!(&receiver.ty, Type::String) {
+        return false;
+    }
+    match &receiver.kind {
+        TExprKind::StrLit(_)
+        | TExprKind::Clone(_)
+        | TExprKind::ExplicitCopy(_)
+        | TExprKind::MaterializeView(_) => true,
+        TExprKind::Call { name, .. } => {
+            let Some(Type::Fn {
+                return_view_provenance,
+                ..
+            }) = cx.fn_types.get(name)
+            else {
+                return false;
+            };
+            !return_view_provenance.as_ref().is_some_and(|provenance| !provenance.is_empty())
+        }
+        TExprKind::BuiltinMethod { op, .. } => !matches!(
+            op,
+            TBuiltinOp::TrimView | TBuiltinOp::AfterView | TBuiltinOp::BeforeView
+        ),
+        _ => false,
+    }
+}
+
 fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
     match op {
         TBuiltinOp::Push
@@ -497,6 +538,61 @@ fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
         _ => false,
     }
 }
+fn builtin_arg_is_place(expr: &Expr) -> bool {
+    matches!(
+        expr.without_parens(),
+        Expr::Ident(..) | Expr::Field(..) | Expr::Index { .. }
+    )
+}
+
+fn lower_builtin_arg(
+    arg: &crate::AST::CallArg,
+    expected: Option<&Type>,
+    owns_value: bool,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let mut value = if owns_value {
+        lower_owned_expr(&arg.expr, cx, env)
+    } else {
+        lower_expr(&arg.expr, cx, env)
+    };
+    if let Some(expected) = expected {
+        if matches!(expected, Type::List(_) | Type::FixedList { .. })
+            && crate::Generics::free_type_params(expected).is_empty()
+        {
+            value = preserve_typed_list_shape(value, expected, cx);
+        }
+    }
+
+    // Builtins store values directly in Rust collections, unlike ordinary call
+    // arguments whose `TCallArg` carries the implicit-clone bit to emission.
+    // Preserve Jet's read-by-value argument semantics at this plain-argument
+    // boundary: places are copied before a storing builtin consumes them.
+    let resource_take = matches!(&value.kind, TExprKind::ResourceTake(_));
+    let already_owned = matches!(
+        &value.kind,
+        TExprKind::Clone(_)
+            | TExprKind::ExplicitCopy(_)
+            | TExprKind::MaterializeView(_)
+            | TExprKind::ResourceTake(_)
+    );
+    let place_copy = owns_value && builtin_arg_is_place(&arg.expr);
+    if !resource_take
+        && !already_owned
+        && (arg.flags.implicit_clone || place_copy)
+        && !value.ty.is_scalar()
+    {
+        let ty = value.ty.clone();
+        env.note_clone(&ty);
+        value = TExpr {
+            ty,
+            kind: TExprKind::Clone(Box::new(value)),
+        };
+    }
+    value
+}
+
 
 fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
     if module == "core.term"
@@ -642,14 +738,28 @@ fn lower_core_crypto_alias_fast(
     let Some((module, core_method)) = target else {
         return None;
     };
-    if module != "core.crypto" || crate::Sema::core_fixed_sig(&module, &core_method).is_none() {
+    if !matches!(module.as_str(), "core.crypto" | "core.crypto.expert") {
         return None;
     }
-    let targs: Vec<TExpr> = args
+    let (params, _) = crate::Sema::core_fixed_sig(&module, &core_method)?;
+    let raw_args: Vec<TExpr> = args
         .iter()
         .map(|arg| lower_expr(&arg.expr, cx, env))
         .collect();
-    let widen_to_vec = core_widen_to_vec(&module, &core_method, &targs);
+    let widen_to_vec = core_widen_to_vec(&module, &core_method, &raw_args);
+    let targs: Vec<TExpr> = raw_args
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            if widen_to_vec.get(index).copied().unwrap_or(false) {
+                value
+            } else if let Some((_, ty)) = params.get(index) {
+                preserve_typed_list_shape(value, ty, cx)
+            } else {
+                value
+            }
+        })
+        .collect();
     let ty = core_call_return_ty(&module, &core_method);
     demand_generic_serde_codec(cx, &env.fn_name, &module, &core_method, &targs, &ty);
     Some(TExpr {
@@ -1661,10 +1771,13 @@ fn lower_method_call_impl(
             });
         }
     }
-    if recv_type
-        .as_ref()
-        .is_some_and(|name| cx.current_type_params.borrow().contains(name.as_str()))
-        && matches!(
+    if recv_type.as_ref().is_some_and(|name| {
+        cx.current_type_params.borrow().contains(name.as_str())
+            || matches!(
+                name.as_str(),
+                crate::Generics::IO_READER | crate::Generics::IO_WRITER
+            )
+    }) && matches!(
             method,
             "read"
                 | "write"
@@ -1678,27 +1791,21 @@ fn lower_method_call_impl(
                 | "query"
                 | "query_one"
                 | "execute"
+                | "live"
                 | "begin"
                 | "commit"
                 | "rollback"
         )
     {
         return in_own_frame(|| {
-            let db_params_ty = Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())));
             let recv = lower_expr(receiver, cx, env);
             let targs: Vec<_> = in_own_frame(|| match method {
-                "query" | "query_one" | "execute" => args
-                    .iter()
-                    .enumerate()
-                    .map(|(i, arg)| {
-                        let arg_ty = if i == 0 {
-                            Type::String
-                        } else {
-                            db_params_ty.clone()
-                        };
-                        lower_one_call_arg(arg, Some((arg.convention, arg_ty)), env, cx)
-                    })
-                    .collect(),
+                "query" | "query_one" | "execute" | "live" => {
+                    let sql_ty = Type::Named("SQL".to_string());
+                    args.iter()
+                        .map(|arg| lower_one_call_arg(arg, Some((arg.convention, sql_ty.clone())), env, cx))
+                        .collect()
+                }
                 "begin" | "commit" | "rollback" => args
                     .iter()
                     .map(|arg| lower_one_call_arg(arg, None, env, cx))
@@ -1734,12 +1841,15 @@ fn lower_method_call_impl(
             };
         });
     }
-    // D-NURSERY1/A: from `[Task<T>]` list type extract `T` (the joined result type).
+    // D-NURSERY1/A: from `[Task<T>]` list type extract `T` (the joined result
+    // type). A normalized fallible child is internally `Task<Result<T, E>>`,
+    // but the task-group surface still returns the successful `T`; the
+    // `TaskFailure` rail is the combinator's only visible error.
     fn taskgroup_result_elem(tasks: &TExpr) -> Type {
         match &tasks.ty {
             Type::List(inner) => match inner.as_ref() {
                 Type::Apply { name, args, .. } if name == "Task" && args.len() == 1 => {
-                    args[0].clone()
+                    taskgroup_success_type(&args[0])
                 }
                 other => (*other).clone(),
             },
@@ -1747,9 +1857,17 @@ fn lower_method_call_impl(
         }
     }
 
+    fn taskgroup_success_type(ty: &Type) -> Type {
+        match ty {
+            Type::Result { ok, .. } => (**ok).clone(),
+            other => other.clone(),
+        }
+    }
+
     /// D-CONC-ALLNAMED1=A: `task.all` carries its named shape in the existing
     /// tuple carrier. Each tuple field is a `Task<T>` at the input and becomes
-    /// the corresponding `T` in the fallible output tuple.
+    /// the corresponding `T` in the fallible output tuple. Normalized
+    /// `Task<Result<T, E>>` fields expose only `T` at this boundary.
     fn taskgroup_result_type(tasks: &TExpr, all: bool) -> Type {
         if all {
             if let Type::Tuple(fields) = &tasks.ty {
@@ -1761,7 +1879,7 @@ fn lower_method_call_impl(
                                 Type::Apply { name, args, .. }
                                     if name == "Task" && args.len() == 1 =>
                                 {
-                                    args[0].clone()
+                                    taskgroup_success_type(&args[0])
                                 }
                                 other => (*other).clone(),
                             };
@@ -1964,8 +2082,8 @@ fn lower_method_call_impl(
             }
         }
     }
-    // D-TYPEDTEXT1=D: `.template()`/`.params()` split a checked `SQL` value;
-    // `.text()` reads the escaped `HTML` string.
+    // D-TYPEDSQL-SINK1=A: `.template()`/`.params()` project the checked `SQL`
+    // value; `.params()` exposes its ordered `DBValue` bindings.
     if recv_type.as_deref() == Some("SQL") && matches!(method, "template" | "params") {
         return in_own_frame(|| {
             let recv = lower_expr(receiver, cx, env);
@@ -1978,7 +2096,7 @@ fn lower_method_call_impl(
                 ty: if method == "template" {
                     Type::String
                 } else {
-                    Type::List(Box::new(Type::String))
+                    Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())))
                 },
                 kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedText {
                     kind,
@@ -2057,10 +2175,14 @@ fn lower_method_call_impl(
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
                 return in_own_frame(|| {
                     let body_ty = spawn_body_result_ty(lam, cx, env);
+                    // D-CONC-SPAWN1: use one normalized carrier for the
+                    // rendered and executable task closures.
+                    let mut spawn_env = clone_env(env);
+                    spawn_env.ret_ty = Some(body_ty.clone());
                     let site = jit_spawn_site(lam, cx, env);
                     let label = spawn_label(lam, cx, env);
-                    let spawn_closure = render_spawn_lambda(lam, cx, env);
-                    let executable = Box::new(lower_lambda(lam, cx, env));
+                    let spawn_closure = render_spawn_lambda(lam, cx, &spawn_env);
+                    let executable = Box::new(lower_lambda(lam, cx, &spawn_env));
                     return TExpr {
                         ty: Type::Apply {
                             name: "Task".to_string(),
@@ -2130,10 +2252,14 @@ fn lower_method_call_impl(
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             return in_own_frame(|| {
                 let body_ty = spawn_body_result_ty(lam, cx, env);
+                // D-CONC-SPAWN1: group and detached spawns share the
+                // closure carrier and return context.
+                let mut spawn_env = clone_env(env);
+                spawn_env.ret_ty = Some(body_ty.clone());
                 let site = jit_spawn_site(lam, cx, env);
                 let label = spawn_label(lam, cx, env);
-                let spawn_closure = render_spawn_lambda(lam, cx, env);
-                let executable = Box::new(lower_lambda(lam, cx, env));
+                let spawn_closure = render_spawn_lambda(lam, cx, &spawn_env);
+                let executable = Box::new(lower_lambda(lam, cx, &spawn_env));
                 let group = lower_expr(receiver, cx, env);
                 return TExpr {
                     ty: Type::Apply {
@@ -2759,6 +2885,7 @@ fn lower_method_call_impl(
     // value differs.
     if method == "query"
         && args.len() == 1
+        && recv_type.is_none()
         && resolved_ret.is_some_and(|ty| matches!(ty, Type::Result { .. }))
     {
         return in_own_frame(|| {
@@ -2958,7 +3085,13 @@ fn lower_method_call_impl(
                                 .cloned()
                                 .unwrap_or_else(|| core_call_return_ty(&module, method))
                         } else {
-                            core_call_return_ty(&module, method)
+                            // Sema's resolved return is authoritative for Core
+                            // calls whose shape depends on the current API fact.
+                            // The fixed table is only the fallback for calls
+                            // that carry no resolved type.
+                            resolved_ret
+                                .cloned()
+                                .unwrap_or_else(|| core_call_return_ty(&module, method))
                         }
                     });
                     demand_generic_serde_codec(cx, &env.fn_name, &module, method, &targs, &ty);
@@ -3098,7 +3231,7 @@ fn lower_method_call_impl(
                                         })
                                         .collect();
                                     let lowered = TExpr {
-                                        ty: ret.clone(),
+                                        ty: imported_extern_call_type(c_abi, ret.clone()),
                                         kind: TExprKind::ExternCall {
                                             wrapper,
                                             c_abi,
@@ -3247,12 +3380,14 @@ fn lower_method_call_impl(
                                         lower_extern_call_arg(arg, conv, env, cx)
                                     })
                                     .collect();
-                                let ty = cx
-                                    .import_rets
-                                    .get(&(alias.clone(), method.to_string()))
-                                    .cloned()
-                                    .flatten()
-                                    .unwrap_or_else(unit_type);
+                                let ty = imported_extern_call_type(
+                                    c_abi,
+                                    cx.import_rets
+                                        .get(&(alias.clone(), method.to_string()))
+                                        .cloned()
+                                        .flatten()
+                                        .unwrap_or_else(unit_type),
+                                );
                                 let lowered = TExpr {
                                     ty,
                                     kind: TExprKind::ExternCall {
@@ -3327,10 +3462,12 @@ fn lower_method_call_impl(
                                         lower_extern_call_arg(arg, conv, env, cx)
                                     })
                                     .collect();
-                                let ty = cx
-                                    .import_return_for_function(&env.fn_name, alias, method)
-                                    .flatten()
-                                    .unwrap_or_else(unit_type);
+                                let ty = imported_extern_call_type(
+                                    c_abi,
+                                    cx.import_return_for_function(&env.fn_name, alias, method)
+                                        .flatten()
+                                        .unwrap_or_else(unit_type),
+                                );
                                 let lowered = TExpr {
                                     ty,
                                     kind: TExprKind::ExternCall {
@@ -3475,6 +3612,17 @@ fn lower_method_call_impl(
                     }
                     _ => op,
                 };
+                // An rvalue String owns its buffer at this call boundary. Carry
+                // that fact to AOT so `bytes()` can consume it without copying;
+                // local/field/index places and tracked string views keep Read.
+                let op = match op {
+                    TBuiltinOp::Bytes { .. }
+                        if string_bytes_receiver_is_owned(&recv_t, cx) =>
+                    {
+                        TBuiltinOp::Bytes { owned: true }
+                    }
+                    op => op,
+                };
                 // Prefer lowered Iter type when AST peek missed the chain.
                 let recv_for_result = recv_ast_ty.as_ref().unwrap_or(&recv_t.ty);
                 // D-HOLE1: `Option.zip`'s `b` type is heterogeneous (arg-dependent), so
@@ -3502,19 +3650,27 @@ fn lower_method_call_impl(
                     // use the lowered receiver type so adapters still type as `Iter`.
                     _ => builtin_result_ty(method, args.len(), Some(recv_for_result)),
                 };
-                // Builtins that store an argument need an owned value. A borrowed
-                // generic parameter is a dereferenced Rust place, so materialize a
-                // clone here instead of leaking rustc E0507. Lookup/compare args stay
-                // borrowed and avoid needless copies.
+                // Reuse sema's canonical builtin signature so contextual empty
+                // collections retain their element type. Builtins store values
+                // as plain Rust arguments, so `lower_builtin_arg` also carries
+                // the implicit-clone/read-by-value boundary ordinary `TCallArg`
+                // emission normally owns.
+                let expected_arg_types =
+                    crate::Collections::builtin_method_arg_types(&recv_t.ty, method);
                 let targs = args
                     .iter()
                     .enumerate()
                     .map(|(i, a)| {
-                        if builtin_arg_takes_ownership(&op, i) {
-                            lower_owned_expr(&a.expr, cx, env)
-                        } else {
-                            lower_expr(&a.expr, cx, env)
-                        }
+                        let expected = expected_arg_types
+                            .as_ref()
+                            .and_then(|types| types.get(i));
+                        lower_builtin_arg(
+                            a,
+                            expected,
+                            builtin_arg_takes_ownership(&op, i),
+                            cx,
+                            env,
+                        )
                     })
                     .collect();
                 return TExpr {
@@ -5689,14 +5845,24 @@ fn lower_method_call_impl(
             && method == Syntax::METHOD_DATATREE_DECODE
             && args.is_empty()
         {
-            if let Some(Type::Result { ok, .. }) = resolved_ret {
+            // Compiler-generated Codable bodies are lowered before a sema pass
+            // writes `resolved_ret` onto each synthetic call. Their explicit
+            // target type argument is the same checked fact, so do not fall
+            // through to the user-method emitter (`__jet_decode`).
+            let target = resolved_ret
+                .and_then(|ret| match ret {
+                    Type::Result { ok, .. } => Some((**ok).clone()),
+                    _ => None,
+                })
+                .or_else(|| type_args.first().cloned());
+            if let Some(target) = target {
                 return in_own_frame(|| {
-                    return lower_datatree_decode_node(
+                    lower_datatree_decode_node(
                         lower_expr(receiver, cx, env),
-                        (**ok).clone(),
+                        target,
                         resolved_ret,
                         cx,
-                    );
+                    )
                 });
             }
         }
@@ -6504,20 +6670,22 @@ fn lower_method_call_impl(
                         };
                     });
                 }
-                // D-SHIFT1 (c7shift): `Reader.over(bytes)` → `jet_reader_over(&(bytes_arg))`.
+                // D-SHIFT1 (c7shift): `Reader.over(bytes)` keeps the borrowing
+                // clone helper unless sema proved a generic owned last use.
                 // Same "arg becomes the recv slot" shape as `Path.from` above.
                 if type_name == "Reader"
                     && method == "over"
                     && args.len() == 1
                     && !cx.type_names.contains("Reader")
                 {
+                    let owned = args[0].flags.owned_last_use;
                     return in_own_frame(|| {
                         let bytes_arg = lower_expr(&args[0].expr, cx, env);
                         return TExpr {
                             ty: Type::Named("Reader".to_string()),
                             kind: TExprKind::HandleMethod {
                                 recv: Box::new(bytes_arg),
-                                op: THandleOp::ReaderOver,
+                                op: THandleOp::ReaderOver { owned },
                                 args: vec![],
                             },
                         };

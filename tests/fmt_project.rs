@@ -256,7 +256,7 @@ fn epoch5_package_and_config_files_use_typed_formatter() {
     let config = write(
         &dir,
         "config/dev.jet",
-        "pub dev :: Config{deps: {ripgrep: \"ripgrep@nixpkgs\"} environments: {dev: Environment{tools: [\"ripgrep@nixpkgs\"]}}}\n",
+        "dev :: Config{deps: {ripgrep: \"ripgrep@nixpkgs\"} environments: {dev: Environment{tools: [\"ripgrep@nixpkgs\"]}}}\n",
     );
     let before_package = read(&package);
     let before_config = read(&config);
@@ -677,17 +677,17 @@ fn simplify_mode_is_stable_across_a_project() {
         write(
             &dir,
             "examples/answer.jet",
-            "fn answer() Int {\n    return 42\n}\n",
+            "fn answer() Int -> {\n    return 42\n}\n",
         ),
         write(
             &dir,
             "tests/double.jet",
-            "fn double(value: Int) Int {\n    return value * 2\n}\n",
+            "fn double(value: Int) Int -> {\n    return value * 2\n}\n",
         ),
         write(
             &dir,
             "docs/reference/sample.jet",
-            "fn label() String {\n    return \"sample\"\n}\n",
+            "fn label() String -> {\n    return \"sample\"\n}\n",
         ),
     ];
     let corpus = [
@@ -738,7 +738,7 @@ fn map_type_spacing_is_project_stable() {
     let f = write(
         &dir,
         "main.jet",
-        "fn read(values: [String: Int]) [String: Int] {\n    return [\"key\": 1]\n}\n",
+        "fn read(values: [String: Int]) [String: Int] -> {\n    return [\"key\": 1]\n}\n",
     );
 
     let first = Command::new(jet())
@@ -750,7 +750,7 @@ fn map_type_spacing_is_project_stable() {
     assert_eq!(first.status.code(), Some(0));
     assert_eq!(
         read(&f),
-        "fn read(values: [String:Int]) [String:Int] { return [\"key\": 1] }\n"
+        "fn read(values: [String:Int]) [String:Int] -> { return [\"key\": 1] }\n"
     );
 
     let before = read(&f);

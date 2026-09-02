@@ -43,13 +43,11 @@ fn csv_row_value(record: jet_foundation::CsvKernel::CsvRecord) -> CtValue {
     }
 }
 
-fn validate_interpreter_route(
-    module: &str,
-    method: &str,
-    span: Span,
-) -> Result<(), Diagnostic> {
+fn validate_interpreter_route(module: &str, method: &str, span: Span) -> Result<(), Diagnostic> {
     if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
-        if row.coverage.contains(jet_foundation::Syntax::CoreCallCoverage::INTERPRETER)
+        if row
+            .coverage
+            .contains(jet_foundation::Syntax::CoreCallCoverage::INTERPRETER)
             && !row.interpreter_route.is_executable()
         {
             return Err(unsupported(
@@ -704,6 +702,21 @@ pub fn apply_core_call(
     apply_core_call_with_type(module, method, args, span, repl_mode, None)
 }
 
+/// Evaluate one registered pure Core route without consulting its interpreter
+/// adapter. Ambient adapters use this to marshal handles around the same pure
+/// value constructor without recursively re-entering the ambient dispatcher.
+pub fn apply_core_pure_call(
+    module: &str,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let row = jet_foundation::Syntax::core_call(module, method).filter(|row| {
+        row.pure_route != jet_foundation::Syntax::CoreCallPureRoute::None && !row.is_receiver()
+    })?;
+    core_pure_parity::evaluate(row, args, span)
+}
+
 /// Apply a Core call with sema's resolved return type available to erased
 /// adapters. The type is marshalling metadata only; effects and policy remain
 /// owned by the existing registries and Prelude kernels.
@@ -728,8 +741,7 @@ pub fn apply_core_call_with_type(
     // boundary; pure rows stay in CorePureParity; typed-intrinsic rows use
     // the existing typed evaluator below. Unknown rows retain the legacy
     // ambient hook so newly surfaced host carriers still get one boundary.
-    let route = jet_foundation::Syntax::core_call(module, method)
-        .map(|row| row.interpreter_route);
+    let route = jet_foundation::Syntax::core_call(module, method).map(|row| row.interpreter_route);
     if route.is_none()
         || matches!(
             route,
@@ -1642,9 +1654,7 @@ pub fn apply_core_call_with_type(
                 Ok(rows) => Ok(CtValue::Present(Box::new(CtValue::List(
                     rows.into_iter()
                         .map(|row| {
-                            CtValue::List(
-                                row.fields.into_iter().map(CtValue::Str).collect(),
-                            )
+                            CtValue::List(row.fields.into_iter().map(CtValue::Str).collect())
                         })
                         .collect(),
                 )))),
@@ -2116,9 +2126,7 @@ pub fn apply_core_call_with_type(
                 CtValue::Int(width) => *width,
                 _ => return Err(unsupported("fmt.hex width must be Int", span)),
             };
-            Ok(CtValue::Str(fmt_kernel::jet_fmt_hex_decimal(
-                &value, width,
-            )))
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_hex_decimal(&value, width)))
         }
         ("core.text.fmt", "sci") => {
             let value = as_float(one(0)?, span)?;

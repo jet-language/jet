@@ -283,7 +283,7 @@ pub(crate) mod runtime {
             pub(crate) header: bool,
             pub(crate) skip_blank: bool,
             pub(crate) parser: super::jet_csv_kernel::CsvParser,
-            pub(crate) allocation: super::JetEncodingAllocationBudget,
+            pub(super) allocation: super::JetEncodingAllocationBudget,
             pub(crate) utf8: [u8; 4],
             pub(crate) utf8_len: usize,
             pub(crate) total: i64,
@@ -1088,6 +1088,164 @@ fn ambient_unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
+pub(crate) fn ambient_csv_reader_from_file(
+    args: &[CtValue],
+    span: Span,
+    take_file: impl FnOnce() -> Result<runtime::JetFileReader, String>,
+) -> Result<CtValue, Diagnostic> {
+    let delimiter = match args.get(2) {
+        None => ",".to_string(),
+        Some(CtValue::Str(value)) => value.clone(),
+        Some(_) => {
+            return Err(ambient_unsupported(
+                "core.encoding.csv.reader delimiter String",
+                span,
+            ))
+        }
+    };
+    let header = match args.get(3) {
+        None => false,
+        Some(CtValue::Bool(value)) => *value,
+        Some(_) => {
+            return Err(ambient_unsupported(
+                "core.encoding.csv.reader header Bool",
+                span,
+            ))
+        }
+    };
+    let skip_blank = match args.get(4) {
+        None => false,
+        Some(CtValue::Bool(value)) => *value,
+        Some(_) => {
+            return Err(ambient_unsupported(
+                "core.encoding.csv.reader skip_blank Bool",
+                span,
+            ))
+        }
+    };
+    let reader = match take_file() {
+        Ok(reader) => reader,
+        Err(error) => {
+            return Err(ambient_unsupported(
+                &format!("core.encoding.csv.reader: {error}"),
+                span,
+            ))
+        }
+    };
+    Ok(match runtime::enc_csv_reader(
+        reader,
+        ambient_limits(args.get(1)),
+        delimiter,
+        header,
+        skip_blank,
+    ) {
+        Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+            AmbientStream::CSVReader(reader),
+        ))),
+        Err(error) => ambient_failed(ambient_encoding_error(&error)),
+    })
+}
+
+pub(crate) fn ambient_json_reader_from_file(
+    args: &[CtValue],
+    span: Span,
+    take_file: impl FnOnce() -> Result<runtime::JetFileReader, String>,
+) -> Result<CtValue, Diagnostic> {
+    let reader = match take_file() {
+        Ok(reader) => reader,
+        Err(error) => {
+            return Err(ambient_unsupported(
+                &format!("core.encoding.json.reader: {error}"),
+                span,
+            ))
+        }
+    };
+    Ok(
+        match runtime::enc_json_reader(reader, ambient_limits(args.get(1))) {
+            Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                AmbientStream::JSONReader(reader),
+            ))),
+            Err(error) => ambient_failed(ambient_encoding_error(&error)),
+        },
+    )
+}
+
+pub(crate) fn ambient_jsonl_reader_from_file(
+    args: &[CtValue],
+    span: Span,
+    take_file: impl FnOnce() -> Result<runtime::JetFileReader, String>,
+) -> Result<CtValue, Diagnostic> {
+    let reader = match take_file() {
+        Ok(reader) => reader,
+        Err(error) => {
+            return Err(ambient_unsupported(
+                &format!("core.encoding.jsonl.reader: {error}"),
+                span,
+            ))
+        }
+    };
+    Ok(
+        match runtime::enc_jsonl_reader(reader, ambient_limits(args.get(1))) {
+            Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                AmbientStream::JSONLReader(reader),
+            ))),
+            Err(error) => ambient_failed(ambient_encoding_error(&error)),
+        },
+    )
+}
+
+pub(crate) fn ambient_xml_reader_from_file(
+    args: &[CtValue],
+    span: Span,
+    take_file: impl FnOnce() -> Result<runtime::JetFileReader, String>,
+) -> Result<CtValue, Diagnostic> {
+    let reader = match take_file() {
+        Ok(reader) => reader,
+        Err(error) => {
+            return Err(ambient_unsupported(
+                &format!("core.encoding.xml.reader: {error}"),
+                span,
+            ))
+        }
+    };
+    Ok(
+        match runtime::enc_xml_reader(
+            reader,
+            ambient_limits(args.get(1)),
+            runtime::jet_std::XMLParseOptions::safe(),
+        ) {
+            Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                AmbientStream::XMLReader(reader),
+            ))),
+            Err(error) => ambient_failed(ambient_encoding_error(&error)),
+        },
+    )
+}
+
+pub(crate) fn ambient_cbor_reader_from_file(
+    args: &[CtValue],
+    span: Span,
+    take_file: impl FnOnce() -> Result<runtime::JetFileReader, String>,
+) -> Result<CtValue, Diagnostic> {
+    let reader = match take_file() {
+        Ok(reader) => reader,
+        Err(error) => {
+            return Err(ambient_unsupported(
+                &format!("core.encoding.cbor.reader: {error}"),
+                span,
+            ))
+        }
+    };
+    Ok(
+        match runtime::enc_cbor_reader(reader, ambient_limits(args.get(1))) {
+            Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                AmbientStream::CBORReader(reader),
+            ))),
+            Err(error) => ambient_failed(ambient_encoding_error(&error)),
+        },
+    )
+}
+
 /// Registry-facing file routes owned by this stream dispatcher. The three
 /// entries must stay in lockstep with `Syntax::CORE_CALL_AMBIENT_ROUTES`;
 /// encoding reader/writer carriers below are internal stream operations and
@@ -1166,23 +1324,9 @@ pub(crate) fn ambient_core_call(
                     span,
                 )));
             };
-            let reader = match ambient_stream_take_file_reader(*file) {
-                Ok(reader) => reader,
-                Err(error) => {
-                    return Some(Err(ambient_unsupported(
-                        &format!("core.encoding.json.reader: {error}"),
-                        span,
-                    )))
-                }
-            };
-            Some(Ok(
-                match runtime::enc_json_reader(reader, ambient_limits(args.get(1))) {
-                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                        AmbientStream::JSONReader(reader),
-                    ))),
-                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
-                },
-            ))
+            Some(ambient_json_reader_from_file(&args, span, || {
+                ambient_stream_take_file_reader(*file)
+            }))
         }
         ("core.encoding.json", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1223,23 +1367,9 @@ pub(crate) fn ambient_core_call(
                     span,
                 )));
             };
-            let reader = match ambient_stream_take_file_reader(*file) {
-                Ok(reader) => reader,
-                Err(error) => {
-                    return Some(Err(ambient_unsupported(
-                        &format!("core.encoding.jsonl.reader: {error}"),
-                        span,
-                    )))
-                }
-            };
-            Some(Ok(
-                match runtime::enc_jsonl_reader(reader, ambient_limits(args.get(1))) {
-                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                        AmbientStream::JSONLReader(reader),
-                    ))),
-                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
-                },
-            ))
+            Some(ambient_jsonl_reader_from_file(&args, span, || {
+                ambient_stream_take_file_reader(*file)
+            }))
         }
         ("core.encoding.jsonl", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1267,65 +1397,15 @@ pub(crate) fn ambient_core_call(
             ))
         }
         ("core.encoding.csv", "reader") => {
-            let delimiter = match args.get(2) {
-                None => ",".to_string(),
-                Some(CtValue::Str(value)) => value.clone(),
-                Some(_) => {
-                    return Some(Err(ambient_unsupported(
-                        "core.encoding.csv.reader delimiter String",
-                        span,
-                    )))
-                }
-            };
-            let header = match args.get(3) {
-                None => false,
-                Some(CtValue::Bool(value)) => *value,
-                Some(_) => {
-                    return Some(Err(ambient_unsupported(
-                        "core.encoding.csv.reader header Bool",
-                        span,
-                    )))
-                }
-            };
-            let skip_blank = match args.get(4) {
-                None => false,
-                Some(CtValue::Bool(value)) => *value,
-                Some(_) => {
-                    return Some(Err(ambient_unsupported(
-                        "core.encoding.csv.reader skip_blank Bool",
-                        span,
-                    )))
-                }
-            };
             let Some(CtValue::Int(file)) = args.first() else {
                 return Some(Err(ambient_unsupported(
                     "core.encoding.csv.reader FileReader",
                     span,
                 )));
             };
-            let reader = match ambient_stream_take_file_reader(*file) {
-                Ok(reader) => reader,
-                Err(error) => {
-                    return Some(Err(ambient_unsupported(
-                        &format!("core.encoding.csv.reader: {error}"),
-                        span,
-                    )))
-                }
-            };
-            Some(Ok(
-                match runtime::enc_csv_reader(
-                    reader,
-                    ambient_limits(args.get(1)),
-                    delimiter,
-                    header,
-                    skip_blank,
-                ) {
-                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                        AmbientStream::CSVReader(reader),
-                    ))),
-                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
-                },
-            ))
+            Some(ambient_csv_reader_from_file(&args, span, || {
+                ambient_stream_take_file_reader(*file)
+            }))
         }
         ("core.encoding.csv", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1359,27 +1439,9 @@ pub(crate) fn ambient_core_call(
                     span,
                 )));
             };
-            let reader = match ambient_stream_take_file_reader(*file) {
-                Ok(reader) => reader,
-                Err(error) => {
-                    return Some(Err(ambient_unsupported(
-                        &format!("core.encoding.xml.reader: {error}"),
-                        span,
-                    )))
-                }
-            };
-            Some(Ok(
-                match runtime::enc_xml_reader(
-                    reader,
-                    ambient_limits(args.get(1)),
-                    runtime::jet_std::XMLParseOptions::safe(),
-                ) {
-                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                        AmbientStream::XMLReader(reader),
-                    ))),
-                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
-                },
-            ))
+            Some(ambient_xml_reader_from_file(&args, span, || {
+                ambient_stream_take_file_reader(*file)
+            }))
         }
         ("core.encoding.xml", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1417,23 +1479,9 @@ pub(crate) fn ambient_core_call(
                     span,
                 )));
             };
-            let reader = match ambient_stream_take_file_reader(*file) {
-                Ok(reader) => reader,
-                Err(error) => {
-                    return Some(Err(ambient_unsupported(
-                        &format!("core.encoding.cbor.reader: {error}"),
-                        span,
-                    )))
-                }
-            };
-            Some(Ok(
-                match runtime::enc_cbor_reader(reader, ambient_limits(args.get(1))) {
-                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                        AmbientStream::CBORReader(reader),
-                    ))),
-                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
-                },
-            ))
+            Some(ambient_cbor_reader_from_file(&args, span, || {
+                ambient_stream_take_file_reader(*file)
+            }))
         }
         ("core.encoding.cbor", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {

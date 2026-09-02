@@ -277,7 +277,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E0057 | parse | retired `take(...)` closure capture prefix; captures are implicit (D-ARROW-CONTROL1) |
 | E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → the write-access marker `&`; raw-reference return spelling `-> &T` no longer exists to point at) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Scrub(Tag) fn` (D-TAG-SURFACE1) |
-| E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
+| E0060 | parse | teaching: retired C FFI marker spelling → `#Import` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
 | E0063 | parse | teaching: applied rules use `#`, not the compile-time/fact-read prefix `@` (D-VERDICT-732-1, amended by D-ONCE-AT1=D) |
 | E0064 | parse | `#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string (D-FFI-INLINE1/D-FFI-RAWBODY1) |
@@ -667,7 +667,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | L3102 | sema  | `#Impure` block missing its reason argument — write `#Impure("…") { … }` (D-CTEFFECT1) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem` |
-| E3203 | sema  | non-C-ABI type in `#Extern` / `#Bindgen` fn signature |
+| E3203 | sema  | non-C-ABI type in `#Import` / `#Bindgen` fn signature |
 | E3204 | sema  | two C `use` forms for the same lib in one file |
 | E3205 | sema  | overlay symbol clashes with bindgen (incompatible signature) |
 | E3206 | parse | user declared reserved `__bindgen__` segment |
@@ -684,9 +684,9 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E3220 | sema  | `#FFI(<lang>)` names a language with no inline foreign binder yet (systems floor ships `c`/`cpp`/`asm`, card #501) |
 | E3222 | sema/build | inline C/C++ body cannot satisfy its declared scalar Jet ABI, or inline asm uses a non-integer/unsupported signature; native tool output stays hidden (D-FFI-INLINE1/ASM1, I2) |
 | E3223 | sema | inline asm operands do not match the Jet signature: missing/unknown named input, duplicate or missing `; -> return`, or unaudited clobber/target register (D-FFI-ASM1) |
-| E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
+| E3301 | sema  | OS-dependent std API called for a selected no-OS target |
 | E3302 | jet   | target triple unknown or toolchain component missing |
-| E3303 | sema  | freestanding build allocates memory with no global allocator |
+| E3303 | sema  | no-OS target allocates memory with no global allocator |
 | E3304 | sema  | selected target does not provide the runtime boundary for a reachable Core socket surface |
 | E3305 | sema  | selected target does not provide a runtime adapter for a reachable Core socket operation |
 | E3410 | sema  | Tier-2 comptime effect (`core.files`/`core.sys`/`core.term`/`core.process`) called outside a `#Impure` gate (D-CTEFFECT1) |
@@ -825,6 +825,10 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E1348 | jetpack | signed nixpkgs index proof was rejected (D-JPK-NIXINDEX1) |
 | E1349 | jetpack | requested nixpkgs attr is outside signed index coverage (D-JPK-NIXINDEX1) |
 | E1350 | jetpack | native Nix cache admission failed during {kind} (D-JPK-NIXCACHE1) |
+| E1360 | jet | inline `package { … }` declaration is not first (D-ECO-INLINEPACKAGE1) |
+| E1361 | jet | duplicate inline `package { … }` declaration (D-ECO-INLINEPACKAGE1) |
+| E1362 | jet | inline `package { … }` declaration is malformed or unbalanced (D-ECO-INLINEPACKAGE1) |
+| E1363 | jet | inline Package conflicts with `package.jet` (D-ECO-INLINEPACKAGE1) |
 | E1320 | jetpack | an external hangar root changed between reading its etag and applying a requested mutation |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1322 | jetpack | workspace/package membership escapes its root (D-ECO-MEMBERS1) |
@@ -1978,12 +1982,12 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 |------|------|-----|-----|
 | E3201 | C library `{lib}` was not found. | Jet looked for a `{lib}: c@…` dep in `package.jet`, then tried `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: c@system` in `deps:`. |
 | E3202 | Type `{ty}` cannot cross the C boundary here. | C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58). | Move the call inside `#Unsafe`, or change the type to a C-safe value type. |
-| E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
+| E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `#Import` / `#Bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
 | E3204 | Two different `use` forms refer to the same C library `{lib}`. | S59 allows one bring-in per C lib per file — either `use "{header}" as alias` or `use c.[{lib} as alias]`, not both. | Remove one line; keep the form that matches your workflow. |
-| E3205 | Overlay `{name}` disagrees with the generated binding. | User `#Extern module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
-| E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `#Extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `#Extern module c.{lib} { … }`. |
-| E3207 | `#Bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Extern module`. | Edit your overlay file with `#Extern module`, or regenerate the cache with `jet inspect bind`. |
-| E3208 | Could not generate bindings from `{header}`. | `{reason}` | Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Extern module c.{lib}`. |
+| E3205 | Overlay `{name}` disagrees with the generated binding. | User `#Import module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
+| E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `#Import module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `#Import module c.{lib} { … }`. |
+| E3207 | `#Bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Import module`. | Edit your overlay file with `#Import module`, or regenerate the cache with `jet inspect bind`. |
+| E3208 | Could not generate bindings from `{header}`. | `{reason}` | Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Import module c.{lib}`. |
 | E3260 | `com.*` needs a Windows host. | COM type libraries, apartments, the registry, and IDispatch are Windows facilities. | Generate, build, and run the COM module on a Windows host; use a non-COM boundary for other targets. |
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
@@ -1992,13 +1996,13 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | E3213 | `{abi}` is not available on this target. | Native calling conventions are restricted by operating system and architecture (e.g. `stdcall`/`cdecl`/`fastcall` are Windows x86 only; `win64` is Windows x86-64; `sysv64` is non-Windows x86-64). | Use the default C ABI or `system` for portable declarations. |
 | E3214 | Variadic C function `{name}` cannot use `{abi}`. | Variadics allow only the default C ABI, or `cdecl` on Windows x86 — other calling conventions don't define how a variadic argument list is passed. | Remove `#ABI`, or use `#ABI(cdecl)` on Windows x86. |
 
-## Cross-compilation and freestanding diagnostics (E2-M15)
+## Cross-compilation and no-OS target diagnostics (E2-M15)
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3301 | `{api}` is not available in a freestanding build. | `--freestanding` targets have no OS; only `core`-level APIs are available. | Embed data at compile time with `@embed("file")`, or build without `--freestanding`. |
+| E3301 | `{api}` is not available on a no-OS target. | Selected no-OS targets have no OS; only `core`-level APIs are available. | Embed data at compile time with `@embed("file")`, or select a hosted target or declared provider. |
 | E3302 | Target `{triple}` is not available. | rustc doesn't have the standard library for this target compiled in, or the target triple is not recognised. `wasm32-wasip2` is the supported WASI Preview 2 server Component target. | Run `jet self doctor --target=<triple>` to see what's missing, or `rustup target add <triple>` to install it; use `wasm32-wasip2` for a WASI Preview 2 server. |
-| E3303 | This freestanding program allocates memory but has no global allocator configured. | `--freestanding` builds cannot use the OS heap; a custom allocator is required. | Add `use core.mem;` and configure an arena or fixed allocator with `mem.set_allocator(…)`. |
+| E3303 | This no-OS program allocates memory but has no global allocator configured. | No-OS targets cannot use the OS heap; a custom allocator provider is required. | Select a target with an allocator provider, or configure an arena or fixed allocator with `mem.set_allocator(…)`. |
 | E3304 | `{module}` is not available for target `{target}`. | `{module}` needs native sockets or WASI Preview 2 sockets, and this target provides neither runtime boundary. | Build for `wasm32-wasip2` or a supported native target, or remove the `{module}` import. |
 | E3305 | `{operation}` is not available for target `{target}`. | The selected target has no Prelude adapter for `{operation}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. | Use a supported TCP/UDP operation, or build for a native target. |
 
@@ -2210,6 +2214,10 @@ failure keeps its What, Why, and Fix lines and ends with
 | E1348 | The signed nixpkgs index could not be trusted. | The manifest, target, signature, or canonical record failed verification, so Jetpack refused to select or substitute the package. | Refresh the signed index or use a covered locked nixpkgs input. |
 | E1349 | The requested nixpkgs attr is not covered by the signed index. | The signed index records only the published nixpkgs channel, revision, system, and attrs it can prove; this attr is in its explicit not-indexed coverage. | Use a covered attr or a supported native provider, or resolve the input through an explicit compatibility path. |
 | E1350 | native Nix cache admission failed during {kind}. | the signed Nix cache closure was not admitted because its {kind} check failed. | repair the cache metadata or network response, then retry the admission. |
+| E1360 | An inline `package { … }` declaration must be the first top-level declaration. | The contextual package carrier owns the file's Package facts and must be established before ordinary Jet items. | Move the `package { … }` block before every other top-level declaration. |
+| E1361 | An inline `package { … }` declaration appears more than once. | One source file has one Package identity; accepting a second block would make facts, outputs, and authority ambiguous. | Keep one leading `package { … }` block and remove the duplicate. |
+| E1362 | The inline `package { … }` declaration is malformed or missing its closing brace. | The contextual carrier must have one balanced block before its body can be passed to the canonical Package parser. | Close the block and fix its structure, then let the Package field diagnostic identify any invalid field. |
+| E1363 | This source declares inline Package facts while `package.jet` also exists. | D-ECO-INLINEPACKAGE1 allows one Package context per project; choosing between two identities would make builds, dependencies, outputs, and authority nondeterministic. | Remove the inline block or remove `package.jet`, then keep the remaining Package declaration canonical. |
 | E1277 | A jetos option key uses a retired namespace. | D-JPK-OSNS1=B and D-JOS-SYSTEMTREE1=A: jetos option keys start with full-word namespaces: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`. | Rename the option namespace, for example `net.hostName` becomes `network.hostName`. |
 | E1278 | A jetos activation proof is incomplete. | D-WD8 requires `jet os switch` to prove the plan, risk class, generated service artifacts, and rollback evidence before changing the active generation pointers. | Rebuild the generation so the proof artifacts are regenerated, or discard a hand-edited generation. |
 | E1279 | jetos VM proof tools are missing. | D-JOS-VMDEPS1=A requires pinned QEMU, firmware, ISO, bootloader, filesystem, EFI image, and initrd compression tools before install/reboot proof can run. | Realize or expose the required tools, then rerun `jet os vm prove <host> --disk <disk>`. |

@@ -503,6 +503,13 @@ mod windows {
             flags: u32,
             console: *mut Handle,
         ) -> i32;
+        fn CompareStringOrdinal(
+            string1: *const u16,
+            count1: i32,
+            string2: *const u16,
+            count2: i32,
+            ignore_case: i32,
+        ) -> i32;
         fn DeleteProcThreadAttributeList(attribute_list: *mut c_void);
         fn GetExitCodeProcess(process: Handle, exit_code: *mut u32) -> i32;
         fn InitializeProcThreadAttributeList(
@@ -657,7 +664,9 @@ mod windows {
 
     struct AttributeList {
         list: *mut c_void,
-        storage: Vec<u8>,
+        // PROC_THREAD_ATTRIBUTE_LIST is pointer-aligned even though the API
+        // reports its storage size in bytes.
+        storage: Vec<usize>,
     }
 
     impl AttributeList {
@@ -670,9 +679,18 @@ mod windows {
             if size == 0 {
                 return Err(error("InitializeProcThreadAttributeList size probe"));
             }
-            let mut storage = vec![0_u8; size];
+            let words = size
+                .checked_add(std::mem::size_of::<usize>() - 1)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "InitializeProcThreadAttributeList size overflows",
+                    )
+                })?
+                / std::mem::size_of::<usize>();
+            let mut storage = vec![0_usize; words];
             let list = storage.as_mut_ptr().cast::<c_void>();
-            // SAFETY: storage has the exact probed size and remains live.
+            // SAFETY: storage has at least the probed size and remains live.
             if unsafe { InitializeProcThreadAttributeList(list, 1, 0, &mut size) } == 0 {
                 return Err(error("InitializeProcThreadAttributeList"));
             }
@@ -867,19 +885,53 @@ mod windows {
         Ok(output)
     }
 
-    fn environment_block(env: &[(std::ffi::OsString, std::ffi::OsString)]) -> Vec<u16> {
-        let mut block = Vec::new();
+    fn compare_environment_names(left: &[u16], right: &[u16]) -> std::cmp::Ordering {
+        let Some(left_len) = i32::try_from(left.len()).ok() else {
+            return left.cmp(right);
+        };
+        let Some(right_len) = i32::try_from(right.len()).ok() else {
+            return left.cmp(right);
+        };
+        // SAFETY: both pointers are valid for the explicit UTF-16 lengths.
+        match unsafe {
+            CompareStringOrdinal(left.as_ptr(), left_len, right.as_ptr(), right_len, 1)
+        } {
+            1 => std::cmp::Ordering::Less,
+            2 => std::cmp::Ordering::Equal,
+            3 => std::cmp::Ordering::Greater,
+            _ => left.cmp(right),
+        }
+    }
+
+    fn environment_block(
+        env: &[(std::ffi::OsString, std::ffi::OsString)],
+    ) -> io::Result<Vec<u16>> {
+        let mut entries = Vec::with_capacity(env.len());
         for (name, value) in env {
-            block.extend(name.encode_wide());
+            let name: Vec<u16> = name.encode_wide().collect();
+            let value: Vec<u16> = value.encode_wide().collect();
+            if name.contains(&0) || value.contains(&0) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Windows process environment contains NUL",
+                ));
+            }
+            entries.push((name, value));
+        }
+        entries.sort_by(|(left, _), (right, _)| compare_environment_names(left, right));
+
+        let mut block = Vec::new();
+        for (name, value) in entries {
+            block.extend(name);
             block.push('=' as u16);
-            block.extend(value.encode_wide());
+            block.extend(value);
             block.push(0);
         }
         if block.is_empty() {
             block.push(0);
         }
         block.push(0);
-        block
+        Ok(block)
     }
 
     pub struct WindowsPtyProcess {
@@ -916,7 +968,7 @@ mod windows {
         let application = make_wide(executable)?;
         let mut command = command_line(executable, args)?;
         let current_directory = cwd.map(make_wide).transpose()?;
-        let mut environment = environment_block(env);
+        let mut environment = environment_block(env)?;
         let mut attributes = AttributeList::create()?;
         let console_handle = console.raw();
         attributes.update(
@@ -1088,7 +1140,11 @@ mod windows {
                 return Err(error("QueryInformationJobObject(accounting)"));
             }
             let limit = limits.cpu_time_ms.unwrap_or(0).max(0) as i64;
-            if accounting.total_user_time >= limit.saturating_mul(10_000) {
+            let cpu_time = accounting
+                .total_user_time
+                .max(0)
+                .saturating_add(accounting.total_kernel_time.max(0));
+            if cpu_time >= limit.saturating_mul(10_000) {
                 return Ok(Some(super::ResourceLimitKind::CpuTime));
             }
         }
@@ -1156,8 +1212,11 @@ mod windows {
         // console control event for the child and its descendants.
         if let Some(input) = input {
             let mut input = input.try_clone()?;
-            input.write_all(&[3])?;
-            return Ok(());
+            match input.write_all(&[3]) {
+                Ok(()) => return Ok(()),
+                Err(error) if is_terminal_eof(&error) => {}
+                Err(error) => return Err(error),
+            }
         }
         terminate(job)
     }

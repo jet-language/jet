@@ -355,49 +355,93 @@ fn expand_builtin_serde_items_with_auto_here(
             Item::Enum(e) if e.name.starts_with("__JetUnion_") => {
                 generated_items.extend(union_codec_items(e, &snapshot));
             }
-            Item::Struct(s)
-                if has_codec(&s.derives)
-                    || auto.auto_encode.contains(&s.name)
-                    || auto.auto_decode.contains(&s.name) =>
-            {
-                let mut derived = s.clone();
-                add_auto_codec_marker(
-                    &mut derived.derives,
-                    crate::Generics::ENCODE,
-                    &auto.auto_encode,
-                    &derived.name,
-                    derived.name_span,
-                );
-                add_auto_codec_marker(
-                    &mut derived.derives,
-                    crate::Generics::DECODE,
-                    &auto.auto_decode,
-                    &derived.name,
-                    derived.name_span,
-                );
-                generated_items.extend(struct_codec_items(&derived));
+            Item::Struct(s) => {
+                let explicit_encode =
+                    has_explicit_codec(&snapshot, &s.name, crate::Generics::ENCODE);
+                let explicit_decode =
+                    has_explicit_codec(&snapshot, &s.name, crate::Generics::DECODE);
+                // An explicit marker is a request to materialize the compiler
+                // candidate even when a source impl already exists. The normal
+                // trait-registration pass then reports the duplicate method and
+                // impl, while an unmarked hand codec remains the sole candidate.
+                let encode = has_derive(&s.derives, crate::Generics::ENCODE)
+                    || (!explicit_encode && auto.auto_encode.contains(&s.name));
+                let decode = has_derive(&s.derives, crate::Generics::DECODE)
+                    || (!explicit_decode && auto.auto_decode.contains(&s.name));
+                if encode || decode {
+                    let mut derived = s.clone();
+                    if explicit_encode && !has_derive(&s.derives, crate::Generics::ENCODE) {
+                        derived
+                            .derives
+                            .retain(|(name, _)| name != crate::Generics::ENCODE);
+                    }
+                    if explicit_decode && !has_derive(&s.derives, crate::Generics::DECODE) {
+                        derived
+                            .derives
+                            .retain(|(name, _)| name != crate::Generics::DECODE);
+                    }
+                    if !explicit_encode {
+                        add_auto_codec_marker(
+                            &mut derived.derives,
+                            crate::Generics::ENCODE,
+                            &auto.auto_encode,
+                            &derived.name,
+                            derived.name_span,
+                        );
+                    }
+                    if !explicit_decode {
+                        add_auto_codec_marker(
+                            &mut derived.derives,
+                            crate::Generics::DECODE,
+                            &auto.auto_decode,
+                            &derived.name,
+                            derived.name_span,
+                        );
+                    }
+                    generated_items.extend(struct_codec_items(&derived));
+                }
             }
-            Item::Enum(e)
-                if has_codec(&e.derives)
-                    || auto.auto_encode.contains(&e.name)
-                    || auto.auto_decode.contains(&e.name) =>
-            {
-                let mut derived = e.clone();
-                add_auto_codec_marker(
-                    &mut derived.derives,
-                    crate::Generics::ENCODE,
-                    &auto.auto_encode,
-                    &derived.name,
-                    derived.name_span,
-                );
-                add_auto_codec_marker(
-                    &mut derived.derives,
-                    crate::Generics::DECODE,
-                    &auto.auto_decode,
-                    &derived.name,
-                    derived.name_span,
-                );
-                generated_items.extend(enum_codec_items(&derived));
+            Item::Enum(e) => {
+                let explicit_encode =
+                    has_explicit_codec(&snapshot, &e.name, crate::Generics::ENCODE);
+                let explicit_decode =
+                    has_explicit_codec(&snapshot, &e.name, crate::Generics::DECODE);
+                let encode = has_derive(&e.derives, crate::Generics::ENCODE)
+                    || (!explicit_encode && auto.auto_encode.contains(&e.name));
+                let decode = has_derive(&e.derives, crate::Generics::DECODE)
+                    || (!explicit_decode && auto.auto_decode.contains(&e.name));
+                if encode || decode {
+                    let mut derived = e.clone();
+                    if explicit_encode && !has_derive(&e.derives, crate::Generics::ENCODE) {
+                        derived
+                            .derives
+                            .retain(|(name, _)| name != crate::Generics::ENCODE);
+                    }
+                    if explicit_decode && !has_derive(&e.derives, crate::Generics::DECODE) {
+                        derived
+                            .derives
+                            .retain(|(name, _)| name != crate::Generics::DECODE);
+                    }
+                    if !explicit_encode {
+                        add_auto_codec_marker(
+                            &mut derived.derives,
+                            crate::Generics::ENCODE,
+                            &auto.auto_encode,
+                            &derived.name,
+                            derived.name_span,
+                        );
+                    }
+                    if !explicit_decode {
+                        add_auto_codec_marker(
+                            &mut derived.derives,
+                            crate::Generics::DECODE,
+                            &auto.auto_decode,
+                            &derived.name,
+                            derived.name_span,
+                        );
+                    }
+                    generated_items.extend(enum_codec_items(&derived));
+                }
             }
             _ => {}
         }
@@ -433,13 +477,22 @@ fn add_auto_codec_marker(
         derives.push((trait_name.to_string(), span));
     }
 }
-
-fn has_codec(derives: &[(String, Span)]) -> bool {
-    derives.iter().any(|(name, _)| {
-        matches!(
-            name.as_str(),
-            crate::Generics::ENCODE | crate::Generics::DECODE
-        )
+fn has_explicit_codec(items: &[Item], type_name: &str, trait_name: &str) -> bool {
+    items.iter().any(|item| match item {
+        Item::Impl(implementation) => {
+            implementation.type_name == type_name
+                && implementation.trait_name.as_deref() == Some(trait_name)
+                && !implementation.is_generated_serde
+        }
+        Item::Struct(definition) if definition.name == type_name => definition
+            .trait_impls
+            .iter()
+            .any(|block| block.trait_name == trait_name && !block.compiler_generated),
+        Item::Enum(definition) if definition.name == type_name => definition
+            .trait_impls
+            .iter()
+            .any(|block| block.trait_name == trait_name && !block.compiler_generated),
+        _ => false,
     })
 }
 
@@ -484,11 +537,6 @@ fn codec_params(
 fn struct_codec_items(s: &crate::AST::StructDef) -> Vec<Item> {
     let encode = has_derive(&s.derives, crate::Generics::ENCODE);
     let decode = has_derive(&s.derives, crate::Generics::DECODE);
-    let wire_types = s
-        .reflection_fields()
-        .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
-        .map(|field| field.ty.clone());
-    let params = codec_params(&s.type_params, wire_types, encode, decode);
     let span = s
         .derives
         .iter()
@@ -502,12 +550,21 @@ fn struct_codec_items(s: &crate::AST::StructDef) -> Vec<Item> {
         .unwrap_or(s.name_span);
     let mut out = Vec::new();
     if encode {
+        let params = codec_params(
+            &s.type_params,
+            s.fields
+                .iter()
+                .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+                .map(|field| field.ty.clone()),
+            true,
+            false,
+        );
         out.push(Item::Impl(serde_impl(
             &s.name,
             crate::Generics::ENCODE,
             serde_method(
                 "encode",
-                params.clone(),
+                params,
                 vec![self_param(span)],
                 Some(data_tree_type()),
                 struct_encode_body(s, span),
@@ -517,6 +574,14 @@ fn struct_codec_items(s: &crate::AST::StructDef) -> Vec<Item> {
         )));
     }
     if decode {
+        let params = codec_params(
+            &s.type_params,
+            s.reflection_fields()
+                .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+                .map(|field| field.ty.clone()),
+            false,
+            true,
+        );
         out.push(Item::Impl(serde_impl(
             &s.name,
             crate::Generics::DECODE,
@@ -672,7 +737,38 @@ fn union_decode_body(e: &crate::AST::EnumDef, items: &[Item], span: Span) -> Vec
         let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
             continue;
         };
+        // Typed JSON keeps numeric lexemes in DataTree::Number so fixed-width
+        // decoders can validate them without a lossy float round-trip. A
+        // numeric member therefore accepts its native DataTree variant and
+        // the compiler-only Number carrier; keep each runtime variant once.
+        let mut wire_variants = Vec::new();
         for shape in shapes {
+            match shape {
+                crate::AST::SerdeWireShape::Int => {
+                    if !wire_variants.contains(&"Int") {
+                        wire_variants.push("Int");
+                    }
+                    if !wire_variants.contains(&"Number") {
+                        wire_variants.push("Number");
+                    }
+                }
+                crate::AST::SerdeWireShape::Float => {
+                    if !wire_variants.contains(&"Float") {
+                        wire_variants.push("Float");
+                    }
+                    if !wire_variants.contains(&"Number") {
+                        wire_variants.push("Number");
+                    }
+                }
+                shape => {
+                    let name = shape.name();
+                    if !wire_variants.contains(&name) {
+                        wire_variants.push(name);
+                    }
+                }
+            }
+        }
+        for wire_variant in wire_variants {
             let value_name = format!("jet_serde_union_value_{index}");
             let decode = try_expr(
                 method_with_type_args(
@@ -693,13 +789,14 @@ fn union_decode_body(e: &crate::AST::EnumDef, items: &[Item], span: Span) -> Vec
                     span,
                 ),
             ];
-            let bindings = match shape {
-                crate::AST::SerdeWireShape::Null => Vec::new(),
-                _ => vec![format!("jet_serde_union_wire_{index}")],
+            let bindings = if wire_variant == "Null" {
+                Vec::new()
+            } else {
+                vec![format!("jet_serde_union_wire_{index}")]
             };
             body.push(pattern_switch(
                 copy(ident("tree", span), span),
-                shape.name(),
+                wire_variant,
                 bindings,
                 branch,
                 Some(Vec::new()),
@@ -747,7 +844,8 @@ fn serde_method(
 
 fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
     let fields = s
-        .reflection_fields()
+        .fields
+        .iter()
         .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
         .collect::<Vec<_>>();
     let has_flatten = fields
@@ -772,7 +870,7 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 &nested,
                 None,
                 method(
-                    field_read("self", &field.name, span),
+                    field_value(field, span),
                     "encode",
                     Vec::new(),
                     span,
@@ -801,7 +899,7 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             ));
         } else if matches!(field.ty, Type::Option(_)) {
             body.push(option_encode(
-                copy(field_read("self", &field.name, span), span),
+                copy(field_value(field, span), span),
                 &key,
                 vec![field.name.clone()],
                 span,
@@ -811,7 +909,7 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 "out",
                 string_expr(&key, span),
                 method(
-                    field_read("self", &field.name, span),
+                    field_value(field, span),
                     "encode",
                     Vec::new(),
                     span,
@@ -852,7 +950,7 @@ fn ordered_encode_fields(
             span,
         ));
         vec![option_switch(
-            copy(field_read("self", &field.name, span), span),
+            copy(field_value(field, span), span),
             &binding_name,
             present,
             ordered_encode_fields(container_markers, fields, index + 1, pairs, span),
@@ -860,7 +958,7 @@ fn ordered_encode_fields(
         )]
     } else {
         next_pairs(method(
-            field_read("self", &field.name, span),
+            field_value(field, span),
             "encode",
             Vec::new(),
             span,
@@ -2201,6 +2299,14 @@ fn method_with_type_args(receiver: Expr, name: &str, type_args: Vec<Type>, span:
 
 fn field_read(base: &str, field: &str, span: Span) -> Expr {
     Expr::Field(Box::new(ident(base, span)), field.to_string(), span)
+}
+
+fn field_value(field: &crate::AST::Field, span: Span) -> Expr {
+    field
+        .computed
+        .as_ref()
+        .map(|computed| computed.as_ref().clone())
+        .unwrap_or_else(|| field_read("self", &field.name, span))
 }
 
 fn call_arg(expr: Expr, span: Span) -> CallArg {

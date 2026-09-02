@@ -116,6 +116,131 @@ fn check_reuses_receipt_at_the_cli_boundary() {
 }
 
 #[test]
+fn project_check_does_not_replay_after_higher_priority_entry_appears() {
+    let root = temp_root("stale-entry");
+    let source_dir = root.join("src");
+    let receipt_dir = root.join("receipts");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"stale-entry\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(source_dir.join("run.jet"), "fn run() {}\n").unwrap();
+    let jet = env!("CARGO_BIN_EXE_jet");
+
+    let first = Command::new(jet)
+        .arg("check")
+        .current_dir(&root)
+        .env("JET_RECEIPT_DIR", &receipt_dir)
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "initial project check failed:\n{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    std::fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
+    let second = Command::new(jet)
+        .arg("check")
+        .current_dir(&root)
+        .env("JET_RECEIPT_DIR", &receipt_dir)
+        .output()
+        .unwrap();
+    assert!(
+        second.status.success(),
+        "project check after entry creation failed:\n{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&second.stderr).contains("ok: check current"),
+        "new higher-priority entry incorrectly replayed the old receipt:\n{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn explicit_check_receipt_tracks_package_workspace_and_generated_authorities() {
+    let root = temp_root("project-authorities");
+    let package = root.join("packages/app");
+    let source = package.join("src/main.jet");
+    let package_manifest = package.join("package.jet");
+    let workspace = root.join("workspace.jet");
+    let workspace_lock = root.join(".jet/lock");
+    let package_lock = package.join(".jet/lock");
+    let generated = package.join(".jet/generated/inputs.jet");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(workspace_lock.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(package_lock.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(generated.parent().unwrap()).unwrap();
+    std::fs::write(
+        &workspace,
+        "module workspace { members: [\"packages/app\"] }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &package_manifest,
+        "name: \"app\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(&source, "fn run() {}\n").unwrap();
+    std::fs::write(&workspace_lock, "workspace-lock-v1\n").unwrap();
+    std::fs::write(&package_lock, "package-lock-v1\n").unwrap();
+    std::fs::write(&generated, "generated-v1\n").unwrap();
+
+    let argv = vec!["check".to_string(), "packages/app/src/main.jet".to_string()];
+    let inputs = jet::ReceiptStore::input_paths_for("check", &argv, &root);
+    for expected in [
+        &workspace,
+        &package_manifest,
+        &workspace_lock,
+        &package_lock,
+        &generated,
+    ] {
+        assert!(
+            inputs.iter().any(|path| path == expected),
+            "explicit check omitted authority input {}: {inputs:?}",
+            expected.display()
+        );
+    }
+
+    let store = ReceiptStore::new(root.join("receipts"));
+    let claim = store.claim("check", &argv, &inputs).unwrap();
+    store.write(&claim, &argv, 0, b"ok", b"").unwrap();
+    assert!(store.lookup(&claim).unwrap().is_some());
+
+    let cases = [
+        (
+            &workspace,
+            "module workspace { members: [] }\n",
+            "module workspace { members: [\"packages/app\"] }\n",
+        ),
+        (
+            &package_manifest,
+            "name: \"changed\"\n",
+            "name: \"app\"\nversion: \"0.1.0\"\n",
+        ),
+        (&workspace_lock, "workspace-lock-v2\n", "workspace-lock-v1\n"),
+        (&package_lock, "package-lock-v2\n", "package-lock-v1\n"),
+        (&generated, "generated-v2\n", "generated-v1\n"),
+    ];
+    for (path, replacement, original) in cases {
+        std::fs::write(path, replacement).unwrap();
+        assert!(
+            store.lookup(&claim).unwrap().is_none(),
+            "changed authority input {} replayed an old receipt",
+            path.display()
+        );
+        std::fs::write(path, original).unwrap();
+    }
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn result_payloads_share_one_receipt_codec_and_store() {
     let root = temp_root("kinds");
     let source = root.join("main.jet");

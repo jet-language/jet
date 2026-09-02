@@ -1,0 +1,102 @@
+{
+  "name": "embedded-data",
+  "tier": "program",
+  "cells": ["embedded.data"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c", "zig", "node"],
+  "spec": {
+    "behavior": "Read a deterministic EDB1 binary telemetry stream of fixed-size frames, checksum every input byte, retain fixed scalar state for four channels, and report valid-frame counts plus sample, energy, load, and tick aggregates.",
+    "args": ["telemetry.bin"],
+    "record": "Header EDB1 and little-endian frame fields channel:u8, flags:u8, sample:u16, tick:u32, energy:u16, load:u16. Frames with flags=0 are valid; channel counts and aggregates include valid frames only.",
+    "memory": "Every implementation loads the identical generated 12,000,008-byte input blob before timing and processing; the reducer state is fixed and uses no maps, strings, or growing collections: only four channel counters and fixed scalar aggregates.",
+    "fixtureGen": {"script": "fixtures/gen.py", "out": "telemetry.bin"},
+    "expected": "expected.out"
+  },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {
+        "status": "not_applicable",
+        "basis": "no_compile_phase",
+        "reason": "Python runs the source directly through python3 and has no separate compile or build phase.",
+        "evidence": "The batch harness invokes python3 main.py and has no configured Python build command."
+      },
+      "warm_build_seconds": {
+        "status": "not_applicable",
+        "basis": "no_compile_phase",
+        "reason": "Python runs the source directly through python3 and has no separate compile or build phase.",
+        "evidence": "The batch harness invokes python3 main.py and has no configured Python build command."
+      },
+      "binary_bytes": {
+        "status": "not_applicable",
+        "basis": "no_compile_phase",
+        "reason": "Python has no compiled executable artifact for this entry.",
+        "evidence": "The batch harness invokes python3 main.py directly and does not produce a Python binary."
+      }
+    },
+    "node": {
+      "cold_build_seconds": {
+        "status": "not_applicable",
+        "basis": "no_compile_phase",
+        "reason": "Node runs the module directly through node and has no separate compile or build phase.",
+        "evidence": "The batch harness invokes node main.mjs and has no configured Node build command."
+      },
+      "warm_build_seconds": {
+        "status": "not_applicable",
+        "basis": "no_compile_phase",
+        "reason": "Node runs the module directly through node and has no separate compile or build phase.",
+        "evidence": "The batch harness invokes node main.mjs and has no configured Node build command."
+      },
+      "binary_bytes": {
+        "status": "not_applicable",
+        "basis": "no_compile_phase",
+        "reason": "Node has no compiled executable artifact for this entry.",
+        "evidence": "The batch harness invokes node main.mjs directly and does not produce a Node binary."
+      }
+    }
+  },
+  "authoring": {
+    "jet": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Uses core.files and Reader for the shared little-endian frame format. Matched execution is intentionally deferred to the orchestrator; the harness command is scripts/agent/jet-env node gauntlet/harness/run.mjs --entry embedded-data."
+    },
+    "rust": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Std-only explicit little-endian parser and fixed four-channel accumulator; harness toolchain is rustc --edition=2021 -O."
+    },
+    "python": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Uses Python stdlib pathlib and struct.Struct for the same fixed frame layout; harness toolchain is python3."
+    },
+    "c": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Uses explicit little-endian byte readers and a fixed four-channel accumulator; harness toolchain is gcc -O2 main.c -o main-c -lm."
+    },
+    "zig": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Uses std-only bounded file loading and explicit little-endian readers; harness toolchain is Zig ReleaseFast."
+    },
+    "node": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Uses Node's built-in fs and Buffer little-endian readers for the shared fixture; harness toolchain is node."
+    }
+  }
+}

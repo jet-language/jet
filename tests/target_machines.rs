@@ -8,7 +8,8 @@ use jet::Driver::{
 use jet::Syntax::RuntimeLayer;
 use jet::TargetMachine::{
     AllocatorPolicy, ByteSize, ExecutionTier, LinkerInput, MemoryAccess, MemoryKind, MemoryRegion,
-    MmioAccess, PanicPolicy, TargetMachine, TargetMachineError, TargetMachineUse, UnsafeGate,
+    MmioAccess, PanicPolicy, ProviderContract, TargetMachine, TargetMachineError, TargetMachineUse,
+    UnsafeGate,
 };
 
 fn sensor_machine() -> TargetMachine {
@@ -46,7 +47,7 @@ fn sensor_machine() -> TargetMachine {
         size: ByteSize::kib(8),
     };
     machine.panic = PanicPolicy::Report {
-        sink: "semihosting".to_string(),
+        provider: ProviderContract::new("semihosting", "sha256:semihosting"),
     };
     machine
 }
@@ -206,12 +207,11 @@ fn run() {
     )
     .expect_err("no-os target machine should reject core.files before codegen");
     match err {
-        TargetMachineCompileError::Machine(errors) => assert!(errors.iter().any(|e| matches!(
-            e,
-            TargetMachineError::CoreApiUnavailable { api, .. } if api.starts_with("core.files")
-        ))),
         TargetMachineCompileError::Diagnostics(diags) => {
-            panic!("expected machine errors, got diagnostics: {diags:?}")
+            assert!(diags.iter().any(|diagnostic| diagnostic.code == "E3310"));
+        }
+        TargetMachineCompileError::Machine(errors) => {
+            panic!("expected registered diagnostics, got machine errors: {errors:?}")
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -277,12 +277,11 @@ fn run() {
     )
     .expect_err("target machine should reject direct volatile access outside MMIO range");
     match err {
-        TargetMachineCompileError::Machine(errors) => assert!(errors.iter().any(|e| matches!(
-            e,
-            TargetMachineError::MmioOutsideRegion { address, .. } if *address == 0x5000_0000
-        ))),
         TargetMachineCompileError::Diagnostics(diags) => {
-            panic!("expected machine errors, got diagnostics: {diags:?}")
+            assert!(diags.iter().any(|diagnostic| diagnostic.code == "E3313"));
+        }
+        TargetMachineCompileError::Machine(errors) => {
+            panic!("expected registered diagnostics, got machine errors: {errors:?}")
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
@@ -428,6 +427,45 @@ fn dossier_target_lens_returns_stable_json() {
     let hosted = jet::Driver::target_machine_dossier_json("hosted").unwrap();
     assert!(hosted.contains("\"environment\":\"hosted\""));
     assert!(jet::Driver::target_machine_dossier_json("nope").is_err());
+}
+#[test]
+fn wasm_profiles_are_explicit_and_provider_bound() {
+    let browser = TargetMachine::wasm_browser();
+    assert_eq!(browser.environment_identity(), "browser");
+    assert!(browser.is_browser_target());
+    assert!(browser.is_web_target());
+    assert!(browser.validate(&TargetMachineUse::default()).is_empty());
+
+    let wasi = TargetMachine::wasm_wasi();
+    assert_eq!(wasi.environment_identity(), "wasi");
+    assert!(wasi.is_wasi_target());
+    assert!(!wasi.is_web_target());
+    assert!(wasi.validate(&TargetMachineUse::default()).is_empty());
+
+    let no_os = TargetMachine::wasm_no_os();
+    assert_eq!(no_os.environment_identity(), "no-os");
+    assert!(!no_os.is_web_target());
+    assert_eq!(no_os.max_runtime_layer(), RuntimeLayer::Core);
+    assert!(no_os.validate(&TargetMachineUse::default()).is_empty());
+}
+
+#[test]
+fn provider_changes_invalidate_target_artifact_identity() {
+    let usage = TargetMachineUse::from_core_apis(["core.ui"]);
+    let browser = TargetMachine::wasm_browser();
+    let before = browser.target_dossier(&usage, ExecutionTier::Aot, "compiler", "deps");
+    let mut changed = browser.clone();
+    changed.byte_sink = jet::TargetMachine::ByteSinkPolicy::Provider {
+        read: None,
+        write: Some(ProviderContract::new("other.write", "sha256:other")),
+        report: Some(ProviderContract::new("other.report", "sha256:other")),
+    };
+    let after = changed.target_dossier(&usage, ExecutionTier::Aot, "compiler", "deps");
+    assert_ne!(before.provider_identity, after.provider_identity);
+    assert_ne!(
+        before.cache_bytes(&browser.triple),
+        after.cache_bytes(&changed.triple)
+    );
 }
 
 #[test]

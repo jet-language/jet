@@ -8,8 +8,10 @@ import {
   REGRESSION_SEEDS,
   batchMutations,
   checkAllAdapters,
+  compareCaseObservations,
   compareTierObservations,
   discoverCorpusSeeds,
+  executeCase,
   makeResultBundle,
   mutateValueSource,
   readDifferentialManifest,
@@ -91,9 +93,11 @@ test("catalog derives one independent oracle row per public surface", () => {
   ]);
   assert.equal(catalog.rows[1].tier_self_diff, true);
   assert.equal(catalog.rows[1].oracle.independence_class, "algebraic-law");
-  assert.equal(catalog.exclusions, 2);
-  assert.equal(catalog.rows[2].status, "excluded");
-  assert.equal(catalog.rows[2].rejection.reason, "not-a-callable:receiver_method");
+  assert.equal(catalog.exclusions, 1);
+  assert.equal(catalog.rows[2].status, "covered");
+  assert.equal(catalog.rows[2].executable, true);
+  assert.equal(catalog.rows[0].status, "excluded");
+  assert.equal(catalog.rows[0].rejection.reason, "field is only observable through its owning constructor");
   assert.throws(
     () => buildOracleCatalog([MANIFEST[0], MANIFEST[0]], "sha256:manifest"),
     /duplicate surface stable_id/,
@@ -111,26 +115,23 @@ test("catalog derives one independent oracle row per public surface", () => {
   );
 });
 
-test("catalog uses a closed exclusion vocabulary and preserves missing callables", () => {
+test("manifest rejects missing public rows before oracle qualification", () => {
   assert.deepEqual(NON_CALLABLE_EXCLUSION_REASON_BY_KIND, {
     receiver_method: "not-a-callable:receiver_method",
     field: "not-a-callable:field",
     nominal_type: "not-a-callable:nominal_type",
   });
-  const catalog = buildOracleCatalog(manifestWithMissingCallable());
-  assert.equal(catalog.counts.covered, 1);
-  assert.equal(catalog.counts.excluded, 3);
-  assert.equal(catalog.counts.missing, 1);
-  assert.equal(catalog.counts.covered + catalog.counts.excluded, 4);
-  for (const [kind, reason] of Object.entries(NON_CALLABLE_EXCLUSION_REASON_BY_KIND)) {
-    const row = catalog.rows.find((candidate) => candidate.kind === kind);
-    assert.equal(row.status, "excluded");
-    assert.equal(row.rejection.reason, reason);
-    assert.equal(row.tier_self_diff, false);
-  }
-  const missing = catalog.rows.find((row) => row.stable_id === "module:core.test.missing");
-  assert.equal(missing.status, "missing");
-  assert.equal(missing.rejection.reason, "manifest row is missing");
+  assert.throws(() => manifestWithMissingCallable(), (error) => {
+    for (const stableId of [
+      "module:core.test.missing",
+      "receiver:Widget.read",
+      "field:Widget.value",
+      "type:core.test.Widget",
+    ]) {
+      assert.ok(error.message.includes(`unresolved public row: ${stableId}`), stableId);
+    }
+    return true;
+  });
 });
 
 test("mutations preserve typed source shape and observable sink", () => {
@@ -295,4 +296,106 @@ test("result bundles are complete and sorted independently of worker order", () 
     { tier: "aot", stdout_bytes: "base64:eA==", stderr_bytes: "base64:", exit: 0, signal: null, timeout: false, relation: "x" },
     { tier: "jet_run", stdout_bytes: "base64:eQ==", stderr_bytes: "base64:", exit: 0, signal: null, timeout: false, relation: "y" },
   ], ["aot", "jet_run"]).ok, false);
+});
+test("mutation cases carry an executable oracle and reject missing references", () => {
+  const seed = {
+    stable_surface_id: "module:core.math.add",
+    seed: "numeric-add-001",
+    domain: "numeric",
+    source: "fn run() { value :: 7\n print(value) }\n",
+    applicable_tiers: ["aot", "jet_run"],
+  };
+  const batch = batchMutations([seed], { maxCases: 5 });
+  assert.equal(batch.cases.length, 5);
+  assert.deepEqual(batch.cases[0].oracle_input, { a: 7, b: 3, c: 2 });
+  assert.equal(batch.cases[0].expected_value, 23);
+  assert.equal(batch.cases[0].expected_value_relation, "23");
+  assert.deepEqual(batch.cases[0].applicable_tiers, ["aot", "jet_run"]);
+  assert.match(batch.batches[0].line_protocol, /"expected_value":23/);
+
+  const unavailable = batchMutations([{
+    ...seed,
+    domain: "unregistered-domain",
+  }], { maxCases: 5 });
+  assert.equal(unavailable.cases.length, 0);
+  assert.equal(unavailable.rejected.length, 5);
+  assert.match(unavailable.rejected[0].reason, /reference oracle is unavailable/);
+});
+
+test("oracle comparison refuses an external relation without an expected value", () => {
+  assert.throws(() => compareCaseObservations({
+    domain: "numeric",
+    applicable_tiers: ["aot"],
+    expected_relation: "oracle:numeric-algebra-laws",
+    observations: [{
+      tier: "aot",
+      stdout: "23\n",
+      stderr: "",
+      exit: 0,
+      signal: null,
+      timeout: false,
+    }],
+  }), /expected value is missing/);
+});
+test("mutation cases reject forged reference values", () => {
+  const forged = batchMutations([{
+    stable_surface_id: "module:core.math.add",
+    seed: "numeric-add-forged",
+    domain: "numeric",
+    source: "fn run() { value :: 7\n print(value) }\n",
+    oracle_input: { a: 7, b: 3, c: 2 },
+    expected_value: 999,
+  }], { maxCases: 5 });
+  assert.equal(forged.cases.length, 0);
+  assert.equal(forged.rejected.length, 5);
+  assert.match(forged.rejected[0].reason, /disagrees with reference oracle/);
+});
+test("executed cases reject a forged carried reference value", async () => {
+  await assert.rejects(
+    () => executeCase({
+      stable_surface_id: "module:core.math.add",
+      source: "fn run() { print(999) }\n",
+      domain: "numeric",
+      oracle_input: { a: 7, b: 3, c: 2 },
+      expected_value: 999,
+      expected_relation: "oracle:numeric-algebra-laws",
+      applicable_tiers: ["aot"],
+    }, {
+      executor: async () => ({
+        tier: "aot",
+        stdout: "999\n",
+        stderr: "",
+        exit: 0,
+        signal: null,
+        timeout: false,
+      }),
+      validate: false,
+      require_expected: true,
+    }),
+    /disagrees with reference oracle/,
+  );
+});
+test("executed cases require the carried reference value", async () => {
+  await assert.rejects(
+    () => executeCase({
+      stable_surface_id: "module:core.math.add",
+      source: "fn run() { print(23) }\n",
+      domain: "numeric",
+      oracle_input: { a: 7, b: 3, c: 2 },
+      expected_relation: "oracle:numeric-algebra-laws",
+      applicable_tiers: ["aot"],
+    }, {
+      executor: async () => ({
+        tier: "aot",
+        stdout: "23\n",
+        stderr: "",
+        exit: 0,
+        signal: null,
+        timeout: false,
+      }),
+      validate: false,
+      require_expected: true,
+    }),
+    /reference oracle expected value is missing/,
+  );
 });

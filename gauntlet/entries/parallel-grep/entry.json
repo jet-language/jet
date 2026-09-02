@@ -6,16 +6,34 @@
   "perf": true,
   "languages": ["jet", "rust", "python", "go", "node"],
   "spec": {
-    "behavior": "Scan every .txt file under the given directory concurrently, count non-overlapping substring occurrences of the needle per line, print matching paths sorted lexicographically, then print files matched/scanned and the total occurrence count.",
+    "behavior": "Recursively scan every regular .txt file under the given directory with bounded concurrency, count non-overlapping substring occurrences of the needle per line, print matching paths sorted lexicographically, then print files matched/scanned and the total occurrence count.",
     "args": ["files", "needle-7f"],
     "fixtureGen": {"script": "fixtures/gen.py", "out": "files/"},
+    "fixture": {
+      "files": 200000,
+      "directories": 200,
+      "layout": "files/dNNN/fMMMM.txt plus one ignored .md file per directory",
+      "match": "files/d000/f0000.txt contains two adjacent needle-7f occurrences; every other .txt file is non-matching"
+    },
     "expected": "expected.out"
   },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs; no binary is built or measured."}
+    }
+  },
   "authoring": {
-    "jet": {"author": "luna-max", "turns": 14, "retries": 12, "diagnosticsHit": ["E2105: can't find the file `main.jet`", "E0329: a nested one-line control body needs braces", "E0107: nothing named `process` exists here", "E0112: `scan_one` wants String (text) for argument 2, but this is Int (a whole number)", "L1101: `__jet_tg_0` still owes `join`", "E0113: this lambda should return `Ordering`, not Bool (true or false)", "E0113: this lambda should return `Ordering`, not Int (a whole number)", "E0956: `core.files.glob()` isn't supported by the current evaluator yet", "E1803: application authority is undecided for `Env`", "E3001: `panic: list failed`", "E0109: text isn't joined with `+`", "E0002: this `{` never gets a matching `}`", "L0508: arrow_loop_value_drop", "rustc E0308: internal compiler error, generated Rust did not compile (Task<Result<...>> mismatch)"], "notes": "Used list_dir plus absolute cwd because default evaluator rejected glob and relative FS lookup failed in scratch. Effectful task handles currently generate internal Task<Result<...>> in AOT; detached children synchronize through channel receives inside task.group."},
-    "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0373: closure may outlive the current function, but it borrows `path`"], "notes": "Added move to scoped worker closure."},
-    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
-    "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
-    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node fs/promises rail with concurrent file reads and the same non-overlapping per-line count."}
+    "jet": {"author": "luna-max", "turns": 14, "retries": 12, "diagnosticsHit": ["E2105: can't find the file `main.jet`", "E0329: a nested one-line control body needs braces", "E0107: nothing named `process` exists here", "E0112: `scan_one` wants String (text) for argument 2, but this is Int (a whole number)", "L1101: `__jet_tg_0` still owes `join`", "E0113: this lambda should return `Ordering`, not Bool (true or false)", "E0113: this lambda should return `Ordering`, not Int (a whole number)", "E0956: `core.files.glob()` isn't supported by the current evaluator yet", "E1803: application authority is undecided for `Env`", "E3001: `panic: list failed`", "E0109: text isn't joined with `+`", "E0002: this `{` never gets a matching `}`", "L0508: arrow_loop_value_drop", "rustc E0308: internal compiler error, generated Rust did not compile (Task<Result<...>> mismatch)"], "notes": "Uses raw process.argv() with the declared root and needle arguments required, the shared recursive fs.walk_files contract, and bounded para_map reads; read and walk failures remain fatal."},
+    "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0373: closure may outlive the current function, but it borrows `path`"], "notes": "Uses recursive std::fs traversal and a bounded scoped worker pool with batched matches."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses pathlib recursive discovery and ThreadPoolExecutor for the same tree and output contract."},
+    "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses filepath.WalkDir and a bounded GOMAXPROCS worker pool for the same tree and output contract."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses recursive fs/promises discovery and a bounded availableParallelism worker pool for the same tree and output contract."}
   }
 }

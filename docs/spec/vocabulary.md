@@ -41,7 +41,7 @@ mechanism.
 ## Collecting loop
 
 Definition: A collecting loop is an eager `loop ... -> ...` expression that runs now
-and returns one `List<T>` in iteration order.
+and returns one `[T]` in iteration order.
 
 Authority: [D-LOOPEVAL1 and D-COMPREHENSION1](syntax-decisions.md#s19--loops).
 

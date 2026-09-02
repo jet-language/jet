@@ -1,0 +1,60 @@
+{
+  "schema_version": "2393-r1-comparison-v1",
+  "card": 2393,
+  "run_id": "2393-r1",
+  "participant": "A06",
+  "status": "measured",
+  "mapping": {
+    "digest": "ca021d6cdbef17c3cd0e624c0145514d8bbaf09e6cf5bc28ca7e2961eafb2483",
+    "first_bit": 1,
+    "second_bit": 1,
+    "jet_label": "Arm B",
+    "rust_label": "Arm A",
+    "option_order": [
+      "Arm B",
+      "Arm A",
+      "no preference"
+    ]
+  },
+  "prompt_path": ".tmp/2393-r1/participants/A06/compare/prompt.txt",
+  "prompt_sha256": "9d2dd076abc232e5bde56b263e7dd6edfe425f8bc98f59d4b42339d962c1a34f",
+  "preference": "Arm A",
+  "mapped_choice": "Rust",
+  "reason": "Arm A passes all four tasks in every mode; Arm B hits an internal compiler error (exit 101) on T1 AOT, a hard correctness failure the runner exercises.",
+  "response_raw": "Looking at the tested observations:\n\n**Arm A** (Rust): All 4 tasks pass every step — correct stdout, correct exit codes on both success and failure fixtures, fast builds (~1.3s) and sub-ms execution. Code is clean: uses enums + typed structs (T2), HashMap with insertion-order Vec (T1/T3), manual JSON escaping (T4). 26/26 steps green.\n\n**Arm B** (Jet): T2, T3, T4 pass all modes (check, JIT run, AOT build). But **T1 fails AOT** — steps 20 and 21 both exit 101 with `internal compiler error: the generated Rust did not compile`. T1 passes `jet check` and JIT, but the AOT path (which the runner exercises) produces an ICE. Additionally, AOT builds take 13–29s vs Arm A's ~1.3s. Code uses parallel arrays instead of structs and has tripled near-identical dispatch functions in T2.\n\nThe T1 AOT ICE is a hard correctness failure: the program can't be built to a native binary, which the test contract exercises.\n\n```json\n{\"preference\":\"Arm A\",\"reason\":\"Arm A passes all four tasks in every mode; Arm B hits an internal compiler error (exit 101) on T1 AOT, a hard correctness failure the runner exercises.\"}\n```\n",
+  "session": {
+    "adapter": "omp-command",
+    "model_family": "Anthropic",
+    "model": "claude-opus-4-6",
+    "argv": [
+      "/etc/profiles/per-user/nate/bin/omp",
+      "--model",
+      "claude-opus-4-6",
+      "--thinking",
+      "high",
+      "--no-session",
+      "--no-skills",
+      "--no-rules",
+      "--no-extensions",
+      "--no-title",
+      "--no-lsp",
+      "--no-pty",
+      "--tools=read",
+      "--auto-approve",
+      "--cwd",
+      "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A06",
+      "--print",
+      "@/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A06/compare/prompt.txt"
+    ],
+    "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A06",
+    "started_at": "2026-09-01T00:06:23.101Z",
+    "ended_at": "2026-09-01T00:07:15.289Z",
+    "wall_seconds": 52.187526766998694,
+    "time_to_first_stdout_seconds": 52.16010952799954,
+    "peak_rss_kb": 307880,
+    "exit_status": 0,
+    "timed_out": false,
+    "stderr": "Working...\n",
+    "response_ref": ".tmp/2393-r1/runs/A06-comparison.omp.json"
+  }
+}

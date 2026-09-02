@@ -358,7 +358,11 @@ impl<'a> Interp<'a> {
         // TIR keeps a named `#FX` value as an ordinary local. Keep the
         // same value in the REPL host frame before the bridge evaluates a body;
         // boundary authorization consumes this carrier directly.
-        if self.repl_mode && stmts.iter().any(|stmt| matches!(stmt, Stmt::AuthorityScope { .. })) {
+        if self.repl_mode
+            && stmts
+                .iter()
+                .any(|stmt| matches!(stmt, Stmt::AuthorityScope { .. }))
+        {
             for stmt in stmts {
                 match self.exec_stmt(stmt, scope)? {
                     Flow::Normal => {}
@@ -388,6 +392,7 @@ impl<'a> Interp<'a> {
         let mut req = super::TirBridge::BlockEvalRequest {
             stmts,
             funcs,
+            binding_types: &self.binding_types,
             error_conversions,
             methods: self.methods,
             extern_names: &extern_names,
@@ -597,6 +602,7 @@ impl<'a> Interp<'a> {
         let mut req = super::TirBridge::ExprEvalRequest {
             expr: e,
             funcs,
+            binding_types: &self.binding_types,
             error_conversions,
             methods: self.methods,
             extern_names: &extern_names,

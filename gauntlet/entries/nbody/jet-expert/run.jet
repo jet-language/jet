@@ -1,199 +1,144 @@
 use core.math as math
 use core.text.fmt as fmt
 
-#CLI
-struct Args {
-    steps: Int
-}
-
-// D-SIMD3=B: keep the body coordinates together so native AOT can
-// auto-vectorize the fixed-width lane operations. The fourth lane is zero.
-#Inline(Always)
-fn kinetic(v: F64x4, mass: Float) Float ->
-    Float{0.5} * mass * (v * v).sum()
+#CLI struct Args { steps: Int }
 
 #Inline(Always)
-fn potential(left: F64x4, left_mass: Float, right: F64x4, right_mass: Float) Float -> {
-    delta :: left - right
-    distance_sq :: (delta * delta).sum()
-    return left_mass * right_mass / math.sqrt(distance_sq)
-}
+fn kinetic(v:F64x4,mass:Float) Float ->
+    Float{0.5}*mass*(v*v).sum()
 
-fn energy(
-    p0: F64x4, v0: F64x4, m0: Float,
-    p1: F64x4, v1: F64x4, m1: Float,
-    p2: F64x4, v2: F64x4, m2: Float,
-    p3: F64x4, v3: F64x4, m3: Float,
-    p4: F64x4, v4: F64x4, m4: Float
-) Float -> {
-    total := kinetic(v0, m0)
-    total -= potential(p0, m0, p1, m1)
-    total -= potential(p0, m0, p2, m2)
-    total -= potential(p0, m0, p3, m3)
-    total -= potential(p0, m0, p4, m4)
-    total += kinetic(v1, m1)
-    total -= potential(p1, m1, p2, m2)
-    total -= potential(p1, m1, p3, m3)
-    total -= potential(p1, m1, p4, m4)
-    total += kinetic(v2, m2)
-    total -= potential(p2, m2, p3, m3)
-    total -= potential(p2, m2, p4, m4)
-    total += kinetic(v3, m3)
-    total -= potential(p3, m3, p4, m4)
-    total += kinetic(v4, m4)
+#Inline(Always)
+fn potential(left:F64x4,left_mass:Float,right:F64x4,right_mass:Float) Float -> {
+    delta::left-right
+    distance_sq::(delta*delta).sum()
+    return left_mass*right_mass/math.sqrt(distance_sq)
+}
+fn energy(p0:F64x4,v0:F64x4,m0:Float,p1:F64x4,v1:F64x4,m1:Float,p2:F64x4,v2:F64x4,m2:Float,p3:F64x4,v3:F64x4,m3:Float,p4:F64x4,v4:F64x4,m4:Float) Float -> {
+    total:=kinetic(v0,m0)
+    total-=potential(p0,m0,p1,m1)
+    total-=potential(p0,m0,p2,m2)
+    total-=potential(p0,m0,p3,m3)
+    total-=potential(p0,m0,p4,m4)
+    total+=kinetic(v1,m1)
+    total-=potential(p1,m1,p2,m2)
+    total-=potential(p1,m1,p3,m3)
+    total-=potential(p1,m1,p4,m4)
+    total+=kinetic(v2,m2)
+    total-=potential(p2,m2,p3,m3)
+    total-=potential(p2,m2,p4,m4)
+    total+=kinetic(v3,m3)
+    total-=potential(p3,m3,p4,m4)
+    total+=kinetic(v4,m4)
     return total
 }
 
 fn run(args: Args) {
-    steps :: args.steps
-    pi :: Float{3.141592653589793}
-    solar_mass :: Float{4.0} * pi * pi
-    year :: Float{365.24}
+    pi::Float{3.141592653589793}
+    solar_mass::Float{4.0}*pi*pi
+    year::Float{365.24}
 
-    p0 := F64x4(0.0, 0.0, 0.0, 0.0)
-    v0 := F64x4(0.0, 0.0, 0.0, 0.0)
-    m0 :: solar_mass
+    p0:=F64x4(0.0,0.0,0.0,0.0)
+    v0:=F64x4(0.0,0.0,0.0,0.0)
+    m0::solar_mass
 
-    p1 := F64x4(4.84143144246472090, -1.16032004402742839, -0.103622044471123109, 0.0)
-    v1 := F64x4(
-        0.00166007664274403694 * year,
-        0.00769901118419740425 * year,
-        -0.0000690460016972063023 * year,
-        0.0
-    )
-    m1 :: Float{0.000954791938424326609} * solar_mass
+    p1:=F64x4(4.84143144246472090,-1.16032004402742839,-0.103622044471123109,0.0)
+    v1:=F64x4(0.00166007664274403694*year,0.00769901118419740425*year,-0.0000690460016972063023*year,0.0)
+    m1::Float{0.000954791938424326609}*solar_mass
 
-    p2 := F64x4(8.34336671824457987, 4.12479856412430479, -0.403523417114321381, 0.0)
-    v2 := F64x4(
-        -0.00276742510726862411 * year,
-        0.00499852801234917238 * year,
-        0.0000230417297573763929 * year,
-        0.0
-    )
-    m2 :: Float{0.000285885980666130812} * solar_mass
+    p2:=F64x4(8.34336671824457987,4.12479856412430479,-0.403523417114321381,0.0)
+    v2:=F64x4(-0.00276742510726862411*year,0.00499852801234917238*year,0.0000230417297573763929*year,0.0)
+    m2::Float{0.000285885980666130812}*solar_mass
 
-    p3 := F64x4(12.8943695621391310, -15.1111514016986312, -0.223307578892655734, 0.0)
-    v3 := F64x4(
-        0.00296460137564761618 * year,
-        0.00237847173959480950 * year,
-        -0.0000296589568540237556 * year,
-        0.0
-    )
-    m3 :: Float{0.0000436624404335156298} * solar_mass
+    p3:=F64x4(12.8943695621391310,-15.1111514016986312,-0.223307578892655734,0.0)
+    v3:=F64x4(0.00296460137564761618*year,0.00237847173959480950*year,-0.0000296589568540237556*year,0.0)
+    m3::Float{0.0000436624404335156298}*solar_mass
 
-    p4 := F64x4(15.3796971148509165, -25.9193146099879641, 0.179258772950371181, 0.0)
-    v4 := F64x4(
-        0.00268067772490389322 * year,
-        0.00162824170038242201 * year,
-        -0.0000951592254519715870 * year,
-        0.0
-    )
-    m4 :: Float{0.0000515138902046611451} * solar_mass
+    p4:=F64x4(15.3796971148509165,-25.9193146099879641,0.179258772950371181,0.0)
+    v4:=F64x4(0.00268067772490389322*year,0.00162824170038242201*year,-0.0000951592254519715870*year,0.0)
+    m4::Float{0.0000515138902046611451}*solar_mass
 
-    momentum :: v1 * F64x4.splat(m1)
-        + v2 * F64x4.splat(m2)
-        + v3 * F64x4.splat(m3)
-        + v4 * F64x4.splat(m4)
-    v0 = F64x4.splat(Float{-1.0} / m0) * momentum
+    momentum::v1*F64x4.splat(m1)+v2*F64x4.splat(m2)+v3*F64x4.splat(m3)+v4*F64x4.splat(m4)
+    v0=F64x4.splat(Float{-1.0}/m0)*momentum
 
-    print(fmt.decimal(energy(
-        p0, v0, m0,
-        p1, v1, m1,
-        p2, v2, m2,
-        p3, v3, m3,
-        p4, v4, m4
-    ), 9))
+    print(fmt.decimal(energy(p0,v0,m0,p1,v1,m1,p2,v2,m2,p3,v3,m3,p4,v4,m4),9))
 
-    dt :: Float{0.01}
-    dt_vec :: F64x4.splat(dt)
-    remaining := steps
+    dt::Float{0.01}
+    dt_vec::F64x4.splat(dt)
+    unit_padding::F64x4(1.0,0.0,0.0,0.0)
+    remaining:=I64{args.steps}
     loop remaining > 0 {
-        d01 :: p0 - p1
-        d02 :: p0 - p2
-        d03 :: p0 - p3
-        d04 :: p0 - p4
-        d12 :: p1 - p2
-        d13 :: p1 - p3
-        d14 :: p1 - p4
-        d23 :: p2 - p3
-        d24 :: p2 - p4
-        d34 :: p3 - p4
+        d01::p0-p1
+        d02::p0-p2
+        d03::p0-p3
+        d04::p0-p4
+        d12::p1-p2
+        d13::p1-p3
+        d14::p1-p4
+        d23::p2-p3
+        d24::p2-p4
+        d34::p3-p4
 
-        dx0 :: F64x4(d01[0], d02[0], d03[0], d04[0])
-        dy0 :: F64x4(d01[1], d02[1], d03[1], d04[1])
-        dz0 :: F64x4(d01[2], d02[2], d03[2], d04[2])
-        squared0 :: dx0 * dx0 + dy0 * dy0 + dz0 * dz0
+        dx0::F64x4(d01[0],d02[0],d12[0],d03[0])
+        dy0::F64x4(d01[1],d02[1],d12[1],d03[1])
+        dz0::F64x4(d01[2],d02[2],d12[2],d03[2])
+        squared0::dx0*dx0+dy0*dy0+dz0*dz0
+        roots0::F64x4(math.sqrt(squared0[0]),math.sqrt(squared0[1]),math.sqrt(squared0[2]),math.sqrt(squared0[3]))
+        magnitudes0::dt_vec/(squared0*roots0)
 
-        dx1 :: F64x4(d12[0], d13[0], d14[0], d23[0])
-        dy1 :: F64x4(d12[1], d13[1], d14[1], d23[1])
-        dz1 :: F64x4(d12[2], d13[2], d14[2], d23[2])
-        squared1 :: dx1 * dx1 + dy1 * dy1 + dz1 * dz1
+        dx1::F64x4(d13[0],d23[0],d04[0],d14[0])
+        dy1::F64x4(d13[1],d23[1],d04[1],d14[1])
+        dz1::F64x4(d13[2],d23[2],d04[2],d14[2])
+        squared1::dx1*dx1+dy1*dy1+dz1*dz1
+        roots1::F64x4(math.sqrt(squared1[0]),math.sqrt(squared1[1]),math.sqrt(squared1[2]),math.sqrt(squared1[3]))
+        magnitudes1::dt_vec/(squared1*roots1)
 
-        dx2 :: F64x4(d24[0], d34[0], 0.0, 0.0)
-        dy2 :: F64x4(d24[1], d34[1], 0.0, 0.0)
-        dz2 :: F64x4(d24[2], d34[2], 0.0, 0.0)
-        squared2 :: dx2 * dx2 + dy2 * dy2 + dz2 * dz2
+        dx2::F64x4(d24[0],d34[0],unit_padding[0],unit_padding[0])
+        dy2::F64x4(d24[1],d34[1],unit_padding[1],unit_padding[1])
+        dz2::F64x4(d24[2],d34[2],unit_padding[2],unit_padding[2])
+        squared2::dx2*dx2+dy2*dy2+dz2*dz2
+        roots2::F64x4(math.sqrt(squared2[0]),math.sqrt(squared2[1]),math.sqrt(squared2[2]),math.sqrt(squared2[3]))
+        magnitudes2::dt_vec/(squared2*roots2)
+        magnitude01::magnitudes0[0]
+        magnitude02::magnitudes0[1]
+        magnitude12::magnitudes0[2]
+        magnitude03::magnitudes0[3]
+        magnitude13::magnitudes1[0]
+        magnitude23::magnitudes1[1]
+        magnitude04::magnitudes1[2]
+        magnitude14::magnitudes1[3]
+        magnitude24::magnitudes2[0]
+        magnitude34::magnitudes2[1]
 
-        roots0 :: F64x4(
-            math.sqrt(squared0[0]),
-            math.sqrt(squared0[1]),
-            math.sqrt(squared0[2]),
-            math.sqrt(squared0[3])
-        )
-        force0 :: dt_vec / (squared0 * roots0)
+        v0-=d01*F64x4.splat(m1*magnitude01)
+        v1+=d01*F64x4.splat(m0*magnitude01)
+        v0-=d02*F64x4.splat(m2*magnitude02)
+        v2+=d02*F64x4.splat(m0*magnitude02)
+        v0-=d03*F64x4.splat(m3*magnitude03)
+        v3+=d03*F64x4.splat(m0*magnitude03)
+        v0-=d04*F64x4.splat(m4*magnitude04)
+        v4+=d04*F64x4.splat(m0*magnitude04)
 
-        roots1 :: F64x4(
-            math.sqrt(squared1[0]),
-            math.sqrt(squared1[1]),
-            math.sqrt(squared1[2]),
-            math.sqrt(squared1[3])
-        )
-        force1 :: dt_vec / (squared1 * roots1)
+        v1-=d12*F64x4.splat(m2*magnitude12)
+        v2+=d12*F64x4.splat(m1*magnitude12)
+        v1-=d13*F64x4.splat(m3*magnitude13)
+        v3+=d13*F64x4.splat(m1*magnitude13)
+        v1-=d14*F64x4.splat(m4*magnitude14)
+        v4+=d14*F64x4.splat(m1*magnitude14)
+        v2-=d23*F64x4.splat(m3*magnitude23)
+        v3+=d23*F64x4.splat(m2*magnitude23)
 
-        roots2 :: F64x4(
-            math.sqrt(squared2[0]),
-            math.sqrt(squared2[1]),
-            math.sqrt(squared2[2]),
-            math.sqrt(squared2[3])
-        )
-        force2 :: dt_vec / (squared2 * roots2)
+        v2-=d24*F64x4.splat(m4*magnitude24)
+        v4+=d24*F64x4.splat(m2*magnitude24)
+        v3-=d34*F64x4.splat(m4*magnitude34)
+        v4+=d34*F64x4.splat(m3*magnitude34)
 
-        v0 -= d01 * F64x4.splat(m1 * force0[0])
-        v1 += d01 * F64x4.splat(m0 * force0[0])
-        v0 -= d02 * F64x4.splat(m2 * force0[1])
-        v2 += d02 * F64x4.splat(m0 * force0[1])
-        v0 -= d03 * F64x4.splat(m3 * force0[2])
-        v3 += d03 * F64x4.splat(m0 * force0[2])
-        v0 -= d04 * F64x4.splat(m4 * force0[3])
-        v4 += d04 * F64x4.splat(m0 * force0[3])
-
-        v1 -= d12 * F64x4.splat(m2 * force1[0])
-        v2 += d12 * F64x4.splat(m1 * force1[0])
-        v1 -= d13 * F64x4.splat(m3 * force1[1])
-        v3 += d13 * F64x4.splat(m1 * force1[1])
-        v1 -= d14 * F64x4.splat(m4 * force1[2])
-        v4 += d14 * F64x4.splat(m1 * force1[2])
-        v2 -= d23 * F64x4.splat(m3 * force1[3])
-        v3 += d23 * F64x4.splat(m2 * force1[3])
-
-        v2 -= d24 * F64x4.splat(m4 * force2[0])
-        v4 += d24 * F64x4.splat(m2 * force2[0])
-        v3 -= d34 * F64x4.splat(m4 * force2[1])
-        v4 += d34 * F64x4.splat(m3 * force2[1])
-
-        p0 += dt_vec * v0
-        p1 += dt_vec * v1
-        p2 += dt_vec * v2
-        p3 += dt_vec * v3
-        p4 += dt_vec * v4
-        remaining -= 1
+        p0+=dt_vec*v0
+        p1+=dt_vec*v1
+        p2+=dt_vec*v2
+        p3+=dt_vec*v3
+        p4+=dt_vec*v4
+        remaining-=1
     }
 
-    print(fmt.decimal(energy(
-        p0, v0, m0,
-        p1, v1, m1,
-        p2, v2, m2,
-        p3, v3, m3,
-        p4, v4, m4
-    ), 9))
+    print(fmt.decimal(energy(p0,v0,m0,p1,v1,m1,p2,v2,m2,p3,v3,m3,p4,v4,m4),9))
 }

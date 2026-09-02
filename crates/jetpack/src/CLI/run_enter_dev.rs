@@ -23,6 +23,7 @@ use crate::EnvFiles;
 use crate::EnvHook;
 use crate::MemberSelect::{self, SelectRequest};
 use crate::Output::Theme;
+use crate::Lock;
 use crate::RefSpec;
 use crate::Secrets;
 use crate::Shell::{self, Env, ShellKind};
@@ -1598,6 +1599,93 @@ pub(super) fn cmd_env(theme: &Theme, parsed: &Parsed) -> i32 {
     routed.positional.clear();
     cmd_env_project(theme, &routed)
 }
+fn replay_locked_nix(
+    theme: &Theme,
+    roots: &Store::Roots,
+    project_dir: &Path,
+    refs: &[RefSpec::RefSpec],
+    table: &RefSpec::SourceTable,
+    offline: bool,
+) -> Result<bool, String> {
+    match Lock::load_strict(project_dir) {
+        Ok(Some(_)) => {}
+        Ok(None) => return Ok(false),
+        Err(error) => return Err(format!("project lock is invalid: {error}")),
+    }
+    let lock_digest = crate::Provider::project_lock_digest(Some(project_dir))
+        .map_err(|error| format!("could not read Nix lock identity: {error:?}"))?;
+    let nix_refs = refs
+        .iter()
+        .filter(|spec| {
+            crate::Provider::uses_nix_provider_for_project(
+                spec,
+                table,
+                offline,
+                &roots.root,
+                Some(project_dir),
+            )
+        })
+        .collect::<Vec<_>>();
+    if nix_refs.is_empty() {
+        return Ok(false);
+    }
+    let mut locked = Vec::new();
+    let mut missing_real_nix = false;
+    for spec in nix_refs {
+        if let Some(package) = Lock::locked_nix_package(project_dir, &spec.raw) {
+            locked.push((spec, package));
+        } else if Lock::registry_realization(project_dir, "jetpackage", &spec.raw).is_none() {
+            missing_real_nix = true;
+        }
+    }
+    if locked.is_empty() {
+        return Ok(false);
+    }
+    if missing_real_nix {
+        return Err(
+            "project lock has only a partial Nix closure; refusing catalog fallback".into(),
+        );
+    }
+    let mut bundles: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (spec, (name, version, closure, envelope)) in locked {
+        let object_digests = if let Some(digests) = bundles.get(&closure.project_cas_bundle) {
+            digests.clone()
+        } else {
+            let (_, digests) = Store::import_nix_cas_bundle(
+                project_dir,
+                roots,
+                &closure.project_cas_bundle,
+            )
+            .map_err(|error| {
+                format!(
+                    "could not import locked Nix CAS bundle for `{}`: {error}",
+                    spec.raw
+                )
+            })?;
+            bundles.insert(closure.project_cas_bundle.clone(), digests.clone());
+            digests
+        };
+        Store::record_locked_nix(
+            roots,
+            &name,
+            &version,
+            &spec.raw,
+            &envelope,
+            &closure,
+            &object_digests,
+            &lock_digest,
+        )
+        .map_err(|error| {
+            format!(
+                "could not register locked Nix CAS closure for `{}`: {error}",
+                spec.raw
+            )
+        })?;
+    }
+    theme.detail("replayed fully locked Nix closure from project CAS");
+    Ok(true)
+}
+
 
 fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     // D-ENVHOOK1=A: `jet env hook <shell>` / `jet env export <shell>` route
@@ -1728,6 +1816,24 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
     mark("trust-gate");
+    let locked_nix_replayed = match replay_locked_nix(
+        &theme,
+        &roots,
+        &project_dir,
+        &plan.refs,
+        &plan.table,
+        flags.offline,
+    ) {
+        Ok(replayed) => replayed,
+        Err(error) => {
+            theme.error(
+                "locked Nix replay failed",
+                &error,
+                "restore the lock-declared project CAS bundle; catalog discovery is disabled for this lock",
+            );
+            return 1;
+        }
+    };
 
     let previous_receipt = read_env_entry_receipt(&project_dir);
     let secret_identity = Secrets::validation_identity(
@@ -1785,7 +1891,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     // policy is needed only to realize a miss; consulting it before this point
     // made a cache hit depend on an unrelated catalog and cost the full cold
     // setup path.
-    if !warm_reused {
+    if !warm_reused && !locked_nix_replayed {
         if let Err(code) = configure_project_catalog(theme, &roots, &project_dir, &plan, &mut flags)
         {
             return code;

@@ -18,6 +18,7 @@ use jet::Diagnostics::{ColorChoice, Diagnostic, ReportPath};
 use jet::ExitCodes;
 use jet_foundation::BuildEffect;
 use jet_foundation::Report::render_status_json;
+pub(crate) use jet::{Diagnostics, SHA256, Syntax};
 
 // D-ALLOC-PROGRAM1=A: the CLI executable installs the resident instance once.
 // JIT/interpreter entry points only marshal the checked package fact into the
@@ -59,6 +60,8 @@ mod CmdTry;
 mod CmdUnsafe;
 mod EngineDispatch;
 mod NativeLinker;
+#[allow(dead_code)]
+mod Store;
 mod ProductionReceipt;
 mod ProveReplay;
 mod ProveSolver;
@@ -67,7 +70,8 @@ use CmdCodemod::run_codemod;
 use CmdCompile::{
     project_environment_requirement, require_project_environment, resolve_named_profile,
     run_build_query, run_compiler_api, run_debug_native, run_dev_entry, run_dev_web,
-    run_external_fmt, run_fix, run_fmt, run_fuzz, run_jobs, run_native_execution, run_new,
+    run_external_fmt, run_fix, run_fmt, run_fuzz, run_jobs, run_native_execution,
+    run_native_source_from_stdin, run_new,
     run_test_opts, run_test_package, run_web_app_dev_entry, validate_target, FuzzRunOpts,
     NativeExecutionRequest, TestRunOpts,
 };
@@ -420,6 +424,7 @@ impl ProfileConfig {
         parts.join(";")
     }
 
+    #[cfg(test)]
     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
         self.rustc_args_for_target(ffi, false)
     }
@@ -506,8 +511,8 @@ pub(crate) enum BuildProfile {
     Named { name: String, config: ProfileConfig },
     /// S15: size-oriented (`opt-level=z`, fat LTO, `panic=abort`).
     Small,
-    /// E2-M15: freestanding / embedded — no OS, only core APIs; `panic=abort`.
-    Freestanding,
+    /// E2-M15: typed no-OS / embedded profile — only the Core layer; `panic=abort`.
+    NoOs,
 }
 
 impl BuildProfile {
@@ -536,7 +541,7 @@ impl BuildProfile {
             BuildProfile::Ci => "ci",
             BuildProfile::Named { name, .. } => name,
             BuildProfile::Small => "small",
-            BuildProfile::Freestanding => "freestanding",
+            BuildProfile::NoOs => "no-os",
         }
     }
 
@@ -552,7 +557,7 @@ impl BuildProfile {
                 format!("profile:{name};{}", config.settings_tag())
             }
             BuildProfile::Small => "small".to_string(),
-            BuildProfile::Freestanding => "freestanding".to_string(),
+            BuildProfile::NoOs => "no-os".to_string(),
         }
     }
 
@@ -587,7 +592,7 @@ impl BuildProfile {
                 panic_abort: true,
                 settings: BTreeMap::new(),
             },
-            BuildProfile::Freestanding => ProfileConfig {
+            BuildProfile::NoOs => ProfileConfig {
                 optimize: OptimizeLevel::Basic,
                 debug_info: false,
                 codegen_units: None,
@@ -1504,6 +1509,12 @@ fn main() {
     let mut raw: Vec<String> = args.collect();
     normalize_compiler_alias(&mut raw, &argv0);
 
+    // Private REPL child mode: the parent sends the authoritative session
+    // snapshot on stdin, so this path never resolves a source pathname.
+    if raw.len() == 1 && raw.first().map(String::as_str) == Some("__jet_repl_run_stdin") {
+        run_native_source_from_stdin();
+    }
+
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {
         run_repl(None, None, &[], &[], ColorChoice::Auto);
@@ -1567,7 +1578,6 @@ fn main() {
     let small = jet_argv.iter().any(|a| a == "--small");
     let interpret = jet_argv.iter().any(|a| a == "--interpret");
     let library_flag = jet_argv.iter().any(|a| a == "--lib");
-    let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
     let gates = parse_gate_flags(jet_argv, json);
     let build_grants: Vec<String> = BuildEffect::ALL
         .into_iter()
@@ -1615,11 +1625,11 @@ fn main() {
         Some(machine) => Some(machine.triple.clone()),
         None => requested_target.clone(),
     };
-    // A no-OS machine carries the freestanding fact, so naming it is enough.
-    let freestanding = freestanding_flag
-        || selected_machine
-            .as_ref()
-            .is_some_and(|machine| machine.no_os);
+    // A named no-OS machine carries the no-OS fact; there is no standalone
+    // profile switch or compatibility alias.
+    let no_os = selected_machine
+        .as_ref()
+        .is_some_and(|machine| machine.no_os);
     let remote_builder: Option<String> = jet_argv.iter().enumerate().find_map(|(index, arg)| {
         arg.strip_prefix("--builder=")
             .map(str::to_string)
@@ -1880,12 +1890,13 @@ fn main() {
                 emit_generated,
                 library: library_flag,
                 small,
-                freestanding,
+                no_os,
                 gates,
                 build_grants: &build_grants,
                 remote_builder: remote_builder.as_deref(),
                 locked,
                 target: effective.as_deref(),
+                target_machine: selected_machine.as_ref(),
                 explain_partition,
                 verbose,
                 sbom,
@@ -1901,6 +1912,7 @@ fn main() {
                 check_project_scope: false,
                 package_scope: true,
                 build_override: true,
+                source_overlay: None,
             });
             return;
         }
@@ -2124,7 +2136,7 @@ fn main() {
         "doctor" => {
             let online = raw.iter().any(|a| a == "--online");
             let apply = raw.iter().any(|a| a == "--fix");
-            run_doctor(online, apply, mode);
+            run_doctor(online, apply, mode, cross_target.as_deref());
             return;
         }
         "exec" => run_exec(&raw, mode),
@@ -2378,7 +2390,11 @@ fn main() {
         "dossier" => {
             // D-WD2/D-DOSSIER1: umbrella explain view over semantic facts.
             let dossier_args: Vec<String> = raw.iter().skip(1).cloned().collect();
-            run_dossier(&dossier_args, mode.json);
+            run_dossier(
+                &dossier_args,
+                mode.json,
+                named_profile.as_deref().unwrap_or("dev"),
+            );
             return;
         }
         "guarantees" => {
@@ -2389,7 +2405,7 @@ fn main() {
                 mode.color_stderr(),
                 gates,
                 named_profile.as_deref().unwrap_or("dev"),
-                freestanding,
+                no_os,
             );
             return;
         }
@@ -2730,8 +2746,8 @@ fn main() {
             if jet_argv.iter().any(|arg| arg == "--show-default") {
                 println!("jet dev: using stock default");
             }
-            let dev_profile = if freestanding {
-                BuildProfile::Freestanding
+            let dev_profile = if no_os {
+                BuildProfile::NoOs
             } else if small {
                 BuildProfile::Small
             } else if let Some(profile) = named_profile.as_deref() {
@@ -2796,6 +2812,7 @@ fn main() {
                     dev_port,
                     &setting_overrides,
                     record_name.as_deref(),
+                    &passthrough,
                 );
                 return;
             }
@@ -3088,12 +3105,13 @@ fn main() {
                                     emit_generated,
                                     library: library_flag,
                                     small,
-                                    freestanding,
+                                    no_os,
                                     gates,
                                     build_grants: &build_grants,
                                     remote_builder: remote_builder.as_deref(),
                                     locked,
                                     target: effective.as_deref(),
+                                    target_machine: selected_machine.as_ref(),
                                     explain_partition,
                                     verbose,
                                     sbom,
@@ -3111,6 +3129,7 @@ fn main() {
                                         || !jet_argv.iter().any(|arg| arg == "--show-default"),
                                     build_override: cmd != "build"
                                         || !jet_argv.iter().any(|arg| arg == "--show-default"),
+                                    source_overlay: None,
                                 });
                                 return;
                             }
@@ -3349,6 +3368,7 @@ fn main() {
             };
             // Ext-optional CLI: `jet run examples/test` resolves to `examples/test.jet`
             // for the path-accepting compile commands.
+            let named_build_target = named_build_entry.is_some();
             let resolved = if cmd == "build" {
                 named_build_entry.unwrap_or_else(|| {
                     resolve_command_target(
@@ -3408,12 +3428,13 @@ fn main() {
                 emit_generated,
                 library: library_flag,
                 small,
-                freestanding,
+                no_os,
                 gates,
                 build_grants: &build_grants,
                 remote_builder: remote_builder.as_deref(),
                 locked,
                 target: effective.as_deref(),
+                target_machine: selected_machine.as_ref(),
                 explain_partition,
                 verbose,
                 sbom,
@@ -3428,10 +3449,12 @@ fn main() {
                 entry_fn: resolved.callable.as_deref(),
                 check_project_scope: cmd == "check" && Path::new(target).is_dir(),
                 package_scope: cmd != "build"
+                    || named_build_target
                     || (Path::new(target).is_dir()
                         && !jet_argv.iter().any(|arg| arg == "--show-default")),
                 build_override: cmd != "build"
                     || !jet_argv.iter().any(|arg| arg == "--show-default"),
+                source_overlay: None,
             });
         }
     }
@@ -3457,9 +3480,9 @@ fn run_wants_watch(raw: &[String]) -> bool {
 /// exists, use that. If neither exists, return `raw` unchanged so the normal
 /// file-not-found diagnostic fires with the original name the user typed.
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): resolve the effective `--target=` value for
-/// `file`. Precedence: an explicit CLI flag always wins; else `package.jet`'s
-/// `target: "web"` (a managed package's project-level default); else a
-/// lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
+/// `file`. Precedence: an explicit CLI flag always wins; else the canonical Package
+/// context's `target: "web"` (inline in the entry or a managed package's package.jet);
+/// else a lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
 /// file's own default, for standalone examples with no manifest at all).
 /// Reparses the file/manifest — wasteful compared to threading the fact
 /// through the real compile pipeline, but `jet` recompiles from scratch on
@@ -3478,6 +3501,7 @@ fn effective_target(_cmd: &str, file: &str, explicit: Option<&str>) -> Option<St
         return Some(target);
     }
     let src = fs::read_to_string(file).ok()?;
+    let src = jet::Package::mask_inline_package_source(&src).ok()?.0;
     let (toks, lex_diags) = jet::Lexer::lex(&src);
     if !lex_diags.is_empty() {
         return None;
@@ -3518,6 +3542,10 @@ fn has_dev_entry_fn(file: &str) -> bool {
         Ok(s) => s,
         Err(_) => return false,
     };
+    let src = match jet::Package::mask_inline_package_source(&src) {
+        Ok((masked, _)) => masked,
+        Err(_) => return false,
+    };
     let (toks, lex_diags) = jet::Lexer::lex(&src);
     if !lex_diags.is_empty() {
         return false;
@@ -3534,6 +3562,10 @@ fn has_dev_entry_fn(file: &str) -> bool {
 fn entry_returns_app(file: &str) -> bool {
     let source = match fs::read_to_string(file) {
         Ok(source) => source,
+        Err(_) => return false,
+    };
+    let source = match jet::Package::mask_inline_package_source(&source) {
+        Ok((masked, _)) => masked,
         Err(_) => return false,
     };
     let (tokens, diagnostics) = jet::Lexer::lex(&source);
@@ -3565,16 +3597,14 @@ fn entry_returns_app(file: &str) -> bool {
 /// inside a managed package (found via the same `find_manifest_root` walk
 /// `jet run`/`jet build` already use to resolve project-root mode).
 fn manifest_default_target(file: &str) -> Option<String> {
-    let start = Path::new(file).parent().unwrap_or(Path::new("."));
-    let root = match jet::Loader::find_manifest_root_checked(start) {
-        Ok(Some(root)) => root,
-        Ok(None) => return None,
-        Err(diagnostic) => report_entry_diagnostic(diagnostic),
-    };
-    let manifest = match jet::Package::PackageFacts::load_checked(&root) {
+    let path = Path::new(file);
+    if !path.is_file() {
+        return None;
+    }
+    let manifest = match jet::Loader::package_facts_for_entry(path) {
         Ok(Some(manifest)) => manifest,
         Ok(None) => return None,
-        Err(error) => report_entry_authority_error(error),
+        Err(diagnostics) => report_entry_diagnostics(path, &diagnostics),
     };
     manifest.target
 }
@@ -3613,10 +3643,20 @@ pub(crate) fn resolve_package_command_override(
         Ok(resolver) => resolver,
         Err(error) => report_entry_authority_error(error),
     };
-    let package = match resolver.checked_package(Path::new(".")) {
-        Ok(package) => package.facts,
-        Err(error) if error.is_missing() => jet::Package::PackageFacts::default(),
-        Err(error) => report_entry_authority_error(error),
+    let package = match jet::Loader::package_facts_for_root(root) {
+        Ok(Some(package)) => package,
+        Ok(None) => jet::Package::PackageFacts::default(),
+        Err(diagnostics) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(
+                    &root.display().to_string(),
+                    "",
+                    &diagnostics,
+                )
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
     };
     match package.resolve_command_entry_checked(&resolver, command) {
         Ok(Some(file)) => Some(file.path),
@@ -3634,7 +3674,11 @@ fn command_scope_root(entry: &Path) -> PathBuf {
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or(Path::new("."))
     };
-    jet::Loader::find_manifest_root(directory).unwrap_or_else(|| directory.to_path_buf())
+    match jet::Loader::find_package_root_checked(directory) {
+        Ok(Some(root)) => root,
+        Ok(None) => directory.to_path_buf(),
+        Err(diagnostic) => report_entry_diagnostic(diagnostic),
+    }
 }
 
 fn package_command_override_for_entry(
@@ -3810,6 +3854,43 @@ fn find_project_entry_with_callable(root: &Path) -> ResolvedEntry {
             }
         }
     }
+    match jet::Loader::find_inline_package_root_checked(root) {
+        Ok(Some(inline_root)) if inline_root == resolver.root() => {
+            match jet::Loader::package_facts_for_root(&inline_root) {
+                Ok(Some(facts)) => match facts.resolve_run_entry_checked(&resolver) {
+                    Ok(Some(entry)) => {
+                        return ResolvedEntry {
+                            path: entry.file.path,
+                            callable: Some(entry.callable),
+                        };
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        crate::cli_error!(
+                            @fix "E2105",
+                            error,
+                            "repair the typed inline Package output or point at a `.jet` file directly"
+                        );
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                },
+                Ok(None) => {}
+                Err(diagnostics) => {
+                    eprint!(
+                        "{}",
+                        jet::render_diagnostics(
+                            &inline_root.display().to_string(),
+                            "",
+                            &diagnostics,
+                        )
+                    );
+                    exit(ExitCodes::USER_ERROR);
+                }
+            }
+        }
+        Ok(Some(_)) | Ok(None) => {}
+        Err(diagnostic) => report_entry_diagnostic(diagnostic),
+    }
     if let Err(error) = jet::Package::PackageFacts::default().resolve_run_entry_checked(&resolver) {
         crate::cli_error!(
             @fix "E2105",
@@ -3866,6 +3947,13 @@ fn report_entry_authority_error(error: jet::Authority::AuthorityError) -> ! {
     );
     exit(ExitCodes::USER_ERROR)
 }
+fn report_entry_diagnostics(path: &Path, diagnostics: &[Diagnostic]) -> ! {
+    let entry = path.display().to_string();
+    let source = fs::read_to_string(path).unwrap_or_default();
+    eprint!("{}", jet::render_diagnostics(&entry, &source, diagnostics));
+    exit(ExitCodes::USER_ERROR)
+}
+
 
 fn report_build_resolution_error(error: String) -> ! {
     if error.contains("two build entries for the package:") {
@@ -4096,7 +4184,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             _ => {} // no runnable member — fall through to the single-project convention
         }
     }
-    match jet::Loader::find_manifest_root_checked(cwd) {
+    match jet::Loader::find_package_root_checked(cwd) {
         Ok(Some(root)) => Some(find_project_entry_with_callable(&root)),
         Ok(None) => None,
         Err(diagnostic) => report_entry_diagnostic(diagnostic),
@@ -4671,7 +4759,6 @@ fn run_init(script: Option<&str>, raw: &[String], mode: OutputMode) -> ! {
         }
     }
 }
-
 /// U11: fold `script`'s inline deps into `<cwd>/package.jet`'s `deps: {}` block
 /// (just written by `write_init`), preserving comments/formatting via the
 /// same comment-preserving editor `jet add` uses.
@@ -4680,7 +4767,11 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
     let Ok(src) = fs::read_to_string(&script_path) else {
         return;
     };
-    let (toks, lex_diags) = jet::Lexer::lex(&src);
+    let source_for_parse = match jet::Package::mask_inline_package_source(&src) {
+        Ok((masked, _)) => masked,
+        Err(_) => return,
+    };
+    let (toks, lex_diags) = jet::Lexer::lex(&source_for_parse);
     if !lex_diags.is_empty() {
         return;
     }
@@ -4750,7 +4841,14 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let (toks, lex_diags) = jet::Lexer::lex(&src);
+    let source_for_parse = match jet::Package::mask_inline_package_source(&src) {
+        Ok((masked, _)) => masked,
+        Err(error) => {
+            report_problems(mode, &file, &src, &[error.diagnostic()]);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let (toks, lex_diags) = jet::Lexer::lex(&source_for_parse);
     if !lex_diags.is_empty() {
         report_problems(mode, &file, &src, &lex_diags);
         exit(ExitCodes::USER_ERROR);
@@ -4841,7 +4939,7 @@ pub(crate) fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> 
 /// message's body for
 /// commands that genuinely have no manifest at all.
 pub(crate) fn require_manifest_root(cwd: &Path, fallback_hint: &str) -> PathBuf {
-    match jet::Loader::find_manifest_root_checked(cwd) {
+    match jet::Loader::find_package_root_checked(cwd) {
         Ok(Some(root)) => root,
         Ok(None) => {
             match jet::Loader::stale_manifest_name_message(cwd) {

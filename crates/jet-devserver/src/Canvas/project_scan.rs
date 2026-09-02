@@ -557,9 +557,31 @@ fn workspace_snapshot_for_source(
 
 fn push_existing(paths: &mut Vec<PathBuf>, path: &Path) {
     match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !is_single_link_file(&metadata) => {}
         Ok(_) => paths.push(path.to_path_buf()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => paths.push(path.to_path_buf()),
+    }
+}
+
+fn is_single_link_file(metadata: &fs::Metadata) -> bool {
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return metadata.nlink() == 1;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return metadata.number_of_links() == 1;
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = metadata;
+        false
     }
 }
 
@@ -643,7 +665,7 @@ pub(super) fn packages_project_json(
     ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> String {
-    let dirs = match package_dirs(manifest_root, ecosystem_root, workspace_root) {
+    let mut dirs = match package_dirs(manifest_root, ecosystem_root, workspace_root) {
         Ok(dirs) => dirs,
         Err(_diagnostic) if workspace_root.is_some() => {
             // Keep malformed workspace projections well-formed. The selected
@@ -653,6 +675,13 @@ pub(super) fn packages_project_json(
         }
         Err(diagnostic) => return projection_diagnostic_json(&diagnostic),
     };
+    if dirs.is_empty() {
+        if let Some(dir) = inline_entry_dir(entry_path) {
+            dirs.push(dir);
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
     dirs.iter()
         .filter_map(|dir| package_project_json(project_root, entry_path, dir))
         .collect::<Vec<_>>()
@@ -703,13 +732,20 @@ pub(super) fn targets_project_json(
     ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> String {
-    let dirs = match package_dirs(manifest_root, ecosystem_root, workspace_root) {
+    let mut dirs = match package_dirs(manifest_root, ecosystem_root, workspace_root) {
         Ok(dirs) => dirs,
         Err(_diagnostic) if workspace_root.is_some() => {
             package_dirs_without_workspace(manifest_root, ecosystem_root)
         }
         Err(diagnostic) => return projection_diagnostic_json(&diagnostic),
     };
+    if dirs.is_empty() {
+        if let Some(dir) = inline_entry_dir(entry_path) {
+            dirs.push(dir);
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
     dirs.iter()
         .filter_map(|dir| package_targets_project_json(project_root, entry_path, dir))
         .flatten()
@@ -728,8 +764,27 @@ fn package_targets_project_json(
 fn package_project_json(project_root: &Path, entry_path: &Path, dir: &Path) -> Option<String> {
     canonical_package_project_json(project_root, entry_path, dir)
 }
+fn inline_entry_dir(entry_path: &Path) -> Option<PathBuf> {
+    let source = fs::read_to_string(entry_path).ok()?;
+    match jet_driver::Package::extract_inline_package(&source) {
+        Ok(None) => None,
+        Ok(Some(_)) | Err(_) => entry_path.parent().map(Path::to_path_buf),
+    }
+}
 
-fn canonical_package_facts(dir: &Path) -> Result<jet_driver::Package::PackageFacts, String> {
+fn canonical_package_facts(
+    dir: &Path,
+    entry_path: &Path,
+) -> Result<jet_driver::Package::PackageFacts, String> {
+    if entry_path
+        .parent()
+        .is_some_and(|parent| path_is_within(entry_path, dir) || same_path(parent, dir))
+    {
+        match jet_semindex::package_facts_for_entry(entry_path)? {
+            Some(facts) => return Ok(facts),
+            None => {}
+        }
+    }
     jet_driver::Package::PackageFacts::load_checked(dir)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| {
@@ -739,6 +794,7 @@ fn canonical_package_facts(dir: &Path) -> Result<jet_driver::Package::PackageFac
             )
         })
 }
+
 
 fn projection_diagnostic_json(diagnostic: &Diagnostic) -> String {
     format!("{{\"diagnostics\":[{}]}}", diagnostic_json(diagnostic))
@@ -882,7 +938,7 @@ fn canonical_package_targets_project_json(
     entry_path: &Path,
     dir: &Path,
 ) -> Option<Vec<String>> {
-    let facts = match canonical_package_facts(dir) {
+    let facts = match canonical_package_facts(dir, entry_path) {
         Ok(facts) => facts,
         Err(error) => {
             return Some(vec![canonical_package_error(
@@ -944,7 +1000,7 @@ fn canonical_package_project_json(
     entry_path: &Path,
     dir: &Path,
 ) -> Option<String> {
-    let facts = match canonical_package_facts(dir) {
+    let facts = match canonical_package_facts(dir, entry_path) {
         Ok(facts) => facts,
         Err(error) => {
             return Some(canonical_package_error(

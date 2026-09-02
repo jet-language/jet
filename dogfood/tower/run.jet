@@ -128,7 +128,7 @@ fn javascript_truthy_int(value: DataTree) Bool !Never -> {
 
 fn javascript_truthy_float(value: DataTree) Bool !Never -> {
     return if value == {
-        .Float(number) -> number != 0.0 && !math.is_nan(number)
+        .Float(number) -> (number > 0.0 || number < 0.0) && !math.is_nan(number)
         else -> javascript_truthy_text(~value)
     }
 }
@@ -249,7 +249,8 @@ fn normalize_criterion(item: DataTree, index: Int, captured_day: String) DataTre
     n_value := tree_field(~source, "n")
     if is_null(~n_value) -> n_value = DataTree.Int(index + 1)
 
-    text_value :: javascript_text_or_empty(tree_field(~source, "text")).trim()
+    text_source :: javascript_text_or_empty(tree_field(~source, "text"))
+    text_value :: text_source.trim()
     status := text_field(~source, "status", "open")
     if !allowed_criterion_status(~status) -> status = "open"
     met_by :: tree_field(~source, "metBy")
@@ -260,7 +261,7 @@ fn normalize_criterion(item: DataTree, index: Int, captured_day: String) DataTre
 
     return DataTree.Object([
         "n": ~n_value,
-        "text": DataTree.Text(text_value),
+        "text": DataTree.Text(~text_value),
         "status": DataTree.Text(~status),
         "metBy": met_by,
         "verifiedBy": verified_by,
@@ -294,7 +295,8 @@ fn normalize_criteria_object_items(items: DataTree, raw: DataTree, captured_day:
 }
 
 fn normalize_criteria_object(raw: DataTree, captured_day: String) DataTree -> {
-    return if raw == {
+    subject := ~raw
+    return if subject == {
         .Object(_fields) -> normalize_criteria_object_items(tree_field(~raw, "items"), ~raw, ~captured_day)
         else -> normalize_criteria_text(~raw, ~captured_day)
     }
@@ -302,7 +304,8 @@ fn normalize_criteria_object(raw: DataTree, captured_day: String) DataTree -> {
 
 fn normalize_criteria_text(raw: DataTree, captured_day: String) DataTree -> {
     empty_text := [DataTree]{}
-    return if raw == {
+    subject := ~raw
+    return if subject == {
         .Text(text) -> {
             if text.is_empty() -> return DataTree.Array(empty_text)
             return DataTree.Array([normalize_criterion(~raw, 0, ~captured_day)])
@@ -509,17 +512,23 @@ fn sync_milestones(milestones: [DataTree], cards: [DataTree], history_cards: [Da
     loop milestone in milestones {
         key :: identity_key(tree_field(~milestone, "id"))
         progress := DataTree.Null
-        if key != "" {
-            positions :: milestone_index.get(key) ?? [Int]{}
-            linked := [DataTree]{}
-            loop position in positions {
-                if position < 0 {
-                    history_index := -position - 1
-                    linked.push(~history_cards[history_index])
-                } else { linked.push(~cards[position]) }
+        if {
+            key != "" -> {
+                positions :: milestone_index.get(key) ?? [Int]{}
+                linked := [DataTree]{}
+                loop position in positions {
+                    if {
+                        position < 0 -> {
+                            history_index := -position - 1
+                            linked.push(~history_cards[history_index])
+                        }
+                        else -> { linked.push(~cards[position]) }
+                    }
+                }
+                progress = milestone_progress(~milestone, ~linked)
             }
-            progress = milestone_progress(~milestone, ~linked)
-        } else { progress = milestone_progress_scan(~milestone, ~cards, ~history_cards) }
+            else -> { progress = milestone_progress_scan(~milestone, ~cards, ~history_cards) }
+        }
         out.push(sync_milestone(~milestone, ~progress))
     }
     return out
@@ -652,34 +661,32 @@ fn lane_of(card: DataTree, linked_decisions: [DataTree], blockers: [DataTree], b
         ])
     }
 
-    if phase == "deciding" {
-        if javascript_truthy(tree_field(~card, "plan")) {
-            return lane_record("implement", DataTree.Text("agent"), "Ready to implement")
-        }
-        return lane_record("plan", DataTree.Text("agent"), "Build a plan + raise decisions")
-    }
-    if phase == "planning" || phase == "triage" {
-        if javascript_truthy(tree_field(~card, "plan")) {
-            return lane_record("plan", DataTree.Text("agent"), "Vet the plan + raise decisions")
-        }
-        return lane_record("plan", DataTree.Text("agent"), "Build a plan + raise decisions")
-    }
-    if phase == "ready" {
-        return lane_record("implement", DataTree.Text("agent"), "Ready to implement")
-    }
-    if phase == "building" {
-        return lane_record("building", DataTree.Text("agent"), "Continue building")
-    }
-    if phase == "verify" {
-        if bool_value(tree_field(~card, "needsAcceptance")) {
-            if acceptance_open {
-                return lane_record("verify", DataTree.Text("owner"), "Owner visual/UX acceptance")
+    if phase == {
+        "deciding" -> {
+            if javascript_truthy(tree_field(~card, "plan")) {
+                return lane_record("implement", DataTree.Text("agent"), "Ready to implement")
             }
-            return lane_record("verify", DataTree.Text("agent"), "Finish criteria before owner visual review")
+            return lane_record("plan", DataTree.Text("agent"), "Build a plan + raise decisions")
         }
-        return lane_record("verify", DataTree.Text("agent"), "Close when exit criteria are met")
+        "planning" | "triage" -> {
+            if javascript_truthy(tree_field(~card, "plan")) {
+                return lane_record("plan", DataTree.Text("agent"), "Vet the plan + raise decisions")
+            }
+            return lane_record("plan", DataTree.Text("agent"), "Build a plan + raise decisions")
+        }
+        "ready" -> return lane_record("implement", DataTree.Text("agent"), "Ready to implement")
+        "building" -> return lane_record("building", DataTree.Text("agent"), "Continue building")
+        "verify" -> {
+            if bool_value(tree_field(~card, "needsAcceptance")) {
+                if acceptance_open {
+                    return lane_record("verify", DataTree.Text("owner"), "Owner visual/UX acceptance")
+                }
+                return lane_record("verify", DataTree.Text("agent"), "Finish criteria before owner visual review")
+            }
+            return lane_record("verify", DataTree.Text("agent"), "Close when exit criteria are met")
+        }
+        else -> return lane_record("blocked", DataTree.Null, "")
     }
-    return lane_record("blocked", DataTree.Null, "")
 }
 
 fn project_card(card: DataTree, linked_decisions: [DataTree], linked_questions: [DataTree], lane: DataTree) DataTree !Never -> {
@@ -1241,7 +1248,7 @@ fn milestone_stalled_days(linked_cards: [DataTree], events: [DataTree], captured
     if !found -> return DataTree.Null
     hit_at :: tree_field(~hit, "at") ?? panic("event timestamp lookup cannot fail")
     age :: age_days(hit_at, ~captured_at) ?? panic("event age calculation cannot fail")
-    if age == Float.INFINITY -> return DataTree.Null
+    if age.is_infinite() -> return DataTree.Null
     return DataTree.Int(Int.from_float(math.floor(age)) ?? 0)
 }
 
@@ -1448,7 +1455,8 @@ fn text_at(tree: DataTree, name: String) String -> {
 
 fn has_text(value: DataTree) Bool -> {
     if !javascript_truthy(~value) -> return false
-    return javascript_value_string(~value).trim() != ""
+    value_text :: javascript_value_string(~value)
+    return value_text.trim() != ""
 }
 
 fn age_days(value: DataTree, captured_at: String) Float -> {
@@ -1460,7 +1468,7 @@ fn age_days(value: DataTree, captured_at: String) Float -> {
 }
 
 fn whole_days_text(age: Float) String -> {
-    if age == Float.INFINITY -> return "Infinity"
+    if age.is_infinite() -> return "Infinity"
     whole :: Int.from_float(math.floor(age)) ?? Int.MAX
     return "{whole}"
 }
@@ -1522,7 +1530,10 @@ fn rule_missing_attribution(events: [DataTree]) [DataTree] -> {
     loop index in 0..<limit {
         event :: events[index]
         by :: tree_field(event, "by")
-        if javascript_truthy(by) && javascript_value_string(by).trim() != "" -> next
+        if javascript_truthy(by) {
+            by_text :: javascript_value_string(by)
+            if by_text.trim() != "" -> next
+        }
         ref_value :: tree_field(event, "ref")
         reference := "(no ref)"
         if javascript_truthy(ref_value) -> reference = javascript_value_string(ref_value)
@@ -1542,8 +1553,9 @@ fn sentence_count(text: String) Int -> { re.split(Regex{"[.!?]\s+"}, text.trim()
 fn prose_density(label: String, value: DataTree) [String] -> {
     gaps := [String]{}
     if !has_text(value) -> return gaps
-    text :: javascript_value_string(value).trim()
-    paragraphs :: re.split(Regex{"\n\s*\n"}, text)
+    value_text :: javascript_value_string(value)
+    text :: value_text.trim()
+    paragraphs :: re.split(Regex{"\n\s*\n"}, ~text)
     paragraph_number := 0
     loop paragraph in paragraphs {
         paragraph_number += 1
@@ -1705,7 +1717,7 @@ fn duplicate_option_keys(keys: [String]) [String] -> {
         key :: keys[index]
         loop later in index + 1..<keys.len() {
             if keys[later] == key {
-                if !duplicates.contains(key) -> duplicates.push(key)
+                if !duplicates.contains(~key) -> duplicates.push(~key)
                 break
             }
         }
@@ -1732,10 +1744,11 @@ fn dissent_metadata(pass: String) DataTree -> {
     if !pass.starts_with(prefix) -> return DataTree.Null
     families :: pass.split_once(". Adversarial model family: ") ?? return DataTree.Null
     if !families.before.starts_with(prefix) -> return DataTree.Null
-    author :: families.before.slice(prefix.len(), families.before.len() - prefix.len()).trim()
+    before_text :: families.before.slice(prefix.len(), families.before.len() - prefix.len())
+    author :: before_text.trim()
     adversarial_and_summary :: families.after.split_once(".") ?? return DataTree.Null
     adversarial :: adversarial_and_summary.before.trim()
-    if author == "" || adversarial == "" -> return DataTree.Null
+    if ~author == "" || adversarial == "" -> return DataTree.Null
     return DataTree.Object([
         "author": DataTree.Text(~author),
         "adversarial": DataTree.Text(~adversarial),
@@ -2029,9 +2042,10 @@ fn rule_criteria_evidence_conflicts(cards: [DataTree]) [DataTree] -> {
             if status != "met" && status != "verified" -> next
             evidence_value :: tree_field(item, "evidence")
             if !javascript_truthy(evidence_value) -> next
-            evidence :: javascript_value_string(evidence_value).trim()
-            if evidence == "" -> next
-            if !evidence_conflicts(evidence) -> next
+            evidence_text :: javascript_value_string(evidence_value)
+            evidence :: evidence_text.trim()
+            if ~evidence == "" -> next
+            if !evidence_conflicts(~evidence) -> next
             number :: int_at(card, "num")
             title :: text_at(card, "title")
             criterion_number :: int_at(item, "n")
@@ -2233,9 +2247,12 @@ fn canonical_fixture_path(path: String, root: String, date: String, file: String
 
 fn snapshot_index(dir: String) Int -> {
     requested :: dir.replace("\\", "/")
-    if requested == "dogfood/tower/tests/parity/fixtures/2026-08-26" -> return 0
-    if requested == "dogfood/tower/tests/parity/fixtures/2026-08-27" -> return 1
-    if requested == "dogfood/tower/tests/parity/fixtures/2026-08-28" -> return 2
+    if requested == {
+        "dogfood/tower/tests/parity/fixtures/2026-08-26" -> return 0
+        "dogfood/tower/tests/parity/fixtures/2026-08-27" -> return 1
+        "dogfood/tower/tests/parity/fixtures/2026-08-28" -> return 2
+        else -> {}
+    }
     panic("snapshot directory must be an exported parity fixture")
     return -1
 }
@@ -2894,7 +2911,7 @@ fn assert_finding_array(tree: DataTree, section: String) {
     assert(is_null(dissent_metadata("One concrete finding.")))
 }
 
-fn check_snapshot(date: String, index: Int) {
+fn _check_snapshot(date: String, index: Int) Bool -> {
     fixture :: "{fixtures_root()}/{date}"
     entry :: manifest_snapshot(index, date)
 
@@ -2927,18 +2944,19 @@ fn check_snapshot(date: String, index: Int) {
     actual_lint :: lint_snapshot_dir(fixture)
     assert_finding_array(actual_lint, "{date}/lint")
     assert(actual_lint.equal_unordered(expected_lint), "{date}/lint.json: lint finding array mismatch")
+    return true
 }
 
 #Test("Tower parity 2026-08-26") {
-    check_snapshot("2026-08-26", 0)
+    assert(_check_snapshot("2026-08-26", 0))
 }
 
 #Test("Tower parity 2026-08-27") {
-    check_snapshot("2026-08-27", 1)
+    assert(_check_snapshot("2026-08-27", 1))
 }
 
 #Test("Tower parity 2026-08-28") {
-    check_snapshot("2026-08-28", 2)
+    assert(_check_snapshot("2026-08-28", 2))
 }
 
 #CLI

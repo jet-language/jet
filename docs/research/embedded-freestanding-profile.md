@@ -58,9 +58,9 @@ The current code has three useful seams.
   linker, allocator, panic, volatile/MMIO, and audit facts. Freestanding
   allocator and panic facts are required, and sema reads them to reject
   unavailable Core APIs (docs/spec/syntax-decisions.md:4940-4958).
-* The current driver derives freestanding from --freestanding or from a
-  selected no-OS machine, then runs a freestanding sema pass before codegen
-  (Source/main.rs:1507-1561; crates/jet-driver/src/Driver/mod.rs:3383-3408).
+* The current driver selects a named no-OS target profile; the retired
+  `--freestanding` spelling is rejected before dispatch. It then runs typed
+  target admission before codegen (Source/main.rs:1600-1632; crates/jet-driver/src/Driver/mod.rs:1187-1213).
 
 The current admission pass is narrower than the target model. It rejects a
 fixed list of OS modules in freestanding mode, including files, terminal,

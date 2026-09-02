@@ -257,6 +257,8 @@ fn assignment() Int -> {
     value := 0
     value = 1
 }
+
+fn run() {}
 "#;
     let diagnostics = tir_support::compile_source("tail_value_errors.jet", invalid)
         .expect_err("unit-valued tails must be rejected in value blocks");
@@ -275,6 +277,8 @@ fn label(value: Int) String -> {
     // Keep the fallback comment.
     return "other" // Keep the tail comment.
 }
+
+fn run() {}
 "#;
     let output = tir_support::compile_source("redundant_tail_return.jet", lintable)
         .expect("the old arm-table spelling should still compile");
@@ -315,6 +319,8 @@ fn label(value: Int) String -> {
     }
     return "other";
 }
+
+fn run() {}
 "#;
     let semicolon_output =
         tir_support::compile_source("redundant_tail_return_semicolons.jet", semicolon_lintable)
@@ -347,9 +353,11 @@ fn label(value: Int) String -> {
 fn label(value: Int) String -> {
     if value == {
         1 -> { print("side"); return "one" }
+        else -> { return "other" }
     }
-    return "other"
 }
+
+fn run() {}
 "#;
     let effectful_output = tir_support::compile_source("effectful_tail_return.jet", effectful)
         .expect("effectful arm-table source should compile");
@@ -378,40 +386,48 @@ fn run() {
 "#;
     tir_support::assert_tiers_agree("tail_return_nested_exits", valid, "1\n2\n9\n");
 
-    for (name, source) in [
+    for (name, source, expected_code) in [
         (
             "nested_semicolon",
             r#"
 fn nested(flag: Bool) Int -> {
-    if flag -> { 1; } else -> { 2 }
+    if {
+        flag -> { print("side"); }
+        else -> { print("other") }
+    }
 }
 fn run() {}
 "#,
+            "E0114",
         ),
         (
             "nested_declaration",
             r#"
 fn nested(flag: Bool) Int -> {
-    if flag -> { value :: 1 } else -> { 2 }
+    if flag -> { value :: 1 } else -> { print("other") }
 }
 fn run() {}
 "#,
+            // A declaration cannot begin the compact value branch, so the
+            // parser rejects this shape before tail totality is checked.
+            "E0003",
         ),
         (
             "fallback_semicolon",
             r#"
 fn fallback(value: ?Int) Int -> {
-    value ?? { 1; }
+    value ?? { print("side"); }
 }
 fn run() {}
 "#,
+            "E0114",
         ),
     ] {
         let diagnostics = tir_support::compile_source(name, source).expect_err(name);
         let diagnostic = diagnostics
             .iter()
-            .find(|diagnostic| diagnostic.code == "E0114")
-            .unwrap_or_else(|| panic!("{name} diagnostics: {diagnostics:?}"));
+            .find(|diagnostic| diagnostic.code == expected_code)
+            .unwrap_or_else(|| panic!("{name} expected {expected_code}: {diagnostics:?}"));
         assert!(diagnostic.span.is_some(), "{name}: {diagnostics:?}");
     }
 }
@@ -424,10 +440,9 @@ fn value_tail_divergence_and_loop_flow_are_deterministic() {
     let valid = r#"
 fn nested(flag: Bool) Int -> {
     // Both nested branches leave without a value.
-    if flag {
-        panic("then")
-    } else {
-        panic("else")
+    if {
+        flag -> { panic("then") }
+        else -> { panic("else") }
     }
 }
 
@@ -445,15 +460,14 @@ fn infinite_true() Int -> {
 
 fn unreachable() Int -> {
     return 1
-    2;
+    print(2);
 }
 
 fn fallback(value: ?Int) Int -> {
     value ?? {
-        if true {
-            panic("missing")
-        } else {
-            panic("missing")
+        if {
+            true -> { panic("missing") }
+            else -> { panic("missing") }
         }
     }
 }
@@ -1063,9 +1077,25 @@ fn runtime_stop_goldens_match_all_execution_tiers() {
 /// documented order before returning its requested code.
 #[test]
 fn explicit_process_exit_cleanup_golden_matches_all_execution_tiers() {
-    tir_support::assert_example_cli_tiers_agree(
+    tir_support::assert_example_cli_tiers_agree_with_package(
         "io/process_exit_cleanup",
-        include_str!("../examples/features/expected/io/process_exit_cleanup.out"),
+        Some(
+            r#"
+name: "process-exit-cleanup"
+version: "0.1.0"
+authority: {
+    holds: {
+        allow: [Env, Exec, IO]
+    }
+}
+"#,
+        ),
+        |actual| {
+            assert_eq!(
+                actual,
+                include_str!("../examples/features/expected/io/process_exit_cleanup.out")
+            );
+        },
     );
 }
 
@@ -2289,7 +2319,7 @@ fn run() {
 }
 
 #[test]
-fn branch_classifier_emits_table_and_ordered_shapes_with_one_subject_evaluation() {
+fn literal_dispatch_emits_nested_comparisons_and_preserves_order() {
     let table = compile(
         "tir_branch_table",
         r#"
@@ -2322,21 +2352,53 @@ fn run() {
 }
 "#,
     );
-    assert!(table.contains("// jet:branch dense-table"), "{table}");
-    assert!(table.contains("// jet:branch sparse-search"), "{table}");
-    assert!(table.contains("// jet:branch bool-two-way"), "{table}");
+    // Ordinary literal arms use the current nested comparison lowering. Keep
+    // the assertions tied to emitted comparisons, not to retired classifier
+    // comments or a Rust `match` shape.
+    let dense = table
+        .split("pub fn __jet_dense")
+        .nth(1)
+        .expect("dense dispatch function should be emitted");
+    let dense_needles = [
+        "jet_int_compare_hot!((__jet_n), (1i64)) == 0",
+        "jet_int_compare_hot!((__jet_n), (2i64)) == 0",
+        "jet_int_compare_hot!((__jet_n), (3i64)) == 0",
+    ];
+    let dense_positions = dense_needles
+        .iter()
+        .map(|needle| dense.find(needle).expect("dense arm comparison was removed"))
+        .collect::<Vec<_>>();
     assert!(
-        table.contains("else if *__jet___switch_subject < 100"),
-        "sparse integers should emit a balanced search tree: {table}"
+        dense_positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "dense comparisons changed authored order: {table}"
     );
+    let sparse = table
+        .split("pub fn __jet_sparse")
+        .nth(1)
+        .expect("sparse dispatch function should be emitted");
+    let sparse_one = sparse
+        .find("jet_int_compare_hot!((__jet_n), (1i64)) == 0")
+        .expect("sparse first arm comparison was removed");
+    let sparse_hundred = sparse
+        .find("jet_int_compare_hot!((__jet_n), (100i64)) == 0")
+        .expect("sparse second arm comparison was removed");
     assert!(
-        table.contains("if *__jet___switch_subject {"),
-        "two-way Bool dispatch should branch on the subject directly: {table}"
+        sparse_one < sparse_hundred,
+        "sparse comparisons changed authored order: {table}"
     );
-    assert_eq!(
-        table.matches("match *__jet___switch_subject").count(),
-        1,
-        "only dense integer arms should use table lowering: {table}"
+    let truth = table
+        .split("pub fn __jet_truth")
+        .nth(1)
+        .expect("Bool dispatch function should be emitted");
+    let truth_true = truth
+        .find("((__jet_flag) == (true))")
+        .expect("Bool true comparison was removed");
+    let truth_false = truth
+        .find("((__jet_flag) == (false))")
+        .expect("Bool false comparison was removed");
+    assert!(
+        truth_true < truth_false,
+        "Bool comparisons changed authored order: {table}"
     );
 
     let ordered = compile(
@@ -2354,15 +2416,15 @@ fn run() {
 "#,
     );
     assert!(
-        ordered.contains("let __jet___switch_subject = &(__jet_subject())"),
-        "{ordered}"
+        ordered.contains("let __jet___switch_subject"),
+        "dispatch subject was not retained once: {ordered}"
     );
     assert!(
-        ordered.contains("(*__jet___switch_subject)"),
+        ordered.contains("__jet___switch_subject"),
         "conditions must reuse the evaluated subject: {ordered}"
     );
     assert_eq!(
-        ordered.matches("&(__jet_subject())").count(),
+        ordered.matches("jet_trace_err(__jet_subject()").count(),
         1,
         "branch subject was evaluated more than once: {ordered}"
     );

@@ -127,3 +127,33 @@ UL11 sits late in the epoch-3 dependency order (after UL1–UL3 + UL13), which i
 | `G8-RUSTC-DEPENDENCY` | card | #670 |
 | `G9-C-ABI-TRUTH` | card | #436 |
 <!-- /audit-dispositions -->
+
+## Addendum — compiled workload gate (#1414)
+
+The compiled-workload corpus now keeps seven frozen tasks, one selected peer
+per task, the declared candidate rows, and ten measured metrics. The peer
+ledger retains C++ rows alongside Rust, Go, Swift, Zig, and domain peers. The
+gate checks the complete task and peer denominator, per-task network authority,
+immutable source and tool identities, non-zero tier artifacts, and all declared
+validator-removal canaries.
+
+The producer records native monotonic timing and host-native peak RSS. Linux
+uses `/proc/<pid>/status`; macOS uses `ps`; Windows uses PowerShell
+`PeakWorkingSet64`. A missing collector fails the run. The cross-platform web
+row uses the supported Chromium CDP driver and web test server. CI runs the
+producer and strict `--check` before the validator self-check.
+
+This is a gate hardening change, not a completed superiority claim. A real
+five-sample report and fresh independent review remain open. Platform-specific
+cross-target toolchains, Chromium availability, and the embedded freestanding
+rows remain host-dependent; the embedded rows stay explicitly excluded pending
+#2046 and #2300. The following commands are the orchestrator proof sequence:
+
+```text
+bash tools/ci/compiled-workload-gate.sh --contract
+bash tools/ci/test-compiled-workload-gate.sh
+node tools/ci/compiled-workload-runner.mjs --platform linux --report-dir "$HOME/.cache/jet-test-scratch/compiled-workload-linux"
+bash tools/ci/compiled-workload-gate.sh --check "$HOME/.cache/jet-test-scratch/compiled-workload-linux"
+cargo test --test agent_workloads compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows
+cargo test --test release_gates compiled_workload_release_gate_uses_frozen_contract_and_canaries
+```

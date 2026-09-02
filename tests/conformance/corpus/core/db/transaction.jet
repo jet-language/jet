@@ -5,8 +5,8 @@ fn run() {
     connection :: db.open_memory()
     policy :: db.policy("items", "true") ?? panic("policy")
     scope :: connection.with_policy(policy, "owner")
-    migration :: db.migrate(scope, "items-v1", ["CREATE TABLE items (i INTEGER)"])
+    migration :: db.migrate(scope, "items-v1", [SQL{"CREATE TABLE items (i INTEGER)"}])
         ?? panic("migrate")
     print("schema={migration}")
-    print(db.transaction(scope, "seed-v1", ["INSERT INTO items (i) VALUES (7)"]) ?? panic("transaction"))
+    print(db.transaction(scope, "seed-v1", [SQL{"INSERT INTO items (i) VALUES (7)"}]) ?? panic("transaction"))
 }

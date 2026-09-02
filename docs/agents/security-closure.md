@@ -50,6 +50,7 @@ copied unchanged into the Codex Security manifest and coverage document.
 | docs/reference/core-surface-ledger.json | The generated core-surface ledger is derived data. |
 | docs/audits/security-deep-scan-2026-08-03.md | The canceled discovery report is prior scan evidence, not scan input. |
 | docs/audits/security-deep-scan-2026-08-03-full.md | The canceled discovery report is prior scan evidence, not scan input. |
+| docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md | The canceled discovery report is prior scan evidence, not scan input. |
 | docs/audits/security-final-*/** | Prior final reports are outputs and must not become scan input. |
 
 This excludes generated state and prior evidence. It keeps source, tests,
@@ -81,7 +82,7 @@ new. Keep both files with the final evidence.
 Preparation writes this fixed request shape:
 
 The two exclusion arrays below are abbreviated for readability in this
-example. The script writes all 23 patterns and all 23 pattern-and-reason
+example. The script writes all 24 patterns and all 24 pattern-and-reason
 objects, in table order, with no other entries.
 
 ~~~
@@ -102,7 +103,7 @@ objects, in table order, with no other entries.
     },
     "scope": {
       "includePaths": ["."],
-      "excludePaths": ["<the 23 exact patterns above, in that order>"],
+      "excludePaths": ["<the 24 exact patterns above, in that order>"],
       "explicitExclusions": [
         {
           "pattern": "<one exact pattern above>",
@@ -155,7 +156,7 @@ byte-sorted scope-files.txt, and this fixed receipt shape:
     },
     "scope": {
       "includePaths": ["."],
-      "excludePaths": ["<the 23 exact patterns above, in that order>"],
+      "excludePaths": ["<the 24 exact patterns above, in that order>"],
       "inventory": {
         "fileCount": 0,
         "byteCount": 0,

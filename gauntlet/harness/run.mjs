@@ -15,7 +15,7 @@ const envRunner = path.join(repoDir, "scripts/agent/jet-env");
 const timer = path.join(harnessDir, "timer.py");
 
 const ENTRY_MODES = ["batch", "batch-steps", "service", "web", "web-app"];
-const MATRIX_UNCOVERED_DEFAULTS = ["embedded.data", "embedded.kernel"];
+const MATRIX_UNCOVERED_DEFAULTS = [];
 const COMPARISON_METRICS = [
   "runtime_wall_seconds",
   "runtime_peak_rss_kb",
@@ -42,6 +42,83 @@ const TIER_POLICY = {
   web: { aot: { required: true }, run: { required: true }, dev: { required: false } },
   "web-app": { aot: { required: true } },
 };
+const RATIO_VERDICTS = {
+  rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
+  non_rust: { win: "<1", parity: null, loss: ">=1" },
+};
+const METRIC_APPLICABILITY_POLICY = {
+  default: "required",
+  not_applicable: "explicit_structural_reason",
+  missing: "unmeasured_and_publication_blocked",
+};
+const STRUCTURAL_NOT_APPLICABLE_BASES = new Set(["no_compile_phase"]);
+const PEER_MEASUREMENT_POLICY = {
+  ratio_tiers: ["aot", "run"],
+  trace_only_tiers: [],
+  sample_binding: "immutable_peer_row_reused_per_declared_jet_tier",
+};
+const LOSS_OWNER_CATEGORY_BY_METRIC = {
+  runtime_wall_seconds: "runtime",
+  runtime_first_stdout_seconds: "runtime",
+  service_latency_ms_p50: "latency",
+  service_latency_ms_p99: "latency",
+  service_startup_seconds: "runtime",
+  runtime_peak_rss_kb: "rss",
+  peak_rss_bytes: "rss",
+  cold_build_seconds: "build",
+  warm_build_seconds: "build",
+  binary_bytes: "binary",
+  loc: "source",
+  source_bytes: "source",
+  tokens: "source",
+  source_tokens: "source",
+};
+const AOT_ONLY_METRICS = new Set(["cold_build_seconds", "warm_build_seconds", "binary_bytes"]);
+
+
+const SOURCE_METRICS = ["loc", "source_bytes", "tokens", "source_tokens"];
+
+function sourceMetricValues(metrics) {
+  return Object.fromEntries(SOURCE_METRICS.map((metric) => [metric, metrics?.[metric] ?? null]));
+}
+
+function metricComparableAtTier(metric, tier) {
+  return tier === "aot" || !AOT_ONLY_METRICS.has(metric);
+}
+const VALID_RESULT_STATUSES = new Set(["ok", "not_applicable", "broken", "unavailable", "failed", "inconclusive"]);
+const VALID_PASS_VERIFICATION_KINDS = new Set(["byte_exact_stdout", "service_probe_sequence"]);
+const FORBIDDEN_SELECTION_KEYS = new Set([
+  "selected",
+  "selected_peer",
+  "selected_metric",
+  "selected_best",
+  "selected_value",
+  "best",
+  "winner",
+  "average",
+  "mean",
+  "avg",
+  "aggregate",
+  "aggregates",
+  "selection",
+  "chosen",
+]);
+
+function positiveMetricValue(metric, value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function selectionOrAggregateIssues(value, prefix, issues, seen = new Set()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return;
+  seen.add(value);
+  for (const [key, nested] of Object.entries(value)) {
+    const normalizedKey = key.replaceAll("-", "_").toLowerCase();
+    if (FORBIDDEN_SELECTION_KEYS.has(normalizedKey)) {
+      issues.push(`${prefix}.${key}: selected or aggregate measurements are not allowed`);
+    }
+    selectionOrAggregateIssues(nested, `${prefix}.${key}`, issues, seen);
+  }
+}
 
 const LANGUAGE_FILES = {
   jet: "run.jet",
@@ -145,11 +222,17 @@ async function processTreeRssKb(rootPid) {
   return found ? total : null;
 }
 
-async function runProcess(cwd, args, { input = undefined, full = false, timeoutMs = DEFAULT_TIMEOUT_MS, resourceBudget = null } = {}) {
+async function runProcess(cwd, args, {
+  input = undefined,
+  full = false,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  resourceBudget = null,
+  env = undefined,
+} = {}) {
   return new Promise((resolve) => {
     const child = spawn(envRunner, [...(full ? ["full"] : []), "sh", "-c", args.map(shellQuote).join(" ")], {
       cwd,
-      env: process.env,
+      env: env === undefined ? process.env : { ...process.env, ...env },
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       detached: true,
     });
@@ -234,16 +317,15 @@ async function timedSequence(cwd, commands, { full = false } = {}) {
   return sample;
 }
 
-function startProcess(cwd, args, { full = false } = {}) {
+function startProcess(cwd, args, { full = false, env = undefined } = {}) {
   const child = spawn(envRunner, [...(full ? ["full"] : []), "sh", "-c", args.map(shellQuote).join(" ")], {
     cwd,
-    env: process.env,
+    env: env === undefined ? process.env : { ...process.env, ...env },
     stdio: ["ignore", "ignore", "pipe"],
     detached: true,
   });
   const stderr = [];
   child.spawnError = null;
-  child.once("error", (error) => { child.spawnError = error; });
   child.stderr.on("data", (chunk) => stderr.push(chunk));
   child.stderrText = () => Buffer.concat(stderr).toString("utf8").trim().slice(0, 500);
   return child;
@@ -299,18 +381,69 @@ function httpProbe(port, probe, timeoutMs = 5000) {
     }, (response) => {
       const chunks = [];
       response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => resolve({
-        ok: true,
-        status: response.statusCode,
-        body: Buffer.concat(chunks).toString("utf8"),
-        latencyMs: performance.now() - started,
-      }));
+      response.on("end", () => {
+        const bodyText = Buffer.concat(chunks).toString("utf8");
+        const latencyMs = performance.now() - started;
+        const headers = { ...response.headers };
+        resolve({
+          ok: true,
+          status: response.statusCode,
+          headers,
+          body: bodyText,
+          latencyMs,
+        });
+      });
     });
     request.on("timeout", () => request.destroy(new Error("HTTP probe timeout")));
     request.on("error", (error) => resolve({ ok: false, error: error.message, latencyMs: performance.now() - started }));
     if (body !== undefined) request.write(body);
     request.end();
   });
+}
+
+function isHeaderMap(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length > 0 &&
+    Object.entries(value).every(([name, expected]) =>
+      typeof name === "string" && name.length > 0 && name === name.trim() && typeof expected === "string");
+}
+
+function normalizedHeaderValue(name, value) {
+  const trimmed = value.trim();
+  if (name.toLowerCase() !== "content-type") return trimmed;
+  const parts = trimmed.split(";");
+  const mediaType = parts.shift().trim().toLowerCase();
+  const parameters = parts.map((part) => {
+    const separator = part.indexOf("=");
+    if (separator < 0) return part.trim().toLowerCase();
+    const key = part.slice(0, separator).trim().toLowerCase();
+    const parameterValue = part.slice(separator + 1).trim();
+    return `${key}=${parameterValue}`;
+  }).sort();
+  return [mediaType, ...parameters].join(";");
+}
+
+function expectedHeadersMatch(expected, actual) {
+  if (!isHeaderMap(expected) || !actual || typeof actual !== "object" || Array.isArray(actual)) return false;
+  const actualHeaders = new Map(Object.entries(actual).map(([name, value]) => [name.toLowerCase(), value]));
+  return Object.entries(expected).every(([name, expectedValue]) => {
+    const actualValue = actualHeaders.get(name.toLowerCase());
+    return typeof actualValue === "string" && normalizedHeaderValue(name, actualValue) === normalizedHeaderValue(name, expectedValue);
+  });
+}
+
+function headerMismatch(probe, result) {
+  if (!isHeaderMap(probe.expectHeaders)) return "missing expected response headers";
+  const actual = result.headers && typeof result.headers === "object" ? result.headers : {};
+  const actualHeaders = new Map(Object.entries(actual).map(([name, value]) => [name.toLowerCase(), value]));
+  for (const [name, expected] of Object.entries(probe.expectHeaders)) {
+    const value = actualHeaders.get(name.toLowerCase());
+    if (value === undefined) return `header ${name} is missing, expected ${JSON.stringify(expected)}`;
+    if (typeof value !== "string" || normalizedHeaderValue(name, value) !== normalizedHeaderValue(name, expected)) {
+      return `header ${name} was ${JSON.stringify(value)}, expected ${JSON.stringify(expected)}`;
+    }
+  }
+  return "response headers did not match expected values";
 }
 
 function lineProbe(port, probe, timeoutMs = 5000) {
@@ -347,14 +480,16 @@ function probeMatches(probe, result, protocol) {
   if (!result.ok) return false;
   if (protocol === "line") return result.body === probe.expect;
   return (probe.expectStatus === undefined || result.status === probe.expectStatus) &&
-    (probe.expectBody === undefined || result.body === probe.expectBody);
+    (probe.expectBody === undefined || result.body === probe.expectBody) &&
+    expectedHeadersMatch(probe.expectHeaders, result.headers);
 }
 
 function probeMismatch(probe, result, protocol) {
   if (!result.ok) return result.error;
   if (protocol === "line") return `body ${JSON.stringify(result.body)}, expected ${JSON.stringify(probe.expect)}`;
   if (probe.expectStatus !== undefined && result.status !== probe.expectStatus) return `status ${result.status}, expected ${probe.expectStatus}`;
-  return `body ${JSON.stringify(result.body)}, expected ${JSON.stringify(probe.expectBody)}`;
+  if (probe.expectBody !== undefined && result.body !== probe.expectBody) return `body ${JSON.stringify(result.body)}, expected ${JSON.stringify(probe.expectBody)}`;
+  return headerMismatch(probe, result);
 }
 
 async function probeSequence(port, probes, protocol = "http") {
@@ -366,15 +501,7 @@ async function probeSequence(port, probes, protocol = "http") {
   return { ok: true };
 }
 
-async function readRssKb(pid) {
-  try {
-    const status = await fs.readFile(`/proc/${pid}/status`, "utf8");
-    const match = status.match(/^VmRSS:\s+(\d+)\s+kB$/m);
-    return match ? Number(match[1]) : null;
-  } catch {
-    return null;
-  }
-}
+
 
 function median(values) {
   const numbers = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
@@ -391,8 +518,19 @@ function percentile(values, fraction) {
 
 function summarizeSamples(samples) {
   const metrics = ["wall_seconds", "peak_rss_kb", "time_to_first_stdout_seconds"];
-  const medians = Object.fromEntries(metrics.map((metric) => [metric, median(samples.map((sample) => sample[metric]))]));
-  return { samples, median: medians };
+  const valid = Array.isArray(samples) && samples.length > 0 &&
+    samples.every((sample) => sample && sample.exit_code === 0 && metrics.every((metric) => positiveMetricValue(metric, sample[metric])));
+  const medians = Object.fromEntries(metrics.map((metric) => [
+    metric,
+    valid ? median(samples.map((sample) => sample[metric])) : null,
+  ]));
+  return { samples, valid, median: medians };
+}
+
+function validBuildSample(sample) {
+  return sample?.exit_code === 0 &&
+    positiveMetricValue("wall_seconds", sample.wall_seconds) &&
+    positiveMetricValue("peak_rss_kb", sample.peak_rss_kb);
 }
 
 function mismatch(expected, actual) {
@@ -403,6 +541,163 @@ function mismatch(expected, actual) {
   const show = (buffer) => JSON.stringify(buffer.subarray(index, index + 80).toString("utf8"));
   return `byte ${index}: expected ${show(expected)}, got ${show(actual)} (length ${expected.length}/${actual.length})`;
 }
+
+function unavailableTierTrace(reason = "compiler-owned tier trace channel is unavailable; --trace-tiers shares workload stderr") {
+  return {
+    status: "failed",
+    channel: "unavailable",
+    rows: [],
+    native_rows: 0,
+    interp_rows: 0,
+    whole_program_deopt: null,
+    invocations: [],
+    reason,
+  };
+}
+
+function tracedCommand(command) {
+  const traced = [...command];
+  if (traced.includes("--trace-tiers")) return traced;
+  const separator = traced.indexOf("--");
+  if (separator < 0) traced.push("--trace-tiers");
+  else traced.splice(separator, 0, "--trace-tiers");
+  return traced;
+}
+
+function validTierRow(row) {
+  return row && typeof row === "object" && !Array.isArray(row) &&
+    typeof row.function === "string" && row.function.length > 0 &&
+    (row.tier === "native" || row.tier === "interp") &&
+    (row.reason === null || typeof row.reason === "string") &&
+    typeof row.millis === "number" && Number.isFinite(row.millis) && row.millis >= 0;
+}
+
+function parseTierFacts(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { error: "sidecar is not a JSON object" };
+  if (!Array.isArray(value.rows) || value.rows.length === 0 || !value.rows.every(validTierRow)) {
+    return { error: "sidecar rows are missing or malformed" };
+  }
+  const nativeRows = value.rows.filter((row) => row.tier === "native").length;
+  const interpRows = value.rows.filter((row) => row.tier === "interp").length;
+  if (!Number.isInteger(value.native_rows) || value.native_rows < 0 || value.native_rows !== nativeRows) {
+    return { error: "sidecar native_rows does not match rows" };
+  }
+  if (!Number.isInteger(value.interp_rows) || value.interp_rows < 0 || value.interp_rows !== interpRows) {
+    return { error: "sidecar interp_rows does not match rows" };
+  }
+  if (typeof value.whole_program_deopt !== "boolean") {
+    return { error: "sidecar whole_program_deopt is not boolean" };
+  }
+  return {
+    rows: value.rows,
+    native_rows: nativeRows,
+    interp_rows: interpRows,
+    whole_program_deopt: value.whole_program_deopt,
+  };
+}
+
+async function readTierFacts(sidecar) {
+  let text;
+  try {
+    text = await fs.readFile(sidecar, "utf8");
+  } catch (error) {
+    return { error: `compiler-owned tier trace sidecar is absent: ${error.message}` };
+  }
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    return { error: `compiler-owned tier trace sidecar is malformed: ${error.message}` };
+  }
+  return parseTierFacts(value);
+}
+
+function tierTraceResult(invocations, reason = null) {
+  const rows = invocations.flatMap((invocation) => invocation.rows);
+  const hasFacts = rows.length > 0;
+  return {
+    status: reason ? "failed" : "passed",
+    channel: "compiler_owned_sidecar",
+    rows,
+    native_rows: invocations.reduce((total, invocation) => total + invocation.native_rows, 0),
+    interp_rows: invocations.reduce((total, invocation) => total + invocation.interp_rows, 0),
+    whole_program_deopt: hasFacts
+      ? invocations.some((invocation) => invocation.whole_program_deopt === true)
+      : null,
+    invocations,
+    ...(reason ? { reason } : {}),
+  };
+}
+
+function emptyTierInvocation(command, exitCode) {
+  return {
+    command: [...command],
+    exit_code: exitCode,
+    rows: [],
+    native_rows: 0,
+    interp_rows: 0,
+    whole_program_deopt: null,
+  };
+}
+
+async function collectTierTrace(cwd, commands, expected, reset = null, {
+  full = false,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+} = {}) {
+  const sidecar = path.join(cwd, ".jet-tier-trace.json");
+  try {
+    await fs.rm(sidecar, { force: true });
+  } catch (error) {
+    return unavailableTierTrace(`could not remove stale tier trace sidecar: ${error.message}`);
+  }
+  if (!Array.isArray(commands) || commands.length === 0) {
+    return unavailableTierTrace("compiler-owned tier trace has no commands");
+  }
+  const invocations = [];
+  const output = [];
+  let reason = null;
+  if (reset) {
+    try {
+      await reset();
+    } catch (error) {
+      return unavailableTierTrace(`tier trace reset failed: ${error.message}`);
+    }
+  }
+  try {
+    for (const command of commands) {
+      await fs.rm(sidecar, { force: true });
+      const result = await runProcess(cwd, tracedCommand(command), {
+        full,
+        timeoutMs,
+        env: { JET_TRACE_TIERS_PATH: sidecar },
+      });
+      const facts = await readTierFacts(sidecar);
+      const invocation = facts.error
+        ? emptyTierInvocation(command, result.code)
+        : { command: [...command], exit_code: result.code, ...facts };
+      invocations.push(invocation);
+      output.push(result.stdout);
+      if (facts.error) {
+        reason = facts.error;
+        break;
+      }
+      if (result.code !== 0) {
+        reason = `trace invocation exited ${result.code}`;
+        break;
+      }
+    }
+    if (!reason) {
+      const mismatchReason = mismatch(expected, Buffer.concat(output));
+      if (mismatchReason) reason = `trace output mismatch: ${mismatchReason}`;
+    }
+    return tierTraceResult(invocations, reason);
+  } catch (error) {
+    return tierTraceResult(invocations, `tier trace collection failed: ${error.message}`);
+  } finally {
+    await fs.rm(sidecar, { force: true });
+  }
+}
+
 
 async function sourceMetrics(sourceDir, filename) {
   const source = path.join(sourceDir, filename);
@@ -466,7 +761,7 @@ function sortedUnique(values) {
 }
 
 function equalStringArrays(left, right) {
-  return JSON.stringify(sortedUnique(left)) === JSON.stringify(sortedUnique(right));
+  return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function tierPolicy(mode) {
@@ -484,6 +779,8 @@ function comparisonMetrics(mode) {
       "service_latency_ms_p99",
       "service_startup_seconds",
       "runtime_peak_rss_kb",
+      "cold_build_seconds",
+      "warm_build_seconds",
       "binary_bytes",
       "loc",
       "source_bytes",
@@ -508,6 +805,50 @@ function comparisonMetrics(mode) {
   return COMPARISON_METRICS;
 }
 
+function metricApplicability(entry, language, metric) {
+  const languageFacts = entry?.metric_applicability?.[language];
+  const fact = languageFacts && typeof languageFacts === "object" && Object.hasOwn(languageFacts, metric)
+    ? languageFacts[metric]
+    : languageFacts && typeof languageFacts === "object" && Object.hasOwn(languageFacts, "*")
+      ? languageFacts["*"]
+      : entry?.non_applicable?.[language];
+  if (fact === undefined) return { status: "required" };
+  if (!fact || typeof fact !== "object" || Array.isArray(fact)) {
+    return { status: "invalid", reason: "metric applicability must be an object" };
+  }
+  if (fact.status !== undefined && fact.status !== "not_applicable") {
+    return { status: "invalid", reason: "metric applicability status must be not_applicable" };
+  }
+  return {
+    status: "not_applicable",
+    basis: fact.basis ?? null,
+    reason: fact.reason ?? null,
+    evidence: fact.evidence ?? null,
+  };
+}
+
+function applicabilityFactIssues(entry, language, scope, fact) {
+  const prefix = `${entry.name}/${language}${scope ? `/${scope}` : ""}`;
+  const issues = [];
+  if (baseLanguage(language) === "jet") issues.push(`${prefix}: Jet cannot be not_applicable`);
+  if (!fact || typeof fact !== "object" || Array.isArray(fact)) {
+    issues.push(`${prefix}: not_applicable fact must be an object`);
+    return issues;
+  }
+  if (fact.status !== undefined && fact.status !== "not_applicable") {
+    issues.push(`${prefix}: not_applicable fact status must be not_applicable`);
+  }
+  if (!STRUCTURAL_NOT_APPLICABLE_BASES.has(fact.basis)) {
+    issues.push(`${prefix}: not_applicable fact requires a structural basis`);
+  }
+  for (const field of ["reason", "evidence"]) {
+    if (typeof fact[field] !== "string" || fact[field].trim().length === 0) {
+      issues.push(`${prefix}: not_applicable fact missing ${field}`);
+    }
+  }
+  return issues;
+}
+
 function runtimeMetrics(runtime) {
   return {
     runtime_wall_seconds: runtime?.median?.wall_seconds ?? null,
@@ -522,6 +863,7 @@ function buildMetrics(build) {
     warm_build_seconds: build?.warm?.wall_seconds ?? null,
   };
 }
+
 
 function unavailableTier(required, reason, status = "unavailable") {
   return {
@@ -555,7 +897,7 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     throw new Error("invalid gauntlet measurement manifest");
   }
   const contract = manifest.contract;
-  if (contract.token_metric !== "source_tokens" || contract.loc_ratio_max !== 1.2 || contract.token_verdict !== "jet_less_than_python") {
+  if (contract.token_metric !== "source_tokens") {
     throw new Error("unsupported gauntlet measurement contract");
   }
   const corpus = manifest.corpus;
@@ -568,7 +910,7 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
   }
   if (manifest.entries.length !== corpus.entry_count || corpus.entry_names.length !== corpus.entry_count ||
     new Set(corpus.entry_names).size !== corpus.entry_names.length || !equalStringArrays(names, corpus.entry_names) ||
-    new Set(corpus.allowed_uncovered_cells).size !== corpus.allowed_uncovered_cells.length) {
+    new Set(corpus.allowed_uncovered_cells).size !== corpus.allowed_uncovered_cells.length || corpus.allowed_uncovered_cells.length !== 0) {
     throw new Error("measurement manifest entry denominator does not match its named corpus");
   }
   const reportContract = manifest.report_contract;
@@ -578,9 +920,14 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     !equalStringArrays(reportContract.optional_jet_tiers ?? [], ["dev"]) ||
     JSON.stringify(reportContract.tier_policy_by_mode) !== JSON.stringify(tierPolicyByMode) ||
     JSON.stringify(reportContract.primary_metric_by_mode) !== JSON.stringify(MODE_PRIMARY_METRIC) ||
-    reportContract.ratio_verdicts?.win !== "<1" || reportContract.ratio_verdicts?.parity !== "<=1.05" || reportContract.ratio_verdicts?.loss !== ">1.05" ||
+    JSON.stringify(reportContract.ratio_verdicts) !== JSON.stringify(RATIO_VERDICTS) ||
+    reportContract.metric_applicability?.default !== METRIC_APPLICABILITY_POLICY.default ||
+    reportContract.metric_applicability?.not_applicable !== METRIC_APPLICABILITY_POLICY.not_applicable ||
+    reportContract.metric_applicability?.missing !== METRIC_APPLICABILITY_POLICY.missing ||
+    !equalStringArrays(reportContract.aot_only_metrics ?? [], [...AOT_ONLY_METRICS]) ||
     reportContract.missing_metric_verdict !== "unmeasured" || reportContract.output_verification !== "byte_exact_utf8_or_declared_probe_sequence" ||
-    reportContract.loss_owner_required_for !== "primary_metric_loss" ||
+    reportContract.loss_owner_required_for !== "any_comparable_metric_loss" ||
+    JSON.stringify(reportContract.peer_measurement) !== JSON.stringify(PEER_MEASUREMENT_POLICY) ||
     JSON.stringify(reportContract.axis_schemas) !== JSON.stringify({
       live_reload: "gauntlet-axis-live-reload-v1",
       memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",
@@ -617,6 +964,9 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     throw new Error("gauntlet report is missing a required comparison axis");
   }
   if (matrix) {
+    if (JSON.stringify(matrix.metric_applicability) !== JSON.stringify(METRIC_APPLICABILITY_POLICY)) {
+      throw new Error("matrix is missing the metric applicability policy");
+    }
     const matrixCells = (matrix.cells ?? []).map((cell) => cell.id);
     if (new Set(matrixCells).size !== matrixCells.length || corpus.matrix_cell_count !== matrixCells.length || !equalStringArrays(corpus.allowed_uncovered_cells, MATRIX_UNCOVERED_DEFAULTS)) {
       throw new Error("measurement manifest matrix denominator does not match the approved matrix");
@@ -634,8 +984,6 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     const comparison = python ? {
       loc_ratio: python.loc === 0 ? null : jet.loc / python.loc,
       source_token_delta: jet.source_tokens - python.source_tokens,
-      loc_pass: jet.loc <= contract.loc_ratio_max * python.loc,
-      token_pass: jet.source_tokens < python.source_tokens,
     } : null;
     entries.push({ name: row.name, jet, python, comparison });
   }
@@ -654,8 +1002,6 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
       python: { loc: pythonLoc, source_tokens: pythonTokens },
       loc_ratio: pythonLoc === 0 ? null : jetLoc / pythonLoc,
       source_token_delta: jetTokens - pythonTokens,
-      loc_pass: jetLoc <= contract.loc_ratio_max * pythonLoc,
-      token_pass: jetTokens < pythonTokens,
     },
     coverage: {
       entry_count: entries.length,
@@ -667,9 +1013,26 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
   };
 }
 
+function validateHttpServiceProbes(entry, issues) {
+  if (entry.mode !== "service") return;
+  const service = entry.spec?.service ?? entry.service;
+  if ((service?.protocol ?? "http") !== "http" || !Array.isArray(service?.probe)) return;
+  for (const [index, probe] of service.probe.entries()) {
+    const prefix = `${entry.name}/service/probe[${index}]`;
+    if (!probe || typeof probe !== "object" || Array.isArray(probe)) {
+      issues.push(`${prefix}: HTTP probe must be an object`);
+      continue;
+    }
+    if (!isHeaderMap(probe.expectHeaders)) {
+      issues.push(`${prefix}: expectHeaders must be a non-empty string map`);
+    }
+  }
+}
+
 function validateEntryShape(item, matrix) {
   const entry = item.entry;
   const issues = [];
+  validateHttpServiceProbes(entry, issues);
   if (!item.nameDeclared) issues.push(`${item.directoryName}: entry.json must declare name`);
   if (entry.name !== item.directoryName) issues.push(`${item.directoryName}: entry.name is ${JSON.stringify(entry.name)}`);
   if (!ENTRY_MODES.includes(entry.mode)) issues.push(`${entry.name}: unsupported mode ${entry.mode ?? "missing"}`);
@@ -689,14 +1052,26 @@ function validateEntryShape(item, matrix) {
     } else {
       for (const [language, fact] of Object.entries(nonApplicable)) {
         if (!(entry.languages ?? []).includes(language)) issues.push(`${entry.name}/${language}: non_applicable language is not declared`);
-        if (!fact || typeof fact !== "object" || Array.isArray(fact)) {
-          issues.push(`${entry.name}/${language}: non_applicable fact must be an object`);
+        issues.push(...applicabilityFactIssues(entry, language, "", fact));
+      }
+    }
+  }
+  const metricApplicable = entry.metric_applicability;
+  if (metricApplicable !== undefined) {
+    if (!metricApplicable || typeof metricApplicable !== "object" || Array.isArray(metricApplicable)) {
+      issues.push(`${entry.name}: metric_applicability must be an object`);
+    } else {
+      for (const [language, facts] of Object.entries(metricApplicable)) {
+        if (!(entry.languages ?? []).includes(language)) issues.push(`${entry.name}/${language}: metric_applicability language is not declared`);
+        if (!facts || typeof facts !== "object" || Array.isArray(facts)) {
+          issues.push(`${entry.name}/${language}: metric_applicability must map metrics to facts`);
           continue;
         }
-        for (const field of ["reason", "evidence"]) {
-          if (typeof fact[field] !== "string" || fact[field].trim().length === 0) {
-            issues.push(`${entry.name}/${language}: non_applicable fact missing ${field}`);
+        for (const [metric, fact] of Object.entries(facts)) {
+          if (metric !== "*" && !comparisonMetrics(entry.mode).includes(metric)) {
+            issues.push(`${entry.name}/${language}/${metric}: unknown comparable metric`);
           }
+          issues.push(...applicabilityFactIssues(entry, language, metric, fact));
         }
       }
     }
@@ -734,6 +1109,9 @@ function validateEntryShape(item, matrix) {
 }
 async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, fullScope) {
   const issues = [];
+  if (JSON.stringify(matrix?.metric_applicability) !== JSON.stringify(METRIC_APPLICABILITY_POLICY)) {
+    issues.push("matrix is missing the metric applicability policy");
+  }
   const items = loaded.map((item) => ({ ...item, directoryName: path.basename(item.dir) }));
   for (const item of items) issues.push(...validateEntryShape(item, matrix));
   if (!fullScope) return issues;
@@ -778,15 +1156,17 @@ async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, ful
 }
 
 async function discoverJetArtifact(dir) {
-  const preferred = path.join(dir, "build", "main");
-  if (await exists(preferred)) return preferred;
+  for (const name of ["run", "main"]) {
+    const preferred = path.join(dir, "build", name);
+    if (await exists(preferred)) return preferred;
+  }
   const found = [];
   async function walk(current) {
     for (const item of await fs.readdir(current, { withFileTypes: true })) {
       if (item.name === ".jet" || item.name === "zig-cache" || item.name === "zig-global-cache") continue;
       const full = path.join(current, item.name);
       if (item.isDirectory()) await walk(full);
-      else if (item.name === "main" || item.name === "main.exe") {
+      else if (item.name === "run" || item.name === "run.exe" || item.name === "main" || item.name === "main.exe") {
         try {
           const stat = await fs.stat(full);
           if ((stat.mode & 0o111) !== 0) found.push(full);
@@ -861,7 +1241,11 @@ async function buildAndMeasure(language, sourceDir, jetBin, overrideCommand = nu
   const artifact = base === "jet" ? await discoverJetArtifact(sourceDir) : path.join(sourceDir, {
     rust: "main-rust", c: "main-c", zig: "main", go: "main-go",
   }[base]);
-  const failure = cold.exit_code !== 0 ? `cold build exit ${cold.exit_code}` : warm?.exit_code !== 0 ? `warm build exit ${warm?.exit_code}` : !await exists(artifact) ? "build produced no executable" : null;
+  const failure = cold.exit_code !== 0 ? `cold build exit ${cold.exit_code}` :
+    !validBuildSample(cold) ? "cold build measurement invalid" :
+      warm?.exit_code !== 0 ? `warm build exit ${warm?.exit_code}` :
+        !validBuildSample(warm) ? "warm build measurement invalid" :
+          !await exists(artifact) ? "build produced no executable" : null;
   return { supported: true, command, build: { cold, warm }, artifact, failure };
 }
 
@@ -885,7 +1269,10 @@ async function configuredBuildAndMeasure(language, sourceDir, jetBin, entry) {
   const full = entry.spec?.fullShell === true;
   const cold = await timedProcess(sourceDir, command, { full });
   const warm = cold.exit_code === 0 ? await timedProcess(sourceDir, command, { full }) : null;
-  const failure = cold.exit_code !== 0 ? `cold build exit ${cold.exit_code}` : warm?.exit_code !== 0 ? `warm build exit ${warm?.exit_code}` : null;
+  const failure = cold.exit_code !== 0 ? `cold build exit ${cold.exit_code}` :
+    !validBuildSample(cold) ? "cold build measurement invalid" :
+      warm?.exit_code !== 0 ? `warm build exit ${warm?.exit_code}` :
+        !validBuildSample(warm) ? "warm build measurement invalid" : null;
   return { supported: true, command, build: { cold, warm }, artifact: null, failure };
 }
 
@@ -980,37 +1367,53 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
     await waitForExit(child);
     return { failure: error.message, startupSeconds };
   }
-  let rssKb = await readRssKb(child.pid);
-  const rssTimer = setInterval(() => {
-    readRssKb(child.pid).then((value) => {
+  let rssKb = await processTreeRssKb(child.pid);
+  let rssSamplePromise = Promise.resolve();
+  const sampleRss = () => {
+    rssSamplePromise = rssSamplePromise.then(async () => {
+      const value = await processTreeRssKb(child.pid);
       if (Number.isFinite(value)) rssKb = Math.max(rssKb ?? 0, value);
-    });
-  }, 20);
+    }).catch(() => {});
+  };
+  const rssTimer = setInterval(sampleRss, 20);
   const latencies = [];
   const repeatProbes = probes.slice(0, -1);
   let measurementFailure = null;
-  for (let repeat = 0; repeat < 50 && !measurementFailure; repeat += 1) {
-    for (const probe of repeatProbes) {
-      const result = await serviceProbe(port, probe, protocol);
-      latencies.push(result.latencyMs);
-      if (!probeMatches(probe, result, protocol)) {
-        measurementFailure = `probe failed during measurement: ${result.error ?? "response mismatch"}`;
-        break;
+  try {
+    for (let repeat = 0; repeat < 50 && !measurementFailure; repeat += 1) {
+      for (const probe of repeatProbes) {
+        const result = await serviceProbe(port, probe, protocol);
+        latencies.push(result.latencyMs);
+        if (!probeMatches(probe, result, protocol)) {
+          measurementFailure = `probe failed during measurement: ${result.error ?? "response mismatch"}`;
+          break;
+        }
       }
     }
+    if (!measurementFailure) {
+      const shutdown = await serviceProbe(port, probes[probes.length - 1], protocol);
+      latencies.push(shutdown.latencyMs);
+      if (!probeMatches(probes.at(-1), shutdown, protocol)) measurementFailure = `shutdown probe failed: ${shutdown.error ?? "response mismatch"}`;
+    }
+  } catch (error) {
+    measurementFailure = error.message;
+  } finally {
+    clearInterval(rssTimer);
+    await rssSamplePromise;
   }
-  if (!measurementFailure) {
-    const shutdown = await serviceProbe(port, probes[probes.length - 1], protocol);
-    latencies.push(shutdown.latencyMs);
-    if (!probeMatches(probes.at(-1), shutdown, protocol)) measurementFailure = `shutdown probe failed: ${shutdown.error ?? "response mismatch"}`;
-  }
-  clearInterval(rssTimer);
-  const finalRssKb = await readRssKb(child.pid);
+  const finalRssKb = await processTreeRssKb(child.pid);
   if (Number.isFinite(finalRssKb)) rssKb = Math.max(rssKb ?? 0, finalRssKb);
   const exit = await waitForExit(child, 5000);
   if (exit.code === null) { stopProcess(child); await waitForExit(child); }
+  const measurementInvalid = !positiveMetricValue("service_startup_seconds", startupSeconds) ||
+    !positiveMetricValue("service_peak_rss_kb", rssKb) ||
+    latencies.length === 0 ||
+    !latencies.every((value) => positiveMetricValue("service_latency_ms", value));
+  const finalFailure = measurementFailure ??
+    (measurementInvalid ? "service timing or RSS measurement invalid" :
+      exit.code !== 0 ? `service clean exit ${exit.code ?? exit.signal}` : null);
   return {
-    failure: measurementFailure ?? (exit.code !== 0 ? `service clean exit ${exit.code ?? exit.signal}` : null),
+    failure: finalFailure,
     startupSeconds,
     latencyMs: { median: median(latencies), p99: percentile(latencies, 0.99) },
     rssKb,
@@ -1019,6 +1422,69 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
     readySeconds: ready.seconds,
   };
 }
+
+async function collectServiceTierTrace(sourceDir, entry, commandForOverride = null, {
+  full = entry.spec?.fullShell === true,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+} = {}) {
+  const service = entry.spec?.service ?? entry.service ?? {};
+  const protocol = service.protocol ?? "http";
+  const probes = service.probe ?? [];
+  if (!service.portArg || probes.length === 0 || !["http", "line"].includes(protocol) ||
+      (protocol === "http" && !service.readyPath) ||
+      (protocol === "line" && !service.ready)) {
+    return unavailableTierTrace("service requires portArg, readiness, and probe");
+  }
+  const commandFor = commandForOverride ?? ((port) => ["jet", "run", "run.jet", "--", String(port)]);
+  const displayCommand = commandFor("<port>");
+  const sidecar = path.join(sourceDir, ".jet-tier-trace.json");
+  try {
+    await fs.rm(sidecar, { force: true });
+  } catch (error) {
+    return unavailableTierTrace(`could not remove stale tier trace sidecar: ${error.message}`);
+  }
+  const invocations = [];
+  let child = null;
+  let exitCode = null;
+  let reason = null;
+  try {
+    const port = await freePort();
+    child = startProcess(sourceDir, tracedCommand(commandFor(port)), {
+      full,
+      env: { JET_TRACE_TIERS_PATH: sidecar },
+    });
+    await waitForReady(child, port, service);
+    const verification = await probeSequence(port, probes, protocol);
+    if (!verification.ok) reason = `probe ${verification.index} failed: ${verification.reason}`;
+    let exit = await waitForExit(child, 5000);
+    if (exit.code === null) {
+      if (!reason) reason = "trace service shutdown did not produce a clean exit";
+      stopProcess(child);
+      exit = await waitForExit(child);
+    }
+    exitCode = exit.code;
+    if (exitCode !== 0 && !reason) reason = `trace service exited ${exitCode ?? exit.signal}`;
+  } catch (error) {
+    reason = `tier trace service failed: ${error.message}`;
+    if (child) {
+      stopProcess(child);
+      const exit = await waitForExit(child);
+      exitCode = exit.code;
+    }
+  }
+  try {
+    const facts = await readTierFacts(sidecar);
+    const invocation = facts.error
+      ? emptyTierInvocation(displayCommand, exitCode)
+      : { command: [...displayCommand], exit_code: exitCode, ...facts };
+    invocations.push(invocation);
+    if (facts.error && !reason) reason = facts.error;
+  } finally {
+    await fs.rm(sidecar, { force: true });
+  }
+  return tierTraceResult(invocations, reason);
+}
+
 
 function serviceMetrics(service) {
   return {
@@ -1052,55 +1518,147 @@ async function measureRuns(cwd, command, count, { full = false, reset = null } =
   return summarizeSamples(samples);
 }
 
-function ratioVerdict(ratio) {
-  if (!Number.isFinite(ratio)) return null;
-  if (ratio < 1) return "win";
-  if (ratio <= 1.05) return "parity";
-  return "loss";
+function ratioVerdict(ratio, peerLanguage = null) {
+  if (!Number.isFinite(ratio) || ratio <= 0) return null;
+  if (baseLanguage(peerLanguage ?? "") === "rust") {
+    if (ratio < 1) return "win";
+    if (ratio <= 1.05) return "parity";
+    return "loss";
+  }
+  return ratio < 1 ? "win" : "loss";
 }
 
 function comparisons(entry, languages, rows, tiers = {}) {
-  const jet = rows.jet;
   const metrics = comparisonMetrics(entry.mode);
   const policy = tierPolicy(entry.mode);
-  const requiredTiers = Object.entries(policy)
-    .filter(([, value]) => value.required)
-    .map(([tier]) => tier);
-  const jetTiersReady = requiredTiers.every((tier) => tiers[tier]?.status === "ok");
+  const rowMap = rows && typeof rows === "object" && !Array.isArray(rows) ? rows : {};
+  const defaultJet = rowMap.jet;
   const output = {};
-  for (const language of languages.filter((item) => item !== "jet")) {
-    const peer = rows[language];
+  for (const language of (Array.isArray(languages) ? languages : [])
+    .filter((item) => typeof item === "string" && item !== "jet" && item !== "jet-expert")) {
+    const peer = rowMap[language];
+    const expertPeer = language.endsWith("-expert");
+    const jetConfiguration = expertPeer ? "jet-expert" : "jet";
+    const matchedJet = expertPeer ? rowMap["jet-expert"] : defaultJet;
+    const comparisonTiers = expertPeer
+      ? {
+          aot: {
+            status: matchedJet?.status === "ok" ? "ok" : (matchedJet?.status ?? "unavailable"),
+            metrics: matchedJet?.metrics ?? {},
+          },
+        }
+      : tiers;
+    const comparisonPolicy = expertPeer ? { aot: { required: true } } : policy;
+    const comparisonRequiredTiers = Object.entries(comparisonPolicy)
+      .filter(([, value]) => value.required)
+      .map(([tier]) => tier);
+    const matchedJetTiersReady = comparisonRequiredTiers.every((tier) => comparisonTiers[tier]?.status === "ok");
+    const declaredPeerNonApplicable = entry?.non_applicable?.[language];
+    const undeclaredPeerNonApplicable = peer?.status === "not_applicable" && !declaredPeerNonApplicable;
     const comparison = {
-      status: peer?.status ?? "unavailable",
-      applicable: peer?.status !== "not_applicable",
-      basis: peer?.status === "not_applicable" ? "declared-non-applicability" : "jet-aot-and-run",
-      reason: peer?.status === "not_applicable" ? peer.reason : undefined,
-      evidence: peer?.status === "not_applicable" ? peer.evidence : undefined,
-      jet_tiers_ready: jetTiersReady,
+      status: undeclaredPeerNonApplicable ? "invalid" : (peer?.status ?? "unavailable"),
+      applicable: peer?.status === "not_applicable" ? declaredPeerNonApplicable === undefined : true,
+      basis: peer?.status === "not_applicable"
+        ? (declaredPeerNonApplicable ? "declared-non-applicability" : "undeclared-non-applicability")
+        : expertPeer ? "jet-expert-aot-and-matched-peer" : "jet-aot-and-run",
+      jet_configuration: jetConfiguration,
+      jet_tiers_ready: matchedJetTiersReady,
+      required_tiers: comparisonRequiredTiers,
+      tier_policy: comparisonPolicy,
+      peer_sample: {
+        binding: PEER_MEASUREMENT_POLICY.sample_binding,
+        source: `rows.${language}.metrics`,
+        language,
+        source_sha256: peer?.metrics?.source_sha256 ?? null,
+      },
       primary_metric: primaryMetric(entry.mode),
       metrics: {},
       tiers: {},
       verdicts: {},
     };
-    if (peer?.status === "not_applicable") {
+    if (undeclaredPeerNonApplicable) {
+      comparison.reason = "peer is marked not_applicable without a declared structural reason";
       output[language] = comparison;
       continue;
     }
-    for (const tier of Object.keys(policy)) {
-      const tierReady = tiers[tier]?.status === "ok";
-      const jetMetrics = tier === "aot" ? jet?.metrics : tiers[tier]?.metrics;
-      const tierComparison = { status: tiers[tier]?.status ?? "unavailable", metrics: {} };
+    if (peer?.status === "not_applicable") {
+      comparison.reason = peer.reason;
+      comparison.evidence = peer.evidence;
+      output[language] = comparison;
+      continue;
+    }
+    for (const tier of Object.keys(comparisonPolicy)) {
+      const tierReady = comparisonTiers[tier]?.status === "ok";
+      const jetMetrics = tier === "aot" ? matchedJet?.metrics : comparisonTiers[tier]?.metrics;
+      const tierComparison = {
+        metrics: {},
+        peer_sample: {
+          binding: PEER_MEASUREMENT_POLICY.sample_binding,
+          source: `rows.${language}.metrics`,
+          language,
+          source_sha256: peer?.metrics?.source_sha256 ?? null,
+        },
+      };
       for (const metric of metrics) {
-        const jetValue = Number.isFinite(jetMetrics?.[metric]) ? jetMetrics[metric] : null;
-        const peerValue = Number.isFinite(peer?.metrics?.[metric]) ? peer.metrics[metric] : null;
-        const ratio = tierReady && peer?.status === "ok" && peerValue !== null && peerValue !== 0 && jetValue !== null
+        const applicability = metricApplicability(entry, language, metric);
+        if (applicability.status === "invalid") {
+          tierComparison.metrics[metric] = {
+            status: "unmeasured",
+            applicability,
+            jet: null,
+            peer: null,
+            ratio: null,
+            verdict: null,
+            reason: applicability.reason,
+          };
+          continue;
+        }
+        if (applicability.status === "not_applicable") {
+          tierComparison.metrics[metric] = {
+            status: "not_applicable",
+            applicability,
+            jet: null,
+            peer: null,
+            ratio: null,
+            verdict: null,
+          };
+          continue;
+        }
+        if (!metricComparableAtTier(metric, tier)) {
+          tierComparison.metrics[metric] = {
+            status: "not_applicable",
+            applicability: {
+              status: "not_applicable",
+              basis: "no_compile_phase",
+              reason: `${metric} is a compile-only measurement and the interpreted ${tier} tier has no compile phase.`,
+              evidence: "Build, rebuild, and binary metrics are measured only from the AOT artifact; interpreted tiers have no compile phase.",
+            },
+            jet: null,
+            peer: null,
+            ratio: null,
+            verdict: null,
+          };
+          continue;
+        }
+        const jetValue = positiveMetricValue(metric, jetMetrics?.[metric]) ? jetMetrics[metric] : null;
+        const peerValue = positiveMetricValue(metric, peer?.metrics?.[metric]) ? peer.metrics[metric] : null;
+        const ratio = tierReady && peer?.status === "ok" && peerValue !== null && jetValue !== null
           ? jetValue / peerValue
           : null;
+        const verdict = ratioVerdict(ratio, language);
         tierComparison.metrics[metric] = {
+          status: verdict === null ? "unmeasured" : "measured",
           jet: jetValue,
           peer: peerValue,
           ratio,
-          verdict: ratioVerdict(ratio),
+          verdict,
+          reason: verdict === null
+            ? (!tierReady ? `matched Jet ${jetConfiguration} ${tier} tier is unavailable`
+              : peer?.status !== "ok" ? "peer row is unavailable"
+                : jetValue === null ? `matched Jet ${jetConfiguration} metric is missing or invalid`
+                  : peerValue === null ? "peer metric is missing or invalid"
+                    : "invalid metric ratio")
+            : null,
         };
       }
       comparison.tiers[tier] = tierComparison;
@@ -1114,9 +1672,8 @@ function comparisons(entry, languages, rows, tiers = {}) {
 
 function emptyJetTiers(entry, dev, reason) {
   const policy = tierPolicy(entry.mode);
-  return Object.fromEntries(["aot", "run", "dev"].map((tier) => {
+  return Object.fromEntries(Object.keys(policy).map((tier) => {
     const tierPolicyValue = policy[tier];
-    if (!tierPolicyValue) return [tier, { applicable: false, required: false, status: "not_applicable", metrics: {} }];
     if (tier === "dev" && !dev) return [tier, unavailableTier(tierPolicyValue.required, "jet dev is unavailable")];
     return [tier, unavailableTier(tierPolicyValue.required, reason)];
   }));
@@ -1284,9 +1841,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       row.command = commands;
       const runs = selectedRuns ?? (entry.perf ? 7 : 3);
       row.runtime = await measureSequenceRuns(stagedSource, commands, runs, reset);
-      if (row.runtime.samples.some((sample) => sample.exit_code !== 0)) {
+      if (row.runtime.valid !== true) {
         row.status = "broken";
-        row.reason = "measured run exited nonzero";
+        row.reason = "measured run samples are invalid";
         row.disqualified = true;
         row.verification = { status: "failed", kind: "timed_run", reason: row.reason };
         continue;
@@ -1342,9 +1899,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       row.command = command;
       const runs = selectedRuns ?? (entry.perf ? 7 : 3);
       row.runtime = await measureRuns(stagedSource, command, runs, { full });
-      if (row.runtime.samples.some((sample) => sample.exit_code !== 0)) {
+      if (row.runtime.valid !== true) {
         row.status = "broken";
-        row.reason = "measured run exited nonzero";
+        row.reason = "measured run samples are invalid";
         row.disqualified = true;
         row.verification = { status: "failed", kind: "timed_run", reason: row.reason };
         continue;
@@ -1393,9 +1950,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     row.command = command;
     const runs = selectedRuns ?? (entry.perf ? 7 : 3);
     row.runtime = await measureRuns(stagedSource, command, runs, { reset: fixtureReset });
-    if (row.runtime.samples.some((sample) => sample.exit_code !== 0)) {
+    if (row.runtime.valid !== true) {
       row.status = "broken";
-      row.reason = "measured run exited nonzero";
+      row.reason = "measured run samples are invalid";
       row.disqualified = true;
       row.verification = { status: "failed", kind: "timed_run", reason: row.reason };
       await stopPeer();
@@ -1416,12 +1973,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     await fs.cp(generatedFixture, target, { recursive: true });
   } : null;
   const TIER_TIMEOUT_MS = timeoutFromEnv("JET_GAUNTLET_TIER_TIMEOUT_MS", Math.min(DEFAULT_TIMEOUT_MS, 180_000));
-  for (const tier of ["aot", "run", "dev"]) {
+  const traceRequests = [];
+  for (const tier of Object.keys(tierPolicy(entry.mode))) {
     const policy = tierPolicy(entry.mode)[tier];
-    if (!policy) {
-      tiers[tier] = { applicable: false, required: false, status: "not_applicable", metrics: {} };
-      continue;
-    }
     if (tier === "dev" && !dev) {
       tiers[tier] = unavailableTier(policy.required, "jet dev is unavailable");
       continue;
@@ -1447,7 +2001,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         ? [jetBin, "run", "run.jet", "--", String(port)]
         : [jetBin, "dev", "--watch=off", "run.jet", "--", String(port)];
       const service = await runService("jet", jetDir, null, entry, commandFor);
-      tiers[tier] = {
+      const tierRow = {
         applicable: true,
         required: policy.required,
         status: service.failure ? "broken" : "ok",
@@ -1455,6 +2009,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         command: commandFor("<port>"),
         verification: { status: service.failure ? "failed" : "passed", kind: "service_probe_sequence", reason: service.failure },
         metrics: {
+          ...sourceMetricValues(jetRow?.metrics),
           runtime_wall_seconds: null,
           runtime_first_stdout_seconds: null,
           runtime_peak_rss_kb: service.rssKb ?? null,
@@ -1464,6 +2019,10 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
           binary_bytes: null,
         },
       };
+      if (!service.failure && tier === "run") {
+        traceRequests.push({ kind: "service", tierRow, commandFor });
+      }
+      tiers[tier] = tierRow;
       continue;
     }
     const commands = jetTierCommands(entry, tier, jetBin);
@@ -1488,15 +2047,33 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       tierRow.runtime = commands.length > 1
         ? await measureSequenceRuns(jetDir, commands, selectedRuns ?? (entry.perf ? 7 : 3), reset ?? (async () => {}))
         : await measureRuns(jetDir, command, selectedRuns ?? (entry.perf ? 7 : 3), { reset: jetFixtureReset });
-      if (tierRow.runtime.samples.some((sample) => sample.exit_code !== 0)) {
+      if (tierRow.runtime.valid !== true) {
         tierRow.status = "broken";
-        tierRow.reason = "measured run exited nonzero";
+        tierRow.reason = "measured run samples are invalid";
         tierRow.verification = { status: "failed", kind: "timed_run", reason: tierRow.reason };
       } else {
-        tierRow.metrics = { ...runtimeMetrics(tierRow.runtime), binary_bytes: null };
+        tierRow.metrics = { ...sourceMetricValues(jetRow?.metrics), ...runtimeMetrics(tierRow.runtime), binary_bytes: null };
+        if (tier === "run") {
+          traceRequests.push({ kind: "batch", tierRow, commands, expected, reset });
+        }
       }
     }
     tiers[tier] = tierRow;
+  }
+  for (const request of traceRequests) {
+    const trace = request.kind === "service"
+      ? await collectServiceTierTrace(jetDir, entry, request.commandFor)
+      : await collectTierTrace(jetDir, request.commands, request.expected, request.reset, { timeoutMs: TIER_TIMEOUT_MS });
+    request.tierRow.trace = trace;
+    if (trace.status !== "passed") {
+      request.tierRow.status = "broken";
+      request.tierRow.reason = trace.reason;
+      request.tierRow.verification = {
+        status: "failed",
+        kind: request.kind === "service" ? "service_probe_sequence" : "byte_exact_stdout",
+        reason: trace.reason,
+      };
+    }
   }
   const requiredTiersReady = Object.entries(tierPolicy(entry.mode))
     .filter(([, policy]) => policy.required)
@@ -1544,78 +2121,495 @@ async function readLiveTowerCards() {
   }
 }
 
-function liveLossOwner(number, tower) {
-  if (!Number.isInteger(number)) return { status: "missing", reason: "no owner card is declared" };
-  if (tower.status !== "available") return { status: "unavailable", card: number, reason: tower.reason };
-  const card = tower.cards.get(number);
-  if (!card) return { status: "stale", card: number, reason: "declared owner card is absent" };
-  if (["done", "cancelled", "frozen"].includes(card.phase)) {
-    return { status: "stale", card: number, title: card.title, phase: card.phase, reason: "declared owner card is terminal" };
+function liveLossOwner(declaredOwners, metric, tower) {
+  const category = LOSS_OWNER_CATEGORY_BY_METRIC[metric] ?? null;
+  const number = category && declaredOwners && typeof declaredOwners === "object" && !Array.isArray(declaredOwners)
+    ? declaredOwners[category]
+    : null;
+  if (!category) return { status: "missing", metric, category: null, reason: "no owner category is declared for this metric" };
+  if (!Number.isInteger(number)) return { status: "missing", metric, category, reason: `no owner card is declared for ${category} metrics` };
+  const towerState = tower && typeof tower === "object" ? tower : { status: "unavailable", reason: "Tower state is missing" };
+  if (towerState.status !== "available" || !(towerState.cards instanceof Map)) {
+    return { status: "unavailable", metric, category, card: number, reason: towerState.reason ?? "Tower cards are unavailable" };
   }
-  return { status: "live", card: number, title: card.title, phase: card.phase, assignee: card.assignee ?? null };
+  const card = towerState.cards.get(number);
+  if (!card) return { status: "stale", metric, category, card: number, reason: "declared owner card is absent" };
+  if (["done", "cancelled", "frozen"].includes(card.phase)) {
+    return { status: "stale", metric, category, card: number, title: card.title, phase: card.phase, reason: "declared owner card is terminal" };
+  }
+  return { status: "live", metric, category, card: number, title: card.title, phase: card.phase, assignee: card.assignee ?? null };
 }
 
 function cellVerdict(verdicts) {
-  if (!verdicts.length || verdicts.some((verdict) => verdict === null)) return "unmeasured";
-  if (verdicts.includes("loss")) return "loss";
-  if (verdicts.includes("parity")) return "parity";
+  const comparable = verdicts.filter((verdict) => verdict !== "not_applicable");
+  if (!comparable.length) return "not_applicable";
+  if (comparable.some((verdict) => !["win", "parity", "loss"].includes(verdict))) {
+    return "unmeasured";
+  }
+  if (comparable.includes("loss")) return "loss";
+  if (comparable.includes("parity")) return "parity";
   return "win";
 }
 
+function unmeasuredMetricComparison(declaredTiers, applicability, reason) {
+  const tiers = Object.fromEntries(declaredTiers.map((tier) => [tier, {
+    status: "unmeasured",
+    applicability,
+    jet: null,
+    peer: null,
+    ratio: null,
+    verdict: null,
+    reason,
+  }]));
+  return {
+    status: "unmeasured",
+    applicability,
+    tiers,
+    verdict: "unmeasured",
+    reason,
+  };
+}
+
+function scoreboardMetricComparison(entry, language, comparison, metric, declaredTiers) {
+  const ratioTiers = declaredTiers.filter((tier) => PEER_MEASUREMENT_POLICY.ratio_tiers.includes(tier) && metricComparableAtTier(metric, tier));
+  const declared = metricApplicability(entry, language, metric);
+  if (declared.status === "invalid") {
+    return unmeasuredMetricComparison(declaredTiers, declared, declared.reason);
+  }
+  const declaredNotApplicable = declared.status === "not_applicable";
+  const comparisonNotApplicable = comparison?.applicable === false || comparison?.status === "not_applicable";
+  if (comparisonNotApplicable && !declaredNotApplicable) {
+    return unmeasuredMetricComparison(
+      declaredTiers,
+      { status: "invalid", reason: "comparison marked metric not_applicable without a declared structural reason" },
+      "comparison marked metric not_applicable without a declared structural reason",
+    );
+  }
+  if (declaredNotApplicable) {
+    const tiers = Object.fromEntries(declaredTiers.map((tier) => [tier, {
+      status: "not_applicable",
+      applicability: declared,
+      jet: null,
+      peer: null,
+      ratio: null,
+      verdict: null,
+    }]));
+    return {
+      status: "not_applicable",
+      applicability: declared,
+      tiers,
+      verdict: "not_applicable",
+      reason: null,
+    };
+  }
+  const tiers = Object.fromEntries(declaredTiers.map((tier) => {
+    const item = comparison?.tiers?.[tier]?.metrics?.[metric];
+    if (item?.status === "not_applicable") {
+      if (!metricComparableAtTier(metric, tier)) {
+        return [tier, { ...item, status: item.status, verdict: null }];
+      }
+      return [tier, {
+        ...item,
+        status: "unmeasured",
+        verdict: null,
+        reason: "metric marked not_applicable without a declared structural reason",
+      }];
+    }
+    if (item?.status === "trace_only" || item?.status === "not_comparable") {
+      return [tier, {
+        ...item,
+        status: "unmeasured",
+        verdict: null,
+        reason: `${metric} is not a ratio-measured metric on ${tier}`,
+      }];
+    }
+    const expectedVerdict = positiveMetricValue(metric, item?.jet) && positiveMetricValue(metric, item?.peer) &&
+      Number.isFinite(item?.ratio) && item.ratio === item.jet / item.peer
+      ? ratioVerdict(item.ratio, language)
+      : null;
+    const valid = item?.status === "measured" &&
+      expectedVerdict !== null &&
+      item.verdict === expectedVerdict;
+    if (!item || !valid) {
+      return [tier, {
+        ...(item ?? {}),
+        status: "unmeasured",
+        jet: item?.jet ?? null,
+        peer: item?.peer ?? null,
+        ratio: item?.ratio ?? null,
+        verdict: null,
+        reason: item?.reason ?? "missing or invalid metric comparison",
+      }];
+    }
+    return [tier, { ...item, status: "measured" }];
+  }));
+  const verdict = cellVerdict(ratioTiers.map((tier) => tiers[tier]?.verdict ?? null));
+  const reasons = ratioTiers.map((tier) => tiers[tier]?.reason).filter(Boolean);
+  return {
+    status: verdict === "unmeasured" ? "unmeasured" : "measured",
+    applicability: declared,
+    tiers,
+    verdict,
+    reason: reasons.length ? [...new Set(reasons)].join("; ") : null,
+  };
+}
+
+
+function validateResultShape(result, matrix = null) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return ["result is not an object"];
+  }
+  const entry = result.entry;
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return ["result is missing entry identity"];
+  }
+  const name = typeof entry.name === "string" ? entry.name : "<unnamed>";
+  const languages = Array.isArray(entry.languages) ? entry.languages : [];
+  const expectedRows = new Set(languages);
+  const rows = result.rows;
+  const rowMap = rows && typeof rows === "object" && !Array.isArray(rows) ? rows : {};
+  const expectedPeers = languages.filter((language) => typeof language === "string" && language !== "jet" && language !== "jet-expert");
+  const comparisonMap = result.comparisons && typeof result.comparisons === "object" && !Array.isArray(result.comparisons)
+    ? result.comparisons
+    : {};
+  const tierMap = result.jet_tiers && typeof result.jet_tiers === "object" && !Array.isArray(result.jet_tiers)
+    ? result.jet_tiers
+    : {};
+  const policy = tierPolicy(entry.mode);
+  const metrics = comparisonMetrics(entry.mode);
+
+  selectionOrAggregateIssues(result.rows, `${name}.rows`, issues);
+  selectionOrAggregateIssues(result.comparisons, `${name}.comparisons`, issues);
+  selectionOrAggregateIssues(result.jet_tiers, `${name}.jet_tiers`, issues);
+  if (!ENTRY_MODES.includes(entry.mode)) issues.push(`${name}: unsupported result mode ${JSON.stringify(entry.mode)}`);
+  if (!VALID_RESULT_STATUSES.has(result.status)) {
+    issues.push(`${name}: invalid result status ${JSON.stringify(result.status)}`);
+  } else if (result.status !== "ok") {
+    issues.push(`${name}: result status ${result.status} is not publishable`);
+  }
+  if (!Array.isArray(entry.languages) || languages.length === 0) {
+    issues.push(`${name}: result has no declared language rows`);
+  } else if (new Set(languages).size !== languages.length) {
+    issues.push(`${name}: result declares duplicate languages`);
+  }
+  if (!Array.isArray(entry.cells) || entry.cells.length === 0) {
+    issues.push(`${name}: result has no declared matrix cells`);
+  } else if (new Set(entry.cells).size !== entry.cells.length) {
+    issues.push(`${name}: result declares duplicate matrix cells`);
+  }
+  for (const language of languages) {
+    if (typeof language !== "string") {
+      issues.push(`${name}: result declares non-string language ${JSON.stringify(language)}`);
+      continue;
+    }
+    const row = rowMap[language];
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      issues.push(`${name}/${language}: missing result row`);
+      continue;
+    }
+    if (row.language !== language) issues.push(`${name}/${language}: row identity is ${JSON.stringify(row.language)}`);
+    if (!VALID_RESULT_STATUSES.has(row.status)) {
+      issues.push(`${name}/${language}: invalid row status ${JSON.stringify(row.status)}`);
+      continue;
+    }
+    if (row.status === "not_applicable") {
+      if (!entry.non_applicable?.[language]) {
+        issues.push(`${name}/${language}: row is not_applicable without a declared structural reason`);
+      }
+      if (row.verification?.status !== "not_applicable") {
+        issues.push(`${name}/${language}: not_applicable row is missing not_applicable verification`);
+      }
+      continue;
+    }
+    if (row.status !== "ok") {
+      issues.push(`${name}/${language}: row status ${row.status} is not publishable`);
+      continue;
+    }
+    if (row.disqualified === true) issues.push(`${name}/${language}: successful row is disqualified`);
+    if (!row.verification || row.verification.status !== "passed" ||
+      !VALID_PASS_VERIFICATION_KINDS.has(row.verification.kind)) {
+      issues.push(`${name}/${language}: successful row is missing valid passed verification`);
+    }
+    if (!row.metrics || typeof row.metrics !== "object" || Array.isArray(row.metrics)) {
+      issues.push(`${name}/${language}: successful row is missing metrics`);
+      continue;
+    }
+    if (!row.provenance || row.provenance.base_language !== baseLanguage(language)) {
+      issues.push(`${name}/${language}: source identity does not match declared language`);
+    }
+    if (typeof row.metrics.source_sha256 !== "string" || row.metrics.source_sha256.length === 0 ||
+      row.provenance?.source_sha256 !== row.metrics.source_sha256) {
+      issues.push(`${name}/${language}: source hash does not match measured source`);
+    }
+    for (const metric of metrics) {
+      if (metricApplicability(entry, language, metric).status === "required" &&
+        !positiveMetricValue(metric, row.metrics[metric])) {
+        issues.push(`${name}/${language}/${metric}: required row metric is missing or invalid`);
+      }
+    }
+  }
+  for (const language of Object.keys(rowMap)) {
+    if (!expectedRows.has(language)) issues.push(`${name}/${language}: result row is not declared`);
+  }
+
+  for (const [tier, tierPolicyValue] of Object.entries(policy)) {
+    const tierResult = tierMap[tier];
+    if (!tierResult || typeof tierResult !== "object" || Array.isArray(tierResult)) {
+      issues.push(`${name}/jet/${tier}: missing Jet tier result`);
+      continue;
+    }
+    if (!VALID_RESULT_STATUSES.has(tierResult.status)) {
+      issues.push(`${name}/jet/${tier}: invalid tier status ${JSON.stringify(tierResult.status)}`);
+      continue;
+    }
+    if (tierPolicyValue.required && tierResult.status !== "ok") {
+      issues.push(`${name}/jet/${tier}: required tier status ${tierResult.status}`);
+    }
+    if (tierResult.status === "not_applicable") {
+      issues.push(`${name}/jet/${tier}: declared Jet tier cannot be not_applicable`);
+      continue;
+    }
+    if (tierResult.status === "ok") {
+      if (!tierResult.verification || tierResult.verification.status !== "passed" ||
+        !VALID_PASS_VERIFICATION_KINDS.has(tierResult.verification.kind)) {
+        issues.push(`${name}/jet/${tier}: successful tier is missing valid passed verification`);
+      }
+      if (!tierResult.metrics || typeof tierResult.metrics !== "object" || Array.isArray(tierResult.metrics)) {
+        issues.push(`${name}/jet/${tier}: successful tier is missing metrics`);
+        continue;
+      }
+      for (const metric of metrics) {
+        if (metricComparableAtTier(metric, tier) && !positiveMetricValue(metric, tierResult.metrics[metric])) {
+          issues.push(`${name}/jet/${tier}/${metric}: required tier metric is missing or invalid`);
+        }
+      }
+      if (tier === "run") {
+        const trace = tierResult.trace;
+        const validTrace = trace?.status === "passed" &&
+          trace.channel === "compiler_owned_sidecar" &&
+          trace.whole_program_deopt === false &&
+          trace.native_rows > 0 && Number.isInteger(trace.native_rows) &&
+          trace.interp_rows === 0 &&
+          Array.isArray(trace.rows) && trace.rows.length > 0 &&
+          Array.isArray(trace.invocations) && trace.invocations.length > 0 &&
+          trace.invocations.every((invocation) =>
+            Array.isArray(invocation.rows) && invocation.rows.length > 0 &&
+            Number.isInteger(invocation.native_rows) && invocation.native_rows > 0 &&
+            invocation.interp_rows === 0 &&
+            invocation.whole_program_deopt === false);
+        if (!validTrace) {
+          issues.push(`${name}/jet/run: successful tier is missing valid native tier trace; whole-program deopts fail closed`);
+        }
+      }
+    }
+  }
+  for (const tier of Object.keys(tierMap)) {
+    if (!Object.hasOwn(policy, tier)) issues.push(`${name}/jet/${tier}: tier is not declared for this mode`);
+  }
+
+  if (!result.comparisons || typeof result.comparisons !== "object" || Array.isArray(result.comparisons)) {
+    issues.push(`${name}: missing peer comparison rows`);
+  }
+  for (const language of Object.keys(comparisonMap)) {
+    if (!expectedPeers.includes(language)) issues.push(`${name}/${language}: comparison row is not declared`);
+  }
+  for (const language of expectedPeers) {
+    const comparison = comparisonMap[language];
+    const row = rowMap[language];
+    if (!comparison || typeof comparison !== "object" || Array.isArray(comparison)) {
+      issues.push(`${name}/${language}: missing peer comparison row`);
+      continue;
+    }
+    if (!VALID_RESULT_STATUSES.has(comparison.status)) {
+      issues.push(`${name}/${language}: invalid comparison status ${JSON.stringify(comparison.status)}`);
+    }
+    const expectedRowStatus = row?.status ?? "unavailable";
+    if (comparison.status !== expectedRowStatus) {
+      issues.push(`${name}/${language}: comparison status does not match peer row`);
+    }
+    const expectedJetConfiguration = language.endsWith("-expert") ? "jet-expert" : "jet";
+    if (comparison.jet_configuration !== expectedJetConfiguration) {
+      issues.push(`${name}/${language}: comparison uses ${JSON.stringify(comparison.jet_configuration)} instead of ${expectedJetConfiguration}`);
+    }
+    const expectedApplicable = expectedRowStatus === "not_applicable" ? false : true;
+    if (comparison.applicable !== expectedApplicable) {
+      issues.push(`${name}/${language}: comparison applicability does not match peer row`);
+    }
+    const expectedSampleSource = `rows.${language}.metrics`;
+    const sampleScopes = [
+      ["comparison", comparison.peer_sample],
+      ...Object.entries(comparison.tiers ?? {}).map(([tier, value]) => [`${tier} tier`, value?.peer_sample]),
+    ];
+    for (const [scope, sample] of sampleScopes) {
+      if (!sample || sample.binding !== PEER_MEASUREMENT_POLICY.sample_binding ||
+        sample.source !== expectedSampleSource ||
+        sample.language !== language ||
+        sample.source_sha256 !== (row?.metrics?.source_sha256 ?? null)) {
+        issues.push(`${name}/${language}/${scope}: peer sample identity does not match its row`);
+      }
+    }
+    const expectedComparisonPolicy = language.endsWith("-expert") ? { aot: { required: true } } : policy;
+    const comparisonPolicy = comparison.tier_policy && typeof comparison.tier_policy === "object" &&
+      !Array.isArray(comparison.tier_policy) ? comparison.tier_policy : {};
+    if (JSON.stringify(comparisonPolicy) !== JSON.stringify(expectedComparisonPolicy)) {
+      issues.push(`${name}/${language}: comparison tier policy does not match the declared mode`);
+    }
+    for (const tier of Object.keys(comparison.tiers ?? {})) {
+      if (!Object.hasOwn(expectedComparisonPolicy, tier)) issues.push(`${name}/${language}/${tier}: comparison tier is not declared`);
+    }
+    if (comparison.status === "not_applicable" && entry.non_applicable?.[language]) continue;
+    for (const [tier, tierPolicyValue] of Object.entries(expectedComparisonPolicy)) {
+      if (!tierPolicyValue.required && !PEER_MEASUREMENT_POLICY.ratio_tiers.includes(tier)) continue;
+      const tierComparison = comparison.tiers?.[tier];
+      if (!tierComparison || typeof tierComparison !== "object" || Array.isArray(tierComparison)) {
+        if (tierPolicyValue.required || PEER_MEASUREMENT_POLICY.ratio_tiers.includes(tier)) {
+          issues.push(`${name}/${language}/${tier}: missing peer tier comparison`);
+        }
+        continue;
+      }
+      if (!PEER_MEASUREMENT_POLICY.ratio_tiers.includes(tier)) continue;
+      for (const metric of metrics) {
+        const item = tierComparison.metrics?.[metric];
+        const applicability = metricApplicability(entry, language, metric);
+        const expectedNotApplicable = applicability.status === "not_applicable" || !metricComparableAtTier(metric, tier);
+        if (expectedNotApplicable) {
+          if (item?.status !== "not_applicable") {
+            issues.push(`${name}/${language}/${tier}/${metric}: required not_applicable cell is missing`);
+          }
+          continue;
+        }
+        if (item?.status !== "measured" || !positiveMetricValue(metric, item?.jet) ||
+          !positiveMetricValue(metric, item?.peer) || !Number.isFinite(item?.ratio) ||
+          item.ratio !== item.jet / item.peer || item.verdict !== ratioVerdict(item.ratio, language)) {
+          issues.push(`${name}/${language}/${tier}/${metric}: missing or invalid independently measured cell`);
+        }
+      }
+    }
+  }
+  if (matrix) {
+    const knownCells = new Set((matrix.cells ?? []).map((cell) => cell.id));
+    for (const cell of Array.isArray(entry.cells) ? entry.cells : []) {
+      if (!knownCells.has(cell)) issues.push(`${name}: result declares unknown matrix cell ${cell}`);
+    }
+  }
+  return [...new Set(issues)];
+}
 function buildScoreboard(matrix, results, manifest, tower) {
+  const inputResults = Array.isArray(results) ? results : [];
+  const resultValidationIssues = inputResults.flatMap((result) => validateResultShape(result, matrix));
+  const canonicalResults = inputResults.filter((result) => result?.entry && typeof result.entry === "object")
+    .map((result) => ({
+      ...result,
+      comparisons: comparisons(result.entry, result.entry.languages, result.rows, result.jet_tiers),
+    }));
   const entriesByCell = new Map();
-  for (const result of results) {
-    for (const cell of result.entry.cells ?? []) {
+  for (const result of canonicalResults) {
+    for (const cell of (Array.isArray(result.entry.cells) ? result.entry.cells : [])) {
       const values = entriesByCell.get(cell) ?? [];
       values.push(result);
       entriesByCell.set(cell, values);
     }
   }
   const declaredOwners = manifest?.loss_owners ?? {};
-  const cells = (matrix.cells ?? []).map((cell) => {
+  const towerState = tower && typeof tower === "object" ? tower : { status: "unavailable", reason: "Tower state is missing" };
+  const cells = (Array.isArray(matrix?.cells) ? matrix.cells : []).map((cell) => {
     const candidates = entriesByCell.get(cell.id) ?? [];
     const records = candidates.map((result) => {
       const metric = primaryMetric(result.entry.mode);
+      const metrics = comparisonMetrics(result.entry.mode);
       const jetTierPolicy = tierPolicy(result.entry.mode);
       const requiredTiers = Object.entries(jetTierPolicy)
         .filter(([, policy]) => policy.required)
         .map(([tier]) => tier);
-      const peers = (result.entry.languages ?? [])
-        .filter((language) => language !== "jet")
+      const peers = (Array.isArray(result.entry.languages) ? result.entry.languages : [])
+        .filter((language) => typeof language === "string" && language !== "jet" && language !== "jet-expert")
         .map((language) => {
           const comparison = result.comparisons?.[language];
-          const item = comparison?.metrics?.[metric];
-          const tierVerdicts = Object.fromEntries(requiredTiers.map((tier) => [tier, comparison?.verdicts?.[tier] ?? null]));
+          const comparisonPolicy = comparison?.tier_policy ?? jetTierPolicy;
+          const comparisonTiers = Object.keys(comparisonPolicy);
+          const metricComparisons = Object.fromEntries(metrics.map((item) => [
+            item,
+            scoreboardMetricComparison(result.entry, language, comparison, item, comparisonTiers),
+          ]));
+          const metricVerdicts = Object.fromEntries(metrics.map((item) => [item, metricComparisons[item].verdict]));
+          const primaryComparison = metricComparisons[metric];
+          const primaryAot = primaryComparison?.tiers?.aot ?? null;
+          const tierVerdicts = Object.fromEntries(comparisonTiers.map((tier) => [
+            tier,
+            primaryComparison?.tiers?.[tier]?.verdict ?? null,
+          ]));
+          const metricFailures = Object.entries(metricComparisons)
+            .filter(([, item]) => !["win", "parity", "not_applicable"].includes(item.verdict))
+            .map(([item, value]) => {
+              const owner = value.verdict === "loss"
+                ? liveLossOwner(declaredOwners[result.entry.name], item, towerState)
+                : null;
+              return { metric: item, peer: language, verdict: value.verdict, reason: value.reason, tiers: value.tiers, owner };
+            });
+          const ratioTierVerdicts = PEER_MEASUREMENT_POLICY.ratio_tiers
+            .filter((tier) => comparisonTiers.includes(tier))
+            .map((tier) => tierVerdicts[tier] ?? null);
+          const primaryVerdict = cellVerdict(ratioTierVerdicts);
           return {
             language,
             applicable: comparison?.applicable !== false,
             status: comparison?.status ?? result.rows?.[language]?.status ?? "unavailable",
-            jet: item?.jet ?? null,
-            peer: item?.peer ?? null,
-            ratio: item?.ratio ?? null,
-            verdict: item?.verdict ?? null,
+            jet: primaryAot?.jet ?? null,
+            peer: primaryAot?.peer ?? null,
+            trace_only_tiers: PEER_MEASUREMENT_POLICY.trace_only_tiers.filter((tier) => comparisonTiers.includes(tier)),
+            jet_configuration: comparison?.jet_configuration ?? "jet",
+            required_tiers: comparison?.required_tiers ?? comparisonTiers.filter((tier) => comparisonPolicy[tier]?.required),
+            tier_policy: comparisonPolicy,
+            peer_sample: comparison?.peer_sample ?? null,
+            ratio: primaryAot?.ratio ?? null,
+            verdict: primaryVerdict === "not_applicable" ? null : primaryVerdict,
             tier_verdicts: tierVerdicts,
-            all_required_tiers_verdict: cellVerdict(Object.values(tierVerdicts)),
+            all_required_tiers_verdict: primaryVerdict,
+            metric_comparisons: metricComparisons,
+            metric_verdicts: metricVerdicts,
+            metric_failures: metricFailures,
           };
         });
       const jetTierStatuses = Object.fromEntries(Object.keys(jetTierPolicy).map((tier) => [tier, result.jet_tiers?.[tier]?.status ?? "unavailable"]));
       const tiersReady = requiredTiers.every((tier) => jetTierStatuses[tier] === "ok");
       const applicablePeers = peers.filter((peer) => peer.applicable !== false);
+      const metricVerdicts = Object.fromEntries(metrics.map((item) => [
+        item,
+        cellVerdict(applicablePeers.map((peer) => peer.metric_verdicts[item] ?? null)),
+      ]));
+      const metricFailures = Object.entries(metricVerdicts)
+        .filter(([, verdict]) => !["win", "parity", "not_applicable"].includes(verdict))
+        .map(([item, verdict]) => {
+          const peerFailures = applicablePeers.flatMap((peer) => peer.metric_failures.filter((failure) => failure.metric === item));
+          return {
+            metric: item,
+            verdict,
+            reasons: [...new Set(peerFailures.map((failure) => failure.reason).filter(Boolean))],
+            peers: peerFailures,
+          };
+        });
+      const lossOwners = metricFailures.flatMap((failure) => failure.peers
+        .filter((peerFailure) => peerFailure.verdict === "loss")
+        .map((peerFailure) => ({ entry: result.entry.name, peer: peerFailure.peer, ...peerFailure.owner })));
       const verdict = result.rows?.jet?.status === "ok" && tiersReady
-        ? (applicablePeers.length > 0 ? cellVerdict(applicablePeers.map((peer) => peer.all_required_tiers_verdict)) : "unmeasured")
+        ? (applicablePeers.length > 0 ? cellVerdict(Object.values(metricVerdicts)) : "unmeasured")
         : "unmeasured";
-      const owner = verdict === "loss" ? liveLossOwner(declaredOwners[result.entry.name], tower) : null;
+      const primaryVerdict = metricVerdicts[metric] ?? "unmeasured";
       return {
         entry: result.entry.name,
         mode: result.entry.mode,
         status: result.status,
         primary_metric: metric,
+        primary_verdict: primaryVerdict,
         jet: result.rows?.jet?.metrics?.[metric] ?? null,
         jet_tiers: jetTierStatuses,
         tiers_ready: tiersReady,
         peers,
+        metric_verdicts: metricVerdicts,
+        metric_failures: metricFailures,
+        loss_owners: lossOwners,
         verdict,
-        loss_owner: owner,
       };
     });
     const verdict = records.length === 1 ? records[0].verdict : "unmeasured";
@@ -1624,16 +2618,20 @@ function buildScoreboard(matrix, results, manifest, tower) {
       domain: cell.domain,
       kind: cell.kind,
       entries: records,
+      metric_verdicts: records.length === 1 ? records[0].metric_verdicts : {},
+      metric_failures: records.flatMap((record) => record.metric_failures),
       verdict,
-      loss_owners: records.filter((record) => record.verdict === "loss").map((record) => ({ entry: record.entry, ...record.loss_owner })),
+      loss_owners: records.flatMap((record) => record.loss_owners),
     };
   });
   const verdicts = cells.map((cell) => cell.verdict);
   const allowedUncovered = new Set(manifest?.corpus?.allowed_uncovered_cells ?? MATRIX_UNCOVERED_DEFAULTS);
+  const metricVerdicts = cells.flatMap((cell) => Object.values(cell.metric_verdicts));
   return {
     contract: "gauntlet-scoreboard-v1",
     primary_metric_by_mode: MODE_PRIMARY_METRIC,
-    verdict_policy: { win: "all declared peer ratios < 1", parity: "no loss and at least one ratio <= 1.05", loss: "any declared peer ratio > 1.05", unmeasured: "missing row, tier, metric, or byte verification" },
+    verdict_policy: { rust: RATIO_VERDICTS.rust, non_rust: RATIO_VERDICTS.non_rust, unmeasured: "missing row, tier, metric, or byte verification" },
+    validation_issues: [...new Set(resultValidationIssues)],
     cells,
     summary: {
       cells: cells.length,
@@ -1643,10 +2641,15 @@ function buildScoreboard(matrix, results, manifest, tower) {
       unmeasured: verdicts.filter((verdict) => verdict === "unmeasured").length,
       unmeasured_allowed: cells.filter((cell) => cell.verdict === "unmeasured" && allowedUncovered.has(cell.id)).length,
       unmeasured_required: cells.filter((cell) => cell.verdict === "unmeasured" && !allowedUncovered.has(cell.id)).length,
+      metric_win: metricVerdicts.filter((verdict) => verdict === "win").length,
+      metric_parity: metricVerdicts.filter((verdict) => verdict === "parity").length,
+      metric_loss: metricVerdicts.filter((verdict) => verdict === "loss").length,
+      metric_unmeasured: metricVerdicts.filter((verdict) => verdict === "unmeasured").length,
+      metric_not_applicable: metricVerdicts.filter((verdict) => verdict === "not_applicable").length,
     },
     loss_owners: {
       declared: declaredOwners,
-      tower: tower.status === "available" ? { status: tower.status, revision: tower.revision } : { status: tower.status, reason: tower.reason },
+      tower: towerState.status === "available" ? { status: towerState.status, revision: towerState.revision } : { status: towerState.status, reason: towerState.reason },
       unresolved: cells.flatMap((cell) => cell.loss_owners.filter((owner) => owner.status !== "live")),
     },
   };
@@ -1737,6 +2740,17 @@ async function probeAxisTool(cwd, tool, jetBin) {
     const versionFlag = tool === "entr" ? "-V" : "--version";
     const versionResult = await runProcess(cwd, [tool, versionFlag], { timeoutMs: 10_000 });
     const versionOutput = versionResult.stdout.toString("utf8").trim() || versionResult.stderr.toString("utf8").trim();
+    if (versionResult.code !== 0) {
+      return {
+        tool,
+        status: "probe_failed",
+        resolved,
+        reason: `${tool} version probe failed (exit ${versionResult.code})`,
+        version: versionOutput.split(/\r?\n/, 1)[0].slice(0, 300),
+        exit_code: versionResult.code,
+        stderr: versionResult.stderr.toString("utf8").trim().slice(0, AXIS_OUTPUT_LIMIT),
+      };
+    }
     return {
       tool,
       status: "available",
@@ -2231,7 +3245,7 @@ async function runAxes(manifest, runDir, jetBin, fullScope, runId) {
       continue;
     }
     try {
-      if (id === "live_reload") axes[id] = await runLiveReloadAxisAdapter(axis, runDir, jetBin);
+      if (id === "live_reload") axes[id] = await runLiveReloadAxisAdapter(axis, runDir, jetBin, { envRunner, envRunnerArgs: ["full"] });
       else if (id === "memory_safety_fuzz") axes[id] = await runMemorySafetyFuzzAxisAdapter(axis, {
         runDir,
         jetBin,
@@ -2263,28 +3277,85 @@ async function runAxes(manifest, runDir, jetBin, fullScope, runId) {
 }
 
 function publicationState({ fullScope, loaded, skipped, matrix, manifest, sourceMeasurements, results, scoreboard, axes, validationIssues }) {
-  const blockers = [...new Set(validationIssues)];
+  const loadedEntries = Array.isArray(loaded) ? loaded : [];
+  const skippedEntries = Array.isArray(skipped) ? skipped : [];
+  const measuredResults = Array.isArray(results) ? results : [];
+  const matrixCells = Array.isArray(matrix?.cells) ? matrix.cells : [];
+  const scoreboardCells = Array.isArray(scoreboard?.cells) ? scoreboard.cells : [];
+  const summary = scoreboard?.summary && typeof scoreboard.summary === "object" ? scoreboard.summary : {};
+  const blockers = Array.isArray(validationIssues) ? [...validationIssues] : [];
+  blockers.push(...measuredResults.flatMap((result) => validateResultShape(result, matrix)));
+  blockers.push(...(Array.isArray(scoreboard?.validation_issues) ? scoreboard.validation_issues : []));
   if (!fullScope) blockers.push("run scope is partial; full matrix publication requires no --entry");
-  if (skipped.length) blockers.push(`skipped entries: ${skipped.map((item) => item.name).join(", ")}`);
-  if (manifest && sourceMeasurements && !sourceMeasurements.coverage.denominator_pass) blockers.push("source measurement denominator is incomplete");
-  if (manifest && sourceMeasurements && !sourceMeasurements.aggregate.loc_pass) blockers.push("source LOC contract failed");
-  if (manifest && sourceMeasurements && !sourceMeasurements.aggregate.token_pass) blockers.push("source token contract failed");
-  const allowed = new Set(manifest?.corpus?.allowed_uncovered_cells ?? MATRIX_UNCOVERED_DEFAULTS);
-  const covered = new Set(results.flatMap((result) => result.entry.cells ?? []));
-  const unexpectedUncovered = (matrix.cells ?? []).map((cell) => cell.id).filter((id) => !covered.has(id) && !allowed.has(id));
-  if (unexpectedUncovered.length) blockers.push(`unexpected uncovered matrix cells: ${unexpectedUncovered.join(", ")}`);
-  const expectedEntryCount = manifest?.corpus?.entry_count ?? loaded.length;
-  if (fullScope && loaded.length !== expectedEntryCount) blockers.push(`entry denominator is ${loaded.length}/${expectedEntryCount}`);
-  if (scoreboard.summary.unmeasured_required > 0) blockers.push(`${scoreboard.summary.unmeasured_required} required matrix cells are unmeasured`);
-  for (const [id, axis] of Object.entries(axes)) {
-    if (axis.required && axis.status !== "complete") blockers.push(`${id} axis is ${axis.status}`);
-    if (axis.required && axis.publication?.status !== "ready" && !(axis.publication?.blockers?.length)) {
-      blockers.push(`${id} axis publication is ${axis.publication?.status ?? "unreported"}`);
-    }
-    for (const blocker of axis.publication?.blockers ?? []) blockers.push(`${id}: ${blocker}`);
+  if (skippedEntries.length) blockers.push(`skipped entries: ${skippedEntries.map((item) => item.name).join(", ")}`);
+  if (!sourceMeasurements) {
+    blockers.push("source measurements are missing");
+  } else if (manifest && !sourceMeasurements.coverage?.denominator_pass) {
+    blockers.push("source measurement denominator is incomplete");
   }
-  for (const owner of scoreboard.loss_owners.unresolved) blockers.push(`${owner.entry}: loss owner ${owner.card ?? "is not declared"} is not live`);
-  const uniqueBlockers = [...new Set(blockers)];
+
+  const expectedResultNames = loadedEntries.map((item) => item.directoryName ?? item.entry?.name ?? null);
+  const actualResultNames = measuredResults.map((result) => result?.entry?.name ?? null);
+  if (measuredResults.length !== loadedEntries.length) {
+    blockers.push(`result denominator is ${measuredResults.length}/${loadedEntries.length}`);
+  }
+  if (new Set(actualResultNames).size !== actualResultNames.length) {
+    blockers.push("result entry identities are duplicated");
+  }
+  if (expectedResultNames.length !== actualResultNames.length ||
+    expectedResultNames.some((name, index) => name !== actualResultNames[index])) {
+    blockers.push("result entry identities do not match the loaded corpus order");
+  }
+  const matrixIds = new Set(matrixCells.map((cell) => cell.id));
+  if (scoreboardCells.length !== matrixCells.length) {
+    blockers.push(`scoreboard cell denominator is ${scoreboardCells.length}/${matrixCells.length}`);
+  }
+  for (const cell of scoreboardCells) {
+    if (!matrixIds.has(cell.id)) blockers.push(`scoreboard declares unknown matrix cell ${cell.id}`);
+  }
+  const requiredAxisIds = Object.entries(manifest?.axes ?? {})
+    .filter(([, axis]) => axis?.status === "required")
+    .map(([id]) => id);
+  const allowedCells = manifest?.corpus?.allowed_uncovered_cells;
+  const allowed = new Set(Array.isArray(allowedCells) ? allowedCells : MATRIX_UNCOVERED_DEFAULTS);
+
+  const scoreboardByCell = new Map(scoreboardCells.map((cell) => [cell.id, cell]));
+  for (const cell of matrixCells) {
+    const record = scoreboardByCell.get(cell.id);
+    const candidates = record?.entries ?? [];
+    if (candidates.length !== 1 && !allowed.has(cell.id)) {
+      blockers.push(`${cell.id}: expected exactly one published entry, found ${candidates.length}`);
+    }
+    for (const failure of record?.metric_failures ?? []) {
+      const reasons = failure.reasons?.length ? ` (${failure.reasons.join("; ")})` : "";
+      blockers.push(`${cell.id}/${failure.metric}: metric ${failure.verdict}${reasons}`);
+    }
+  }
+  const covered = new Set(measuredResults.flatMap((result) => Array.isArray(result?.entry?.cells) ? result.entry.cells : []));
+  const unexpectedUncovered = matrixCells.map((cell) => cell.id).filter((id) => !covered.has(id) && !allowed.has(id));
+  if (unexpectedUncovered.length) blockers.push(`unexpected uncovered matrix cells: ${unexpectedUncovered.join(", ")}`);
+  const expectedEntryCount = manifest?.corpus?.entry_count ?? loadedEntries.length;
+  if (fullScope && loadedEntries.length !== expectedEntryCount) blockers.push(`entry denominator is ${loadedEntries.length}/${expectedEntryCount}`);
+  if (summary.unmeasured_required > 0) blockers.push(`${summary.unmeasured_required} required matrix cells are unmeasured`);
+  if (summary.metric_unmeasured > 0) blockers.push(`${summary.metric_unmeasured} required metric cells are unmeasured`);
+
+  const axisResults = axes && typeof axes === "object" ? axes : {};
+  for (const id of requiredAxisIds) {
+    if (!Object.hasOwn(axisResults, id)) blockers.push(`${id} axis is missing`);
+  }
+  for (const [id, axis] of Object.entries(axisResults)) {
+    const axisRecord = axis && typeof axis === "object" ? axis : {};
+    const required = axisRecord.required === true || requiredAxisIds.includes(id);
+    if (required && axisRecord.status !== "complete") blockers.push(`${id} axis is ${axisRecord.status ?? "unreported"}`);
+    if (required && axisRecord.publication?.status !== "ready") {
+      blockers.push(`${id} axis publication is ${axisRecord.publication?.status ?? "unreported"}`);
+    }
+    for (const blocker of axisRecord.publication?.blockers ?? []) blockers.push(`${id}: ${blocker}`);
+  }
+  for (const owner of scoreboard?.loss_owners?.unresolved ?? []) {
+    blockers.push(`${owner.entry}/${owner.peer ?? "peer"}/${owner.metric ?? "metric"} (${owner.category ?? "unknown category"}): loss owner ${owner.card ?? "is not declared"} is not live`);
+  }
+  const uniqueBlockers = [...new Set(blockers.filter((blocker) => typeof blocker === "string" && blocker.length > 0))];
   return {
     scope: fullScope ? "full_matrix" : "partial_entry",
     status: uniqueBlockers.length ? "incomplete" : "complete",
@@ -2438,7 +3509,9 @@ async function main() {
       expected_output: "byte-exact UTF-8 stdout or declared service probe sequence",
       source_metric_token_definition: sourceManifest?.contract?.token_definition ?? null,
       tier_policy_by_mode: Object.fromEntries(Object.entries(TIER_POLICY).map(([mode, policy]) => [mode, Object.keys(policy)])),
-      ratio_verdicts: { win: "<1", parity: "<=1.05", loss: ">1.05" },
+      ratio_verdicts: RATIO_VERDICTS,
+      metric_applicability: METRIC_APPLICABILITY_POLICY,
+      peer_measurement: PEER_MEASUREMENT_POLICY,
       missing_metric_verdict: "unmeasured",
       run_count: options.runs ?? "entry perf policy (7 for perf, 3 otherwise)",
     },
@@ -2483,7 +3556,24 @@ async function main() {
   if (!publication.complete) process.exitCode = 1;
 }
 
-main().catch((error) => {
-  console.error(`harness: ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(`harness: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
+
+export {
+  comparisons,
+  ratioVerdict,
+  metricApplicability,
+  validateEntryShape,
+  validateResultShape,
+  buildScoreboard,
+  publicationState,
+  processTreeRssKb,
+  httpProbe,
+  probeMatches,
+  collectTierTrace,
+  collectServiceTierTrace,
+};

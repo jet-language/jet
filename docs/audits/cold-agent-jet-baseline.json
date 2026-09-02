@@ -1,14 +1,207 @@
 {
   "schema": "jet.cold-agent.baseline.v1",
-  "status": "blocked",
-  "reason": "No real stock-model baseline is claimed. Record it only after the OpenAI API adapter and Anthropic OMP command adapter complete the capsule matrix.",
+  "status": "recorded",
+  "contexts": [
+    "capsule"
+  ],
+  "required_families": [
+    "openai",
+    "anthropic"
+  ],
   "capsule": {
     "path": "tools/agent-eval/jet-context-capsule.md",
     "bytes": 10221,
     "sha256": "e81956a7a2a5d67ef746b003801c5981750b0b9626ab34fb55651b924336d50d"
   },
+  "control": {
+    "path": "llms.text",
+    "source_bytes": 320224,
+    "source_sha256": "d0e599355ea6a99671b5bbea7acb4a53ff722adb9b04403a54aa4de44c68e6f1",
+    "context_budget_bytes": 10221,
+    "context_sha256": "1d460523d50ca90972ef0f934b7c49c31e0691fe4aca6149fe85752d83a2b380"
+  },
   "context_budget_bytes": 10221,
-  "required_families": ["openai", "anthropic"],
-  "rows": [],
-  "summary": null
+  "fixtures": {
+    "task_file": {
+      "path": "tools/agent-eval/tasks/tasks.json",
+      "bytes": 2597,
+      "sha256": "14e595a722b1db48212974e1d73b6b125bb945485dda5f71b8cd437904111d13"
+    },
+    "adapter_file": {
+      "path": "tools/agent-eval/adapters.json",
+      "bytes": 2015,
+      "sha256": "19be7351b5766e4cdd67eceefdace07799034b84062ce7fa809b414e1a23566e"
+    }
+  },
+  "harness": {
+    "path": "tools/agent-eval/run-cold-context.mjs",
+    "bytes": 51486,
+    "sha256": "03c07ce09402a945d99edd272b25153ef406241aea2942c88181904db338566b",
+    "adapter_timeout_ms": 600000
+  },
+  "adapters": [
+    {
+      "id": "anthropic",
+      "family": "anthropic",
+      "transport": "command",
+      "command_sha256": "080c7f5508c466f9a834bfc6907d782ae9e76abff9dcdc64f4093b8d44cdae3a"
+    },
+    {
+      "id": "openai",
+      "family": "openai",
+      "transport": "command",
+      "command_sha256": "13350cb23e6d045331406cef66a34e4e1e70823fbb150850b1d71af974192365"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "cli",
+      "domain": "cli",
+      "mode": "batch",
+      "spec_sha256": "da6d73182836b5cead1e6e5631d942ff2c43e36fe015ca3908696d9ab1c1085c",
+      "expected_sha256": "c5fa82d189d479e8f25624dae9ac04ef4cdce2b76bada300e95ce74da2d7724f"
+    },
+    {
+      "id": "data-transform",
+      "domain": "data-transform",
+      "mode": "batch",
+      "spec_sha256": "b81059fa5dd0079dbae8268fda4ded33d8d92dd8b1dc92b8c848d425ca8d0bf6",
+      "expected_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3"
+    },
+    {
+      "id": "hello",
+      "domain": "hello",
+      "mode": "batch",
+      "spec_sha256": "27dc62cd0af8eff2c3260dde03bbdd54130238ea15ed6e450425bc7e7f98baeb",
+      "expected_sha256": "98c227aa8dc2fe324a18115872e69314698a1a8e87dbda90eb46e1ff48e601f0"
+    },
+    {
+      "id": "http",
+      "domain": "http-service",
+      "mode": "http",
+      "spec_sha256": "f9dfafa7a58c69656bc8113cb1e25bd933d32acaa0021563d1b3f21cff249af9",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "rows": [
+    {
+      "adapter": "anthropic",
+      "family": "anthropic",
+      "context": "capsule",
+      "task": "cli",
+      "source_sha256": "68b46d60ab4b0c506b180001afa94f24fe0ad44efcdf788a50d745274d7f3c43",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c5fa82d189d479e8f25624dae9ac04ef4cdce2b76bada300e95ce74da2d7724f",
+      "expected_stdout_sha256": "c5fa82d189d479e8f25624dae9ac04ef4cdce2b76bada300e95ce74da2d7724f"
+    },
+    {
+      "adapter": "anthropic",
+      "family": "anthropic",
+      "context": "capsule",
+      "task": "data-transform",
+      "source_sha256": "090164f30f8875bbb1c2dc383d5c5f0aeaf7547c35bc377a2892f4362acd817f",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3",
+      "expected_stdout_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3"
+    },
+    {
+      "adapter": "anthropic",
+      "family": "anthropic",
+      "context": "capsule",
+      "task": "hello",
+      "source_sha256": "8b25a51a83ed052fb6618babb0668de696c00c208df543f14b43460778823c9b",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "98c227aa8dc2fe324a18115872e69314698a1a8e87dbda90eb46e1ff48e601f0",
+      "expected_stdout_sha256": "98c227aa8dc2fe324a18115872e69314698a1a8e87dbda90eb46e1ff48e601f0"
+    },
+    {
+      "adapter": "anthropic",
+      "family": "anthropic",
+      "context": "capsule",
+      "task": "http",
+      "source_sha256": "100cc315a796ed6af2e1bd96bf82e7c16371c513703c571e777f1864e5ce3fe6",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "adapter": "openai",
+      "family": "openai",
+      "context": "capsule",
+      "task": "cli",
+      "source_sha256": "1398c0f4a116cc76fe4230aaa84f93ffaf08ba1d53c517d4d86baa6db761b252",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "c5fa82d189d479e8f25624dae9ac04ef4cdce2b76bada300e95ce74da2d7724f",
+      "expected_stdout_sha256": "c5fa82d189d479e8f25624dae9ac04ef4cdce2b76bada300e95ce74da2d7724f"
+    },
+    {
+      "adapter": "openai",
+      "family": "openai",
+      "context": "capsule",
+      "task": "data-transform",
+      "source_sha256": "f4984a9f11d1ef0266397f6e745b9798fd2938ef42329588c3b5c0d362ce4dac",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3",
+      "expected_stdout_sha256": "8d797ff9eb437ace369a3ce5d3187c9984a2ae2ad63bd816bca683a687e573d3"
+    },
+    {
+      "adapter": "openai",
+      "family": "openai",
+      "context": "capsule",
+      "task": "hello",
+      "source_sha256": "8b25a51a83ed052fb6618babb0668de696c00c208df543f14b43460778823c9b",
+      "compile_score": 1,
+      "run_score": 1,
+      "score": 1,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "98c227aa8dc2fe324a18115872e69314698a1a8e87dbda90eb46e1ff48e601f0",
+      "expected_stdout_sha256": "98c227aa8dc2fe324a18115872e69314698a1a8e87dbda90eb46e1ff48e601f0"
+    },
+    {
+      "adapter": "openai",
+      "family": "openai",
+      "context": "capsule",
+      "task": "http",
+      "source_sha256": "93bcb7715c738df3b58a752cbf00ae3bc741e390c259fb00d4415d3f1f9e9f5f",
+      "compile_score": 1,
+      "run_score": 0,
+      "score": 0,
+      "status": "failed",
+      "stderr_sha256": "e3b5750385cee5ea5266121399884d4734b222f7c2171f5f4c222b811524d439",
+      "error": "run:probe-2"
+    }
+  ],
+  "summary": {
+    "capsule": {
+      "cases": 8,
+      "passes": 7,
+      "compile_passes": 8,
+      "run_passes": 7,
+      "pass_rate": 0.875
+    }
+  }
 }

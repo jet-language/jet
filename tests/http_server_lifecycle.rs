@@ -1096,8 +1096,17 @@ fn serve_once_waits_for_nonblocking_listener_readiness() {
         jet_http_srv_response(200, &"ready".to_string())
     });
     let client = std::thread::spawn(move || {
+        use std::io::Write;
         std::thread::sleep(std::time::Duration::from_millis(20));
-        request(addr, b"GET /ready HTTP/1.1\r\nHost: local\r\n\r\n")
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream
+            .write_all(b"GET /ready HTTP/1.1\r\nHost:")
+            .expect("request header prefix");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        stream
+            .write_all(b" local\r\n\r\n")
+            .expect("request header suffix");
+        read_response(&mut stream)
     });
     jet_http_mux_serve_once_listener(&JetTCPListener { inner: listener }, &mux)
         .expect("serve once");
@@ -4256,6 +4265,40 @@ fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
             .status,
         201
     );
+}
+
+#[test]
+fn mux_route_snapshot_invalidates_and_revalidates_after_mutation() {
+    let mux = jet_http_mux_new();
+    let request = |path: &str| {
+        JetHTTPRequest::server("GET", path.to_string(), Vec::new(), Default::default())
+    };
+    jet_http_mux_add(&mux, "GET", "/cached", |_| {
+        jet_http_srv_response(200, &"cached".to_string())
+    });
+    jet_http_mux_validate(&mux).expect("initial route validation");
+    assert_eq!(
+        jet_http_mux_dispatch(&mux, request("/cached"))
+            .unwrap()
+            .body,
+        "cached"
+    );
+
+    jet_http_mux_add(&mux, "GET", "/added", |_| {
+        jet_http_srv_response(201, &"added".to_string())
+    });
+    assert_eq!(
+        jet_http_mux_dispatch(&mux, request("/added"))
+            .unwrap()
+            .status,
+        201
+    );
+
+    jet_http_mux_add(&mux, "GET", "/cached", |_| {
+        jet_http_srv_response(200, &"duplicate".to_string())
+    });
+    let error = jet_http_mux_validate(&mux).expect_err("route mutation must revalidate");
+    assert!(error.contains("route conflict"), "{error}");
 }
 
 #[test]

@@ -8,18 +8,22 @@ struct WorkloadArgs {
     input: String
 }
 
+fn reject_json() {
+    print("reject=json")
+    print("valid=false")
+}
+
 fn run(args: WorkloadArgs) {
     input :: args.input
-    raw :: fs.read(input) ?? panic("read input")
+    raw :: fs.read(input) ?? return reject_json()
+    raw_bytes :: raw.bytes()
+    if raw_bytes.len() > 1048576 -> return reject_json()
     if json.parse(raw) == {
         .Ok(value) -> {
             canonical :: json.canonical(value) ?? panic("canonicalize")
             print("canonical={canonical}")
             print("valid=true")
         }
-        .Err(_) -> {
-            print("reject=json")
-            print("valid=false")
-        }
+        .Err(_) -> reject_json()
     }
 }

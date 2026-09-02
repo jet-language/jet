@@ -72,58 +72,70 @@ fn reserved_in_diagnostic_teaches_postfix_member_carve_out() {
 }
 
 #[test]
-fn single_bar_is_bitwise_or_and_flow_pipe_has_no_foreign_guess() {
-    let bit_or = jet::Compiler::parse_source(
+fn single_bar_is_bitwise_or() {
+    let parsed = jet::Compiler::parse_source(
         "fn run() {\n    left :: 1\n    right :: 2\n    value :: left | right\n}\n",
     );
     assert!(
-        bit_or.diagnostics.is_empty(),
+        parsed.diagnostics.is_empty(),
         "D-BITOREXPR1=A admits value `|` as bitwise OR: {:?}",
-        bit_or.diagnostics
+        parsed.diagnostics
     );
+}
 
-    let pipe_closure = jet::Compiler::parse_source("fn run() {\n    f :: |x| x + 1\n}\n");
+#[test]
+fn pipe_closure_shape_has_no_foreign_guess() {
+    let parsed = jet::Compiler::parse_source("fn run() {\n    f :: |x| x + 1\n}\n");
     assert!(
-        pipe_closure
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "E0003")
-            && pipe_closure
-                .diagnostics
-                .iter()
-                .all(|diag| diag.code != "E0033"),
+        parsed.diagnostics.iter().any(|diag| diag.code == "E0003")
+            && parsed.diagnostics.iter().all(|diag| diag.code != "E0033"),
         "pipe-closure-shaped input must be ordinary E0003: {:?}",
-        pipe_closure.diagnostics
+        parsed.diagnostics
     );
+}
 
-    let flow = jet::compile("fn run() {\n    value :: 1 |> print\n}\n")
+#[test]
+fn flow_pipe_shape_has_no_foreign_guess() {
+    let diagnostics = jet::compile("fn run() {\n    value :: 1 |> print\n}\n")
         .expect_err("`|>` stays unassigned");
-    assert!(flow.iter().any(|diag| diag.code == "E0003"), "{flow:?}");
-    assert!(flow.iter().all(|diag| diag.code != "E0033"), "{flow:?}");
     assert!(
-        flow.iter().all(|diag| {
+        diagnostics.iter().any(|diag| diag.code == "E0003"),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().all(|diag| diag.code != "E0033"),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().all(|diag| {
             !diag.what.contains("pipeline")
                 && !diag.why.contains("pipeline")
                 && !diag.fix.contains("pipeline")
         }),
-        "an unassigned token must not advertise a future flow alias: {flow:?}"
+        "an unassigned token must not advertise a future flow alias: {diagnostics:?}"
     );
+}
 
-    let alternatives = jet::Compiler::parse_source(
+#[test]
+fn pattern_alternatives_keep_single_bar() {
+    let parsed = jet::Compiler::parse_source(
         "enum State { Ready Waiting Done }\nfn run() {\n    state :: State.Ready\n    if state == {\n        .Ready | .Waiting -> { print(\"open\") }\n        .Done -> { print(\"done\") }\n    }\n}\n",
     );
     assert!(
-        alternatives.diagnostics.is_empty(),
+        parsed.diagnostics.is_empty(),
         "pattern alternatives remain legal: {:?}",
-        alternatives.diagnostics
+        parsed.diagnostics
     );
+}
 
-    let boolean_or =
+#[test]
+fn double_bar_keeps_boolean_or() {
+    let parsed =
         jet::Compiler::parse_source("fn run() {\n    if true || false { print(\"ok\") }\n}\n");
     assert!(
-        boolean_or.diagnostics.is_empty(),
+        parsed.diagnostics.is_empty(),
         "`||` keeps its boolean-or meaning: {:?}",
-        boolean_or.diagnostics
+        parsed.diagnostics
     );
 }
 
@@ -398,6 +410,7 @@ fn package_views_read_real_inputs_through_comptime_and_match_goldens() {
         std::process::id()
     ));
     fs::create_dir_all(root.join(".jet")).expect("create package view fixture");
+    fs::create_dir_all(root.join("config")).expect("create package config fixture");
     fs::write(
         root.join("package.jet"),
         r#"
@@ -409,6 +422,7 @@ license: "MIT"
 repository: "https://example.test/demo"
 runtime: "hosted"
 target: "native"
+configs: ["config/build.jet"]
 deps: {
     gitdep: {
         git: "https://build-user:build-secret@example.test/acme/tool?token=query-secret#private",
@@ -419,6 +433,14 @@ deps: {
 "#,
     )
     .expect("write package manifest fixture");
+    fs::write(
+        root.join("config/build.jet"),
+        r#"pub build :: Config{
+    outputs: { app: Executable{ entry: run } }
+}
+"#,
+    )
+    .expect("write package config fixture");
     fs::write(
         root.join(".jet/lock"),
         r#"
@@ -458,6 +480,11 @@ module profile.dev {
     let lock = jet::Compiler::read_lock(&root).expect("read lock view");
     let profiles = jet::Compiler::read_profiles(&root).expect("read profile view");
     assert_eq!(manifest.dependencies, package.dependencies);
+    assert!(manifest.outputs.is_empty(), "manifest must stay uncomposed");
+    assert_eq!(package.outputs.len(), 1, "package must include Config outputs");
+    assert_eq!(package.outputs[0].name, "app");
+    assert_eq!(package.outputs[0].kind, "executable");
+    assert_eq!(package.outputs[0].entry.as_deref(), Some("run"));
     assert_eq!(
         manifest.dependencies[0].source,
         r#"{ git: "https://example.test/acme/tool", tag: "v1" }"#
@@ -487,46 +514,444 @@ module profile.dev {
         jet::AST::CtValue::Present(value) => value.to_json(),
         other => panic!("expected a present package view, got {other:?}"),
     };
-    let (manifest_json, package_json, lock_json, profiles_json) = values;
+    let (manifest_value, package_value, lock_value, profiles_value) = values;
+    let manifest_json = json(manifest_value);
+    let package_json = json(package_value);
+    let lock_json = json(lock_value);
+    let profiles_json = json(profiles_value);
     assert_eq!(
-        json(manifest_json),
+        manifest_json,
         r#"{"schema_version":1,"file":"package.jet","jet":null,"edition":"2028","description":"typed package","license":"MIT","repository":"https://example.test/demo","layer":"hosted","target":"native","dependencies":[{"name":"gitdep","source":"{ git: \"https://example.test/acme/tool\", tag: \"v1\" }"},{"name":"local","source":"./deps/local"}],"packages":[],"outputs":[],"build_profiles":[]}"#
     );
     assert_eq!(
-        json(package_json),
-        r#"{"schema_version":1,"file":"package.jet","jet":null,"edition":"2028","description":"typed package","license":"MIT","repository":"https://example.test/demo","layer":"hosted","target":"native","dependencies":[{"name":"gitdep","source":"{ git: \"https://example.test/acme/tool\", tag: \"v1\" }"},{"name":"local","source":"./deps/local"}],"packages":[],"outputs":[],"build_profiles":[]}"#
+        package_json,
+        r#"{"schema_version":1,"file":"package.jet","jet":null,"edition":"2028","description":"typed package","license":"MIT","repository":"https://example.test/demo","layer":"hosted","target":"native","dependencies":[{"name":"gitdep","source":"{ git: \"https://example.test/acme/tool\", tag: \"v1\" }"},{"name":"local","source":"./deps/local"}],"packages":[],"outputs":[{"name":"app","kind":"executable","entry":"run"}],"build_profiles":[]}"#
     );
     assert_eq!(
-        json(lock_json),
+        lock_json,
         r#"{"schema_version":1,"file":".jet/lock","version":1,"root_dependencies":["gitdep"],"packages":[{"name":"gitdep","version":"1.0.0","source_kind":"git","source":"tag = \"v1\"","revision":"deadbeef","fingerprint":"lock-fp","content_hash":"lock-hash","dependencies":[],"layer":"hosted","inferred_layer":"hosted"}]}"#
     );
     assert_eq!(
-        json(profiles_json),
+        profiles_json,
         r#"{"schema_version":1,"file":"env.jet","profiles":[{"name":"base","extends":[],"packages":[],"collisions":[],"sources":["profile.base"]},{"name":"dev","extends":["base"],"packages":[],"collisions":[{"key":"bin/editor","value":"editor@default"}],"sources":["profile.dev"]}]}"#
     );
-    let input_paths: std::collections::BTreeSet<_> =
-        inputs.into_iter().map(|input| input.path).collect();
-    assert!(input_paths.contains("package.jet"));
-    assert!(input_paths.contains(".jet/lock"));
-    assert!(input_paths.contains("env.jet"));
+    for projection in [&manifest_json, &package_json, &lock_json, &profiles_json] {
+        for secret in [
+            "build-user",
+            "build-secret",
+            "query-secret",
+            "lock-user",
+            "lock-secret",
+        ] {
+            assert!(!projection.contains(secret), "projection leaked {secret}: {projection}");
+        }
+        assert!(
+            !projection.contains(root.to_str().unwrap()),
+            "projection leaked authority path: {projection}"
+        );
+    }
+    let expected_inputs = [
+        ("package.jet", root.join("package.jet")),
+        ("config/build.jet", root.join("config/build.jet")),
+        (".jet/lock", root.join(".jet/lock")),
+        ("env.jet", root.join("env.jet")),
+    ];
+    assert_eq!(inputs.len(), expected_inputs.len());
+    for (relative, absolute) in expected_inputs {
+        let input = inputs
+            .iter()
+            .find(|input| input.path == relative)
+            .unwrap_or_else(|| panic!("missing consumed package input {relative}"));
+        assert_eq!(
+            input.hash,
+            jet::SHA256::sha256_hex(&fs::read(absolute).expect("read consumed input"))
+        );
+    }
 }
 
 #[test]
-fn package_views_remain_compile_time_only() {
-    let diagnostics = jet::compile(
-        "use core.compiler as compiler\nfn run() { compiler.package() }\n",
+fn inline_and_extracted_package_views_are_equivalent() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let base = std::env::temp_dir().join(format!(
+        "jet_compiler_inline_carrier_equivalence_{}_{}",
+        std::process::id(),
+        stamp
+    ));
+    let inline_root = base.join("inline");
+    let extracted_root = base.join("extracted");
+    let body = r#"
+name: "carrier-equivalence"
+version: "1.2.3"
+jet: ">=0.1.0"
+edition: "2028"
+description: "same typed facts"
+license: "MIT"
+repository: "https://example.test/carrier"
+runtime: "hosted"
+target: "native"
+configs: ["config/build.jet"]
+"#;
+    for root in [&inline_root, &extracted_root] {
+        fs::create_dir_all(root.join("config")).expect("create carrier fixture");
+        fs::write(
+            root.join("config/build.jet"),
+            "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+        )
+        .expect("write carrier config");
+    }
+    fs::write(
+        inline_root.join("run.jet"),
+        format!("package {{{body}}}\nfn run() {{}}\n"),
     )
-    .expect_err("package views must not become a runtime capability");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
-        "expected compile-time-only diagnostic, got {diagnostics:?}"
-    );
-    assert!(
-        diagnostics
+    .expect("write inline carrier");
+    fs::write(extracted_root.join("package.jet"), body).expect("write extracted manifest");
+
+    let inline_manifest = jet::Compiler::read_manifest(&inline_root).expect("read inline manifest");
+    let extracted_manifest =
+        jet::Compiler::read_manifest(&extracted_root).expect("read extracted manifest");
+    assert_eq!(inline_manifest, extracted_manifest);
+    assert!(inline_manifest.outputs.is_empty());
+
+    let inline_package = jet::Compiler::read_package(&inline_root).expect("read inline package");
+    let extracted_package =
+        jet::Compiler::read_package(&extracted_root).expect("read extracted package");
+    assert_eq!(inline_package, extracted_package);
+    assert_eq!(inline_package.outputs.len(), 1);
+    assert_eq!(inline_package.outputs[0].name, "app");
+}
+
+#[test]
+fn inline_package_config_inputs_invalidate_package_views() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "jet_compiler_inline_config_invalidation_{}_{}",
+        std::process::id(),
+        stamp
+    ));
+    fs::create_dir_all(root.join("config")).expect("create inline invalidation fixture");
+    fs::write(
+        root.join("run.jet"),
+        r#"package {
+name: "inline-invalidation"
+version: "1.0.0"
+configs: ["config/build.jet"]
+}
+fn run() {}
+"#,
+    )
+    .expect("write inline package");
+    let config = root.join("config/build.jet");
+    fs::write(
+        &config,
+        "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+    )
+    .expect("write first package config");
+    let (first_result, first_inputs) =
+        jet::Comptime::with_package_read_context(&root, || jet::Compiler::read_package(&root));
+    let first = first_result.expect("read first inline package");
+
+    fs::write(
+        &config,
+        "pub build :: Config{ outputs: { app: Executable{ entry: check } } }\n",
+    )
+    .expect("write changed package config");
+    let (second_result, second_inputs) =
+        jet::Comptime::with_package_read_context(&root, || jet::Compiler::read_package(&root));
+    let second = second_result.expect("read changed inline package");
+
+    assert_ne!(first, second, "a Config edit must change completed package facts");
+    let input_hash = |inputs: &[jet::AST::ComptimeInput], path: &str| {
+        inputs
             .iter()
-            .any(|diagnostic| diagnostic.what.contains("compile-time only")),
-        "diagnostic must teach the phase boundary: {diagnostics:?}"
+            .find(|input| input.path == path)
+            .map(|input| input.hash.clone())
+            .unwrap_or_else(|| panic!("missing package input {path}: {inputs:?}"))
+    };
+    assert_ne!(
+        input_hash(&first_inputs, "config/build.jet"),
+        input_hash(&second_inputs, "config/build.jet")
     );
+    for inputs in [&first_inputs, &second_inputs] {
+        assert!(inputs.iter().any(|input| input.path == "run.jet"));
+        assert!(inputs.iter().any(|input| input.path == "config/build.jet"));
+    }
+}
+
+#[test]
+fn inline_package_authority_errors_redact_absolute_paths() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "jet_compiler_inline_authority_redaction_{}_{}",
+        std::process::id(),
+        stamp
+    ));
+    fs::create_dir_all(&root).expect("create inline authority fixture");
+    fs::write(
+        root.join("run.jet"),
+        r#"package {
+name: "inline-authority-error"
+version: "1.0.0"
+configs: ["missing-config"]
+}
+fn run() {}
+"#,
+    )
+    .expect("write invalid inline package");
+
+    let error =
+        jet::Compiler::read_package(&root).expect_err("missing inline Config must fail closed");
+    assert_eq!(error.code, "E0956");
+    assert_eq!(error.file, "package.jet");
+    assert!(
+        error.cause.contains("E1334") && error.cause.contains("invalid"),
+        "inline authority failure must use the typed redacted cause: {error:?}"
+    );
+    assert!(
+        !error.cause.contains(root.to_str().unwrap()),
+        "inline authority failure leaked the root path: {error:?}"
+    );
+}
+
+#[test]
+fn inline_package_parse_errors_preserve_registered_diagnostic() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "jet_compiler_inline_parse_error_{}_{}",
+        std::process::id(),
+        stamp
+    ));
+    fs::create_dir_all(&root).expect("create inline parse fixture");
+    fs::write(
+        root.join("run.jet"),
+        r#"package {
+version: "1.0.0"
+unknown: "value"
+}
+fn run() {}
+"#,
+    )
+    .expect("write malformed inline package");
+
+    let error =
+        jet::Compiler::read_package(&root).expect_err("malformed inline package must fail closed");
+    assert_eq!(error.code, "E0956");
+    assert_eq!(error.file, "package.jet");
+    assert!(
+        error.cause.contains("E1206") && error.cause.contains("unknown"),
+        "inline parse failure must preserve the registered typed cause: {error:?}"
+    );
+    assert!(
+        !error.cause.contains("E1362"),
+        "inline parse failure must not replace the registered cause with a generic code: {error:?}"
+    );
+    assert!(
+        !error.cause.contains(root.to_str().unwrap()),
+        "inline parse failure leaked the authority root: {error:?}"
+    );
+}
+
+#[test]
+fn package_views_redact_repository_credentials_and_queries() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "jet_compiler_repository_redaction_{}_{}",
+        std::process::id(),
+        stamp
+    ));
+    fs::create_dir_all(&root).expect("create repository redaction fixture");
+    fs::write(
+        root.join("package.jet"),
+        r#"name: "repository-redaction"
+version: "1.0.0"
+repository: "https://repo-user:repo-secret@example.test/acme/repo?token=repo-query#private"
+"#,
+    )
+    .expect("write hostile repository");
+
+    let manifest = jet::Compiler::read_manifest(&root).expect("read redacted manifest");
+    let package = jet::Compiler::read_package(&root).expect("read redacted package");
+    assert_eq!(
+        manifest.repository.as_deref(),
+        Some("https://example.test/acme/repo")
+    );
+    assert_eq!(
+        package.repository.as_deref(),
+        Some("https://example.test/acme/repo")
+    );
+    for value in [manifest.repository.as_deref(), package.repository.as_deref()] {
+        let value = value.expect("repository remains present");
+        assert!(!value.contains("repo-user"));
+        assert!(!value.contains("repo-secret"));
+        assert!(!value.contains("repo-query"));
+    }
+
+    fs::write(
+        root.join("package.jet"),
+        "name: \"repository-safe\"\nversion: \"1.0.0\"\nrepository: \"https://example.test/acme/repo\"\n",
+    )
+    .expect("write safe repository");
+    assert_eq!(
+        jet::Compiler::read_manifest(&root)
+            .expect("read safe repository")
+            .repository
+            .as_deref(),
+        Some("https://example.test/acme/repo")
+    );
+}
+
+#[test]
+fn package_api_example_checks_and_runs_through_the_shared_evaluator() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/tooling/compiler_api_package");
+    let expected = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/features/expected/tooling/compiler_api_package.out"),
+    )
+    .expect("read compiler API package expected output");
+    let entry = root.join("run.jet");
+    let entry_string = entry.to_string_lossy().into_owned();
+    let project = jet::check_project_build_for_tier(
+        &entry_string,
+        jet::Policy::GateSet::default(),
+        "dev",
+        &std::collections::BTreeMap::new(),
+        None,
+        None,
+    )
+    .expect("package project build check should start")
+    .expect("package Config should select the project build");
+    assert!(project.build.is_some(), "project build check lost its BuildPlan");
+    assert!(
+        project.runtime.is_some(),
+        "project build check lost the resolved runtime graph"
+    );
+    assert!(
+        project.runtime_effect_facts.is_some(),
+        "project build check lost runtime effect facts"
+    );
+    // This witness exercises the source carrier in explicit-file scope. The
+    // package `app` Output is a Config contribution, so project-output proof
+    // belongs to the build path above rather than a raw run.jet check.
+    for target in [entry] {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["check", target.to_str().expect("UTF-8 package target")])
+            .current_dir(&root)
+            .env("NO_COLOR", "1")
+            .env("TERM", "dumb")
+            .output()
+            .expect("compiler API package check should start");
+        assert!(
+            output.status.success(),
+            "compiler API package check failed for {}:\n{}",
+            target.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("E0956"), "{target:?} emitted E0956: {stderr}");
+        assert!(
+            !stderr.contains("unbound"),
+            "{target:?} emitted an unbound follow-on: {stderr}"
+        );
+        assert!(
+            !stderr.contains("L0103"),
+            "{target:?} reported a qualified compiler alias as unused: {stderr}"
+        );
+    }
+
+    for args in [vec!["run"], vec!["run", "--interpret"]] {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(&args)
+            .current_dir(&root)
+            .env("NO_COLOR", "1")
+            .env("TERM", "dumb")
+            .output()
+            .expect("compiler API package run should start");
+        assert!(
+            output.status.success(),
+            "compiler API package run {:?} failed:\n{}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).as_ref(),
+            expected.as_str(),
+            "compiler API package output diverged for {:?}",
+            args
+        );
+    }
+    if common::have_rustc() {
+        let build_dir = root.join("build");
+        let _ = fs::remove_dir_all(&build_dir);
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .arg("build")
+            .current_dir(&root)
+            .env("NO_COLOR", "1")
+            .env("TERM", "dumb")
+            .output()
+            .expect("compiler API package AOT build should start");
+        assert!(
+            output.status.success(),
+            "compiler API package AOT build failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("L0103"),
+            "compiler API package AOT build reported its qualified alias as unused:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let binary = build_dir.join("compiler_api_package");
+        let run = Command::new(&binary)
+            .output()
+            .expect("compiler API package AOT binary should start");
+        assert!(
+            run.status.success(),
+            "compiler API package AOT binary failed:\n{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&run.stdout).as_ref(),
+            expected.as_str(),
+            "compiler API package AOT output diverged"
+        );
+        let _ = fs::remove_dir_all(build_dir);
+    }
+}
+
+
+#[test]
+fn package_views_remain_compile_time_only() {
+    for operation in ["manifest", "package", "lock", "profiles"] {
+        let source = format!(
+            "use core.compiler as compiler\nfn run() {{ compiler.{operation}() }}\n"
+        );
+        let diagnostics =
+            jet::compile(&source).expect_err("package views must not become runtime capabilities");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
+            "{operation} should report E0956: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.what.contains("compile-time only")),
+            "{operation} must teach the phase boundary: {diagnostics:?}"
+        );
+    }
 }
 
 #[test]
@@ -547,8 +972,88 @@ fn package_views_reject_config_paths_outside_the_pinned_root() {
     assert_eq!(error.code, "E0956");
     assert_eq!(error.file, "package.jet");
     assert!(
-        error.cause.contains("configs"),
-        "refusal must identify the rejected path declaration: {error:?}"
+        error.cause.contains("E1334") && error.cause.contains("invalid"),
+        "refusal must preserve a typed, actionable authority cause: {error:?}"
+    );
+    assert!(
+        !error.cause.contains(root.to_str().unwrap()),
+        "refusal cause leaked the authority root: {error:?}"
+    );
+}
+
+#[test]
+fn package_views_report_malformed_lock_as_typed_file_cause() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_compiler_package_view_malformed_lock_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(root.join(".jet")).expect("create malformed lock fixture");
+    fs::write(
+        root.join("package.jet"),
+        "name: \"malformed-lock\"\nversion: \"1.0.0\"\n",
+    )
+    .expect("write malformed lock package");
+    fs::write(
+        root.join(".jet/lock"),
+        "version = 1\n[[package]]\nversion = \"1.0.0\"\n",
+    )
+    .expect("write malformed lock");
+
+    let error = jet::Compiler::read_lock(&root).expect_err("malformed lock must fail closed");
+    assert_eq!(error.code, "E0956");
+    assert_eq!(error.file, ".jet/lock");
+    assert!(!error.message.is_empty());
+    assert!(!error.cause.is_empty());
+
+    let (value, inputs) = jet::Comptime::with_package_read_context(&root, || {
+        jet::Compiler::eval_core_call(
+            "core.compiler",
+            "lock",
+            Vec::new(),
+            jet::Diagnostics::Span::new(0, 0),
+        )
+        .expect("compiler callback handles malformed package input")
+        .expect("dispatcher returns a typed failure value")
+    });
+    let jet::AST::CtValue::Failed(jet::AST::CtReport::Told(payload)) = value else {
+        panic!("malformed lock must be a told typed failure: {value:?}");
+    };
+    let payload = payload.to_json();
+    assert!(payload.contains("\"code\":\"E0956\""), "{payload}");
+    assert!(payload.contains("\"file\":\".jet/lock\""), "{payload}");
+    assert!(payload.contains("\"cause\":\""), "{payload}");
+    assert!(inputs.iter().any(|input| input.path == ".jet/lock"));
+}
+
+#[test]
+fn package_views_reject_profile_imports_outside_the_pinned_root() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_compiler_package_view_profile_escape_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create profile escape fixture");
+    fs::write(
+        root.join("env.jet"),
+        r#"
+module profile.base {
+    imports: find("../outside")
+    packages: []
+}
+"#,
+    )
+    .expect("write escaping profile fixture");
+
+    let error =
+        jet::Compiler::read_profiles(&root).expect_err("profile imports must stay below root");
+    assert_eq!(error.code, "E0956");
+    assert_eq!(error.file, "env.jet");
+    assert!(
+        error.cause.contains("E1331") || error.cause.contains("root"),
+        "refusal must preserve the authority cause: {error:?}"
+    );
+    assert!(
+        !error.cause.contains(root.to_str().unwrap()),
+        "profile refusal cause leaked the authority root: {error:?}"
     );
 }
 

@@ -11,6 +11,7 @@ use std::path::Path;
 use crate::Comptime::CtValue;
 use crate::AST::CtKey;
 use crate::Syntax;
+use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::ProviderFacts::ProviderFacts;
 
 const MAX_RESOLVER_NODES: usize = 100_000;
@@ -2467,9 +2468,10 @@ fn validate_dotenv_spec(spec: &DotenvSpec) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolve a declared dotenv file against the real project root. The caller
-/// must read the returned canonical path, never the unchecked joined path.
-pub fn checked_dotenv_path(root: &Path, relative: &str) -> Result<std::path::PathBuf, String> {
+/// Open a declared dotenv file below a pinned project authority and return
+/// the bytes read from that same descriptor. The caller must consume these
+/// snapshot bytes rather than reopen the project pathname.
+pub fn checked_dotenv_snapshot(root: &Path, relative: &str) -> Result<Vec<u8>, String> {
     let relative_path = Path::new(relative);
     if relative.is_empty()
         || relative_path.is_absolute()
@@ -2481,17 +2483,39 @@ pub fn checked_dotenv_path(root: &Path, relative: &str) -> Result<std::path::Pat
     {
         return Err("dotenv path must be a normal project-relative path".to_string());
     }
-    let metadata = std::fs::symlink_metadata(root).map_err(|error| error.to_string())?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err("dotenv project root must be a real directory".to_string());
+    let resolver = AuthorityResolver::open(root).map_err(|error| error.to_string())?;
+    let file = resolver
+        .checked_file(relative_path)
+        .map_err(|error| error.to_string())?;
+    let metadata = file
+        .handle
+        .metadata()
+        .map_err(|error| format!("couldn't inspect dotenv file authority: {error}"))?;
+    if dotenv_file_has_multiple_links(&metadata) {
+        return Err("dotenv file must not be a hard link to another path".to_string());
     }
-    let real_root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
-    let candidate = real_root.join(relative_path);
-    let real = std::fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
-    if !real.starts_with(&real_root) {
-        return Err("dotenv path escapes the project root through a symlink".to_string());
+    resolver
+        .revalidate_file(&file)
+        .map_err(|error| error.to_string())?;
+    Ok(file.bytes)
+}
+
+fn dotenv_file_has_multiple_links(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return metadata.nlink() > 1;
     }
-    Ok(real)
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return metadata.number_of_links() > 1;
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = metadata;
+        true
+    }
 }
 
 pub fn valid_env_name(name: &str) -> bool {
@@ -3660,7 +3684,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn checked_dotenv_path_rejects_symlink_escape() {
+    fn checked_dotenv_snapshot_rejects_symlink_escape() {
         use std::os::unix::fs::symlink;
 
         let root = std::env::temp_dir().join(format!(
@@ -3676,10 +3700,107 @@ mod tests {
         std::fs::write(&outside, "SECRET=must-not-read\n").unwrap();
         symlink(&outside, root.join(".env")).unwrap();
 
-        assert!(checked_dotenv_path(&root, ".env").is_err());
+        assert!(checked_dotenv_snapshot(&root, ".env").is_err());
         assert_eq!(
             std::fs::read_to_string(&outside).unwrap(),
             "SECRET=must-not-read\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_dotenv_snapshot_rejects_final_symlink_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-env-dotenv-final-swap-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jet-env-dotenv-final-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".env"), "ALLOWED=inside\n").unwrap();
+        assert_eq!(
+            checked_dotenv_snapshot(&root, ".env").unwrap(),
+            b"ALLOWED=inside\n"
+        );
+        std::fs::write(&outside, "ALLOWED=outside\n").unwrap();
+        let saved = root.join(".env.saved");
+        std::fs::rename(root.join(".env"), &saved).unwrap();
+        symlink(&outside, root.join(".env")).unwrap();
+
+        assert!(checked_dotenv_snapshot(&root, ".env").is_err());
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "ALLOWED=outside\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_dotenv_snapshot_rejects_ancestor_symlink_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-env-dotenv-ancestor-swap-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jet-env-dotenv-ancestor-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(root.join("nested")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("nested/.env"), "ALLOWED=inside\n").unwrap();
+        std::fs::write(outside.join(".env"), "ALLOWED=outside\n").unwrap();
+        let saved = root.join("nested.saved");
+        std::fs::rename(root.join("nested"), &saved).unwrap();
+        symlink(&outside, root.join("nested")).unwrap();
+
+        assert!(checked_dotenv_snapshot(&root, "nested/.env").is_err());
+        assert_eq!(
+            std::fs::read_to_string(outside.join(".env")).unwrap(),
+            "ALLOWED=outside\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_dotenv_snapshot_rejects_hardlink_to_outside_file() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-env-dotenv-hardlink-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jet-env-dotenv-hardlink-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&outside, "ALLOWED=outside\n").unwrap();
+        std::fs::hard_link(&outside, root.join(".env")).unwrap();
+
+        let error = checked_dotenv_snapshot(&root, ".env").expect_err("hardlink must be rejected");
+        assert!(error.contains("hard link"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "ALLOWED=outside\n"
         );
 
         let _ = std::fs::remove_dir_all(&root);

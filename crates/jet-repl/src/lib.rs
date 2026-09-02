@@ -1244,16 +1244,40 @@ fn write_unique_temp_file(tag: &str, source: &str) -> std::io::Result<std::path:
     Ok(path)
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const REPL_O_NOFOLLOW: i32 = 0o400000;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+const REPL_O_NOFOLLOW: i32 = 0x0100;
+
 fn write_temp_file_at(path: &std::path::Path, source: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        // Linux O_NOFOLLOW: create_new already rejects an existing symlink;
-        // this also rejects a symlink substituted between lookup and open.
-        options.custom_flags(0o400000);
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios"
+        ))]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Refuse a final symlink substituted between the name checks and open.
+            options.custom_flags(REPL_O_NOFOLLOW);
+        }
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios"
+        )))]
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "this Unix target cannot enforce no-follow temporary-file creation",
+            ));
+        }
     }
     let mut file = options.open(&path)?;
     if let Err(error) = file.write_all(source.as_bytes()) {
@@ -1263,11 +1287,39 @@ fn write_temp_file_at(path: &std::path::Path, source: &str) -> std::io::Result<(
     Ok(())
 }
 
+fn run_native_source_child(
+    jet_bin: &Path,
+    source: &str,
+) -> io::Result<std::process::Output> {
+    let mut child = std::process::Command::new(jet_bin)
+        .arg("__jet_repl_run_stdin")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "REPL child did not expose its source pipe",
+        )
+    })?;
+    if let Err(error) = stdin.write_all(source.as_bytes()) {
+        drop(stdin);
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    drop(stdin);
+    child.wait_with_output()
+}
+
+
 // ── :run ───────────────────────────────────────────────────────────────────
 
-/// Materialize the session + stmt_srcs to a temp `.jet` file and run it
-/// natively via `jet run` (D-REPL-FUEL=A). Bypasses the interpreter fuel cap.
-/// When the session is empty, reports a no-op note.
+/// Send the materialized session + stmt_srcs to a private native child over
+/// stdin (D-REPL-FUEL=A). Bypasses the interpreter fuel cap without reopening
+/// a pathname after the session snapshot is assembled. When the session is
+/// empty, reports a no-op note.
 fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
     if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
         let _ = writeln!(out_sink, "note: session is empty — nothing to run");
@@ -1304,28 +1356,14 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         )
     };
 
-    // Write to a temp file.
-    let tmp_path = match write_unique_temp_file("run", &jet_src) {
-        Ok(path) => path,
-        Err(e) => {
-        let _ = writeln!(out_sink, "error: couldn't write temp file: {}", e);
-        return;
-        }
-    };
-
     let _ = write!(out_sink, "{}", dim("compiling session…", color));
     let _ = writeln!(out_sink, " {}", dim("running…", color));
 
-    // Spawn `jet run <temp>` using the current executable. This reuses the
-    // full compile+rustc pipeline without duplicating it in the library crate.
+    // The private child mode consumes this exact snapshot from stdin. No
+    // pathname is created, reopened, or cleaned up between the session and
+    // native execution.
     let jet_bin = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("jet"));
-
-    let result = std::process::Command::new(&jet_bin)
-        .arg("run")
-        .arg(&tmp_path)
-        .output();
-
-    let _ = std::fs::remove_file(&tmp_path);
+    let result = run_native_source_child(&jet_bin, &jet_src);
 
     match result {
         Ok(output) => {
@@ -4043,6 +4081,40 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn repl_nofollow_flag_uses_linux_family_value() {
+        assert_eq!(REPL_O_NOFOLLOW, 0o400000);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn repl_nofollow_flag_uses_macos_family_value() {
+        assert_eq!(REPL_O_NOFOLLOW, 0x0100);
+    }
+
+    #[cfg(all(
+        unix,
+        not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios"
+        ))
+    ))]
+    #[test]
+    fn repl_temp_writer_rejects_unsupported_unix() {
+        let path = std::env::temp_dir().join(format!(
+            "jet-repl-unsupported-{}.jet",
+            std::process::id()
+        ));
+        let error = write_temp_file_at(&path, "must not be written\n")
+            .err()
+            .expect("unsupported Unix target must fail closed");
+        assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    }
+
 
     #[test]
     fn sigil_binding_is_classified_as_statement() {

@@ -14,9 +14,10 @@ pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
     }
 }
 
-// D-ENC-DYN1=A+: the dynamic `Data` value's variants (face of `jet_std::DataTree`).
+// D-ENC-DYN1=A+: the dynamic `Data` value's public variants plus the
+// compiler-only typed-JSON numeric carrier.
 pub(crate) fn is_json_variant(variant: &str) -> bool {
-    crate::Syntax::is_data_variant(variant)
+    crate::Syntax::is_data_variant(variant) || variant == "Number"
 }
 
 // D-DBDRIVER1: the `DBValue` dynamic tagged SQL value's variants.
@@ -44,16 +45,6 @@ pub(crate) fn is_key_variant(variant: &str) -> bool {
     )
 }
 
-/// The Rust spelling of `variant` under `enum_type_prefix`'s head — raw for a
-/// Rust-defined (Prelude/host) enum, mangled for a Jet-declared one. Same table,
-/// same answer as the head, so the two halves of a pattern cannot disagree.
-pub(crate) fn variant_rust_name(cx: &Cx, variant: &str) -> String {
-    let raw = match cx.variant_owner.get(variant) {
-        Some(owner) => crate::Codegen::TIR::tir_enum_rust_path(cx, owner).1,
-        None => is_json_variant(variant) || is_key_variant(variant),
-    };
-    crate::Codegen::TIR::tir_enum_variant_rust_name(variant, raw)
-}
 
 pub(crate) fn escape_rust_str(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))

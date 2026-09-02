@@ -80,6 +80,7 @@ pub mod MCP;
 // it belongs at the plan-model's foundation, not inside one engine crate.
 pub mod Merge;
 pub mod Package;
+pub mod Public;
 pub mod Platform;
 pub mod ProviderFacts;
 // E4-JP15 / D-JPK-VARIANT1=D: closed typed variant axes + deterministic

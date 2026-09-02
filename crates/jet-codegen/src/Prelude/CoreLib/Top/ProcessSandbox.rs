@@ -6,10 +6,13 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -451,13 +454,20 @@ pub fn output_with_read_only_mounts(
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            #[cfg(target_os = "macos")]
+            {
+                use std::os::unix::process::CommandExt;
+                // Linux Bubblewrap already creates the session with
+                // `--new-session`; Seatbelt needs an explicit child group.
+                command.process_group(0);
+            }
             Ok(())
         },
     )?;
     wait_with_limited_output(child, timeout)
 }
 
-fn read_output_limited<R: Read>(mut reader: R) -> std::io::Result<(Vec<u8>, bool)> {
+fn read_output_limited<R: Read>(mut reader: R) -> io::Result<(Vec<u8>, bool)> {
     let mut output = Vec::with_capacity(64 * 1024);
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -474,22 +484,88 @@ fn read_output_limited<R: Read>(mut reader: R) -> std::io::Result<(Vec<u8>, bool
     }
 }
 
+#[cfg(unix)]
+const PROCESS_GROUP_SIGKILL: i32 = 9;
+#[cfg(unix)]
+const PROCESS_GROUP_ESRCH: i32 = 3;
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn kill(pid: i32, signal: i32) -> i32;
+}
+
+#[cfg(unix)]
+fn terminate_process_group(pid: u32) -> io::Result<()> {
+    let pid = i32::try_from(pid)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "process id is out of range"))?;
+    // SAFETY: the negative PID targets only the process group assigned to the
+    // child by CommandExt::process_group(0).
+    if unsafe { kill(-pid, PROCESS_GROUP_SIGKILL) } == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(PROCESS_GROUP_ESRCH) {
+        return Ok(());
+    }
+    Err(error)
+}
+
+fn terminate_process_tree(child: &mut Child, child_reaped: bool) -> io::Result<()> {
+    #[cfg(unix)]
+    let group_error = terminate_process_group(child.id()).err();
+    #[cfg(not(unix))]
+    let group_error = child.kill().err();
+
+    #[cfg(unix)]
+    if group_error.is_some() {
+        // Keep the direct-child fallback for a failed group signal. The group
+        // path is authoritative; this only preserves the old best effort if a
+        // platform rejects the group operation.
+        let _ = child.kill();
+    }
+
+    let wait_error = if child_reaped {
+        None
+    } else {
+        child.wait().err()
+    };
+    match (wait_error, group_error) {
+        (Some(error), _) => Err(error),
+        (None, Some(error)) => Err(error),
+        (None, None) => Ok(()),
+    }
+}
+
 fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Result<Output, Error> {
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| Error::Io("sandbox child stdout was not piped".to_string()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| Error::Io("sandbox child stderr was not piped".to_string()))?;
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            let error = Error::Io("sandbox child stdout was not piped".to_string());
+            let _ = terminate_process_tree(&mut child, false);
+            return Err(error);
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            let error = Error::Io("sandbox child stderr was not piped".to_string());
+            let _ = terminate_process_tree(&mut child, false);
+            return Err(error);
+        }
+    };
     let exceeded = Arc::new(AtomicBool::new(false));
+    let reader_failed = Arc::new(AtomicBool::new(false));
     let stdout_exceeded = Arc::clone(&exceeded);
+    let stdout_reader_failed = Arc::clone(&reader_failed);
     let stderr_exceeded = Arc::clone(&exceeded);
+    let stderr_reader_failed = Arc::clone(&reader_failed);
     let stdout_thread = thread::spawn(move || {
         let result = read_output_limited(stdout);
         if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) {
             stdout_exceeded.store(true, Ordering::Release);
+        }
+        if result.is_err() {
+            stdout_reader_failed.store(true, Ordering::Release);
         }
         result
     });
@@ -498,37 +574,41 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
         if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) {
             stderr_exceeded.store(true, Ordering::Release);
         }
+        if result.is_err() {
+            stderr_reader_failed.store(true, Ordering::Release);
+        }
         result
     });
 
     let deadline = timeout.map(|limit| Instant::now() + limit);
     let mut timed_out = false;
-    let status = loop {
+    let mut child_reaped = false;
+    let mut wait_error = None;
+    let mut status = None;
+    loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status,
+            Ok(Some(child_status)) => {
+                child_reaped = true;
+                status = Some(child_status);
+                break;
+            }
             Ok(None) => {
-                if exceeded.load(Ordering::Acquire) {
-                    let _ = child.kill();
-                    break child
-                        .wait()
-                        .map_err(|error| Error::Io(error.to_string()))?;
+                if exceeded.load(Ordering::Acquire) || reader_failed.load(Ordering::Acquire) {
+                    break;
                 }
                 if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     timed_out = true;
-                    let _ = child.kill();
-                    break child
-                        .wait()
-                        .map_err(|error| Error::Io(error.to_string()))?;
+                    break;
                 }
                 thread::sleep(Duration::from_millis(5));
             }
             Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(Error::Io(error.to_string()));
+                wait_error = Some(error);
+                break;
             }
         }
-    };
+    }
+    let cleanup_error = terminate_process_tree(&mut child, child_reaped).err();
     let stdout = stdout_thread
         .join()
         .map_err(|_| Error::Io("sandbox stdout reader panicked".to_string()))?
@@ -537,6 +617,9 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
         .join()
         .map_err(|_| Error::Io("sandbox stderr reader panicked".to_string()))?
         .map_err(|error| Error::Io(error.to_string()))?;
+    if let Some(error) = wait_error {
+        return Err(Error::Io(error.to_string()));
+    }
     if exceeded.load(Ordering::Acquire) {
         return Err(Error::Io(format!(
             "sandbox process output exceeded {MAX_CAPTURED_OUTPUT_BYTES} bytes"
@@ -549,6 +632,10 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
             timeout.as_millis()
         )));
     }
+    if let Some(error) = cleanup_error {
+        return Err(Error::Io(error.to_string()));
+    }
+    let status = status.expect("sandbox child must exit or have a cleanup reason");
     Ok(Output {
         status,
         stdout: stdout.0,

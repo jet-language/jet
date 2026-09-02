@@ -5,7 +5,9 @@ description: >-
   Rust, Python, C, Zig, and domain incumbents. One skill, two modes chosen on
   activation — run (harness + win/parity/loss scoreboard, absorbs the retired
   field-audit's peer-gap role) or build/update (define or evolve the matrix,
-  entries, and harness). Report-only, never gates.
+  entries, and harness). Reports are evidence, not a substitute for delivery:
+  every loss or failure blocks its owning performance card, milestone, and
+  release gate and remains carded.
 ---
 
 # Gauntlet
@@ -98,26 +100,34 @@ report produced from the result.
 ## Run mode
 
 1. Execute the harness over every entry. Verify expected output before
-   timing; a wrong answer disqualifies the cell and is itself a finding.
-2. Compute same-run ratios per metric. Never compare against a previous
-   run's numbers.
-3. Score every cell, uniform strict bar, no per-entry softening: **win** =
-   strictly better, **parity** = ratio ≤ 1.05, everything else **loss**.
+  timing; a wrong answer disqualifies the cell and is a failure finding.
+2. Compute same-run ratios independently for every matched cell and metric.
+  Never compare against a previous run's numbers.
+3. Apply the global performance law to every matched cell and metric:
+   - The strict target and win is a Jet ratio `<1.00` against each peer.
+   - Every non-Rust peer requires `<1.00`; a ratio `>=1.00` is a loss.
+   - Rust is the only peer that permits parity at `<=1.05`; 1.05 is a
+     measurement-noise rejection ceiling, never a target or a win. A Rust
+     ratio `>1.05` is a loss.
+   - Unmeasured, invalid, missing, or wrong-output data is a failure, never a
+     win, parity, or exclusion.
 4. Collect advisory rows: readability proxies, RLI5 rubric, authoring cost.
-   For RLI5: spawn a Luna max subagent per persona (true beginner default,
-   plus switcher, domain expert, unattended agent); it invokes the global
-   universal `rli5` skill against the entry's Jet and port sources with the
-   same modify/derive probes; grade the returned friction tables here,
-   weighting each stumble by path commonality (`surface-frequency-audit`
-   data where it exists, honest estimate otherwise; common-path stumbles are
-   real findings, rare-path friction may be acceptable — say which).
-   Advisory, never gating.
+  For RLI5: spawn a Luna max subagent per persona (true beginner default,
+  plus switcher, domain expert, unattended agent); it invokes the global
+  universal `rli5` skill against the entry's Jet and port sources with the
+  same modify/derive probes; grade the returned friction tables here,
+  weighting each stumble by path commonality (`surface-frequency-audit`
+  data where it exists, honest estimate otherwise; common-path stumbles are
+  real findings, rare-path friction may be acceptable — say which).
+  Advisory, never gating.
 5. List every matrix cell with no entry as **uncovered territory** —
-   unmeasured is not winning.
+  unmeasured is not winning.
 
 **Report.** One dark-mode, visual-first scoreboard: matrix cells × metrics,
-win/parity/loss colored, losses first (a report with no losing row has not
-looked hard enough). Include the beat table — where Jet categorically wins
+win/parity/loss/failure colored, losses and failures first (a report with no
+loss or failure has not looked hard enough). Show each peer-specific ratio
+ceiling and distinguish strict wins from Rust-only measurement-noise parity.
+Include the beat table — where Jet categorically wins
 and what a peer must break to match it — marking shipped versus
 ratified-but-unbuilt per row. Prose follows the `simple` skill rules. Write
 under `docs/audits/` via the Tower CLI (never hand-edit board JSON):
@@ -127,15 +137,20 @@ node plugins/tower/tower.mjs docs add --section audits --id gauntlet-YYYY-MM-DD 
 ```
 
 Never overwrite a different day's note.
-
-**The ratchet.** This skill never gates and keeps no history, so cards are
-the only drift protection — minting them is not optional. Every loss
-auto-mints a Tower card carrying the measured evidence (entry, metric, ratio,
-both sources), deduplicated against existing cards first — new evidence for a
-known cause goes on the existing card. Every uncovered cell worth filling
+**The ratchet.** Historical result files and reports are immutable evidence:
+never rewrite an earlier day's artifact to make a new threshold appear green.
+Record the active policy with each new run and explain any policy change.
+Every loss or failure — including an unmeasured, invalid, missing, or
+wrong-output required row — auto-mints or updates a Tower card carrying the
+measured evidence (entry, metric, ratio or failure, both sources, and policy).
+Deduplicate against existing cards first; new evidence for a known cause goes
+on the existing card. Each loss or failure blocks the owning performance card,
+milestone, and release gate until a fresh valid run satisfies the law; it
+remains carded even after later repair. Every uncovered cell worth filling
 mints or updates a build-mode corpus card. Close with the per-finding
 disposition table from `.agents/skills/_shared/audit-dispositions.md`; card
 rows satisfy it.
+
 
 ## The standing lens
 

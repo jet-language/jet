@@ -83,11 +83,11 @@ fn tree_sitter_result_handler_grammar_keeps_the_canonical_shape() {
             && rule.contains("field(\"failure\"")
     );
     assert!(
-        !rule.contains(":>"),
+        !rule.contains("\":>\""),
         "retired arrow leaked into Result handler grammar"
     );
     assert!(
-        !rule.contains("=>"),
+        !rule.contains("\"=>\""),
         "retired arrow leaked into Result handler grammar"
     );
 }
@@ -565,7 +565,7 @@ enum Shape {
     Circle(Float)
     Empty
 }
-fn area(s: Shape) Float {
+fn area(s: Shape) Float -> {
     if s == {
         .Circle(r) -> return r
         .Empty -> return 0.0
@@ -613,7 +613,7 @@ fn dot_zero_in_statement_lexes_as_dot_then_int() {
 #[test]
 fn parse_option_fn() {
     let src = r#"
-fn find_even(limit: Int) (?Int) {
+fn find_even(limit: Int) ?Int -> {
     loop i in 1..limit {
         if i % 2 == 0 {
             return Val(i);
@@ -651,17 +651,18 @@ fn run() {}
 #[test]
 fn parse_pipe_switch_arms_as_subject_tests() {
     // D-IF3: explicit `if subject == { … }` dispatch. A bare value arm becomes
-    // `subject == value`; a `||` chain of bare values re-applies the comparison
-    // to each (`orange || mango` ≡ `fruit == orange || fruit == mango`).
+    // `subject == value`; a `|` chain of bare values re-applies the comparison
+    // to each (`orange | mango` ≡ `fruit == orange || fruit == mango`).
     let src = r#"
 fn run() {
     fruit :: "orange"
     if fruit == {
         apple -> { print("Apple Juice") }
-        orange || mango -> { print("Orange Juice") }
-        tangerine || yuzu -> { print("Citrus Juice") }
+        orange | mango -> { print("Orange Juice") }
+        tangerine | yuzu -> { print("Citrus Juice") }
         else -> { print("Water") }
     }
+    print("done")
 }
 "#;
     let (toks, lex_diags) = jet::Lexer::lex(src);
@@ -807,7 +808,7 @@ fn run() {
 #[test]
 fn parse_bracket_collection_types_and_semicolon_list_items() {
     let src = r#"
-pub fn shell() [JSON] {
+pub fn shell() [JSON] -> {
     return [
         JSON.Null;
     ];

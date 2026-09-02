@@ -67,17 +67,332 @@ pub(crate) fn package_guarantees_for_manifest(
             jet_foundation::Authority::ApplicationAuthority::from_policy(
                 package_manifest.authority.holds.allow.as_deref(),
                 package_manifest.authority.holds.deny.as_deref(),
-                "package.jet authority.holds",
+                &format!("{} authority.holds", package_manifest.origin),
             ),
     }
 }
+/// Complete one inline Package with the same file-backed Config and member
+/// checks used by the canonical `package.jet` loader. The candidate is mutated
+/// only after each Config has been checked and composed, so a failed inline
+/// load never leaves partially-applied Package facts behind.
+fn complete_inline_package_facts(
+    facts: &mut crate::Package::PackageFacts,
+    source_root: &Path,
+) -> Result<(), crate::Package::PackageParseError> {
+    facts.compose_configs(source_root)?;
+    facts.validate_guarantees()?;
+    facts
+        .validate_defaults()
+        .map_err(|error| crate::Package::PackageParseError::Composition(error.to_string()))?;
+    facts.validate_members_in(source_root)
+}
+struct InlineLockFailure {
+    path: PathBuf,
+    raw: String,
+    diagnostic: Diagnostic,
+}
+
+/// Apply the same optional lock freshness check to an inline Package that the
+/// extracted `package.jet` path receives. A missing lock remains valid for an
+/// unlocked load; `--locked` performs the stricter source check separately.
+fn verify_inline_manifest_lock(
+    package_root: &Path,
+    manifest: &Manifest::Manifest,
+) -> Result<(), InlineLockFailure> {
+    if manifest.dependencies.is_empty() {
+        return Ok(());
+    }
+    let resolver = AuthorityResolver::open(package_root).map_err(|error| InlineLockFailure {
+        path: package_root.to_path_buf(),
+        raw: String::new(),
+        diagnostic: error.diagnostic(),
+    })?;
+    let lock_file = match resolver.checked_file(Path::new(Syntax::UNIFIED_LOCK_FILE)) {
+        Ok(file) => file,
+        Err(error) if error.is_missing() => return Ok(()),
+        Err(error) => {
+            return Err(InlineLockFailure {
+                path: package_root.to_path_buf(),
+                raw: String::new(),
+                diagnostic: error.diagnostic(),
+            })
+        }
+    };
+    let path = lock_file.path.clone();
+    let raw = lock_file.text().map_err(|error| InlineLockFailure {
+        path: path.clone(),
+        raw: String::new(),
+        diagnostic: error.diagnostic(),
+    })?;
+    resolver
+        .revalidate_file(&lock_file)
+        .map_err(|error| InlineLockFailure {
+            path: path.clone(),
+            raw: raw.clone(),
+            diagnostic: error.diagnostic(),
+        })?;
+    let lock = crate::Lock::parse(&raw).map_err(|_| InlineLockFailure {
+        path: path.clone(),
+        raw: raw.clone(),
+        diagnostic: crate::Lock::e1202(&path.display().to_string()),
+    })?;
+    crate::Lock::verify_lock_matches_manifest(
+        &lock,
+        manifest,
+        &path.display().to_string(),
+    )
+    .map_err(|diagnostic| InlineLockFailure {
+        path: path.clone(),
+        raw: raw.clone(),
+        diagnostic,
+    })?;
+    resolver
+        .revalidate_file(&lock_file)
+        .map_err(|error| InlineLockFailure {
+            path,
+            raw,
+            diagnostic: error.diagnostic(),
+        })?;
+    Ok(())
+}
+
+
+
+/// Read the single package context carried by an already-loaded program.
+///
+/// The loader rejects a canonical manifest plus an inline declaration before
+/// sema. This accessor therefore chooses exactly one source and always feeds
+/// the same `PackageFacts` parser used for `package.jet`.
+pub fn package_facts_for_bundle(
+    bundle: &ProgramBundle,
+) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
+    let manifest_root = find_manifest_root_checked(&bundle.project_root)
+        .map_err(|diagnostic| vec![diagnostic])?;
+    let entry = bundle.modules.get(bundle.entry);
+    let inline = match entry {
+        Some(module) => crate::Package::extract_inline_package(&module.source)
+            .map_err(|error| vec![error.diagnostic()]),
+        None => Ok(None),
+    };
+    let inline = match inline {
+        Ok(value) => value,
+        Err(diagnostics) => return Err(diagnostics),
+    };
+    if let Some(block) = inline {
+        if manifest_root.is_some() {
+            return Err(vec![Diagnostic::error(
+                "E1363",
+                "an inline Package conflicts with package.jet".to_string(),
+                "one project cannot carry both an inline Package block and a package.jet manifest"
+                    .to_string(),
+                "remove package.jet or remove the inline Package block".to_string(),
+                Some(block.span),
+            )]);
+        }
+        let module = entry.expect("inline package block has an entry module");
+        let mut facts = crate::Package::PackageFacts::parse_uncomposed(
+            block.body(&module.source),
+            module.display.clone(),
+        )
+        .map_err(|error| {
+            vec![Diagnostic::error(
+                "E1362",
+                "the inline Package body is malformed".to_string(),
+                error.to_string(),
+                "fix the inline Package fields, then retry".to_string(),
+                Some(block.body_span),
+            )]
+        })?;
+        let source_root = module.path.parent().unwrap_or_else(|| Path::new("."));
+        complete_inline_package_facts(&mut facts, source_root)
+            .map_err(|error| {
+                vec![Diagnostic::error(
+                    "E1362",
+                    "the inline Package body is malformed".to_string(),
+                    error.to_string(),
+                    "fix the inline Package fields, then retry".to_string(),
+                    Some(block.body_span),
+                )]
+            })?;
+        return Ok(Some(facts));
+    }
+    if let Some(inline_root) = find_inline_package_root_checked(&bundle.project_root)
+        .map_err(|diagnostic| vec![diagnostic])?
+    {
+        if manifest_root.is_some() {
+            return Err(inline_manifest_conflict_loader_error(&inline_root).into_plain());
+        }
+        return package_facts_for_root(&inline_root);
+    }
+    let Some(root) = manifest_root else {
+        return Ok(None);
+    };
+    crate::Package::PackageFacts::load_checked(&root)
+        .map_err(|error| vec![error.diagnostic()])
+}
+
+/// Read the one package context selected by an entry path.
+///
+/// Inline `Package { … }` is checked before manifest discovery. A canonical
+/// `package.jet` therefore remains the fallback only when the entry carries
+/// no inline package, and the two carriers cannot silently diverge.
+pub fn package_facts_for_entry(
+    entry: &Path,
+) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
+    let source = fs::read_to_string(entry).map_err(|error| {
+        vec![Diagnostic::error(
+            "E1331",
+            format!("entry `{}` cannot be read", entry.display()),
+            error.to_string(),
+            "restore the entry source, then retry".to_string(),
+            None,
+        )]
+    })?;
+    let entry_root = entry.parent().unwrap_or_else(|| Path::new("."));
+    let manifest_root =
+        find_manifest_root_checked(entry_root).map_err(|diagnostic| vec![diagnostic])?;
+    let inline_root =
+        find_inline_package_root_checked(entry_root).map_err(|diagnostic| vec![diagnostic])?;
+    let facts = package_facts_from_entry_source(entry, &source, manifest_root.clone())?;
+    if manifest_root.is_some() && inline_root.is_some() {
+        return Err(
+            inline_manifest_conflict_loader_error(inline_root.as_ref().expect("inline root"))
+                .into_plain(),
+        );
+    }
+    if facts.is_some() || inline_root.is_none() {
+        return Ok(facts);
+    }
+    package_facts_for_root(&inline_root.expect("inline root checked above"))
+}
+
+fn package_facts_from_entry_source(
+    entry: &Path,
+    source: &str,
+    manifest_root: Option<PathBuf>,
+) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
+    let inline = crate::Package::extract_inline_package(source)
+        .map_err(|error| vec![error.diagnostic()])?;
+    if let Some(block) = inline {
+        if manifest_root.is_some() {
+            return Err(vec![Diagnostic::error(
+                "E1363",
+                "an inline Package conflicts with package.jet".to_string(),
+                "one project cannot carry both an inline Package block and a package.jet manifest"
+                    .to_string(),
+                "remove package.jet or remove the inline Package block".to_string(),
+                Some(block.span),
+            )]);
+        }
+        let mut facts = crate::Package::PackageFacts::parse_uncomposed(
+            block.body(source),
+            entry.display().to_string(),
+        )
+        .map_err(|error| {
+            vec![Diagnostic::error(
+                "E1362",
+                "the inline Package body is malformed".to_string(),
+                error.to_string(),
+                "fix the inline Package fields, then retry".to_string(),
+                Some(block.body_span),
+            )]
+        })?;
+        let source_root = entry.parent().unwrap_or_else(|| Path::new("."));
+        complete_inline_package_facts(&mut facts, source_root)
+            .map_err(|error| {
+                vec![Diagnostic::error(
+                    "E1362",
+                    "the inline Package body is malformed".to_string(),
+                    error.to_string(),
+                    "fix the inline Package fields, then retry".to_string(),
+                    Some(block.body_span),
+                )]
+            })?;
+        return Ok(Some(facts));
+    }
+    let Some(root) = manifest_root else {
+        return Ok(None);
+    };
+    crate::Package::PackageFacts::load_checked(&root)
+        .map_err(|error| vec![error.diagnostic()])
+}
+
+fn inline_manifest_conflict_loader_error(root: &Path) -> LoaderError {
+    let result = (|| {
+        let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
+        let carrier = checked_inline_package_entry(&resolver)?
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "E1363",
+                    "an inline Package conflicts with package.jet".to_string(),
+                    "one project cannot carry both an inline Package block and a package.jet manifest"
+                        .to_string(),
+                    "remove package.jet or remove the inline Package block".to_string(),
+                    None,
+                )
+            })?;
+        let source = carrier.text().map_err(|error| error.diagnostic())?;
+        let block = crate::Package::extract_inline_package(&source)
+            .map_err(|error| error.diagnostic())?
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "E1363",
+                    "an inline Package conflicts with package.jet".to_string(),
+                    "one project cannot carry both an inline Package block and a package.jet manifest"
+                        .to_string(),
+                    "remove package.jet or remove the inline Package block".to_string(),
+                    None,
+                )
+            })?;
+        Ok::<_, Diagnostic>(LoaderError::at(
+            &carrier.path.display().to_string(),
+            &source,
+            vec![Diagnostic::from_row("E1363", &[], Some(block.span))],
+        ))
+    })();
+    match result {
+        Ok(error) => error,
+        Err(diagnostic) => LoaderError::at(&root.display().to_string(), "", vec![diagnostic]),
+    }
+}
+
+
+/// Read the package facts rooted at a project directory. An inline carrier is
+/// selected from the canonical stock entry before extracted manifest lookup.
+pub fn package_facts_for_root(
+    root: &Path,
+) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
+    let resolver = AuthorityResolver::open(root).map_err(|error| vec![error.diagnostic()])?;
+    let manifest_root =
+        find_manifest_root_checked(resolver.root()).map_err(|diagnostic| vec![diagnostic])?;
+    let Some(entry) = checked_inline_package_entry(&resolver).map_err(|diagnostic| vec![diagnostic])?
+    else {
+        let Some(root) = manifest_root else {
+            return Ok(None);
+        };
+        return crate::Package::PackageFacts::load_checked(&root)
+            .map_err(|error| vec![error.diagnostic()]);
+    };
+    let source = entry
+        .text()
+        .map_err(|error| vec![error.diagnostic()])?;
+    let facts = package_facts_from_entry_source(&entry.path, &source, manifest_root)?;
+    resolver
+        .revalidate_file(&entry)
+        .map_err(|error| vec![error.diagnostic()])?;
+    Ok(facts)
+}
 
 fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
-    let (tokens, lex_diags) = Lexer::lex(source);
+    let source_for_parse = match crate::Package::mask_inline_package_source(source) {
+        Ok((masked, _)) => masked,
+        Err(error) => return PreparedFrontendModule::LexFailed(vec![error.diagnostic()]),
+    };
+    let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
     if !lex_diags.is_empty() {
         return PreparedFrontendModule::LexFailed(lex_diags);
     }
-    match Parser::parse_for_check_with_source(&tokens, source) {
+    match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
         Ok((program, teaching)) => PreparedFrontendModule::Parsed(program, teaching),
         Err(diagnostics) => PreparedFrontendModule::ParseFailed(diagnostics),
     }
@@ -506,7 +821,7 @@ fn record_import_edge_fact(
     ledger.record_structure_fact(fact);
 }
 
-/// Build the U17 package resolution from a project's `package.jet` text and the
+/// Build the U17 package resolution from already-parsed Package facts and the
 /// shared hangar store.
 ///
 /// Reading the hangar is a *pure lookup*: the compiler never realizes on demand
@@ -515,26 +830,11 @@ fn record_import_edge_fact(
 /// (`collect_dep_dirs` only links deps already present on disk; `jet fetch` is
 /// the separate realize step). So a declared-but-unbuilt library is a friendly
 /// "run `jetpack env --prep`" (E0983), never a silent network fetch.
-fn collect_pkg_resolution(raw: &str) -> Result<PkgResolution, Diagnostic> {
+fn collect_pkg_resolution(
+    facts: &crate::Package::PackageFacts,
+) -> Result<PkgResolution, Diagnostic> {
     let mut declared_deps = HashSet::new();
     let mut hangar_deps = HashSet::new();
-    let facts =
-        crate::Package::PackageFacts::parse_uncomposed(raw, "package.jet").map_err(|error| {
-            match &error {
-                crate::Package::PackageParseError::Composition(detail)
-                    if detail.contains("is a diagnostic code") =>
-                {
-                    crate::Manifest::manifest_parse_diagnostic(Path::new("package.jet"), &error)
-                }
-                _ => Diagnostic::error(
-                    "E1206",
-                    "invalid package manifest".to_string(),
-                    error.to_string(),
-                    "fix the fields in package.jet before loading the project".to_string(),
-                    None,
-                ),
-            }
-        })?;
     for (name, source) in &facts.deps {
         // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
         // package — it must not shadow `use <pkg>` resolution (e.g. a dep
@@ -846,6 +1146,19 @@ fn load_entry_with_overlays_mode_on_stack(
             ));
         }
     };
+    let inline_root = match find_inline_package_root_checked(&entry_dir) {
+        Ok(root) => root.filter(|inline| {
+            workspace_root
+                .as_ref()
+                .is_none_or(|workspace| is_physically_within(workspace, inline))
+        }),
+        Err(diagnostic) => {
+            return Err(record_loader_error(
+                &mut sink,
+                LoaderError::at(&entry_abs.display().to_string(), "", vec![diagnostic]),
+            ));
+        }
+    };
     if manifest_root.is_none() {
         if let Some((path, diagnostic)) = stale_manifest_name_diagnostic(&entry_dir) {
             return Err(record_loader_error(
@@ -855,6 +1168,7 @@ fn load_entry_with_overlays_mode_on_stack(
         }
     }
     let validates_project_parts = manifest_root.is_some()
+        || inline_root.is_some()
         || workspace_root.is_some()
         || entry_abs
             .file_name()
@@ -924,6 +1238,51 @@ fn load_entry_with_overlays_mode_on_stack(
                 ));
             }
         };
+        let entry_source = if let Some((_, text)) = overlays
+            .iter()
+            .rev()
+            .find(|(path, _)| normalize_path(path) == entry_abs)
+        {
+            (*text).to_string()
+        } else {
+            match checked_source_file_with_resolver(
+                &entry_abs,
+                &entry_abs.display().to_string(),
+                &resolver,
+            ) {
+                Ok((_, _, source)) => source,
+                Err(error) => return Err(record_loader_error(&mut sink, error)),
+            }
+        };
+        match crate::Package::extract_inline_package(&entry_source) {
+            Ok(Some(block)) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &entry_abs.display().to_string(),
+                        &entry_source,
+                        vec![Diagnostic::from_row("E1363", &[], Some(block.span))],
+                    ),
+                ));
+            }
+            Ok(None) if inline_root.is_some() => {
+                let error = inline_manifest_conflict_loader_error(
+                    inline_root.as_ref().expect("inline root"),
+                );
+                return Err(record_loader_error(&mut sink, error));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &entry_abs.display().to_string(),
+                        &entry_source,
+                        vec![error.diagnostic()],
+                    ),
+                ));
+            }
+        }
         let package_manifest = match crate::Package::PackageFacts::parse_uncomposed(
             &raw,
             pack_path.display().to_string(),
@@ -1127,7 +1486,6 @@ fn load_entry_with_overlays_mode_on_stack(
                         ));
                     }
                 }
-
                 // E1212/E1213: each packages: entry must have exactly one
                 // module declaration in the source tree (U10 Chunk 3).
                 {
@@ -1165,22 +1523,23 @@ fn load_entry_with_overlays_mode_on_stack(
                     }
                 }
 
+
                 // Collect package dep source directories for module search.
                 let dep_dirs = match collect_dep_dirs(&mf, &manifest_dir) {
                     Ok(dep_dirs) => dep_dirs,
-                    Err(diagnostic) => {
+                    Err(diagnostics) => {
                         return Err(record_loader_error(
                             &mut sink,
                             LoaderError::at(
                                 &pack_path.display().to_string(),
                                 &raw,
-                                vec![diagnostic],
+                                diagnostics,
                             ),
                         ));
                     }
                 };
                 // U17: declared package kinds + realized library staging dirs.
-                let resolution = collect_pkg_resolution(&raw).map_err(|diagnostic| {
+                let resolution = collect_pkg_resolution(&package_manifest).map_err(|diagnostic| {
                     record_loader_error(
                         &mut sink,
                         LoaderError::at(&pack_path.display().to_string(), &raw, vec![diagnostic]),
@@ -1247,13 +1606,18 @@ fn load_entry_with_overlays_mode_on_stack(
                         ),
                     )
                 })?;
+                let mut dependency_boundary_policies = dep_dirs
+                    .values()
+                    .filter_map(|dependency| dependency.boundary_policy.clone())
+                    .collect::<Vec<_>>();
+                dependency_boundary_policies.sort_by(|left, right| {
+                    left.package
+                        .cmp(&right.package)
+                        .then_with(|| left.source_root.cmp(&right.source_root))
+                });
                 let mut boundary_policies =
                     vec![ImportBoundaryPolicy::from_manifest(&mf, &manifest_dir)];
-                boundary_policies.extend(
-                    dep_dirs
-                        .values()
-                        .filter_map(|dependency| dependency.boundary_policy.clone()),
-                );
+                boundary_policies.extend(dependency_boundary_policies);
                 (
                     manifest_dir,
                     dep_dirs,
@@ -1280,7 +1644,10 @@ fn load_entry_with_overlays_mode_on_stack(
         // self-contained) and resolve each one up front, so the ordinary
         // `Module` import resolution (`resolve_module_import`) finds them in
         // `realized_libs` exactly like a hangar-realized `library` (U17).
-        let project_root = workspace_root.clone().unwrap_or_else(|| entry_dir.clone());
+        let mut package_source_root = inline_root.clone().or_else(|| workspace_root.clone());
+        let project_root = package_source_root
+            .clone()
+            .unwrap_or_else(|| entry_dir.clone());
         let mut resolution = PkgResolution::default();
         // An overlay owns its path's text (an LSP unsaved buffer, a staged
         // codemod tree) exactly as it does in `load_file`: a manifest-less
@@ -1304,7 +1671,331 @@ fn load_entry_with_overlays_mode_on_stack(
                 .map(|(_, _, source)| source.clone())
                 .expect("one source reader must provide the entry text")
         });
-        let (toks, lex_diags) = crate::Lexer::lex(&raw);
+        let mut package_source = raw.clone();
+        let mut package_origin = entry_abs.clone();
+        let mut inline_block = match crate::Package::extract_inline_package(&raw) {
+            Ok(block) => block,
+            Err(error) => {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &entry_abs.display().to_string(),
+                        &raw,
+                        vec![error.diagnostic()],
+                    ),
+                ));
+            }
+        };
+        if inline_block.is_some() && inline_root.is_none() {
+            package_source_root = Some(entry_dir.clone());
+        }
+        if inline_block.is_none() {
+            if let Some(inline_root) = inline_root.as_ref() {
+                let resolver = match AuthorityResolver::open(inline_root) {
+                    Ok(resolver) => resolver,
+                    Err(error) => {
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(
+                                &inline_root.display().to_string(),
+                                "",
+                                vec![error.diagnostic()],
+                            ),
+                        ));
+                    }
+                };
+                let carrier = match checked_inline_package_entry(&resolver) {
+                    Ok(Some(file)) => file,
+                    Ok(None) => {
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(
+                                &inline_root.display().to_string(),
+                                "",
+                                vec![Diagnostic::error(
+                                    "E1362",
+                                    "the inline Package entry disappeared".to_string(),
+                                    "the package source changed during entry resolution"
+                                        .to_string(),
+                                    "restore the inline Package declaration and retry".to_string(),
+                                    None,
+                                )],
+                            ),
+                        ));
+                    }
+                    Err(diagnostic) => {
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(
+                                &inline_root.display().to_string(),
+                                "",
+                                vec![diagnostic],
+                            ),
+                        ));
+                    }
+                };
+                package_source = match carrier.text() {
+                    Ok(source) => source,
+                    Err(error) => {
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(
+                                &carrier.path.display().to_string(),
+                                "",
+                                vec![error.diagnostic()],
+                            ),
+                        ));
+                    }
+                };
+                package_origin = carrier.path.clone();
+                inline_block = match crate::Package::extract_inline_package(&package_source) {
+                    Ok(block) => block,
+                    Err(error) => {
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(
+                                &package_origin.display().to_string(),
+                                &package_source,
+                                vec![error.diagnostic()],
+                            ),
+                        ));
+                    }
+                };
+            }
+        }
+        let mut package_policy = organization_policy.clone();
+        let mut package_lints_deny = Vec::new();
+        let mut package_guarantees = PackageGuarantees::default();
+        let mut package_output_roots = HashSet::new();
+        let mut package_output_declarations = Vec::new();
+        let mut package_defaults = Vec::new();
+        let mut program_allocator = crate::TargetMachine::AllocatorPolicy::HostedDefault;
+        let mut pkg_dep_dirs = HashMap::new();
+        let mut boundary_policies = Vec::new();
+        if let Some(block) = inline_block {
+            let mut package_manifest = match crate::Package::PackageFacts::parse_uncomposed(
+                block.body(&package_source),
+                package_origin.display().to_string(),
+            ) {
+                Ok(facts) => facts,
+                Err(error) => {
+                    return Err(record_loader_error(
+                        &mut sink,
+                        LoaderError::at(
+                            &package_origin.display().to_string(),
+                            &package_source,
+                            vec![Diagnostic::error(
+                                "E1362",
+                                "the inline Package body is malformed".to_string(),
+                                error.to_string(),
+                                "fix the inline Package fields, then retry".to_string(),
+                                Some(block.body_span),
+                            )],
+                        ),
+                    ));
+                }
+            };
+            if let Err(error) =
+                complete_inline_package_facts(
+                    &mut package_manifest,
+                    package_source_root.as_deref().unwrap_or(&entry_dir),
+                )
+            {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &package_origin.display().to_string(),
+                        &package_source,
+                        vec![Diagnostic::error(
+                            "E1362",
+                            "the inline Package body is malformed".to_string(),
+                            error.to_string(),
+                            "fix the inline Package fields, then retry".to_string(),
+                            Some(block.body_span),
+                        )],
+                    ),
+                ));
+            }
+            let mf =
+                match crate::Package::to_manifest(&package_manifest, block.body(&package_source)) {
+                Ok(manifest) => manifest,
+                Err(diagnostic) => {
+                    return Err(record_loader_error(
+                        &mut sink,
+                        LoaderError::at(
+                            &package_origin.display().to_string(),
+                            &package_source,
+                            vec![diagnostic],
+                        ),
+                    ));
+                }
+            };
+            layer_ceiling = mf.package.layer;
+            package_edition = Manifest::effective_edition(&mf);
+            if let Err(diagnostic) =
+                Manifest::check_toolchain(&mf, &package_origin.display().to_string())
+            {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &package_origin.display().to_string(),
+                        &package_source,
+                        vec![diagnostic],
+                    ),
+                ));
+            }
+            if let Err(diagnostic) =
+                Manifest::check_edition_support(&mf, &package_origin.display().to_string())
+            {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &package_origin.display().to_string(),
+                        &package_source,
+                        vec![diagnostic],
+                    ),
+                ));
+            }
+            if let Err(failure) = verify_inline_manifest_lock(
+                package_source_root.as_deref().unwrap_or(&entry_dir),
+                &mf,
+            ) {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &failure.path.display().to_string(),
+                        &failure.raw,
+                        vec![failure.diagnostic],
+                    ),
+                ));
+            }
+            if let Err(diagnostic) = dry_resolve_path_deps(
+                &mf,
+                package_source_root.as_deref().unwrap_or(&entry_dir),
+            ) {
+                return Err(record_loader_error(
+                    &mut sink,
+                    LoaderError::at(
+                        &package_origin.display().to_string(),
+                        &package_source,
+                        vec![diagnostic],
+                    ),
+                ));
+            }
+            for pkg in &package_manifest.packages {
+                match crate::Package::discover_module_in(
+                    package_source_root.as_deref().unwrap_or(&entry_dir),
+                    &pkg.name,
+                ) {
+                    Ok(_) => {}
+                    Err(crate::Package::DiscoveryError::NotFound { name }) => {
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(
+                                &package_origin.display().to_string(),
+                                &package_source,
+                                vec![Manifest::e1212(
+                                    &entry_abs.display().to_string(),
+                                    &name,
+                                )],
+                            ),
+                        ));
+                    }
+                    Err(crate::Package::DiscoveryError::Ambiguous { name, paths }) => {
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(
+                                &package_origin.display().to_string(),
+                                &package_source,
+                                vec![Manifest::e1213(
+                                    &entry_abs.display().to_string(),
+                                    &name,
+                                    &paths,
+                                )],
+                            ),
+                        ));
+                    }
+                }
+            }
+            pkg_dep_dirs = match collect_dep_dirs(
+                &mf,
+                package_source_root.as_deref().unwrap_or(&entry_dir),
+            ) {
+                Ok(dep_dirs) => dep_dirs,
+                Err(diagnostics) => {
+                    return Err(record_loader_error(
+                        &mut sink,
+                        LoaderError::at(
+                            &package_origin.display().to_string(),
+                            &package_source,
+                            diagnostics,
+                        ),
+                    ));
+                }
+            };
+            resolution = collect_pkg_resolution(&package_manifest).map_err(|diagnostic| {
+                record_loader_error(
+                    &mut sink,
+                    LoaderError::at(&package_origin.display().to_string(), &package_source, vec![diagnostic]),
+                )
+            })?;
+            package_guarantees = package_guarantees_for_manifest(&package_manifest);
+            package_output_declarations = package_manifest
+                .outputs
+                .iter()
+                .filter_map(|(address, output)| {
+                    let selected = package_manifest
+                        .entry_path(
+                            package_source_root.as_deref().unwrap_or(&entry_dir),
+                            output,
+                        )
+                        .ok()
+                        .flatten()?;
+                    if selected != entry_abs {
+                        return None;
+                    }
+                    let entry = output.entry.clone()?;
+                    let kind = match &output.kind {
+                        crate::Package::PackageOutputKind::Library => OutputKind::Library,
+                        crate::Package::PackageOutputKind::Executable => OutputKind::Executable,
+                        crate::Package::PackageOutputKind::Service => OutputKind::Service,
+                        crate::Package::PackageOutputKind::Check => OutputKind::Check,
+                        crate::Package::PackageOutputKind::Environment => OutputKind::Environment,
+                        crate::Package::PackageOutputKind::Image => OutputKind::Image,
+                        crate::Package::PackageOutputKind::Bundle => OutputKind::Bundle,
+                        crate::Package::PackageOutputKind::System => OutputKind::System,
+                        crate::Package::PackageOutputKind::Fleet => OutputKind::Fleet,
+                    };
+                    Some((address.clone(), output.name.clone(), kind, entry))
+                })
+                .collect();
+            package_defaults = package_manifest
+                .defaults
+                .iter()
+                .map(|(name, address)| (name.clone(), address.clone()))
+                .collect();
+            package_output_roots = package_output_declarations
+                .iter()
+                .filter_map(|(_, _, _, entry)| entry.split('.').next())
+                .filter(|root| !root.is_empty())
+                .map(str::to_owned)
+                .collect();
+            package_lints_deny = package_manifest.policy.lints_deny.clone().unwrap_or_default();
+            package_policy.extend(package_manifest.policy.declarations.clone());
+            let source = package_origin.display().to_string();
+            for declaration in package_policy
+                .iter_mut()
+                .filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package)
+            {
+                declaration.source = source.clone();
+            }
+            boundary_policies.push(ImportBoundaryPolicy::from_manifest(
+                &mf,
+                package_source_root.as_deref().unwrap_or(&entry_dir),
+            ));
+            program_allocator = package_manifest.allocator.clone();
+        } else {
+            let (toks, lex_diags) = crate::Lexer::lex(&raw);
         if lex_diags.is_empty() {
             if let Ok(prog) = crate::Parser::parse(&toks) {
                 for dep in crate::ScriptDeps::collect(&prog) {
@@ -1343,6 +2034,7 @@ fn load_entry_with_overlays_mode_on_stack(
                 }
             }
         }
+        }
         if let Some((entry_resolver, entry_checked, _)) = entry_authority.as_ref() {
             if let Err(error) = entry_resolver.revalidate_file(entry_checked) {
                 return Err(record_loader_error(
@@ -1357,16 +2049,16 @@ fn load_entry_with_overlays_mode_on_stack(
         }
         (
             project_root,
-            HashMap::new(),
+            pkg_dep_dirs,
             resolution,
-            organization_policy,
-            Vec::new(),
-            PackageGuarantees::default(),
-            HashSet::new(),
-            Vec::new(),
-            Vec::new(),
-            crate::TargetMachine::AllocatorPolicy::HostedDefault,
-            Vec::new(),
+            package_policy,
+            package_lints_deny,
+            package_guarantees,
+            package_output_roots,
+            package_output_declarations,
+            package_defaults,
+            program_allocator,
+            boundary_policies,
         )
     };
 
@@ -2044,11 +2736,84 @@ pub fn find_manifest_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagn
         dir = parent;
     }
 }
+fn checked_inline_package_entry(
+    resolver: &AuthorityResolver,
+) -> Result<Option<CheckedFile>, Diagnostic> {
+    let candidates = [
+        PathBuf::from(Syntax::DEFAULT_ENTRY_FILE),
+        PathBuf::from("src").join(Syntax::DEFAULT_ENTRY_FILE),
+    ];
+    for relative in candidates {
+        let file = match resolver.checked_file(&relative) {
+            Ok(file) => file,
+            Err(error) if error.is_missing() => continue,
+            Err(error) => return Err(error.diagnostic()),
+        };
+        let source = file.text().map_err(|error| error.diagnostic())?;
+        let inline = crate::Package::extract_inline_package(&source)
+            .map_err(|error| error.diagnostic())?;
+        resolver
+            .revalidate_file(&file)
+            .map_err(|error| error.diagnostic())?;
+        if inline.is_some() {
+            return Ok(Some(file));
+        }
+    }
+    Ok(None)
+}
 
-/// Walk upward from `start` to find the nearest directory containing a Package
-/// root, stopping at the active workspace boundary.
+/// Walk upward from `start` to find the nearest root whose stock entry carries
+/// the canonical inline Package block. Workspace boundaries remain authoritative
+/// just as they are for extracted package manifests.
+pub fn find_inline_package_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+    let mut dir =
+        AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())?;
+    loop {
+        let Some(resolver) =
+            AuthorityResolver::open_for_authority_walk(&dir).map_err(|error| error.diagnostic())?
+        else {
+            let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+                return Ok(None);
+            };
+            dir = parent;
+            continue;
+        };
+        let workspace_boundary = match resolver.resolve_workspace_source() {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(error) => return Err(error.workspace_diagnostic()),
+        };
+        let has_manifest = match resolver.checked_manifest(Path::new(".")) {
+            Ok(_) => true,
+            Err(error) if error.is_missing() => false,
+            Err(error) => return Err(error.diagnostic()),
+        };
+        if checked_inline_package_entry(&resolver)?.is_some() {
+            return Ok(Some(dir));
+        }
+        if workspace_boundary || has_manifest {
+            return Ok(None);
+        }
+        let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+            return Ok(None);
+        };
+        dir = parent;
+    }
+}
+
+/// Find either the canonical extracted package root or the root selected by an
+/// inline Package carrier. The inline result wins so a later facts read emits
+/// the explicit inline/manifest conflict instead of silently choosing one.
+pub fn find_package_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
+    let manifest = find_manifest_root_checked(start)?;
+    let inline = find_inline_package_root_checked(start)?;
+    Ok(inline.or(manifest))
+}
+
+/// Find either the canonical extracted package root or the root selected by an
+/// inline Package carrier, stopping at the active workspace boundary.
 pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
-    find_manifest_root_checked(start).ok().flatten()
+    find_package_root_checked(start).ok().flatten()
 }
 
 /// Verify the source trees a locked build is about to load.
@@ -2061,21 +2826,22 @@ pub fn verify_locked_dependency_sources(entry_path: &str) -> Result<(), Vec<Diag
     let entry = Path::new(entry_path);
     let entry_dir = entry.parent().unwrap_or(Path::new("."));
     let manifest_root = find_manifest_root_checked(entry_dir).map_err(|d| vec![d])?;
-    let Some(manifest_root) = manifest_root else {
+    let package_root = manifest_root.clone().or_else(|| {
+        AuthorityResolver::authority_walk_root(entry_dir).ok()
+    });
+    let Some(package_root) = package_root else {
         return Ok(());
     };
-    let lock_root = find_workspace_root_checked(entry_dir)
-        .map_err(|d| vec![d])?
-        .unwrap_or_else(|| manifest_root.clone());
-    let resolver = AuthorityResolver::open(&manifest_root).map_err(|error| vec![error.diagnostic()])?;
-    let checked = resolver
-        .checked_manifest(Path::new("."))
-        .map_err(|error| vec![error.diagnostic()])?;
-    let raw = checked.file.text().map_err(|error| vec![error.diagnostic()])?;
-    let manifest = Manifest::parse(&checked.file.path, &raw).map_err(|diagnostic| vec![diagnostic])?;
+    let Some(facts) = package_facts_for_entry(entry)? else {
+        return Ok(());
+    };
+    let manifest = crate::Package::to_manifest(&facts, "").map_err(|diagnostic| vec![diagnostic])?;
     if manifest.dependencies.is_empty() {
         return Ok(());
     }
+    let lock_root = find_workspace_root_checked(entry_dir)
+        .map_err(|d| vec![d])?
+        .unwrap_or_else(|| package_root.clone());
     let lock_path = lock_root.join(Syntax::UNIFIED_LOCK_FILE);
     let lock = crate::Lock::load(&lock_root)
         .ok_or_else(|| vec![crate::Lock::e1202(&lock_path.display().to_string())])?;
@@ -2088,7 +2854,7 @@ pub fn verify_locked_dependency_sources(entry_path: &str) -> Result<(), Vec<Diag
     let mut resolved_sources = HashMap::new();
     verify_locked_manifest(
         &manifest,
-        &manifest_root,
+        &package_root,
         &lock_root,
         &lock,
         &mut visited,
@@ -2243,28 +3009,14 @@ fn load_locked_manifest_from_authority(
     dep_name: &str,
     source_root: &Path,
 ) -> Result<Manifest::Manifest, Vec<Diagnostic>> {
-    let resolver = AuthorityResolver::open(source_root).map_err(|error| {
-        if error.is_missing() {
-            vec![locked_dependency_diagnostic(
-                dep_name,
-                "the locked source has no readable package.jet",
-            )]
-        } else {
-            vec![error.diagnostic()]
-        }
-    })?;
-    let checked = resolver.checked_manifest(Path::new(".")).map_err(|error| {
-        if error.is_missing() {
-            vec![locked_dependency_diagnostic(
-                dep_name,
-                "the locked source has no readable package.jet",
-            )]
-        } else {
-            vec![error.diagnostic()]
-        }
-    })?;
-    let raw = checked.file.text().map_err(|error| vec![error.diagnostic()])?;
-    Manifest::parse(&checked.file.path, &raw).map_err(|diagnostic| vec![diagnostic])
+    let facts = crate::Loader::package_facts_for_root(source_root)?;
+    let Some(facts) = facts else {
+        return Err(vec![locked_dependency_diagnostic(
+            dep_name,
+            "the locked source has no readable package source",
+        )]);
+    };
+    crate::Package::to_manifest(&facts, "").map_err(|diagnostic| vec![diagnostic])
 }
 
 fn resolve_locked_path_dependency(
@@ -2322,7 +3074,6 @@ fn verify_locked_source_tree(
             "the locked source is not a real directory",
         )]);
     }
-    validate_locked_source_nodes(source_root, dep_name)?;
     if expected_hash.trim().is_empty() {
         return Err(vec![locked_dependency_diagnostic(
             dep_name,
@@ -2361,7 +3112,7 @@ fn locked_store_source_path(
             "the lock has no safe immutable store fingerprint",
         ));
     }
-    let root = std::env::var("JET_STORE_DIR")
+    let root = std::env::var("JET_PACKAGE_STORE_DIR")
         .or_else(|_| std::env::var("HOME").map(|home| format!("{home}/.jet/store")))
         .or_else(|_| std::env::var("USERPROFILE").map(|home| format!("{home}/.jet/store")))
         .unwrap_or_else(|_| ".jet/store".to_string());
@@ -2382,49 +3133,6 @@ fn safe_store_component(value: &str) -> bool {
             Some(std::path::Component::Normal(_))
         )
         && Path::new(value).components().nth(1).is_none()
-}
-
-fn validate_locked_source_nodes(path: &Path, dep_name: &str) -> Result<(), Vec<Diagnostic>> {
-    let entries = std::fs::read_dir(path).map_err(|error| {
-        vec![locked_dependency_diagnostic(
-            dep_name,
-            &format!("the locked source cannot be read: {error}"),
-        )]
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            vec![locked_dependency_diagnostic(
-                dep_name,
-                &format!("the locked source cannot be read: {error}"),
-            )]
-        })?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with('.') || name == "build" || name == "target" {
-            continue;
-        }
-        let metadata = std::fs::symlink_metadata(entry.path()).map_err(|error| {
-            vec![locked_dependency_diagnostic(
-                dep_name,
-                &format!("the locked source node cannot be read: {error}"),
-            )]
-        })?;
-        if metadata.file_type().is_symlink() {
-            return Err(vec![locked_dependency_diagnostic(
-                dep_name,
-                "the locked source contains a symlink",
-            )]);
-        }
-        if metadata.is_dir() {
-            validate_locked_source_nodes(&entry.path(), dep_name)?;
-        } else if !metadata.is_file() {
-            return Err(vec![locked_dependency_diagnostic(
-                dep_name,
-                "the locked source contains an unsupported filesystem node",
-            )]);
-        }
-    }
-    Ok(())
 }
 
 fn locked_dependency_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
@@ -2641,12 +3349,23 @@ fn dry_resolve_recursive(
                 }
             }
         }
-        // Load the dep's manifest to get its package name + version.
-        let dep_mf = match Manifest::load(&dep_path) {
-            None => continue, // missing manifest is caught later; not an E1201
-            Some(Ok(manifest)) => manifest,
-            Some(Err(diagnostic)) => return Err(diagnostic),
+        // Load the dep's canonical package source to get its identity/version.
+        let dep_facts = match package_facts_for_root(&dep_path) {
+            Ok(Some(facts)) => facts,
+            Ok(None) => continue, // missing package source is caught later
+            Err(mut diagnostics) => {
+                return Err(diagnostics.pop().unwrap_or_else(|| {
+                    Diagnostic::error(
+                        "E1206",
+                        format!("package dependency `{dep_alias}` is invalid"),
+                        "the dependency package facts could not be loaded".to_string(),
+                        "restore the dependency package source and retry".to_string(),
+                        None,
+                    )
+                }))
+            }
         };
+        let dep_mf = crate::Package::to_manifest(&dep_facts, "")?;
         let dep_pkg_name = dep_mf.package.name.clone();
         let dep_version = dep_mf.package.version.clone();
 
@@ -2696,28 +3415,28 @@ fn dependency_authority_for_path<'a>(
 
 fn dependency_dir_from_resolver(
     resolver: AuthorityResolver,
-) -> Result<DependencyDir, Diagnostic> {
+) -> Result<DependencyDir, Vec<Diagnostic>> {
     // Source root for the dep: if .jet/ subdir exists use it, else the dep root.
     let src_root = match resolver.checked_directory(Path::new(".jet")) {
         Ok(directory) => directory.path,
         Err(error) if error.is_missing() => resolver.root().to_path_buf(),
-        Err(error) => return Err(error.diagnostic()),
+        Err(error) => return Err(vec![error.diagnostic()]),
     };
     let authority = if src_root == resolver.root() {
         resolver.clone()
     } else {
         let relative = src_root.strip_prefix(resolver.root()).map_err(|_| {
-            Diagnostic::error(
+            vec![Diagnostic::error(
                 "E1334",
                 "dependency source root is outside its checked package root".to_string(),
                 format!("`{}` is not below `{}`", src_root.display(), resolver.root().display()),
                 "repair the dependency's package layout and retry".to_string(),
                 None,
-            )
+            )]
         })?;
         let directory = resolver
             .checked_directory(relative)
-            .map_err(|error| error.diagnostic())?;
+            .map_err(|error| vec![error.diagnostic()])?;
         AuthorityResolver::from_checked_directory(&directory)
     };
     let (boundary_policy, auto_derive_default) =
@@ -2734,32 +3453,47 @@ fn dependency_dir_from_resolver(
 fn dependency_manifest_policy(
     resolver: &AuthorityResolver,
     source_root: &Path,
-) -> Result<(Option<ImportBoundaryPolicy>, Option<bool>), Diagnostic> {
-    let checked = match resolver.checked_manifest(Path::new(".")) {
-        Ok(checked) => checked,
-        Err(error) if error.is_missing() => return Ok((None, None)),
-        Err(error) => return Err(error.diagnostic()),
+) -> Result<(Option<ImportBoundaryPolicy>, Option<bool>), Vec<Diagnostic>> {
+    let manifest = if source_root == resolver.root() {
+        let facts = package_facts_for_root(source_root)?;
+        match facts {
+            Some(facts) => crate::Package::to_manifest(&facts, "")
+                .map_err(|diagnostic| vec![diagnostic])?,
+            None => return Ok((None, None)),
+        }
+    } else {
+        let checked = match resolver.checked_manifest(Path::new(".")) {
+            Ok(checked) => checked,
+            Err(error) if error.is_missing() => return Ok((None, None)),
+            Err(error) => return Err(vec![error.diagnostic()]),
+        };
+        let raw = checked
+            .file
+            .text()
+            .map_err(|error| vec![error.diagnostic()])?;
+        let manifest =
+            Manifest::parse(&checked.file.path, &raw).map_err(|diagnostic| vec![diagnostic])?;
+        resolver
+            .revalidate_file(&checked.file)
+            .map_err(|error| vec![error.diagnostic()])?;
+        manifest
     };
-    let raw = checked.file.text().map_err(|error| error.diagnostic())?;
-    let manifest = Manifest::parse(&checked.file.path, &raw)?;
     let auto_derive_default = !jet_foundation::LintPolicy::is_denied(
         manifest.policy.lints_deny.as_deref().unwrap_or_default(),
         jet_foundation::LintPolicy::auto_derive_lint().code,
     );
-    resolver
-        .revalidate_file(&checked.file)
-        .map_err(|error| error.diagnostic())?;
     Ok((
         Some(ImportBoundaryPolicy::from_manifest(&manifest, source_root)),
         Some(auto_derive_default),
     ))
 }
 
+
 /// Collect each dependency's owning manifest root and source root.
 fn collect_dep_dirs(
     mf: &Manifest::Manifest,
     project_root: &Path,
-) -> Result<HashMap<String, DependencyDir>, Diagnostic> {
+) -> Result<HashMap<String, DependencyDir>, Vec<Diagnostic>> {
     let mut dirs = HashMap::new();
     let lock = crate::Lock::load(project_root);
     for (dep_name, spec) in &mf.dependencies {
@@ -2767,31 +3501,41 @@ fn collect_dep_dirs(
             Manifest::DepSpec::Path { path } => {
                 let abs = normalize_path(&project_root.join(path));
                 let source = if let Some(lock) = lock.as_ref() {
-                    let package = lock
-                        .packages
-                        .iter()
-                        .find(|package| {
-                            package.name == *dep_name
-                                && matches!(&package.source, crate::Lock::LockSource::Path(_))
-                        })
-                        .ok_or_else(|| {
-                            crate::Lock::e1202(
+                    match lock.packages.iter().find(|package| {
+                        package.name == *dep_name
+                            && matches!(&package.source, crate::Lock::LockSource::Path(_))
+                    }) {
+                        Some(package) => locked_store_source_path(dep_name, package)
+                            .map_err(|diagnostic| vec![diagnostic])?,
+                        None if lock.root_dependencies.iter().any(|name| name == dep_name) => {
+                            // A compiler-generated lock may carry build
+                            // provenance before a direct path dependency has
+                            // an immutable store record. The root dependency
+                            // list still proves manifest membership; keep the
+                            // declared path for unlocked source loading.
+                            abs.clone()
+                        }
+                        None => {
+                            return Err(vec![crate::Lock::e1202(
                                 &project_root
                                     .join(Syntax::UNIFIED_LOCK_FILE)
                                     .display()
                                     .to_string(),
-                            )
-                        })?;
-                    locked_store_source_path(dep_name, package)?
+                            )]);
+                        }
+                    }
                 } else {
                     abs
                 };
                 let resolver = match AuthorityResolver::open(&source) {
                     Ok(resolver) => resolver,
                     Err(error) if error.is_missing() => continue,
-                    Err(error) => return Err(error.diagnostic()),
+                    Err(error) => return Err(vec![error.diagnostic()]),
                 };
-                dirs.insert(dep_name.clone(), dependency_dir_from_resolver(resolver)?);
+                dirs.insert(
+                    dep_name.clone(),
+                    dependency_dir_from_resolver(resolver)?,
+                );
             }
             Manifest::DepSpec::Git { .. } => {
                 // Git deps are consumed from the same immutable store entry
@@ -2812,14 +3556,16 @@ fn collect_dep_dirs(
                                     .display()
                                     .to_string(),
                             )
-                        })?;
-                    locked_store_source_path(dep_name, package)?
+                        })
+                        .map_err(|diagnostic| vec![diagnostic])?;
+                    locked_store_source_path(dep_name, package)
+                        .map_err(|diagnostic| vec![diagnostic])?
                 } else {
                     project_root.join(".jet-build").join("deps").join(dep_name)
                 };
                 match AuthorityResolver::open(&source) {
                     Err(error) if error.is_missing() => continue,
-                    Err(error) => return Err(error.diagnostic()),
+                    Err(error) => return Err(vec![error.diagnostic()]),
                     Ok(resolver) => {
                         dirs.insert(
                             dep_name.clone(),
@@ -2850,27 +3596,32 @@ fn collect_dep_dirs(
 /// authority is returned to the import caller.
 fn project_resolution(
     project_root: &Path,
-) -> Result<(HashMap<String, DependencyDir>, PkgResolution), Diagnostic> {
-    let resolver = AuthorityResolver::open(project_root).map_err(|error| error.diagnostic())?;
-    let checked = match resolver.checked_manifest(Path::new(".")) {
-        Ok(checked) => checked,
-        Err(error) if error.is_missing() => {
-            return Ok((HashMap::new(), PkgResolution::default()));
-        }
-        Err(error) => return Err(error.diagnostic()),
+) -> Result<(HashMap<String, DependencyDir>, PkgResolution), Vec<Diagnostic>> {
+    let Some(facts) = package_facts_for_root(project_root)? else {
+        return Ok((HashMap::new(), PkgResolution::default()));
     };
-    let pack_path = checked.file.path.clone();
-    let raw = checked.file.text().map_err(|error| error.diagnostic())?;
-    resolver
-        .revalidate_file(&checked.file)
-        .map_err(|error| error.diagnostic())?;
-    let mf = Manifest::parse(&pack_path, &raw)?;
-    resolver
-        .revalidate_file(&checked.file)
-        .map_err(|error| error.diagnostic())?;
-    let dep_dirs = collect_dep_dirs(&mf, project_root)?;
-    Ok((dep_dirs, collect_pkg_resolution(&raw)?))
+    let manifest = crate::Package::to_manifest(&facts, "")
+        .map_err(|diagnostic| vec![diagnostic])?;
+    let dep_dirs = collect_dep_dirs(&manifest, project_root)?;
+    let resolution =
+        collect_pkg_resolution(&facts).map_err(|diagnostic| vec![diagnostic])?;
+    Ok((dep_dirs, resolution))
 }
+
+fn project_resolution_for_bundle(
+    bundle: &ProgramBundle,
+) -> Result<(HashMap<String, DependencyDir>, PkgResolution), Vec<Diagnostic>> {
+    let Some(facts) = package_facts_for_bundle(bundle)? else {
+        return project_resolution(&bundle.project_root);
+    };
+    let manifest = crate::Package::to_manifest(&facts, "")
+        .map_err(|diagnostic| vec![diagnostic])?;
+    let dep_dirs = collect_dep_dirs(&manifest, &bundle.project_root)?;
+    let resolution =
+        collect_pkg_resolution(&facts).map_err(|diagnostic| vec![diagnostic])?;
+    Ok((dep_dirs, resolution))
+}
+
 
 fn auto_derive_default_for_file(
     path: &Path,
@@ -3008,11 +3759,15 @@ fn load_file(
             return Err(LoaderError::at(display, &source, diagnostics));
         }
         None => {
-            let (tokens, lex_diags) = Lexer::lex(&source);
+            let source_for_parse =
+                crate::Package::mask_inline_package_source(&source)
+                    .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
+                    .0;
+            let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
             if !lex_diags.is_empty() {
                 return Err(LoaderError::at(display, &source, lex_diags));
             }
-            match Parser::parse_for_check_with_source(&tokens, &source) {
+            match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
                 Ok((program, teaching)) => {
                     parse_teaching.extend(teaching);
                     program
@@ -3798,28 +4553,28 @@ pub fn resolve_import_target(
     bundle: &ProgramBundle,
     importing_idx: usize,
     imp: &ImportDecl,
-) -> Result<usize, Diagnostic> {
+) -> Result<usize, Vec<Diagnostic>> {
     if core_module_path(imp).is_some() {
-        return Err(Diagnostic::error(
+        return Err(vec![Diagnostic::error(
             "E1001",
             "core modules do not resolve to files".to_string(),
             "`core` is provided by the compiler in M10".to_string(),
             "handle this import as a compiler-known module".to_string(),
             Some(imp.span),
-        ));
+        )]);
     }
     let importing = &bundle.modules[importing_idx];
     // Rebuild the same dep-source dirs (M12.1) and U17 package resolution
     // (realized library staging dirs) the loader used, so a `use <pkg>`
     // re-resolves to the exact file already pulled into the bundle.
-    let (pkg_dep_dirs, pkg_resolution) = project_resolution(&bundle.project_root)?;
+    let (pkg_dep_dirs, pkg_resolution) = project_resolution_for_bundle(bundle)?;
     let (project_parts, project_part_failures) =
         crate::ProjectParts::scan_with_diagnostics(&bundle.project_root, &[]);
     if let Some(failure) = project_part_failures
         .iter()
         .find(|failure| failure.authority)
     {
-        return Err(failure.problem.clone());
+        return Err(vec![failure.problem.clone()]);
     }
     let target_path = match resolve_import(
         imp,
@@ -3831,20 +4586,20 @@ pub fn resolve_import_target(
         &project_part_failures,
     ) {
         Ok(p) => normalize_path(&p),
-        Err(d) => return Err(d),
+        Err(d) => return Err(vec![d]),
     };
     for (i, m) in bundle.modules.iter().enumerate() {
         if normalize_path(&m.path) == target_path {
             return Ok(i);
         }
     }
-    Err(Diagnostic::error(
+    Err(vec![Diagnostic::error(
         "E0603",
         "imported file isn't part of this program".to_string(),
         "the loader should have pulled in every imported file already".to_string(),
         "report this as a compiler bug".to_string(),
         Some(imp.span),
-    ))
+    )])
 }
 
 pub fn import_alias(imp: &ImportDecl) -> String {
@@ -4084,7 +4839,7 @@ mod stale_manifest_name_tests {
         fs::write(outer.join("pack.jet"), "").unwrap();
         fs::write(
             inner.join("authority.jet"),
-            "module workspace { policy: .{ deny: #(FS) } }\n",
+            "module workspace { policy: { deny: #(FS) } }\n",
         )
         .unwrap();
 
@@ -4105,12 +4860,12 @@ mod stale_manifest_name_tests {
         .unwrap();
         fs::write(
             inner.join("a.jet"),
-            "module workspace { policy: .{ deny: #(FS) } }\n",
+            "module workspace { policy: { deny: #(FS) } }\n",
         )
         .unwrap();
         fs::write(
             inner.join("b.jet"),
-            "module workspace { policy: .{ deny: #(FS) } }\n",
+            "module workspace { policy: { deny: #(FS) } }\n",
         )
         .unwrap();
 

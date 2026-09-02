@@ -501,11 +501,7 @@ impl TraitRegistry {
             diags.push(e0913(Generics::CHECKED_TEXT, &["Error".to_string()], span));
         }
         for (_, assoc_span, _) in error_impls.iter().skip(1) {
-            diags.push(e0907(
-                Generics::CHECKED_TEXT,
-                "type Error",
-                *assoc_span,
-            ));
+            diags.push(e0907(Generics::CHECKED_TEXT, "type Error", *assoc_span));
         }
         for (name, assoc_span, _) in assoc_type_impls
             .iter()
@@ -526,11 +522,7 @@ impl TraitRegistry {
             .filter(|method| method.name == "encode_hole")
             .collect();
         if check_methods.is_empty() {
-            diags.push(e0906(
-                Generics::CHECKED_TEXT,
-                &["check".to_string()],
-                span,
-            ));
+            diags.push(e0906(Generics::CHECKED_TEXT, &["check".to_string()], span));
         }
         if hole_methods.is_empty() {
             diags.push(e0906(
@@ -540,11 +532,7 @@ impl TraitRegistry {
             ));
         }
         for method in check_methods.iter().skip(1) {
-            diags.push(e0907(
-                Generics::CHECKED_TEXT,
-                "check",
-                method.name_span,
-            ));
+            diags.push(e0907(Generics::CHECKED_TEXT, "check", method.name_span));
         }
         for method in hole_methods.iter().skip(1) {
             diags.push(e0907(
@@ -565,10 +553,7 @@ impl TraitRegistry {
                 && method.params[0].public_label.is_none()
                 && method.params[0].ty == Type::String
                 && method.is_pure
-                && method
-                    .declared_effects
-                    .as_ref()
-                    .is_some_and(Vec::is_empty)
+                && method.declared_effects.as_ref().is_some_and(Vec::is_empty)
                 && matches!(
                     &method.return_type,
                     Some(Type::Result { ok, err })
@@ -586,15 +571,10 @@ impl TraitRegistry {
                 && method.params[0].ty == Type::Named("T".to_string())
                 && method.return_type == Some(Type::String)
                 && method.is_pure
-                && method
-                    .declared_effects
-                    .as_ref()
-                    .is_some_and(Vec::is_empty)
+                && method.declared_effects.as_ref().is_some_and(Vec::is_empty)
                 && method.type_params.len() == 1
                 && method.type_params[0].name == "T"
-                && method.type_params[0]
-                    .bounds
-                    == [PRINTABLE.to_string()]
+                && method.type_params[0].bounds == [PRINTABLE.to_string()]
         });
         if check.is_some() && !check_ok {
             diags.push(e0907(
@@ -1983,6 +1963,22 @@ impl TraitRegistry {
         );
     }
 
+    /// Core `JetShow` implementations that sema admits as printable values.
+    /// The repository-level diagnostics coverage test keeps this promise
+    /// aligned with the corresponding Prelude declarations without making
+    /// foundation depend on codegen.
+    const PRELUDE_JET_SHOW_PRINTABLE_TYPES: &[&str] = &[
+        "ComputeDevice",
+        "SyncText",
+        "SyncCounter",
+        "SyncMap",
+        "SyncList",
+        "ServiceRestart",
+        "ServiceDelivery",
+        "ServiceRuntime",
+        "ServiceStateStore",
+    ];
+
     /// D-DISPLAYDBG1: register synthetic `Display` + `Debug` protocol hooks.
     pub fn register_synthetic_display_debug(&mut self) {
         self.register_synthetic_trait_method(
@@ -2009,7 +2005,6 @@ impl TraitRegistry {
             crate::Syntax::TYPE_BYTES,
             "Clock",
             "Closed",
-            "ComputeDevice",
             "CountMinSketch",
             "DBValue",
             "DataError",
@@ -2085,17 +2080,9 @@ impl TraitRegistry {
             "ReservoirSampler",
             "Rng",
             "Fake",
-            "ServiceDelivery",
-            "ServiceRestart",
-            "ServiceRuntime",
-            "ServiceStateStore",
             "Size",
             "SocketAddr",
             "Solver",
-            "SyncCounter",
-            "SyncList",
-            "SyncMap",
-            "SyncText",
             "Stat",
             "Stopwatch",
             "TestSuite",
@@ -2124,7 +2111,10 @@ impl TraitRegistry {
             "CBORError",
             "Zone",
             "ZonedDateTime",
-        ] {
+        ]
+        .into_iter()
+        .chain(Self::PRELUDE_JET_SHOW_PRINTABLE_TYPES.iter().copied())
+        {
             self.auto_printable.insert(ty.to_string());
         }
         for ty in [
@@ -2270,15 +2260,14 @@ impl TraitRegistry {
             .insert(("Id".to_string(), Syntax::TRAIT_EQUATABLE.to_string()));
     }
 
-    /// D-DBDRIVER1=A: one nominal parameterized SQL driver contract. SQLite's
-    /// `DBScope` is the first compiler-owned implementation. Methods take SQL
-    /// text plus a separate `[DBValue]` bind list — there is no raw-execute
-    /// escape, and a raw `DBConnection` cannot bypass its row policy.
+    /// D-DBDRIVER1=A / D-TYPEDSQL-SINK1=A: one nominal typed-SQL driver
+    /// contract. SQLite's `DBScope` is the first compiler-owned
+    /// implementation. Methods take one SQL value carrying template text and
+    /// ordered `[DBValue]` bindings; there is no raw-execute escape, and a raw
+    /// `DBConnection` cannot bypass its row policy.
     pub fn register_synthetic_driver(&mut self) {
         let dummy = Span { start: 0, end: 0 };
         let db_error = Type::Named("DBError".to_string());
-        let db_value = Type::Named(Syntax::TYPE_DB_VALUE.to_string());
-        let params = Type::List(Box::new(db_value));
         let row = Type::Map {
             key: Box::new(Type::String),
             key_span: None,
@@ -2301,21 +2290,7 @@ impl TraitRegistry {
         let sql_param = |name: &str| crate::AST::Param {
             name: name.to_string(),
             name_span: dummy,
-            ty: Type::String,
-            ty_span: dummy,
-            convention: AccessConvention::Move,
-            root: false,
-            default: None,
-            variadic: false,
-            variadic_bound_list: None,
-            declared_view_from_names: None,
-            public_label: None,
-            zone: crate::AST::ParamZone::Either,
-        };
-        let params_param = crate::AST::Param {
-            name: "params".to_string(),
-            name_span: dummy,
-            ty: params,
+            ty: Type::Named("SQL".to_string()),
             ty_span: dummy,
             convention: AccessConvention::Move,
             root: false,
@@ -2357,7 +2332,7 @@ impl TraitRegistry {
                     TraitMethodSig {
                         name: name.to_string(),
                         name_span: dummy,
-                        params: vec![write_self.clone(), sql_param("sql"), params_param.clone()],
+                        params: vec![write_self.clone(), sql_param("sql")],
                         return_type: Some(ret),
                         span: dummy,
                         default_body: None,
@@ -3182,7 +3157,9 @@ pub fn emit_trait_def(
         // site; compiler-generated Rust protocols are emitted by their
         // dedicated synthetic paths and never come through this function.
         let ret = m.return_type.as_ref().map(|_| m.effective_return_type());
-        let ret = ret.as_ref().map(|ty| {
+        let ret = ret
+            .as_ref()
+            .map(|ty| {
                 if has_view_return {
                     render_view_return(ty, &assoc)
                 } else {

@@ -21,16 +21,19 @@ fn run(args: WorkloadArgs) {
         fields :: row.fields
         line_number :: row.line
         if fields.len() != 1 -> panic("bad desktop row {line_number}")
-        line :: fields[0]
-        if line == "Tab" {
-            backend.on_event(ui.key_event(line))
-            print("focus|{backend.focused_label()}")
-        } else {
-            label :: "{line}"
-            key := ""
-            if line != "Empty" -> key = line
-            backend.on_event(ui.key_event(key))
-            print("event|{label}|observed")
+        line :: fields.get(0) ?? panic("missing line")
+        if {
+            line == "Tab" -> {
+                backend.on_event(ui.key_event(line))
+                print("focus|{backend.focused_label()}")
+            }
+            else -> {
+                label :: "{line}"
+                key := ""
+                if line != "Empty" -> key = ~line
+                backend.on_event(ui.key_event(key))
+                print("event|{label}|observed")
+            }
         }
     }
 }

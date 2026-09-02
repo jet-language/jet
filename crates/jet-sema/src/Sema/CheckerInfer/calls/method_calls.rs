@@ -2174,9 +2174,10 @@ impl<'a> Checker<'a> {
             }
             // D-CONC-SHARE1=A (amends D-MEM1 S6 / D-SHARED-API1=A):
             // `shared x` — a lock-guarded shared value (`Arc<RwLock<T>>`
-            // class). `T` is inferred from the constructed value, no
-            // turbofish. The parser desugars the prefix form to this one
-            // constructor node and teaches E1115 on the retired
+            // class). `T` is inferred from the constructed value, or from an
+            // enclosing `Shared<T>` expectation when the value is shape-free.
+            // The parser desugars the prefix form to this one constructor node
+            // and teaches E1115 on the retired
             // `Shared.new(x)` call, so every tier keeps one shape.
             if type_name == "Shared" && method == "new" {
                 self.record_memory_event(crate::Sema::MemoryEvent::new(
@@ -2202,7 +2203,18 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let elem_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Int);
+                let expected_elem_ty = owner_type_args.first().cloned().or_else(|| {
+                    match &self.expected_type {
+                        Some(Type::Shared(inner)) => Some((**inner).clone()),
+                        _ => None,
+                    }
+                });
+                let elem_ty = match expected_elem_ty {
+                    Some(expected) => self
+                        .infer_with_expected(&mut args[0].expr, &expected)
+                        .unwrap_or(expected),
+                    None => self.infer(&mut args[0].expr).unwrap_or(Type::Int),
+                };
                 if self.shared_storage_problem(&elem_ty).is_some() {
                     self.diags.push(Diagnostic::error(
                             "E1102",
@@ -2326,6 +2338,8 @@ impl<'a> Checker<'a> {
                 if let Some(arg) = args.first_mut() {
                     let want = Type::List(Box::new(u8_ty()));
                     self.check_shift_arg("Reader.over", &want, arg);
+                    arg.flags.owned_last_use = arg.convention == AccessConvention::Read
+                        && self.proven_owned_last_use(&arg.expr, &want);
                 }
                 for a in args.iter_mut().skip(1) {
                     self.infer(&mut a.expr);
@@ -2872,7 +2886,9 @@ impl<'a> Checker<'a> {
                 return Some(if method == "template" {
                     Type::String
                 } else {
-                    Type::List(Box::new(Type::String))
+                    Type::List(Box::new(Type::Named(
+                        Syntax::TYPE_DB_VALUE.to_string(),
+                    )))
                 });
             }
             if n == "HTML" && method == "text" {
@@ -3122,19 +3138,21 @@ impl<'a> Checker<'a> {
         // D-DBDRIVER1: method calls on a `DBConnection` handle. A bespoke block
         // (like the `#Transact` handle above) rather than the generic
         // `file_handle_method_return` table, because `.query`/`.query_one`/
-        // `.execute` need real expected-type-directed arg elaboration
-        // (`sql: String, params: [DBValue]`) — an empty `[]` params literal must
-        // resolve its element type from the parameter, not blind inference.
+        // `.execute` need real expected-type-directed SQL argument elaboration.
+        // The carrier keeps its template and ordered bindings together, so no
+        // separate params literal is accepted at this boundary.
         if let Type::Named(handle_ty) = &recv_ty {
             if handle_ty == "DBConnection" {
                 if let Some(ret) = self.check_db_connection_method(method, args, span) {
                     *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
                     return ret;
                 }
             }
             if handle_ty == "DBScope" {
                 if let Some(ret) = self.check_db_scope_method(method, args, span) {
                     *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
                     return ret;
                 }
             }
@@ -4023,6 +4041,9 @@ impl<'a> Checker<'a> {
                 Type::Named(n) => n.clone(),
                 _ => "Regex".to_string(),
             });
+            // Preserve the exact Regex/Match return so a following method in
+            // the same chain can recover its receiver type from this node.
+            *resolved_ret_out = ret.clone();
             return ret;
         }
         // D-TIMEDEPTH1=A: method calls on the shared civil-time surface.

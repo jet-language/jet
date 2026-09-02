@@ -90,3 +90,71 @@ fn jet_zip_pad_step<A: Clone, B: Clone>(
         (None, None) => None,
     }
 }
+
+/// Shared predicate count kernel for eager List adapters.
+fn jet_list_count_where_kernel<T, F>(xs: &[T], mut predicate: F) -> i64
+where
+    F: FnMut(&T) -> bool,
+{
+    let mut count = 0_i64;
+    for item in xs {
+        if predicate(item) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Shared first-match replacement kernel for eager List adapters.
+fn jet_list_update_first_kernel<T, F>(
+    xs: &mut Vec<T>,
+    mut predicate: F,
+    replacement: T,
+) -> bool
+where
+    F: FnMut(&T) -> bool,
+{
+    for index in 0..xs.len() {
+        if predicate(&xs[index]) {
+            xs[index] = replacement;
+            return true;
+        }
+    }
+    false
+}
+
+/// Error-propagating form used by the reference evaluator's callback ABI.
+fn jet_list_count_where_result_kernel<T, E, F>(
+    xs: &[T],
+    mut predicate: F,
+) -> Result<i64, E>
+where
+    F: FnMut(&T) -> Result<bool, E>,
+{
+    let mut count = 0_i64;
+    for item in xs {
+        if predicate(item)? {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// Error-propagating first-match replacement kernel for the reference
+/// evaluator. Replacement is moved only after a successful predicate.
+fn jet_list_update_first_result_kernel<T, E, F>(
+    xs: &mut Vec<T>,
+    mut predicate: F,
+    replacement: T,
+) -> Result<bool, E>
+where
+    F: FnMut(&T) -> Result<bool, E>,
+{
+    for index in 0..xs.len() {
+        if predicate(&xs[index])? {
+            xs[index] = replacement;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}

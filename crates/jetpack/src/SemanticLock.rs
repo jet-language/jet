@@ -3751,9 +3751,6 @@ pub fn atomic_commit(project: &Path, lock: &SemanticLockFile) -> Result<(), Lock
     let project = project.to_path_buf();
     let lock = lock.clone();
     crate::RuntimePolicy::with_project_lock(&project, "semantic-lock", || {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
         let machine = strip_semantic_sections(&existing);
         // Machine half must remain Lock-parseable when present.
@@ -3776,7 +3773,8 @@ pub fn atomic_commit(project: &Path, lock: &SemanticLockFile) -> Result<(), Lock
         } else {
             format!("{}\n\n{semantic}", machine.trim_end())
         };
-        crate::Lock::write_lock_atomically(&path, &body).map_err(std::io::Error::other)?;
+        crate::Lock::write_lock_atomically(&project, body.as_bytes())
+            .map_err(std::io::Error::other)?;
         Ok(())
     })
     .map_err(|e| LockCommitError {

@@ -19,7 +19,7 @@ mod production_path {
         "`jet build` uses the optimized default profile.",
         "Removing or bypassing this plan section must fail the canary.",
     ];
-    const CLOSEOUT_CRITERIA_SECTION: &str = "## #666 criterion evidence and removal checks";
+    const CLOSEOUT_CRITERIA_SECTION: &str = "## #666 criterion evidence and removal checks\n";
     const CLOSEOUT_CRITERIA_REQUIREMENTS: &[&str] = &[
         CLOSEOUT_CRITERIA_SECTION,
         "tools/perf/dashboard.sh",
@@ -37,6 +37,14 @@ mod production_path {
         "measured samples.",
         "interquartile spread of 100% or less",
         "five Tukey-fence outliers.",
+        "Matched compiler-speed peer contract",
+        "JET_PERF_PEER_REPORT",
+        "each non-Rust ratio `Jet / peer` is less than `1.00`",
+        "The matrix metadata must carry `compiler_sha256`, machine identity, rustc version,",
+        "and `rustc_sha256`; missing identity fields fail closed.",
+        "All per-cell values are positive integers, and every workload, source,",
+        "expected, manifest, and toolchain identity is a complete SHA-256 digest.",
+        "gate never averages cells, selects a best peer, or accepts a partial report.",
     ];
     const CACHE_REMOVAL_CANARY: &str = "## #1025 cache removal canary";
     const CACHE_REMOVAL_CANARY_REQUIREMENTS: &[&str] = &[
@@ -83,6 +91,116 @@ mod production_path {
         json_int(json_field(value, key)).unwrap_or_else(|| panic!("JSON field {key} is not numeric"))
     }
 
+    fn synthetic_v4_baseline() -> String {
+        let states = [
+            "jit-clean",
+            "jit-no-change",
+            "jit-representative-edit",
+            "aot-release-clean",
+            "aot-release-no-change",
+            "aot-release-representative-edit",
+        ];
+        let source_hash =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let expected_hash =
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let manifest_hash =
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let workload_hash =
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        let libc_hash =
+            "1111111111111111111111111111111111111111111111111111111111111111";
+        let allocator_hash =
+            "2222222222222222222222222222222222222222222222222222222222222222";
+        let allocator_environment_hash =
+            "3333333333333333333333333333333333333333333333333333333333333333";
+        let hardware_hash =
+            "4444444444444444444444444444444444444444444444444444444444444444";
+        let topology_hash =
+            "5555555555555555555555555555555555555555555555555555555555555555";
+        let toolchain_hash =
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+        let rustc_hash =
+            "6666666666666666666666666666666666666666666666666666666666666666";
+        let output_hash =
+            "7777777777777777777777777777777777777777777777777777777777777777";
+        let error_hash =
+            "8888888888888888888888888888888888888888888888888888888888888888";
+        let linker_hash =
+            "9999999999999999999999999999999999999999999999999999999999999999";
+        let compiler_hash =
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let rustc_vv_hash =
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        let jet_env_hash =
+            "abababababababababababababababababababababababababababababababab";
+        let peer_contract =
+            "6f9085bde94607c64f688587c06e6fc2f3e02fba10104c960c7488dba341c183";
+        let mut runs = String::new();
+        for state in states {
+            let (stage, profile, backend, linker, linker_identity, cache_state, cache_policy) =
+                if state.starts_with("jit-") {
+                    (
+                        "jit-fast",
+                        "fast",
+                        "cranelift",
+                        "none",
+                        "none",
+                        if state.ends_with("no-change") {
+                            "NoChange"
+                        } else if state.ends_with("representative-edit") {
+                            "Edit"
+                        } else {
+                            "Clean"
+                        },
+                        if state.ends_with("no-change") {
+                            "shared-cache-after-warmup"
+                        } else if state.ends_with("representative-edit") {
+                            "base-cache-snapshot-before-edit"
+                        } else {
+                            "fresh-cache-per-sample"
+                        },
+                    )
+                } else {
+                    (
+                        "aot-release",
+                        "release",
+                        "rustc-llvm",
+                        "ld",
+                        linker_hash,
+                        if state.ends_with("no-change") {
+                            "NoChange"
+                        } else if state.ends_with("representative-edit") {
+                            "Edit"
+                        } else {
+                            "Clean"
+                        },
+                        if state.ends_with("no-change") {
+                            "shared-cache-after-warmup"
+                        } else if state.ends_with("representative-edit") {
+                            "base-cache-snapshot-before-edit"
+                        } else {
+                            "fresh-cache-per-sample"
+                        },
+                    )
+                };
+            let phase = format!(
+                "parse_us=1;sema_us=1;source=fixture.jet;source_sha256={source_hash};source_bytes=1;expected_sha256={expected_hash};expected_bytes=1;manifest_sha256={manifest_hash};workload_sha256={workload_hash};role=base;profile={profile};backend={backend};linker={linker};linker_path={linker};linker_sha256={linker_identity};linker_backend={linker};linker_backend_path={linker};linker_backend_sha256={linker_identity};cache_state={cache_state};cache_policy={cache_policy};cache_hits=1;cache_misses=0;libc_sha256={libc_hash};allocator_sha256={allocator_hash};allocator_environment_sha256={allocator_environment_hash};hardware_sha256={hardware_hash};topology_sha256={topology_hash};toolchain_sha256={toolchain_hash};rustc_sha256={rustc_hash};top_cause=none;artifact_bytes=0;parity=verified;semantic_parity=verified;diagnostic_parity=verified;effect_parity=verified;tier_parity=verified;dev_profile=dev;aot_profile=release"
+            );
+            if !runs.is_empty() {
+                runs.push(',');
+            }
+            runs.push_str(&format!(
+                r#"{{"program":"fixture.jet","state":"{state}","stage":"{stage}","latency_ns":100,"memory_bytes":100,"variance_pct":0,"stdout_sha256":"{output_hash}","stderr_sha256":"{error_hash}","phase_totals":"{phase}"}}"#
+            ));
+        }
+        let corpus_hash =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        format!(
+            r#"{{"schema":"jet.compiler-speed","version":4,"corpus_sha256":"{corpus_hash}","manifest_sha256":"{manifest_hash}","stage":"matrix","peer_version":1,"peer_contract_sha256":"{peer_contract}","peer_run_id":"fixture-run","peer_keys":"rustc:rust,cxx:cxx","peer_metrics":"latency_ns,memory_bytes","peer_count":2,"peer_rows":24,"parity":{{"status":"verified","cases":1,"semantic":"verified","diagnostics":"verified","effects":"verified","tiers":"verified"}},"machine":{{"allocator_source_sha256":"{allocator_hash}","allocator_environment_sha256":"{allocator_environment_hash}","arch":"x86_64","compiler_sha256":"{compiler_hash}","cpus":2,"governor":"governor","hardware_sha256":"{hardware_hash}","hostname":"fixture","kernel":"kernel","libc_sha256":"{libc_hash}","load1_start_milli":100,"load1_peak_milli":200,"load1_end_milli":150,"memory_bytes":1024,"os":"Linux","rustc":"rustc","rustc_vv_sha256":"{rustc_vv_hash}","target":"target","toolchain_sha256":"{toolchain_hash}","topology_sha256":"{topology_hash}","jet_env_sha256":"{jet_env_hash}","llvm":"llvm","rustc_sha256":"{rustc_hash}"}},"budgets":{{"latency_regression_pct":15,"memory_regression_pct":15,"samples":20,"variance_pct":100,"warmups":1}},"outliers_discarded":0,"runs":[{runs}]}}"#
+        )
+    }
+
     fn checker_report_from_baseline(baseline: &str) -> String {
         let root = parse(baseline).expect("generated compiler-speed baseline JSON");
         let machine = json_field(&root, "machine");
@@ -99,8 +217,14 @@ mod production_path {
             json_number(machine, "cpus"),
             json_text(machine, "hostname")
         );
+        let peer_contract = json_text(&root, "peer_contract_sha256");
+        let peer_run_id = json_text(&root, "peer_run_id");
+        let peer_keys = json_text(&root, "peer_keys");
+        let peer_metrics = json_text(&root, "peer_metrics");
+        let peer_count = json_number(&root, "peer_count");
+        let peer_rows = json_number(&root, "peer_rows");
         let mut report = format!(
-            "compiler-speed version={} corpus={} corpus_sha256={} manifest_sha256={} stage=matrix machine={} target={} rustc={} llvm={} rustc_vv_sha256={} rustc_sha256={} compiler_sha256={} jet_env_sha256={} libc_sha256={} allocator_sha256={} allocator_environment_sha256={} hardware_sha256={} topology_sha256={} toolchain_sha256={} kernel={} governor={} load1_start_milli={} load1_peak_milli={} load1_end_milli={} memory_bytes={} profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups={} samples={} outliers_discarded={} parity={} parity_cases={}\n",
+            "compiler-speed version={} corpus={} corpus_sha256={} manifest_sha256={} stage=matrix machine={} target={} rustc={} llvm={} rustc_vv_sha256={} rustc_sha256={} compiler_sha256={} jet_env_sha256={} libc_sha256={} allocator_sha256={} allocator_environment_sha256={} hardware_sha256={} topology_sha256={} toolchain_sha256={} kernel={} governor={} load1_start_milli={} load1_peak_milli={} load1_end_milli={} memory_bytes={} profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups={} samples={} outliers_discarded={} parity={} parity_cases={} peer_contract_sha256={} peer_run_id={} peer_machine={} peer_target={} peer_keys={} peer_metrics={} peer_count={} peer_rows={}\n",
             json_number(&root, "version"),
             runs.len() / 6,
             json_text(&root, "corpus_sha256"),
@@ -130,6 +254,14 @@ mod production_path {
             json_number(&root, "outliers_discarded"),
             json_text(parity, "status"),
             json_number(parity, "cases"),
+            peer_contract,
+            peer_run_id,
+            machine_id,
+            json_text(machine, "target"),
+            peer_keys,
+            peer_metrics,
+            peer_count,
+            peer_rows,
         );
         report.push_str("program\tstate\tstage\tlatency_ns\tmemory_bytes\tvariance_pct\toutput_sha256:stderr_sha256\tphases\n");
         for run in runs {
@@ -145,6 +277,31 @@ mod production_path {
                 json_text(run, "stderr_sha256"),
                 json_text(run, "phase_totals"),
             ));
+        }
+        report.push_str(&format!(
+            "compiler-speed-peer version=1 run_id={} corpus_sha256={} manifest_sha256={} target={} machine={} peers={} metrics={} contract_sha256={} peer_count={} rows={}\n",
+            peer_run_id,
+            json_text(&root, "corpus_sha256"),
+            json_text(&root, "manifest_sha256"),
+            json_text(machine, "target"),
+            machine_id,
+            peer_keys,
+            peer_metrics,
+            peer_contract,
+            peer_count,
+            peer_rows,
+        ));
+        report.push_str("peer\tlanguage\tprogram\tstate\tmetric\tvalue\tworkload_sha256\tsource_sha256\texpected_sha256\tmanifest_sha256\ttoolchain_sha256\n");
+        for run in runs {
+            for (peer, language, value) in [("rustc", "rust", 100), ("cxx", "cxx", 101)] {
+                for metric in ["latency_ns", "memory_bytes"] {
+                    report.push_str(&format!(
+                        "{peer}\t{language}\t{}\t{}\t{metric}\t{value}\tffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n",
+                        json_text(run, "program"),
+                        json_text(run, "state"),
+                    ));
+                }
+            }
         }
         report
     }
@@ -187,7 +344,7 @@ mod production_path {
 
     #[test]
     fn compiler_speed_checker_accepts_generated_baseline() {
-        let baseline = fs::read_to_string(repository_file("tools/perf/baseline.json")).unwrap();
+        let baseline = synthetic_v4_baseline();
         let report = checker_report_from_baseline(&baseline);
         let output = run_checker_fixture("compiler-speed-checker-accept", &baseline, &report);
         assert_eq!(
@@ -205,7 +362,7 @@ mod production_path {
 
     #[test]
     fn compiler_speed_checker_rejects_unsupported_baseline_version() {
-        let baseline = fs::read_to_string(repository_file("tools/perf/baseline.json")).unwrap();
+        let baseline = synthetic_v4_baseline();
         let version = json_number(&parse(&baseline).unwrap(), "version");
         let bumped = baseline.replacen(
             &format!("\"version\":{version}"),
@@ -223,7 +380,7 @@ mod production_path {
 
     #[test]
     fn compiler_speed_checker_rejects_changed_machine_rustc_identity() {
-        let baseline = fs::read_to_string(repository_file("tools/perf/baseline.json")).unwrap();
+        let baseline = synthetic_v4_baseline();
         let parsed = parse(&baseline).unwrap();
         let machine_rustc = json_str(json_field(json_field(&parsed, "machine"), "rustc"))
             .expect("machine rustc identity")
@@ -484,7 +641,7 @@ mod production_path {
         );
         let bypassed = COMPILER_SPEED_PLAN.replacen(
             CLOSEOUT_CRITERIA_SECTION,
-            "## #666 criterion evidence and removal checks (bypassed)",
+            "## #666 criterion evidence and removal checks (bypassed)\n",
             1,
         );
         assert_ne!(
@@ -543,6 +700,32 @@ mod production_path {
         args.windows(2)
             .any(|window| window[0] == flag && window[1] == value)
     }
+    fn metadata_value(args: &[String]) -> &str {
+        args.windows(2)
+            .find_map(|window| {
+                (window[0] == "-C")
+                    .then(|| window[1].strip_prefix("metadata="))
+                    .flatten()
+            })
+            .expect("rustc invocation has content metadata")
+    }
+
+    fn assert_content_metadata_and_remap(args: &[String]) {
+        let metadata = metadata_value(args);
+        assert!(
+            metadata.len() == 64
+                && metadata
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+            "rustc metadata is not a lowercase SHA-256 key: {metadata:?}; args={args:?}"
+        );
+        assert!(
+            args.windows(2).any(|window| {
+                window[0] == "--remap-path-prefix" && window[1].ends_with("=/jet/build")
+            }),
+            "rustc invocation did not remap its build workdir: {args:?}"
+        );
+    }
 
     fn has_digest_field(line: &str, field: &str) -> bool {
         line.split_whitespace().any(|part| {
@@ -556,6 +739,13 @@ mod production_path {
         })
     }
 
+    fn has_corelib_identity(line: &str) -> bool {
+        line.contains("corelib=/* jet-corelib-r10 ")
+            && ["source=", "closure=", "fp="]
+                .iter()
+                .all(|field| has_digest_field(line, field))
+    }
+
     fn build(scratch: &Scratch) -> std::process::Output {
         Command::new(jet())
             .args(["build", "main.jet", "--profile=debug", "--verbose"])
@@ -567,6 +757,7 @@ mod production_path {
                 "JET_DEBUG_NATIVE_CACHE_LOG",
                 scratch.join("native-cache.log"),
             )
+            .env("JET_RECEIPT_BYPASS", "1")
             .env("NO_COLOR", "1")
             .output()
             .unwrap()
@@ -578,6 +769,7 @@ mod production_path {
             .env("JET_CACHE_DIR", scratch.join("build-cache"))
             .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
             .env("JET_TIMING", "1")
+            .env("JET_RECEIPT_BYPASS", "1")
             .env("NO_COLOR", "1")
             .output()
             .unwrap()
@@ -587,7 +779,7 @@ mod production_path {
     fn production_build_follows_compiler_speed_plan_flags_and_linker() {
         for requirement in [
             "Fast linker (mold → lld → system), tuned rustc flags.",
-            "Native rustc builds honor explicit",
+            "Native rustc builds\n  honor explicit",
             "`RUSTC_LINKER`/`CC`; otherwise Jet selects mold, then lld",
             "Fast builds pass explicit `opt-level=0`, `codegen-units=256`, and",
             "`lto=off`",
@@ -642,12 +834,28 @@ mod production_path {
             .unwrap();
         assert_eq!(run.status.code(), Some(0));
         assert_eq!(run.stdout, b"compiler-speed\n");
-
         let log = fs::read_to_string(rustc_log).unwrap();
-        let final_args = invocations(&log)
-            .into_iter()
+
+        let recorded = invocations(&log);
+        let final_args = recorded
+            .iter()
             .find(|args| has_pair(args, "--crate-name", "main"))
             .expect("recorded final rustc invocation");
+        assert_content_metadata_and_remap(final_args);
+        let runtime_args = recorded
+            .iter()
+            .filter(|args| {
+                has_pair(args, "--crate-name", "jet_runtime")
+                    || has_pair(args, "--crate-name", "jet_runtime_core")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !runtime_args.is_empty(),
+            "recorded runtime rlib rustc invocation"
+        );
+        for args in runtime_args {
+            assert_content_metadata_and_remap(args);
+        }
         for flag in ["codegen-units=256", "opt-level=0", "lto=off", "debuginfo=2"] {
             assert!(
                 final_args.iter().any(|arg| arg == flag),
@@ -656,11 +864,195 @@ mod production_path {
         }
         assert!(
             has_pair(
-                &final_args,
+                final_args,
                 "-C",
                 &format!("linker={}", real_linker.display())
             ),
             "final rustc invocation omitted explicit linker: {final_args:?}"
+        );
+    }
+
+    #[test]
+    fn production_build_is_reproducible_across_checkout_paths() {
+        let left = Scratch::new("compiler-speed-repro-left");
+        let right = Scratch::new("compiler-speed-repro-right");
+        let package = "name: \"deterministic_build\"\nversion: \"0.1.0\"\n";
+        let source = "fn run() { print(\"deterministic-build\") }\n";
+        for scratch in [&left, &right] {
+            fs::create_dir_all(scratch.join("src")).unwrap();
+            fs::write(scratch.join("package.jet"), package).unwrap();
+            fs::write(scratch.join("src/main.jet"), source).unwrap();
+        }
+        let build = |scratch: &Scratch| {
+            Command::new(jet())
+                .args(["run", "--release", "src/main.jet"])
+                .current_dir(&scratch.path)
+                .env("JET_CACHE_DIR", scratch.join("build-cache"))
+                .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+                .env("JET_RECEIPT_BYPASS", "1")
+                .env("NO_COLOR", "1")
+                .output()
+                .unwrap()
+        };
+        for (name, output) in [("left", build(&left)), ("right", build(&right))] {
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{name} reproducibility build failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let left_rust = fs::read(left.join("build/main.rs")).unwrap();
+        let right_rust = fs::read(right.join("build/main.rs")).unwrap();
+        assert_eq!(
+            jet::SHA256::sha256_hex(&left_rust),
+            jet::SHA256::sha256_hex(&right_rust),
+            "generated Rust SHA-256 changed with checkout path"
+        );
+        assert_eq!(left_rust, right_rust, "generated Rust changed with checkout path");
+
+        let left_binary = fs::read(left.join("build/main")).unwrap();
+        let right_binary = fs::read(right.join("build/main")).unwrap();
+        assert_eq!(
+            jet::SHA256::sha256_hex(&left_binary),
+            jet::SHA256::sha256_hex(&right_binary),
+            "native binary SHA-256 changed with checkout path"
+        );
+        assert_eq!(
+            left_binary, right_binary,
+            "native binary changed with checkout path"
+        );
+    }
+
+    #[test]
+    fn explicit_project_link_build_is_reproducible_and_content_sensitive() {
+        let left = Scratch::new("compiler-speed-c-link-left");
+        let right = Scratch::new("compiler-speed-c-link-right");
+        let package =
+            "name: \"deterministic_c_build\"\nversion: \"0.1.0\"\ndeps: { answer: c@\"./native\" }\n";
+        let source = "use c.answer as answer\n#Import module c.answer { fn value() I32 = \"answer_value\" }\nfn run() { print(\"{answer.value()}\") }\n";
+        for scratch in [&left, &right] {
+            fs::create_dir_all(scratch.join("native")).unwrap();
+            fs::create_dir_all(scratch.join("src")).unwrap();
+            fs::write(scratch.join("package.jet"), package).unwrap();
+            fs::write(scratch.join("src/main.jet"), source).unwrap();
+        }
+        let build_archive = |scratch: &Scratch, value: i32| {
+            fs::write(
+                scratch.join("native/answer.c"),
+                format!("int answer_value(void) {{ return {value}; }}\n"),
+            )
+            .unwrap();
+            let object = scratch.join("native/answer.o");
+            let compile = Command::new(path_program("cc"))
+                .args([
+                    "-c",
+                    scratch.join("native/answer.c").to_str().unwrap(),
+                    "-o",
+                    object.to_str().unwrap(),
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                compile.status.success(),
+                "C archive source failed: {}",
+                String::from_utf8_lossy(&compile.stderr)
+            );
+            let archive = Command::new(path_program("ar"))
+                .args(["rcs", "native/libanswer.a", "native/answer.o"])
+                .current_dir(&scratch.path)
+                .output()
+                .unwrap();
+            assert!(
+                archive.status.success(),
+                "C archive creation failed: {}",
+                String::from_utf8_lossy(&archive.stderr)
+            );
+        };
+        build_archive(&left, 42);
+        build_archive(&right, 42);
+
+        let tools = left.join("tools");
+        fs::create_dir_all(&tools).unwrap();
+        let real_rustc = path_program("rustc");
+        let left_log = left.join("rustc.log");
+        write_executable(
+            &tools.join("rustc"),
+            "#!/bin/sh\n\
+             { printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_RUSTC_LOG\"\n\
+             exec \"$JET_TEST_REAL_RUSTC\" \"$@\"\n",
+        );
+        let run = |scratch: &Scratch, log: &Path| {
+            Command::new(jet())
+                .args(["run", "--release", "src/main.jet"])
+                .current_dir(&scratch.path)
+                .env("PATH", prepend_path(&tools))
+                .env("JET_TEST_REAL_RUSTC", &real_rustc)
+                .env("JET_TEST_RUSTC_LOG", log)
+                .env("JET_CACHE_DIR", scratch.join("build-cache"))
+                .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+                .env("JET_RECEIPT_BYPASS", "1")
+                .env("NO_COLOR", "1")
+                .output()
+                .unwrap()
+        };
+        let left_run = run(&left, &left_log);
+        assert_eq!(
+            left_run.status.code(),
+            Some(0),
+            "left explicit-link run failed:\n{}",
+            String::from_utf8_lossy(&left_run.stderr)
+        );
+        assert_eq!(left_run.stdout, b"42\n");
+        let right_log = right.join("rustc.log");
+        let right_run = run(&right, &right_log);
+        assert_eq!(
+            right_run.status.code(),
+            Some(0),
+            "right explicit-link run failed:\n{}",
+            String::from_utf8_lossy(&right_run.stderr)
+        );
+        assert_eq!(right_run.stdout, b"42\n");
+
+        let final_args = |log: &Path| {
+            let log = fs::read_to_string(log).unwrap();
+            invocations(&log)
+                .into_iter()
+                .find(|args| has_pair(args, "--crate-name", "main"))
+                .expect("recorded explicit-link final rustc invocation")
+        };
+        let left_metadata = {
+            let args = final_args(&left_log);
+            assert_content_metadata_and_remap(&args);
+            metadata_value(&args).to_string()
+        };
+        let right_metadata = {
+            let args = final_args(&right_log);
+            assert_content_metadata_and_remap(&args);
+            metadata_value(&args).to_string()
+        };
+        assert_eq!(
+            left_metadata, right_metadata,
+            "project-local C link metadata changed with checkout path"
+        );
+
+        build_archive(&left, 43);
+        let changed_log = left.join("rustc-changed.log");
+        let changed_run = run(&left, &changed_log);
+        assert_eq!(
+            changed_run.status.code(),
+            Some(0),
+            "changed explicit-link run failed:\n{}",
+            String::from_utf8_lossy(&changed_run.stderr)
+        );
+        assert_eq!(changed_run.stdout, b"43\n");
+        let changed_args = final_args(&changed_log);
+        assert_content_metadata_and_remap(&changed_args);
+        assert_ne!(
+            left_metadata,
+            metadata_value(&changed_args),
+            "changed linked archive did not change rustc metadata"
         );
     }
 
@@ -747,7 +1139,7 @@ fn run() {
                 .lines()
                 .any(|line| {
                     has_digest_field(line, "runtime=")
-                        && has_digest_field(line, "corelib=")
+                        && has_corelib_identity(line)
                         && has_digest_field(line, "key=")
                 }),
             "native cache log did not expose relevant runtime/Core digests:\n{cache_log}"

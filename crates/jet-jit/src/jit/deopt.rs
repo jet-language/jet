@@ -17,7 +17,9 @@ use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::JitBackend::RunOutcome;
 use jet_foundation::AST::{ProgramBundle, Type};
 
-use super::runtime_host::{HostFns, JitRuntime};
+use super::runtime_host::{
+    alloc_jit_error, alloc_jit_result, jit_error, jit_result, HostFns, JitRuntime,
+};
 use super::tiers::{deopt_marshallable, record_trace, Tier, TierPlan, TierRow};
 use super::types_meta::{func_has_receiver, func_signature, JitMeta};
 use super::Concurrency;
@@ -407,12 +409,8 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
     let mut sink = DevSink::new();
     // Per-run buffer, cleared like the sink (see `resident_invoke`).
     jet_foundation::Outcome::jet_journey_reset();
-    jet_codegen::scheduler::jet_observe_runtime_start();
-    let mut outcome = jet_codegen::Comptime::with_ambient(
-        Some(crate::ambient_interp::ambient_core_call),
-        Some(crate::ambient_interp::ambient_handle),
-        Some(crate::ambient_interp::ambient_extern_call),
-        || match Comptime::TirBridge::run_bundle_at_stage(
+    let mut outcome = crate::with_interpreter_ambient(|| {
+        match Comptime::TirBridge::run_bundle_at_stage(
             bundle,
             &mut sink,
             jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
@@ -443,8 +441,8 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
                     .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
             },
             Err(d) => RunOutcome::Problems(vec![rewrite_runtime_tier_diag(d)]),
-        },
-    );
+        }
+    });
     if let RunOutcome::Ran { stderr, .. } = &mut outcome {
         if let Some(report) = jet_codegen::scheduler::jet_observe_parked_tasks_report() {
             stderr.push_str(&report.rendered);
@@ -697,12 +695,9 @@ pub(crate) fn jet_deopt_call(
         let value = match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
             allocator.as_ref(),
             || {
-                jet_codegen::Comptime::with_ambient(
-                    Some(crate::ambient_interp::ambient_core_call),
-                    Some(crate::ambient_interp::ambient_handle),
-                    Some(crate::ambient_interp::ambient_extern_call),
-                    || TIR::run_named_func_with_memos(program, &func_name, args, &mut sink, memos),
-                )
+                crate::with_interpreter_ambient(|| {
+                    TIR::run_named_func_with_memos(program, &func_name, args, &mut sink, memos)
+                })
             },
         ) {
             Ok(v) => v,
@@ -747,8 +742,69 @@ pub(crate) fn jet_deopt_call(
     interpret()
 }
 
+fn deopt_marshal_diag(ty: &Type, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E0956",
+        format!("deopt cannot marshall type `{ty:?}`"),
+        detail.to_string(),
+        "report this as a compiler bug".to_string(),
+        None,
+    )
+}
+
+/// Decode the record form emitted for a comptime-folded `Err` value. Runtime
+/// error constructors use `JitRuntime::errors`; this fallback keeps the
+/// comptime record carrier symmetric when it crosses the same result ABI.
+fn bits_to_ct_err_record(rt: &JitRuntime, bits: i64) -> Option<CtValue> {
+    let message = rt.heap.record_clone_string(bits, 0)?;
+    let code = match rt.heap.record_get_int(bits, 1)? {
+        0 => CtValue::absent(Type::String),
+        packed if packed > 0 => CtValue::Present(Box::new(CtValue::Str(
+            rt.heap.clone_string(packed - 1)?,
+        ))),
+        _ => return None,
+    };
+    let cause = match rt.heap.record_get_int(bits, 2)? {
+        0 => CtValue::absent(Type::Named(
+            jet_foundation::Syntax::TYPE_ERR.to_string(),
+        )),
+        packed if packed > 0 => CtValue::Present(Box::new(bits_to_ct_err_record(
+            rt,
+            packed - 1,
+        )?)),
+        _ => return None,
+    };
+    Some(CtValue::Struct {
+        type_name: jet_foundation::Syntax::TYPE_ERR.to_string(),
+        fields: vec![
+            ("message".to_string(), CtValue::Str(message)),
+            ("code".to_string(), code),
+            ("cause".to_string(), cause),
+        ],
+    })
+}
+
 fn bits_to_ct(rt: &JitRuntime, ty: &Type, bits: i64) -> Result<CtValue, Diagnostic> {
     match ty {
+        Type::Result { ok, err } => {
+            let result = jit_result(rt, bits)
+                .ok_or_else(|| deopt_marshal_diag(ty, "cross-tier host shim needs a valid Result arena handle"))?;
+            let payload_ty = if result.ok { ok.as_ref() } else { err.as_ref() };
+            let payload = bits_to_ct(rt, payload_ty, result.bits as i64)?;
+            if result.ok {
+                Ok(CtValue::Present(Box::new(payload)))
+            } else {
+                Ok(CtValue::Failed(CtReport::Told(Box::new(payload))))
+            }
+        }
+        Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR => {
+            if let Some(error) = jit_error(rt, bits) {
+                return Ok(CtValue::from_jet_err(&error));
+            }
+            bits_to_ct_err_record(rt, bits).ok_or_else(|| {
+                deopt_marshal_diag(ty, "cross-tier host shim needs a valid Err arena handle")
+            })
+        }
         Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => Ok(CtValue::Int(bits)),
         Type::Bool => Ok(CtValue::Bool(bits != 0)),
         Type::Char => Ok(CtValue::Char(char::from_u32(bits as u32).unwrap_or('\0'))),
@@ -761,30 +817,49 @@ fn bits_to_ct(rt: &JitRuntime, ty: &Type, bits: i64) -> Result<CtValue, Diagnost
         Type::Named(n) if n == "String" => {
             Ok(CtValue::Str(rt.heap.clone_string(bits).unwrap_or_default()))
         }
-        Type::Named(n) if n == "Unit" => Ok(CtValue::Unit),
-        _ => Err(Diagnostic::error(
-            "E0956",
-            format!("deopt cannot marshall type `{ty:?}`"),
-            "cross-tier host shim only moves Int/Bool/Char/String/Unit".to_string(),
-            "report this as a compiler bug".to_string(),
-            None,
+        Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_NEVER => {
+            Ok(CtValue::Unit)
+        }
+        _ => Err(deopt_marshal_diag(
+            ty,
+            "cross-tier host shim only moves scalar values plus tagged Result payloads",
         )),
     }
 }
 
 fn ct_to_bits(rt: &mut JitRuntime, ty: &Type, value: &CtValue) -> Result<i64, Diagnostic> {
+    if let Type::Result { ok, err } = ty {
+        return match value {
+            CtValue::Present(inner) => {
+                let bits = ct_to_bits(rt, ok, inner)?;
+                Ok(alloc_jit_result(rt, true, bits as u64))
+            }
+            CtValue::Failed(CtReport::Told(inner)) => {
+                let bits = ct_to_bits(rt, err, inner)?;
+                Ok(alloc_jit_result(rt, false, bits as u64))
+            }
+            CtValue::Failed(CtReport::Clean(_)) => Ok(alloc_jit_result(rt, false, 0)),
+            other => {
+                let bits = ct_to_bits(rt, ok, other)?;
+                Ok(alloc_jit_result(rt, true, bits as u64))
+            }
+        };
+    }
+    if matches!(ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
+        let error = value
+            .to_jet_err()
+            .ok_or_else(|| deopt_marshal_diag(ty, "cross-tier host shim needs a structured Err payload"))?;
+        return Ok(alloc_jit_error(rt, error));
+    }
     match value {
         CtValue::Int(n) => Ok(*n),
         CtValue::Bool(b) => Ok(i64::from(*b)),
         CtValue::Char(c) => Ok(u32::from(*c) as i64),
         CtValue::Str(s) => Ok(rt.heap.alloc_string(s.clone())),
         CtValue::Unit => Ok(0),
-        _ => Err(Diagnostic::error(
-            "E0956",
-            format!("deopt cannot marshall value for `{ty:?}`"),
-            "cross-tier host shim only moves Int/Bool/Char/String/Unit".to_string(),
-            "report this as a compiler bug".to_string(),
-            None,
+        _ => Err(deopt_marshal_diag(
+            ty,
+            "cross-tier host shim only moves scalar values plus tagged Result payloads",
         )),
     }
 }

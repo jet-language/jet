@@ -445,7 +445,7 @@ mod tests {
         fs::create_dir_all(&nested).unwrap();
         fs::write(
             root.join("authority.jet"),
-            "module workspace { policy: .{ deny: #(Exec) } }\n",
+            "module workspace { policy: { deny: #(Exec) } }\n",
         )
         .unwrap();
         fs::write(package.join(Syntax::PACKAGE_FILE), "name: \"app\"\n").unwrap();

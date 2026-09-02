@@ -315,6 +315,18 @@ pub fn assert_example_cli_tiers_agree_with<F>(stem: &str, check_stdout: F)
 where
     F: Fn(&str),
 {
+    assert_example_cli_tiers_agree_with_package(stem, None, check_stdout);
+}
+
+/// Run an executable example from an isolated scratch package. This keeps a
+/// narrowly scoped authority grant out of the shared examples tree.
+pub fn assert_example_cli_tiers_agree_with_package<F>(
+    stem: &str,
+    package_source: Option<&str>,
+    check_stdout: F,
+) where
+    F: Fn(&str),
+{
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let stem_path = root.join("examples/features").join(stem);
     let source = if stem_path.is_dir() {
@@ -327,6 +339,16 @@ where
         "missing executable allocator example: {}",
         source.display()
     );
+    let (scratch, run_source) = if let Some(package_source) = package_source {
+        let scratch = unique_tmp("jet_example_policy");
+        fs::create_dir_all(&scratch).unwrap();
+        let run_source = scratch.join(source.file_name().expect("example source has a filename"));
+        fs::copy(&source, &run_source).unwrap();
+        fs::write(scratch.join("package.jet"), package_source).unwrap();
+        (Some(scratch), run_source)
+    } else {
+        (None, source.clone())
+    };
 
     let modes = [
         ("release", true, false),
@@ -346,7 +368,7 @@ where
             command.arg("--interpret");
         }
         command
-            .arg(&source)
+            .arg(&run_source)
             .current_dir(&root)
             .env("JET_CACHE_DIR", cache.join("cache"))
             .env("JETPACK_ROOT", cache.join("jetpack"))
@@ -376,6 +398,9 @@ where
         } else {
             baseline = Some((mode, result.0, result.1));
         }
+    }
+    if let Some(scratch) = scratch {
+        let _ = fs::remove_dir_all(scratch);
     }
 }
 
@@ -608,6 +633,61 @@ pub fn build_release_and_run_multi(
         String::from_utf8_lossy(&run.stdout).into_owned(),
         String::from_utf8_lossy(&run.stderr).into_owned(),
     )
+}
+
+/// Run a scratch program through release AOT, default resident JIT, and the
+/// forced interpreter.
+pub fn assert_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
+    let files = [("main.jet", src)];
+    let runs = [
+        build_release_and_run_multi(name, "main.jet", &files),
+        run_default_multi(name, "main.jet", &files),
+        run_interpret_multi(name, "main.jet", &files),
+    ];
+    let baseline = &runs[0];
+    for (mode, result) in ["release AOT", "default resident JIT", "forced interpreter"]
+        .into_iter()
+        .zip(runs.iter())
+    {
+        assert_eq!(result.0, 0, "{mode} failed:\n{}", result.2);
+        assert_eq!(result.1, expected_stdout, "{mode} output disagreed");
+        assert_eq!(result.0, baseline.0, "{mode} exit code disagreed");
+        assert_eq!(result.1, baseline.1, "{mode} stdout disagreed");
+    }
+}
+
+/// Assert the stable E3010 code/message across release AOT, resident JIT, and
+/// forced interpretation while ignoring adapter-specific source locations.
+pub fn assert_release_error_tiers_agree(name: &str, src: &str, expected_message: &str) {
+    let files = [("main.jet", src)];
+    let runs = [
+        build_release_and_run_multi(name, "main.jet", &files),
+        run_default_multi(name, "main.jet", &files),
+        run_interpret_multi(name, "main.jet", &files),
+    ];
+    let expected_prefix = format!("Stop [E3010]: `{expected_message}`");
+    let baseline_code = runs[0].0;
+    let mut baseline_prefix = None;
+    for (mode, result) in ["release AOT", "default resident JIT", "forced interpreter"]
+        .into_iter()
+        .zip(runs.iter())
+    {
+        assert_ne!(result.0, 0, "{mode} unexpectedly succeeded");
+        assert_eq!(result.0, baseline_code, "{mode} exit code disagreed");
+        assert!(result.1.is_empty(), "{mode} wrote stdout: {:?}", result.1);
+        let prefix = result
+            .2
+            .lines()
+            .find(|line| line.contains("Stop [E3010]:"))
+            .and_then(|line| line.split(" — ").next())
+            .unwrap_or_else(|| panic!("{mode} did not report E3010:\n{}", result.2));
+        assert_eq!(prefix, expected_prefix.as_str(), "{mode} message disagreed");
+        if let Some(baseline_prefix) = baseline_prefix {
+            assert_eq!(prefix, baseline_prefix, "{mode} detail disagreed");
+        } else {
+            baseline_prefix = Some(prefix);
+        }
+    }
 }
 
 /// Run a multi-file program through the default `jet run` lens.

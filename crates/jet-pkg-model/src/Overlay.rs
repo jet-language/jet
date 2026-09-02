@@ -1134,20 +1134,14 @@ fn named_block(body: &str, name: &str) -> Result<Option<String>, OverlayError> {
             let rest = body[after..].trim_start();
             if let Some(rest) = rest.strip_prefix(':') {
                 let rest = rest.trim_start();
-                if let Some(rest) = rest.strip_prefix('.') {
-                    if let Some(inner) = rest.trim_start().strip_prefix('{') {
-                        let policy_body = balanced_policy_body(inner)?;
-                        if found.is_some() {
-                            return Err(OverlayError::Malformed(format!(
-                                "workspace `{name}` block appears more than once"
-                            )));
-                        }
-                        found = Some(policy_body);
-                    } else {
+                if let Some(inner) = rest.strip_prefix('{') {
+                    let policy_body = balanced_policy_body(inner)?;
+                    if found.is_some() {
                         return Err(OverlayError::Malformed(format!(
-                            "workspace `{name}` must be a record"
+                            "workspace `{name}` block appears more than once"
                         )));
                     }
+                    found = Some(policy_body);
                 } else {
                     return Err(OverlayError::Malformed(format!(
                         "workspace `{name}` must be a record"
@@ -1570,22 +1564,6 @@ fn strip_build_policy_blocks(body: &str) -> String {
                 .expect("peeked whitespace")
                 .len_utf8();
         }
-        if !body[cursor..].starts_with('.') {
-            pos = after;
-            continue;
-        }
-        cursor += 1;
-        while body[cursor..]
-            .chars()
-            .next()
-            .is_some_and(char::is_whitespace)
-        {
-            cursor += body[cursor..]
-                .chars()
-                .next()
-                .expect("peeked whitespace")
-                .len_utf8();
-        }
         if !body[cursor..].starts_with('{') {
             pos = after;
             continue;
@@ -1595,6 +1573,7 @@ fn strip_build_policy_blocks(body: &str) -> String {
         let end = cursor + 1 + consumed;
         out.push_str(&body[pos..at]);
         pos = end;
+
     }
     out.push_str(&body[pos..]);
     out

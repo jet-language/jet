@@ -190,6 +190,25 @@ The fact law's discipline extends to the corpus itself. Every truth — a semant
 Tie-break rule: when a decision trades rank N against rank M, the smaller
 number wins. When it trades effort against anything, effort loses.
 
+### Competitive performance law
+
+Jet targets a strict win against every matched peer on every required
+performance cell and metric. Results are judged independently: an average,
+aggregate, easier workload, or faster unrelated tier never cancels a loss.
+
+- Against Rust, Jet should win. When a strict win is not physically
+  achievable, parity requires a same-run Jet/Rust ratio at or below `1.05`.
+  The five-percent band accounts for measurement noise; it is a rejection
+  ceiling, not a product target and never a win.
+- Against every non-Rust peer, Jet must be strictly faster: the same-run ratio
+  must be below `1.00`.
+- Wrong output, missing peers, uncovered cells, unavailable measurements,
+  mismatched inputs, or inconclusive evidence cannot pass.
+- A performance card, milestone, dashboard, or release gate stays open while
+  any required cell violates this law. Every loss keeps an owned optimization
+  path until Jet wins or reaches the Rust parity floor without sacrificing
+  safety, semantics, diagnostics, determinism, or execution-tier parity.
+
 ## Effort is never a deterrent (owner-directed, absolute)
 
 Implementation difficulty, build time, or "this is a lot of work" must **never**

@@ -6,7 +6,9 @@ use super::fallible::value_loop_requires_route;
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::CheckerCore::{contextual_literal, ContextualLiteral};
-use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
+use crate::Sema::Diagnostics::{
+    owned_type_for_read_view, soft_public_use, type_fix_hint, typed_text_mismatch,
+};
 use crate::Syntax;
 use crate::AST::{
     noelse_terminated, AccessConvention, BinOp, Call, CallArg, CallArgFlags, EnumLitArg, Expr,
@@ -77,6 +79,60 @@ fn is_string_literal(expr: &Expr, expected: &str) -> bool {
             if parts.len() == 1
                 && matches!(&parts[0], StrPart::Lit(value) if value == expected)
     )
+}
+
+fn raw_multiline_html_edit(source: &str, parts: &[StrPart], span: Span) -> Option<TextEdit> {
+    let literal_source = source.get(span.start..span.end)?;
+    if !literal_source.starts_with("\"\"\"") || !literal_source.ends_with("\"\"\"") {
+        return None;
+    }
+
+    let mut literal_text = String::new();
+    for part in parts {
+        if let StrPart::Lit(text) = part {
+            literal_text.push_str(text);
+        }
+    }
+    let lower = literal_text.to_ascii_lowercase();
+    const HTML_STARTS: &[&str] = &[
+        "<!doctype html",
+        "<html",
+        "<head",
+        "<body",
+        "<main",
+        "<section",
+        "<article",
+        "<header",
+        "<footer",
+        "<nav",
+        "<div",
+        "<span",
+        "<p",
+        "<h1",
+        "<h2",
+        "<h3",
+        "<ul",
+        "<li",
+        "<a ",
+        "<button",
+        "<pre",
+        "<code",
+        "<meta",
+        "<link",
+        "<script",
+        "<style",
+        "<svg",
+        "<iframe",
+        "<form",
+    ];
+    if !HTML_STARTS.iter().any(|tag| lower.contains(tag)) {
+        return None;
+    }
+
+    Some(TextEdit {
+        span,
+        new_text: format!("HTML{{{literal_source}}}"),
+    })
 }
 
 fn repeated_struct_list_edit(
@@ -230,7 +286,28 @@ fn http_text_result() -> Type {
     }
 }
 
+
 impl<'a> Checker<'a> {
+    fn expr_definitely_diverges(expr: &Expr) -> bool {
+        match expr.without_parens() {
+            Expr::Todo { .. } => true,
+            Expr::Call(call) => call.name == Syntax::BUILTIN_PANIC,
+            Expr::If {
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                ..
+            } => {
+                let then_diverges = crate::Sema::Diagnostics::block_definitely_exits(then_body)
+                    || Self::expr_definitely_diverges(then_value);
+                let else_diverges = crate::Sema::Diagnostics::block_definitely_exits(else_body)
+                    || Self::expr_definitely_diverges(else_value);
+                then_diverges && else_diverges
+            }
+            _ => false,
+        }
+    }
     fn named_local_type(&self, expr: &Expr) -> Option<String> {
         match expr.without_parens() {
             Expr::Ident(name, _) => match &self.lookup(name)?.ty {
@@ -1255,11 +1332,11 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| fallback.to_string())
     }
 
-    /// D-BOUND-HEAD1: every typed-literal hole is sent through the same
-    /// `JetShow` capability gate. A typed head is not ordinary Display
-    /// interpolation; AOT, JIT, and the evaluator all marshal its value to
-    /// the shared show path.
-    fn validate_typed_hole_printable(&mut self, inner: &mut Expr) -> bool {
+    /// D-BOUND-HEAD1: typed-literal holes use the shared `JetShow` capability
+    /// gate. An `HTML` hole in an `HTML` literal is the one direct-composition
+    /// case: its nominal type proves the fragment already passed the HTML
+    /// boundary, so escaping it again would corrupt the markup.
+    fn validate_typed_hole_printable(&mut self, inner: &mut Expr, type_name: &str) -> Option<Type> {
         let was_borrow_ctx = self.borrow_ctx;
         self.borrow_ctx = true;
         let was_view_read = self.allow_string_view_read;
@@ -1268,10 +1345,12 @@ impl<'a> Checker<'a> {
         self.borrow_ctx = was_borrow_ctx;
         self.allow_string_view_read = was_view_read;
         let Some(ty) = ty else {
-            return false;
+            return None;
         };
-        if is_printable(&ty, self.registry, self.trait_reg) {
-            return true;
+        let trusted_html = type_name == jet_foundation::Syntax::TYPE_HTML
+            && matches!(&ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_HTML);
+        if trusted_html || is_printable(&ty, self.registry, self.trait_reg) {
+            return Some(ty);
         }
         self.diags.push(Diagnostic::error(
             "E0112",
@@ -1280,7 +1359,7 @@ impl<'a> Checker<'a> {
             "use a printable value, or convert it to String before the hole".to_string(),
             Some(inner.span()),
         ));
-        false
+        None
     }
 
     pub(crate) fn rewrite_typed_text_literal(
@@ -1304,9 +1383,20 @@ impl<'a> Checker<'a> {
             return None;
         };
         let mut holes_printable = true;
+        let mut trusted_html_holes = Vec::new();
         for part in parts.iter_mut() {
             if let StrPart::Interp(inner, _) = part {
-                holes_printable &= self.validate_typed_hole_printable(inner);
+                match self.validate_typed_hole_printable(inner, &type_name) {
+                    Some(ty) => trusted_html_holes.push(
+                        type_name == jet_foundation::Syntax::TYPE_HTML
+                            && matches!(
+                                ty,
+                                Type::Named(name)
+                                    if name == jet_foundation::Syntax::TYPE_HTML
+                            ),
+                    ),
+                    None => holes_printable = false,
+                }
             }
         }
         if !holes_printable {
@@ -1322,6 +1412,7 @@ impl<'a> Checker<'a> {
             spread: false,
         };
         let mut args: Vec<CallArg> = Vec::new();
+        let mut trusted_html_holes = trusted_html_holes.into_iter();
         let mut cur_lit = String::new();
         for p in parts {
             match p {
@@ -1332,7 +1423,10 @@ impl<'a> Checker<'a> {
                         convention: AccessConvention::Read,
                         span: inner.span(),
                         expr: *inner,
-                        flags: crate::AST::CallArgFlags::default(),
+                        flags: crate::AST::CallArgFlags {
+                            trusted_html: trusted_html_holes.next().unwrap_or(false),
+                            ..crate::AST::CallArgFlags::default()
+                        },
                         label: None,
                         spread: false,
                     });
@@ -1667,9 +1761,29 @@ impl<'a> Checker<'a> {
         self.normalize_imported_core_expr(expr);
         self.normalize_prelude_expr(expr);
         let saved_statement_expr_inference = self.statement_expr_inference;
+        let saved_statement_expr_root_depth = self.statement_expr_root_depth;
         self.statement_expr_inference = true;
+        // `infer_statement_expr` is called for a Stmt::Expr after the
+        // statement checker has entered its source depth. `infer` enters one
+        // more depth for the root expression; nested argument/value
+        // expressions enter still deeper levels and must retain their value
+        // tails. Parentheses are transparent, but their inference wrapper
+        // still consumes one source-nesting slot per wrapper.
+        let mut paren_depth = 0;
+        let mut root: &Expr = &*expr;
+        while let Expr::Paren(inner, _) = root {
+            paren_depth += 1;
+            root = inner;
+        }
+        let direct_call_root = matches!(root, Expr::Call(..));
+        self.statement_expr_root_depth = Some(
+            self.source_nesting
+                + paren_depth
+                + if direct_call_root { 0 } else { 1 },
+        );
         let result = self.infer_fallible_stmt(expr);
         self.statement_expr_inference = saved_statement_expr_inference;
+        self.statement_expr_root_depth = saved_statement_expr_root_depth;
         result
     }
 
@@ -1715,13 +1829,14 @@ impl<'a> Checker<'a> {
                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
             )
             || !matches!(result, Some(Type::Result { .. }))
-            || self.expected_type.as_ref().is_some_and(|expected| {
-                matches!(
-                    expected,
-                    Type::Result { err, .. }
-                        if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
-                )
-            })
+            || (self.ordinary_binding_root_depth != Some(self.source_nesting)
+                && self.expected_type.as_ref().is_some_and(|expected| {
+                    matches!(
+                        expected,
+                        Type::Result { err, .. }
+                            if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
+                    )
+                }))
         {
             return result;
         }
@@ -1763,6 +1878,7 @@ impl<'a> Checker<'a> {
             Expr::Call(..)
                 | Expr::MethodCall { .. }
                 | Expr::CallValue { .. }
+                | Expr::Lambda(..)
                 | Expr::Ok(..)
                 | Expr::Err(..)
                 | Expr::Try(..)
@@ -1833,27 +1949,28 @@ impl<'a> Checker<'a> {
         {
             return Some(Type::String);
         }
-        // Range/list windows deliberately keep `Type::List<T>` at the Jet
-        // surface. Their borrow shape lives in the provenance graph, so the
-        // owning-copy rule must consult that graph instead of looking only for
-        // the explicit `View<T>` type. A mutable window is never an implicit
-        // copy source: its `Write` fact keeps the existing refusal path live.
-        if matches!(ty, Type::List(_)) {
-            let sources = self.view_call_sources(e);
-            if !sources.is_empty()
-                && sources.iter().all(|(path, _, kind, access)| {
-                    path.is_empty()
-                        && *access == crate::Sema::ViewAccess::Read
-                        && matches!(
-                            kind,
-                            crate::Sema::ViewKind::List
-                                | crate::Sema::ViewKind::Buffer
-                                | crate::Sema::ViewKind::Matrix
-                        )
-                })
-            {
-                return Some(ty.clone());
-            }
+        // Read-only list, buffer, and matrix windows keep the selected
+        // element's surface type when indexed (for example, `window[0]` is a
+        // `String`, not a `View<String>`). Their borrow shape lives in the
+        // provenance graph, so the owning-copy rule must consult that graph
+        // instead of looking only for the explicit `View<T>` type. A mutable
+        // window is never an implicit copy source: its `Write` fact keeps the
+        // existing refusal path live. Keep the path empty so a struct
+        // containing a declared view field is not copied wholesale.
+        let sources = self.view_call_sources(e);
+        if !sources.is_empty()
+            && sources.iter().all(|(path, _, kind, access)| {
+                path.is_empty()
+                    && *access == crate::Sema::ViewAccess::Read
+                    && matches!(
+                        kind,
+                        crate::Sema::ViewKind::List
+                            | crate::Sema::ViewKind::Buffer
+                            | crate::Sema::ViewKind::Matrix
+                    )
+            })
+        {
+            return Some(ty.clone());
         }
         if !type_is_copy(ty)
             && matches!(e, Expr::Ident(..) | Expr::Field(..) | Expr::Index { .. })
@@ -2533,15 +2650,27 @@ impl<'a> Checker<'a> {
             }
         );
         if !result_pattern {
-            let result = if self.statement_expr_inference {
+            let branch_diverges = Self::expr_definitely_diverges(value);
+            let result = if self.statement_expr_inference || branch_diverges {
                 // A braced dispatch arm is a statement arm when the whole
                 // dispatch is used as a statement. Use the statement call
                 // checker for its tail so `print(...)` contributes Unit
                 // instead of entering value-only call inference (E0116).
+                // A diverging tail is also statement-shaped: it cannot
+                // contribute a value to the surrounding branch.
                 self.infer_fallible_stmt(value)
             } else {
                 self.infer(value)
             };
+            if branch_diverges {
+                self.flow.reachable = false;
+                // A diverging arm has no value at the join. In particular,
+                // nested all-diverging value-ifs must not surface the Unit
+                // recovery type from their panic/todo tails as a fallback
+                // type mismatch.
+                self.expected_type = saved_expected;
+                return None;
+            }
             self.expected_type = saved_expected;
             return result;
         }
@@ -2629,7 +2758,7 @@ impl<'a> Checker<'a> {
                 }
                 let mut body = std::mem::replace(e, Expr::Absent(span));
                 replace_bare_member_subject(&mut body);
-                *e = Expr::Lambda(Lambda {
+                *e = Expr::Lambda(Box::new(Lambda {
                     take_names: Vec::new(),
                     params: vec![LambdaParam {
                         name: BARE_MEMBER_SUBJECT.to_string(),
@@ -2643,7 +2772,7 @@ impl<'a> Checker<'a> {
                     body: LambdaBody::Expr(Box::new(body)),
                     span,
                     meta: LambdaMeta::default(),
-                });
+                }));
                 self.subject_shorthand_depth += 1;
                 let result = self.infer(e);
                 self.subject_shorthand_depth -= 1;
@@ -2810,26 +2939,34 @@ impl<'a> Checker<'a> {
                     &before,
                     &[then_path, else_path],
                 );
-                if self.statement_expr_inference {
+                if self.statement_expr_inference
+                    && self.statement_expr_root_depth == Some(self.source_nesting)
+                {
                     return Some(crate::Sema::CheckerCoreLib::unit_ty());
                 }
                 match (then_ty, else_ty) {
                     (Some(a), Some(b)) => {
-                        // D-TOOL2: `todo` is diverging; if one branch is a
-                        // typed hole, the other branch's type wins.
-                        let then_is_todo = matches!(then_value.as_ref(), Expr::Todo { .. });
-                        let else_is_todo = matches!(else_value.as_ref(), Expr::Todo { .. });
-                        if a == b || else_is_todo {
-                            // Update the todo's expected_type to match what we know.
-                            if else_is_todo {
+                        // `todo`, `panic`, and an all-diverging nested value-if
+                        // do not contribute a live branch type. Keep the type
+                        // from the branch that can reach the join.
+                        let then_is_diverging = Self::expr_definitely_diverges(then_value)
+                            || crate::Sema::Diagnostics::block_definitely_exits(then_body);
+                        let else_is_diverging = Self::expr_definitely_diverges(else_value)
+                            || crate::Sema::Diagnostics::block_definitely_exits(else_body);
+                        if a == b || else_is_diverging {
+                            // Update a typed hole's expected_type to match what
+                            // we know; panic/diverging branches have no hole.
+                            if matches!(else_value.as_ref(), Expr::Todo { .. }) {
                                 if let Expr::Todo { expected_type, .. } = else_value.as_mut() {
                                     *expected_type = Some(a.name());
                                 }
                             }
                             Some(a)
-                        } else if then_is_todo {
-                            if let Expr::Todo { expected_type, .. } = then_value.as_mut() {
-                                *expected_type = Some(b.name());
+                        } else if then_is_diverging {
+                            if matches!(then_value.as_ref(), Expr::Todo { .. }) {
+                                if let Expr::Todo { expected_type, .. } = then_value.as_mut() {
+                                    *expected_type = Some(b.name());
+                                }
                             }
                             Some(b)
                         } else if let Some(joined) = a.numeric_join(&b) {
@@ -3129,6 +3266,7 @@ impl<'a> Checker<'a> {
             // only from `SQL.{"…"}` / `HTML.{"…"}` / `Sh.{"…"}` (typed-literal
             // heads) via `elaborate_typed_lit` → `rewrite_typed_text_literal`.
             Expr::Str(parts, str_span) => {
+                let raw_html_edit = raw_multiline_html_edit(self.source, parts, *str_span);
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): interpolation with at least one
                 // `{…}` hole builds a fresh `String` (unlike a plain literal
                 // with no holes, which is one constant piece of text — not
@@ -3219,7 +3357,8 @@ impl<'a> Checker<'a> {
                                         // `BuildError` is a compiler-host-only
                                         // carrier for the `fn build` entry.
                                         if n != "BuildError"
-                                            && self.trait_reg.auto_printable.contains(n)
+                                            && (n == crate::Syntax::TYPE_IO_ERROR
+                                                || self.trait_reg.auto_printable.contains(n))
                                             && !self.trait_reg.implements_trait(
                                                 n,
                                                 crate::Generics::DISPLAY,
@@ -3278,7 +3417,8 @@ impl<'a> Checker<'a> {
                                                     self.registry.distinct_granted_bundles(n),
                                                     inner.span(),
                                                 ));
-                                            } else if self.trait_reg.auto_printable.contains(n)
+                                            } else if (n == crate::Syntax::TYPE_IO_ERROR
+                                                || self.trait_reg.auto_printable.contains(n))
                                                 && !self
                                                     .trait_reg
                                                     .implements_trait(n, crate::Generics::DISPLAY)
@@ -3498,6 +3638,10 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
+                }
+                if let Some(edit) = raw_html_edit {
+                    self.diags
+                        .push(Diagnostic::from_row("L0524", &[], Some(*str_span)).with_edit(edit));
                 }
                 Some(Type::String)
             }
@@ -5194,6 +5338,54 @@ impl<'a> Checker<'a> {
             None => Some(head),
         }
     }
+    /// Keep expected collection slots strict. `check_type_assignable` reports
+    /// specialized diagnostics, but returns `false` for a plain mismatch so
+    /// callers can choose their context. An expected list used to ignore that
+    /// result and silently adopt its element type, which let `[String]` cross a
+    /// `List<SQL>` database sink.
+    fn check_list_element_assignable(&mut self, want: &Type, got: &Type, span: Span) {
+        let reported = self.check_type_assignable(want, got, span);
+        let fixed_widens = matches!(
+            (want, got),
+            (
+                Type::List(want_elem),
+                Type::FixedList {
+                    elem: got_elem, ..
+                }
+            ) if want_elem == got_elem && Type::obligations_satisfy(want_elem, got_elem)
+        );
+        let union_widens = matches!(
+            want,
+            Type::Union(members)
+                if members
+                    .iter()
+                    .any(|member| member == got && Type::obligations_satisfy(member, got))
+        );
+        let trait_box = self.trait_slot_accepts(want, got);
+        if !reported
+            && got != want
+            && !fixed_widens
+            && got.numeric_widening_to(want).is_none()
+            && !union_widens
+            && !trait_box
+        {
+            if let Some(diag) = typed_text_mismatch(want, got, span) {
+                self.diags.push(diag);
+            } else {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "a list item needs {}, but this is {}",
+                        want.show(),
+                        got.show()
+                    ),
+                    "every list item must match the list's element type".to_string(),
+                    type_fix_hint(want, got),
+                    Some(span),
+                ));
+            }
+        }
+    }
 
     fn infer_owned_list_element(&mut self, elem: &mut Expr) -> Option<Type> {
         let ty = self.infer_owning_value(elem);
@@ -5217,7 +5409,7 @@ impl<'a> Checker<'a> {
         for elem in elems.iter() {
             self.reject_fixed_storage(elem, "be stored in a list");
         }
-        if self.freestanding {
+        if self.no_os {
             self.diags.push(e3303(span));
         }
         if elems.is_empty() {
@@ -5280,7 +5472,7 @@ impl<'a> Checker<'a> {
             self.expected_type = Some((*expected_inner).clone());
             for e in elems.iter_mut() {
                 if let Some(t) = self.infer_owned_list_element(e) {
-                    self.check_type_assignable(&expected_inner, &t, e.span());
+                    self.check_list_element_assignable(&expected_inner, &t, e.span());
                 }
             }
             self.expected_type = saved;
@@ -5316,7 +5508,7 @@ impl<'a> Checker<'a> {
                                 }
                             }
                             _ => {
-                                self.check_type_assignable(&expected_inner, &t, e.span());
+                                self.check_list_element_assignable(&expected_inner, &t, e.span());
                             }
                         }
                     }
@@ -5344,7 +5536,7 @@ impl<'a> Checker<'a> {
                         let t = self.infer_owned_list_element(inner);
                         match t {
                             Some(Type::List(spread_elem)) => {
-                                self.check_type_assignable(
+                                self.check_list_element_assignable(
                                     &expected_inner,
                                     &spread_elem,
                                     *spread_span,
@@ -5372,7 +5564,7 @@ impl<'a> Checker<'a> {
                                     Expr::Ident(name, _) if self.is_string_view(name)
                                 ) || self.string_view_call_source(e).is_some());
                             if !string_view_compatible {
-                                self.check_type_assignable(&expected_inner, &t, e.span());
+                                self.check_list_element_assignable(&expected_inner, &t, e.span());
                             }
                         }
                     }
@@ -5510,7 +5702,7 @@ impl<'a> Checker<'a> {
         entries: &mut [(Expr, Expr)],
         span: Span,
     ) -> Option<Type> {
-        if self.freestanding {
+        if self.no_os {
             self.diags.push(e3303(span));
         }
         if entries.is_empty() {

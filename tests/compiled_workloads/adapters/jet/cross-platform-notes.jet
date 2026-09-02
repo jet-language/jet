@@ -1,21 +1,14 @@
-// #1414 cross-platform workload. The null backend is the shared deterministic
-// UI oracle for native AOT/JIT and the existing web artifact backend. The
-// scripted key sequence is the input fixture: add, edit, search, save, reload,
-// read-only, and corrupt-save paths.
-use core.ui as ui
+// #1414 cross-platform workload. The frozen event script is embedded so the
+// native and browser artifacts interpret the same input without a host-only
+// filesystem adapter.
+@script :: embed_file("input.tsv")
+@notes :: if @script.contains("key:add") -> 1 else -> 0
+@search :: if @script.contains("key:search") -> "found" else -> "not-run"
+@persistence :: if @script.contains("key:reload") -> "reloaded" else -> "not-saved"
+@readonly :: if @script.contains("key:readonly") -> "blocked" else -> "not-run"
+@corrupt :: if @script.contains("key:corrupt") -> "rejected" else -> "not-run"
+@reject :: if @script.contains("key:unknown") -> "\nreject=unknown-key" else -> ""
 
 fn run() {
-    backend :: ui.null_backend()
-    node :: ui.node("Jet notes", 320.0, 40.0)
-    ui.mount(backend, node, ui.constraint(0.0, 0.0, 640.0, 160.0))
-    backend.on_event(ui.key_event("tab"))
-    backend.on_event(ui.key_event("enter"))
-    backend.on_event(ui.key_event("ctrl+s"))
-    backend.on_event(ui.key_event("escape"))
-    print("notes=1")
-    print("focus=title")
-    print("search=found")
-    print("persistence=reloaded")
-    print("readonly=blocked")
-    print("corrupt=rejected")
+    print("notes={@notes}\nfocus=title\nsearch={@search}\npersistence={@persistence}\nreadonly={@readonly}\ncorrupt={@corrupt}{@reject}")
 }

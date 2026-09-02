@@ -118,9 +118,12 @@ fn h1_rejects_request_target_controls_before_connecting() {
         r#"
 use core.http.client as http
 fn run() {{
-    if http.get("http://{addr}/safe\r\nInjected: yes") == {{
+    if http.get("http://{addr}/safe\nInjected: yes") == {{
         .Ok(_) -> print("accepted")
-        .Err(_) -> print("rejected")
+        .Err(error) -> {{
+            if error == .InvalidUrl -> print("rejected")
+            else -> print("wrong error")
+        }}
         else -> print("unexpected")
     }}
 }}
@@ -156,12 +159,46 @@ fn h1_rejects_user_framing_headers_before_connecting() {
         r#"
 use core.http.client as http
 fn run() {{
+    method :: http.request("GET\nInjected", "http://{addr}/method")
+    if method.send() == {{
+        .Ok(_) -> print("method accepted")
+        .Err(error) -> {{
+            if error == .InvalidHeader -> print("method rejected")
+            else -> print("method wrong")
+        }}
+        else -> print("method unexpected")
+    }}
+    name :: http.request("POST", "http://{addr}/name")
+        .header("x-bad\nname", "value")
+        .body("body")
+    if name.send() == {{
+        .Ok(_) -> print("header name accepted")
+        .Err(error) -> {{
+            if error == .InvalidHeader -> print("header name rejected")
+            else -> print("header name wrong")
+        }}
+        else -> print("header name unexpected")
+    }}
+    value :: http.request("POST", "http://{addr}/value")
+        .header("x-safe", "bad\nvalue")
+        .body("body")
+    if value.send() == {{
+        .Ok(_) -> print("header value accepted")
+        .Err(error) -> {{
+            if error == .InvalidHeader -> print("header value rejected")
+            else -> print("header value wrong")
+        }}
+        else -> print("header value unexpected")
+    }}
     length :: http.request("POST", "http://{addr}/length")
         .header("Content-Length", "0")
         .body("body")
     if length.send() == {{
         .Ok(_) -> print("length accepted")
-        .Err(_) -> print("length rejected")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("length rejected")
+            else -> print("length wrong")
+        }}
         else -> print("length unexpected")
     }}
     transfer :: http.request("POST", "http://{addr}/transfer")
@@ -169,8 +206,124 @@ fn run() {{
         .body("body")
     if transfer.send() == {{
         .Ok(_) -> print("transfer accepted")
-        .Err(_) -> print("transfer rejected")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("transfer rejected")
+            else -> print("transfer wrong")
+        }}
         else -> print("transfer unexpected")
+    }}
+    duplicate_host :: http.request("GET", "http://{addr}/duplicate-host")
+        .header("Host", "one")
+        .header("hOsT", "two")
+    if duplicate_host.send() == {{
+        .Ok(_) -> print("duplicate host accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("duplicate host rejected")
+            else -> print("duplicate host wrong")
+        }}
+        else -> print("duplicate host unexpected")
+    }}
+    connection_host :: http.request("GET", "http://{addr}/connection-host")
+        .header("cOnNeCtIoN", "hOsT")
+    if connection_host.send() == {{
+        .Ok(_) -> print("connection host accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("connection host rejected")
+            else -> print("connection host wrong")
+        }}
+        else -> print("connection host unexpected")
+    }}
+    connection_length :: http.request("POST", "http://{addr}/connection-length")
+        .header("Connection", "Content-Length")
+        .body("body")
+    if connection_length.send() == {{
+        .Ok(_) -> print("connection length accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("connection length rejected")
+            else -> print("connection length wrong")
+        }}
+        else -> print("connection length unexpected")
+    }}
+    connection_transfer :: http.request("POST", "http://{addr}/connection-transfer")
+        .header("Connection", "tRaNsFeR-EnCoDiNg")
+        .body("body")
+    if connection_transfer.send() == {{
+        .Ok(_) -> print("connection transfer accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("connection transfer rejected")
+            else -> print("connection transfer wrong")
+        }}
+        else -> print("connection transfer unexpected")
+    }}
+    proxy_connection :: http.request("GET", "http://{addr}/proxy-connection")
+        .header("pRoXy-CoNnEcTiOn", "keep-alive")
+    if proxy_connection.send() == {{
+        .Ok(_) -> print("proxy connection accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("proxy connection rejected")
+            else -> print("proxy connection wrong")
+        }}
+        else -> print("proxy connection unexpected")
+    }}
+    keep_alive :: http.request("GET", "http://{addr}/keep-alive")
+        .header("Keep-Alive", "timeout=5")
+    if keep_alive.send() == {{
+        .Ok(_) -> print("keep-alive accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("keep-alive rejected")
+            else -> print("keep-alive wrong")
+        }}
+        else -> print("keep-alive unexpected")
+    }}
+    te :: http.request("GET", "http://{addr}/te")
+        .header("TE", "trailers")
+    if te.send() == {{
+        .Ok(_) -> print("te accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("te rejected")
+            else -> print("te wrong")
+        }}
+        else -> print("te unexpected")
+    }}
+    trailer :: http.request("GET", "http://{addr}/trailer")
+        .header("Trailer", "x-trailer")
+    if trailer.send() == {{
+        .Ok(_) -> print("trailer accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("trailer rejected")
+            else -> print("trailer wrong")
+        }}
+        else -> print("trailer unexpected")
+    }}
+    upgrade :: http.request("GET", "http://{addr}/upgrade")
+        .header("Upgrade", "websocket")
+    if upgrade.send() == {{
+        .Ok(_) -> print("upgrade accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("upgrade rejected")
+            else -> print("upgrade wrong")
+        }}
+        else -> print("upgrade unexpected")
+    }}
+    proxy_authenticate :: http.request("GET", "http://{addr}/proxy-authenticate")
+        .header("Proxy-Authenticate", "Basic")
+    if proxy_authenticate.send() == {{
+        .Ok(_) -> print("proxy authenticate accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("proxy authenticate rejected")
+            else -> print("proxy authenticate wrong")
+        }}
+        else -> print("proxy authenticate unexpected")
+    }}
+    proxy_authorization :: http.request("GET", "http://{addr}/proxy-authorization")
+        .header("pRoXy-AuThOrIzAtIoN", "Basic secret")
+    if proxy_authorization.send() == {{
+        .Ok(_) -> print("proxy authorization accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("proxy authorization rejected")
+            else -> print("proxy authorization wrong")
+        }}
+        else -> print("proxy authorization unexpected")
     }}
 }}
 "#
@@ -178,7 +331,10 @@ fn run() {{
     let (code, stdout, stderr) =
         common::build_and_run("jet_http_client_law", "user_framing_headers", &src);
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(stdout, "length rejected\ntransfer rejected\n");
+    assert_eq!(
+        stdout,
+        "method rejected\nheader name rejected\nheader value rejected\nlength rejected\ntransfer rejected\nduplicate host rejected\nconnection host rejected\nconnection length rejected\nconnection transfer rejected\nproxy connection rejected\nkeep-alive rejected\nte rejected\ntrailer rejected\nupgrade rejected\nproxy authenticate rejected\nproxy authorization rejected\n"
+    );
     assert!(!server.join().unwrap(), "user-controlled framing reached the socket");
 }
 
@@ -931,6 +1087,121 @@ fn main() {
     assert!(!bridge::jet_http_client_response_reused_impl(third.1));
 }
 
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "bridge harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin)
+        .arg(format!("http://{addr}/h2"))
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert!(
+        output.status.success(),
+        "bridge harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn h2_response_body_overrun_is_rejected_at_64_mib() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut preface = [0; 24];
+        stream.read_exact(&mut preface).unwrap();
+        assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+        assert_eq!(read_h2_frame(&mut stream).0, 4);
+        write_h2_frame(&mut stream, 4, 0, 0, &[]);
+        loop {
+            let request = read_h2_frame(&mut stream);
+            if request.0 == 1 {
+                assert_eq!(request.2, 1);
+                break;
+            }
+        }
+
+        // Omit content-length so the hostile path exercises the cumulative
+        // DATA-byte guard rather than only the declared-length guard.
+        write_h2_frame(&mut stream, 1, 4, 1, &[0x88]);
+        let chunk = vec![b'x'; 64 * 1024];
+        for _ in 0..1024 {
+            write_h2_frame(&mut stream, 0, 0, 1, &chunk);
+        }
+        write_h2_frame(&mut stream, 0, 1, 1, b"x");
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_h2_overrun_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let shown = dir.join("seed.jet");
+    let source =
+        "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("h2_overrun.rs");
+    let bin = dir.join("h2_overrun");
+    fs::write(
+        &harness,
+        r#"
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+    let response = bridge::jet_http_client_send_with_impl(
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!(response.0, 200);
+    let mut received = 0usize;
+    loop {
+        match bridge::jet_http_client_body_read_impl(response.1, 64 * 1024) {
+            Ok(Some(chunk)) => received += chunk.len(),
+            Ok(None) => panic!("HTTP/2 body overrun was accepted"),
+            Err(error) => {
+                assert_eq!(error, bridge::JetHTTPBridgeError::InvalidFraming);
+                break;
+            }
+        }
+    }
+    assert_eq!(received, 64 * 1024 * 1024);
+    bridge::jet_http_client_body_close_impl(response.1);
+    bridge::jet_http_client_drop_impl(client);
+}
 "#,
     )
     .unwrap();
@@ -2879,6 +3150,99 @@ fn run() {{
 }
 
 #[test]
+fn cross_origin_redirect_strips_request_credentials_and_rejects_proxy_auth() {
+    let first_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let second_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let forbidden_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    forbidden_listener.set_nonblocking(true).unwrap();
+    let first_addr = first_listener.local_addr().unwrap();
+    let second_addr = second_listener.local_addr().unwrap();
+    let forbidden_addr = forbidden_listener.local_addr().unwrap();
+    let forbidden = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match forbidden_listener.accept() {
+                Ok(_) => return true,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return false;
+                    }
+                    std::thread::yield_now();
+                }
+                Err(_) => return false,
+            }
+        }
+    });
+    let server = std::thread::spawn(move || {
+        let (mut first, _) = first_listener.accept().unwrap();
+        let first_request = String::from_utf8_lossy(&request_head(&mut first)).to_ascii_lowercase();
+        for header in ["authorization: bearer secret\r\n", "cookie: session=secret\r\n"] {
+            assert!(
+                first_request.contains(header),
+                "initial request omitted `{header}`: {first_request}"
+            );
+        }
+        assert!(
+            !first_request.contains("proxy-authorization:"),
+            "the valid request must not carry raw proxy credentials: {first_request}"
+        );
+        assert!(first_request.starts_with("get /start "));
+        write!(
+            first,
+            "HTTP/1.1 302 Found\r\nLocation: http://{second_addr}/next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        drop(first);
+
+        let (mut second, _) = second_listener.accept().unwrap();
+        let second_request = String::from_utf8_lossy(&request_head(&mut second)).to_ascii_lowercase();
+        assert!(second_request.starts_with("get /next "));
+        for header in ["authorization:", "proxy-authorization:", "cookie:"] {
+            assert!(
+                !second_request.contains(header),
+                "cross-origin redirect leaked `{header}`: {second_request}"
+            );
+        }
+        second
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+    });
+
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() {{
+    client :: http.Client.new()
+        .redirects(.Follow{{ max: 2, same_origin_credentials: true }})
+        .protocols(false, true, false)
+    forbidden :: http.request("GET", "http://{forbidden_addr}/forbidden")
+        .header("Proxy-Authorization", "Basic secret")
+    if client.send(forbidden) == {{
+        .Ok(_) -> print("proxy-auth accepted")
+        .Err(error) -> {{
+            if error == .InvalidFraming -> print("proxy-auth rejected")
+            else -> print("proxy-auth wrong")
+        }}
+        else -> print("proxy-auth unexpected")
+    }}
+    req :: http.request("GET", "http://{first_addr}/start")
+        .header("Authorization", "Bearer secret")
+        .header("Cookie", "session=secret")
+    resp :: client.send(req) ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "cross_origin_creds", &src);
+    server.join().unwrap();
+    assert!(!forbidden.join().unwrap(), "raw proxy credentials reached the socket");
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "proxy-auth rejected\nok\n1\n");
+}
+
+#[test]
 fn request_first_byte_timeout_overrides_client_phase_budget() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -3300,4 +3664,357 @@ fn run() {
 "#;
     let (code, _stdout, stderr) = common::build_and_run("jet_http_client_law", "retries_type", src);
     assert_eq!(code, 0, "stderr:\n{stderr}");
+}
+
+#[test]
+fn h2_rejects_idle_stream_flood_before_queue_growth() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed = closed.clone();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut preface = [0; 24];
+        stream.read_exact(&mut preface).unwrap();
+        assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+        assert_eq!(read_h2_frame(&mut stream).0, 4);
+        write_h2_frame(&mut stream, 4, 0, 0, &[]);
+        let request = loop {
+            let frame = read_h2_frame(&mut stream);
+            if frame.0 == 1 {
+                break frame;
+            }
+        };
+        assert_eq!(request.2, 1);
+        // Keep the real response body open. The following DATA frame targets
+        // idle stream 3 and must be rejected before entering any queue.
+        write_h2_frame(&mut stream, 1, 4, 1, &[0x88]);
+        let chunk = vec![b'x'; 64 * 1024];
+        let length = (chunk.len() as u32).to_be_bytes();
+        let mut head = [0; 9];
+        head[..3].copy_from_slice(&length[1..]);
+        head[3] = 0;
+        head[4] = 0;
+        head[5..].copy_from_slice(&3u32.to_be_bytes());
+        stream.write_all(&head).unwrap();
+        stream.write_all(&chunk).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut byte = [0; 1];
+        loop {
+            match stream.read(&mut byte) {
+                Ok(0) => {
+                    observed.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) => {
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                    }
+                Err(_) => {
+                    observed.store(true, Ordering::Relaxed);
+                    break;
+                }
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+        }
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_h2_idle_stream_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let shown = dir.join("seed.jet");
+    let source =
+        "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("h2_idle_stream.rs");
+    let bin = dir.join("h2_idle_stream");
+    fs::write(
+        &harness,
+        r#"
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+    let response = bridge::jet_http_client_send_with_impl(
+        client,
+        "GET",
+        &url,
+        &[],
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        &[],
+        &[],
+    )
+    .unwrap();
+    assert_eq!(response.0, 200);
+    let error = bridge::jet_http_client_body_read_impl(response.1, 64 * 1024).unwrap_err();
+    assert_eq!(error, bridge::JetHTTPBridgeError::InvalidFraming);
+    bridge::jet_http_client_body_close_impl(response.1);
+    bridge::jet_http_client_drop_impl(client);
+    bridge::jet_http_client_drop_impl(root);
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "bridge H2 idle-stream harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin)
+        .arg(format!("http://{addr}/h2"))
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert!(
+        closed.load(Ordering::Relaxed),
+        "idle-stream peer remained open after invalid frame"
+    );
+    assert!(
+        output.status.success(),
+        "bridge H2 idle-stream harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn h2_bounds_queued_frames_for_another_active_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed = closed.clone();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut preface = [0; 24];
+        stream.read_exact(&mut preface).unwrap();
+        assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+        assert_eq!(read_h2_frame(&mut stream).0, 4);
+        write_h2_frame(&mut stream, 4, 0, 0, &[]);
+        let first = loop {
+            let frame = read_h2_frame(&mut stream);
+            if frame.0 == 1 {
+                break frame;
+            }
+        };
+        assert_eq!(first.2, 1);
+        write_h2_frame(&mut stream, 1, 4, 1, &[0x88]);
+        let second = loop {
+            let frame = read_h2_frame(&mut stream);
+            if frame.0 == 1 {
+                break frame;
+            }
+        };
+        assert_eq!(second.2, 3);
+        write_h2_frame(&mut stream, 1, 4, 3, &[0x88]);
+        let chunk = vec![b'x'; 64 * 1024];
+        let mut send = |payload: &[u8]| -> bool {
+            let length = (payload.len() as u32).to_be_bytes();
+            let mut head = [0; 9];
+            head[..3].copy_from_slice(&length[1..]);
+            head[3] = 0;
+            head[4] = 0;
+            head[5..].copy_from_slice(&3u32.to_be_bytes());
+            stream
+                .write_all(&head)
+                .and_then(|_| stream.write_all(payload))
+                .is_ok()
+        };
+        for _ in 0..1024 {
+            if !send(&chunk) {
+                break;
+            }
+        }
+        stream
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut byte = [0; 1];
+        loop {
+            match stream.read(&mut byte) {
+                Ok(0) => {
+                    observed.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) => {
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                    }
+                Err(_) => {
+                    observed.store(true, Ordering::Relaxed);
+                    break;
+                }
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+        }
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_h2_active_queue_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let shown = dir.join("seed.jet");
+    let source =
+        "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("h2_active_queue.rs");
+    let bin = dir.join("h2_active_queue");
+    fs::write(
+        &harness,
+        r#"
+fn send(
+    client: i64,
+    url: &String,
+) -> Result<(i64, i64, Option<i64>, Vec<String>), bridge::JetHTTPBridgeError> {
+    bridge::jet_http_client_send_with_impl(
+        client,
+        "GET",
+        url,
+        &[],
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        &[],
+        &[],
+    )
+}
+
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+    let first = send(client, &url).unwrap();
+    assert_eq!(first.0, 200);
+    let second_url = url.clone();
+    let second = std::thread::spawn(move || send(client, &second_url).unwrap())
+        .join()
+        .unwrap();
+    assert_eq!(second.0, 200);
+    let error = bridge::jet_http_client_body_read_impl(first.1, 64 * 1024).unwrap_err();
+    assert_eq!(error, bridge::JetHTTPBridgeError::InvalidFraming);
+    bridge::jet_http_client_body_close_impl(first.1);
+    bridge::jet_http_client_body_close_impl(second.1);
+    bridge::jet_http_client_drop_impl(client);
+    bridge::jet_http_client_drop_impl(root);
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "bridge H2 active-queue harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin)
+        .arg(format!("http://{addr}/h2"))
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert!(
+        closed.load(Ordering::Relaxed),
+        "active-stream queue flood did not close the peer"
+    );
+    assert!(
+        output.status.success(),
+        "bridge H2 active-queue harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = fs::remove_dir_all(&dir);
 }

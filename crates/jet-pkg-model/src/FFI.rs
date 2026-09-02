@@ -102,14 +102,32 @@ pub(crate) fn undefined_symbol_flag_for_target(target: &str) -> &'static str {
     }
 }
 
-/// Gather every `extern rust` function across all modules.
+/// Gather every foreign function across all modules.
 pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
     let mut out = Vec::new();
     for module in &bundle.modules {
         for item in &module.items {
             let Item::ExternRust(block) = item else {
                 if let Item::Func(f) = item {
-                    if let Some(inline) = &f.inline_foreign {
+                    if let Some(import) = crate::Sema::guest_import_function_signature(f)
+                        .filter(|_| crate::Sema::guest_import_bridge_compatible(f))
+                    {
+                        out.push(ExternEntry {
+                            jet_name: import.name.clone(),
+                            rust_path: import.symbol.clone(),
+                            wrapper_name: crate::Sema::guest_import_wrapper_name(
+                                &module.alias,
+                                &import.name,
+                            ),
+                            params: import.params.clone(),
+                            return_type: import.return_type.clone(),
+                            crate_spec: "std".to_string(),
+                            line_hint: format!("`#Import(c) fn {}`", import.name),
+                            inline: None,
+                            c_abi: true,
+                            close: None,
+                        });
+                    } else if let Some(inline) = &f.inline_foreign {
                         out.push(ExternEntry {
                             jet_name: f.name.clone(),
                             rust_path: String::new(),
@@ -331,7 +349,12 @@ pub fn prepare_for_target(
     // made only from local Jet types must still resolve its declared provider
     // and report E3201 when the provider is absent.
     let c_link_args = if bundle.cffi.links_c() {
-        crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)?
+        crate::CFFI::rustc_link_args_for_target_with_entry(
+            &bundle.cffi,
+            &bundle.project_root,
+            target,
+            bundle.modules.get(bundle.entry).map(|module| module.path.as_path()),
+        )?
     } else {
         Vec::new()
     };
@@ -1728,24 +1751,36 @@ const ENCODING_JSON_RUNTIME: &str = include_str!("../../jet-foundation/src/Encod
 const JSON_NUMBER_RUNTIME: &str = include_str!("../../jet-foundation/src/JSONNumber.rs");
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
 const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
+const HOST_RUNTIME_SENTRY_BEGIN: &str = "// JET_HOST_RUNTIME_SENTRY_BEGIN";
+const HOST_RUNTIME_SENTRY_END: &str = "// JET_HOST_RUNTIME_SENTRY_END";
 const CRYPTO_ENTROPY_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 
-fn standalone_outcome_runtime() -> String {
-    let start = OUTCOME_RUNTIME
-        .find(HOST_RUNTIME_STOP_BEGIN)
-        .expect("Outcome host wrapper marker missing");
-    let end = OUTCOME_RUNTIME
-        .find(HOST_RUNTIME_STOP_END)
+fn strip_outcome_host_wrapper(source: &str, begin: &str, end: &str) -> String {
+    let start = source.find(begin).expect("Outcome host wrapper marker missing");
+    let end = source
+        .find(end)
         .expect("Outcome host wrapper end marker missing")
-        + HOST_RUNTIME_STOP_END.len();
-
-    // The crypto bridge has no compiler Registry. Keep the carrier/kernel and
-    // remove only the host adapter, matching the standalone Prelude projection.
-    let mut projected = String::with_capacity(OUTCOME_RUNTIME.len() - (end - start));
-    projected.push_str(&OUTCOME_RUNTIME[..start]);
-    projected.push_str(&OUTCOME_RUNTIME[end..]);
+        + end.len();
+    let mut projected = String::with_capacity(source.len() - (end - start));
+    projected.push_str(&source[..start]);
+    projected.push_str(&source[end..]);
     projected
+}
+
+fn standalone_outcome_runtime() -> String {
+    // Bridge crates have no compiler Registry. Keep the shared carriers and
+    // row-driven kernels, but remove both foundation-only Registry adapters.
+    let projected = strip_outcome_host_wrapper(
+        OUTCOME_RUNTIME,
+        HOST_RUNTIME_STOP_BEGIN,
+        HOST_RUNTIME_STOP_END,
+    );
+    strip_outcome_host_wrapper(
+        &projected,
+        HOST_RUNTIME_SENTRY_BEGIN,
+        HOST_RUNTIME_SENTRY_END,
+    )
 }
 
 /// The `wasmtime` crate version that backs sandboxed Component Model hosts
@@ -1756,6 +1791,11 @@ fn standalone_outcome_runtime() -> String {
 /// approved Cranelift backend (D-JITDEP1). Pin matches `jet-jit`'s Cranelift
 /// generation instead of bloating the release with two backend generations.
 pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
+/// The generated bridge uses the workspace's std-only foundation crate for
+/// descriptor-relative, no-follow plugin reads. Keep the path in the cache
+/// identity through the dependency map rather than duplicating its limits.
+const JET_FOUNDATION_CRATE_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
 
 /// Hand-written application plugin-loader runtime emitted into the bridge
 /// crate when `core.plugin` is used (D-PLUGIN1 / D-DEP-WASM1=A).
@@ -1968,6 +2008,10 @@ fn build_bridge_full(
         deps.insert(
             WASMTIME_CRATE_SPEC.0.to_string(),
             WASMTIME_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            "jet-foundation".to_string(),
+            JET_FOUNDATION_CRATE_PATH.to_string(),
         );
     }
     if needs_secrets {
@@ -3416,7 +3460,7 @@ fn native_toolchain_identity() -> &'static str {
     NATIVE_TOOLCHAIN_IDENTITY.as_str()
 }
 
-pub(crate) fn host_target() -> String {
+pub fn host_target() -> String {
     if let Ok(target) = std::env::var("JET_BUILD_TARGET") {
         if !target.trim().is_empty() {
             return target;
@@ -3444,9 +3488,14 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>, has_native
     if !deps.is_empty() {
         s.push_str("[dependencies]\n");
         for (name, ver) in deps {
-            // Some crates need feature flags or other TOML table syntax — check
-            // the allowlist first; fall back to the plain `name = "version"` form.
-            if let Some((_, toml_val)) = FEATURED_DEPS.iter().find(|(n, _)| *n == name) {
+            // `jet-foundation` is a workspace path dependency. All other
+            // entries are registry dependencies (some with feature flags).
+            if name == "jet-foundation" && ver == JET_FOUNDATION_CRATE_PATH {
+                s.push_str(&format!(
+                    "jet-foundation = {{ path = {:?} }}\n",
+                    JET_FOUNDATION_CRATE_PATH
+                ));
+            } else if let Some((_, toml_val)) = FEATURED_DEPS.iter().find(|(n, _)| *n == name) {
                 s.push_str(&format!("{name} = {toml_val}\n"));
             } else {
                 s.push_str(&format!("{name} = \"{ver}\"\n"));
@@ -3696,7 +3745,11 @@ fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> Strin
             _ => call_args.push(format!("p{index}")),
         }
     }
-    let raw_call = format!("unsafe {{ {}({}) }}", entry.rust_path, call_args.join(", "));
+    // Native symbols are data, not Rust identifiers. The generated identifier
+    // stays in the compiler-owned lane; `link_name` carries the exact symbol.
+    let native_ident = format!("{}_native", entry.wrapper_name);
+    let native_symbol = format!("{:?}", entry.rust_path);
+    let raw_call = format!("unsafe {{ {}({}) }}", native_ident, call_args.join(", "));
     let call = match &entry.return_type {
         Some(Type::String) => format!(
             "    let ptr = {raw_call};\n    if ptr.is_null() {{ ffi_panic(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(ptr) }}.to_str().unwrap_or_else(|_| ffi_panic()).to_owned()"
@@ -3713,8 +3766,9 @@ fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> Strin
         format!("{}\n{call}", setup.join("\n"))
     };
     format!(
-        "unsafe extern \"C\" {{\n    fn {}({}){};\n}}\n\npub fn {}({}){} {{\n{}\n}}\n",
-        entry.rust_path,
+        "unsafe extern \"C\" {{\n    #[link_name = {}]\n    fn {}({}){};\n}}\n\npub fn {}({}){} {{\n{}\n}}\n",
+        native_symbol,
+        native_ident,
         raw_params.join(", "),
         raw_ret,
         entry.wrapper_name,
@@ -4629,6 +4683,9 @@ mod tests {
         assert!(!source.contains("JET_HOST_RUNTIME_STOP_BEGIN"));
         assert!(!source.contains("JET_HOST_RUNTIME_STOP_END"));
         assert!(!source.contains("pub fn jet_render_runtime_stop("));
+        assert!(!source.contains("JET_HOST_RUNTIME_SENTRY_BEGIN"));
+        assert!(!source.contains("JET_HOST_RUNTIME_SENTRY_END"));
+        assert!(!source.contains("pub fn jet_render_runtime_sentry("));
     }
 
     #[test]
@@ -4760,6 +4817,7 @@ mod tests {
         assert!(!generated.contains("Command::new(\"cc\")"));
         assert!(!generated.contains("Command::new(\"ar\")"));
 
+
         let key = |toolchain: &InlineNativeToolchain| {
             cache_key_full(
                 &entries,
@@ -4786,5 +4844,27 @@ mod tests {
         let mut changed_target = toolchain.clone();
         changed_target.target = "aarch64-unknown-linux-gnu".into();
         assert_ne!(first, key(&changed_target));
+    }
+    #[test]
+    fn c_wrapper_escapes_native_symbol_as_link_name() {
+        let entry = ExternEntry {
+            jet_name: "host_add".into(),
+            rust_path: "host-add$raw".into(),
+            wrapper_name: "jet_ffi_guest___jet_mod__host_add".into(),
+            params: vec![(AccessConvention::Read, Type::Int)],
+            return_type: Some(Type::Int),
+            crate_spec: "std".into(),
+            line_hint: "`#Import(c) fn host_add`".into(),
+            inline: None,
+            c_abi: true,
+            close: None,
+        };
+        let source = emit_c_wrapper_fn(&entry, &HashSet::new());
+        assert!(source.contains("#[link_name = \"host-add$raw\"]"));
+        assert!(source.contains(
+            "fn jet_ffi_guest___jet_mod__host_add_native(p0: i64) -> i64;"
+        ));
+        assert!(source.contains("unsafe { jet_ffi_guest___jet_mod__host_add_native(p0) }"));
+        assert!(!source.contains("fn host-add$raw"));
     }
 }

@@ -7,7 +7,7 @@ struct WorkloadArgs {
 
 fn run(args: WorkloadArgs) {
     root :: args.root
-    paths :: fs.walk(~root) ?? panic("cannot walk input root")
+    paths :: fs.walk(root) ?? panic("cannot walk input root")
     rows := [String]{}
     loop file in paths {
         if !file.is_dir {
@@ -23,5 +23,10 @@ fn run(args: WorkloadArgs) {
         }
     }
     rows.sort()
-    if rows.len() == 0 -> print("no-matches") else -> loop row in rows -> print(row)
+    if rows.len() == 0 {
+        print("no-matches")
+        return
+    }
+    loop row in rows { print(row) }
+    return
 }

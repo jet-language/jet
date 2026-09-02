@@ -70,7 +70,7 @@ fn options(policy: BuildPolicy) -> BuildRunOptions {
         inspect_only: false,
         emit_generated: false,
         locked: false,
-        freestanding: false,
+        no_os: false,
         web_target: false,
         plugin_target: false,
         cross_target: None,

@@ -19,7 +19,7 @@ use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, Weak};
 
 // Every native host call that reaches the resident runtime crosses this lock.
 // Spawned Cranelift frames share the same arena as their parent, so the raw
@@ -31,6 +31,45 @@ static HTTP_SHARED_RUNTIME: AtomicUsize = AtomicUsize::new(0);
 /// callbacks retain raw JIT code pointers, so a live replacement is not enough
 /// to make a callback from the previous resident image safe to invoke.
 static HTTP_RUNTIME_EPOCH: AtomicUsize = AtomicUsize::new(1);
+/// Test-only coordination hooks used by resident HTTP lifetime proofs. The
+/// production path keeps the hooks empty; tests install them briefly to form
+/// blocking barriers around a real callback and the shutdown boundary.
+type HttpTestHook = Arc<dyn Fn() + Send + Sync + 'static>;
+static HTTP_TEST_HANDLER_HOOK: LazyLock<Mutex<Option<HttpTestHook>>> =
+    LazyLock::new(|| Mutex::new(None));
+static HTTP_TEST_SHUTDOWN_HOOK: LazyLock<Mutex<Option<HttpTestHook>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+fn http_test_handler_hook() -> &'static Mutex<Option<HttpTestHook>> {
+    &HTTP_TEST_HANDLER_HOOK
+}
+
+fn http_test_shutdown_hook() -> &'static Mutex<Option<HttpTestHook>> {
+    &HTTP_TEST_SHUTDOWN_HOOK
+}
+
+pub(crate) fn set_http_test_handler_hook(hook: Option<HttpTestHook>) {
+    *http_test_handler_hook().lock().unwrap() = hook;
+}
+
+pub(crate) fn set_http_test_shutdown_hook(hook: Option<HttpTestHook>) {
+    *http_test_shutdown_hook().lock().unwrap() = hook;
+}
+
+pub(crate) fn notify_http_test_handler_entry() {
+    let hook = http_test_handler_hook().lock().unwrap().clone();
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+pub(crate) fn notify_http_test_shutdown_started() {
+    let hook = http_test_shutdown_hook().lock().unwrap().clone();
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
 /// Task cancellation must stay live while a deopt host owns `RUNTIME_ACCESS`
 /// across an interpreter wait. The registry carries only weak control handles;
 /// heap and task-table ownership remain in `JitRuntime`.
@@ -319,7 +358,21 @@ pub(crate) fn settle_pending_after_native() {
             // native early return. Resident reporting owns E3003.
         }
     }
+
 }
+pub(crate) fn http_runtime_epoch() -> usize {
+    HTTP_RUNTIME_EPOCH.load(Ordering::Acquire)
+}
+pub(crate) fn runtime_access_available_for_test() -> bool {
+    match RUNTIME_ACCESS.try_lock() {
+        Ok(guard) => {
+            drop(guard);
+            true
+        }
+        Err(std::sync::TryLockError::WouldBlock | std::sync::TryLockError::Poisoned(_)) => false,
+    }
+}
+
 
 pub(crate) fn with_runtime_mut<F, R>(f: F) -> R
 where
@@ -1515,6 +1568,16 @@ fn jet_jit_sleep(nanos: i64) -> i64 {
         jet_codegen::scheduler::jet_std_time_sleep_duration_ns(nanos);
         0
     })
+}
+
+/// The ambient interpreter can reach `core.time.sleep` while servicing a
+/// named deopt call. Keep that callback on the same no-unwind wait boundary as
+/// the resident host, so cancellation and deadlines reach the owning runtime
+/// instead of escaping through the evaluator frame.
+pub(crate) fn ambient_time_sleep(nanos: i64) {
+    deliver_wait_status(jet_scheduler_wait_without_unwind(|| {
+        jet_codegen::scheduler::jet_std_time_sleep_duration_ns(nanos)
+    }));
 }
 
 fn jet_jit_task_timeout(nanos: i64) -> i64 {

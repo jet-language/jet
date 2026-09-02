@@ -138,7 +138,7 @@ struct Record {{ id: U64; flags: U32 }}
 
 fn increment(x: I32) I32 -[]> {{ return x + 1 }}
 
-#Extern module c.jetmatrix {{
+#Import module c.jetmatrix {{
     fn coord_sum(p: Coord) Int = "coord_sum"
     fn status_value(s: Status) I32 = "status_value"
     fn packet_value(p: Packet) I32 = "packet_value"

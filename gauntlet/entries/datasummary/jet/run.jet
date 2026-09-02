@@ -1,29 +1,19 @@
 use core.[data, files]
 
-struct Measurement {
-    group: String
-    value: Float
-}
+#CLI struct Args { path: String }
 
-#CLI
-struct Args {
-    input: String
-}
+struct Measurement { group: String, value: Float }
 
-fn summary(values: [Float]) String -> {
-    sorted := values.copy()
-    sorted.sort()
-    n := sorted.len()
-    stats :: data.describe(values)
-    "n={n} mean={stats.mean:Fixed(2)} median={sorted[(n - 1) /% 2]:Fixed(2)} p95={sorted[((19 * n + 19) /% 20) - 1]:Fixed(2)} sd={stats.stddev:Fixed(2)}"
-}
-
-fn run(args: Args) {
-    text :: files.read(args.input) ?? panic("read failed")
-    measurements :: data.csv<Measurement>(text) ?? panic("csv failed")
-    loop (name, rows) in measurements.group_by(measurement -> measurement.group) {
-        print("{name} {summary(rows.map(measurement -> measurement.value))}")
+fn run(args: Args) !(IOError | [FieldError]) {
+    measurements :: data.csv<Measurement>(files.read(args.path))
+    loop (name, rows) in measurements.group_by(.group) {
+        values :: rows.map(.value)
+        stats :: data.describe(values)
+        n :: stats.count
+        sorted := ~values
+        sorted.sort()
+        print("{name} n={n} mean={stats.mean:Fixed(2)} median={sorted[(n - 1) /% 2]:Fixed(2)} p95={sorted[(n * 19 - 1) /% 20]:Fixed(2)} sd={stats.stddev:Fixed(2)}")
     }
-    overall :: measurements.fold(Float{0.0}, (total, measurement) -> total + measurement.value) / Float.from_int(measurements.len())
-    print("overall n={measurements.len()} mean={overall:Fixed(2)}")
+    overall :: data.describe(measurements.map(.value))
+    print("overall n={overall.count} mean={overall.mean:Fixed(2)}")
 }

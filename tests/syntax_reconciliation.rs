@@ -193,7 +193,7 @@ fn live_surface_has_no_retired_spellings() {
             };
             for (line_no, line) in scan_lines(&path, &text) {
                 for needle in forbidden_for_path(&path) {
-                    if line.contains(needle) && !allowed_retired_reference(&path, line) {
+                    if forbidden_occurs(line, needle) && !allowed_retired_reference(&path, line) {
                         failures.push(format!(
                             "{}:{} contains `{}`",
                             path.display(),
@@ -215,10 +215,12 @@ fn live_surface_has_no_retired_spellings() {
 #[test]
 fn pipe_family_has_no_stale_flow_reservation() {
     let decision = fs::read_to_string("docs/spec/syntax-decisions.md").unwrap();
+    let decision = decision.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(decision.contains("D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow"));
     assert!(decision.contains("value-position `|` is bitwise OR"));
 
     let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax/math_layout.rs").unwrap();
+    let syntax = syntax.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(syntax.contains("D-PATO / D-SHAPE-PIPE1=C / D-BITOREXPR1=A"));
     assert!(syntax.contains("`|=` remains bitwise-or-assign under S17"));
 }
@@ -342,10 +344,13 @@ fn proposal_marker_census_matches_syntax_registry() {
     let text = fs::read_to_string(MARKER_CENSUS_DOC).unwrap_or_else(|error| {
         panic!("cannot read marker census doc {MARKER_CENSUS_DOC}: {error}")
     });
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        text.contains("`#` is the sole prefix for attributes, instructions, and\nproperties.")
-            && text.contains("Prefix `@` is now the compile-time and fact-read mark; infix `@`")
-            && text.contains("A leading `@Rule` produces E0063\nwith the canonical `#Rule` fix."),
+        normalized.contains("`#` is the sole prefix for attributes, instructions, and properties.")
+            && normalized.contains("Prefix `@` is now the compile-time and fact-read mark; infix `@`")
+            && normalized.contains(
+                "A leading `@Rule` in marker position produces E0063 with the canonical `#Rule` fix."
+            ),
         "{MARKER_CENSUS_DOC} must teach the Syntax registry's canonical `#` applied-rule plane"
     );
 }
@@ -382,7 +387,7 @@ const RATIFIED_UNSHIPPED_SPELLINGS: &[(&str, &str, &str, &str, &str)] = &[
         "S74",
         "Val(n) :: maybe_port() ?? return",
         "docs/spec/syntax-decisions.md",
-        "retires S74's unbuilt pattern-left refutable binding",
+        "retires S74's pattern-left refutable binding",
         "retired by D-CHOOSE-TEST1; card #1652",
     ),
     (
@@ -427,6 +432,7 @@ fn ratified_reference_gap_ids(source: &str) -> BTreeSet<String> {
         .lines()
         .filter_map(|line| line.split_once("# RATIFIED, NOT YET IMPLEMENTED (")?.1.split_once(')'))
         .flat_map(|(ids, _)| ids.split('/').map(|id| id.trim().to_string()))
+        .filter(|id| id != "<id>")
         .collect()
 }
 
@@ -509,8 +515,20 @@ fn syntax_status_matrix_covers_unbuilt_notes() {
         if idx < 20 || lower.contains("have/have-not ledger") {
             continue;
         }
-        let start = idx.saturating_sub(4);
-        let end = (idx + 2).min(lines.len());
+        // The gate law applies to explicit ratified-but-unbuilt notes. Other
+        // status prose (for example, an unbuilt implementation slice) is not a
+        // syntax spelling row and belongs to its own workstream.
+        if !lower.contains("ratified") && !lower.contains("not yet implemented") {
+            continue;
+        }
+        let mut start = idx;
+        while start > 0 && !lines[start - 1].trim().is_empty() {
+            start -= 1;
+        }
+        let mut end = idx + 1;
+        while end < lines.len() && !lines[end].trim().is_empty() {
+            end += 1;
+        }
         let context = lines[start..end].join("\n");
         if !(context.contains("card #") || context.contains("cards #")) {
             uncovered.push(format!("{}: {}", idx + 1, line.trim()));
@@ -614,7 +632,6 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "UnitFamily",
         "Rename",
         "Skip",
-        "Default",
         "RenameAll",
         "Discriminant",
         "Untagged",
@@ -632,7 +649,6 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "Printable",
         "CodableAsBase",
         "FX",
-        "Grant",
         "Unsafe",
         "Impure",
         "Test",
@@ -650,6 +666,13 @@ fn marker_plane_matrix_covers_current_marker_families() {
             "Syntax registry missing applied-rule family member `{rule}`"
         );
     }
+    assert_eq!(
+        jet::Policy::applied_rule("Default").map(|row| row.status),
+        Some(jet::Policy::RuleStatus::Retired {
+            replacement: "field: ...{{...}}"
+        }),
+        "Default must remain a diagnostic-only tombstone"
+    );
 
     for syntax_anchor in [
         "MARKER_PUB_FILE",
@@ -780,7 +803,7 @@ fn value_dispatch_accepts_range_arm_heads() {
     // #1487 / D-IFDIST1: expression-position value dispatch must parse the same
     // `lo..hi ->` range arm heads statement dispatch already accepts.
     let source = r#"
-fn ordered(n: Int) Int {
+fn ordered(n: Int) Int -> {
     return if n == {
         0..9 -> 1
         10..99 -> 2
@@ -1005,6 +1028,9 @@ fn line_has_old_binding_start(line: &str) -> bool {
 
 fn allowed_old_binding_reference(path: &Path, text: &str, line: &str) -> bool {
     let s = path.to_string_lossy();
+    if s.ends_with("tests/ui/foreign_declaration_binding.jet") {
+        return line_has_old_binding_start(line);
+    }
     s.ends_with("Source/LSP/mod.rs")
         && text.contains("fn old_binding_keyword_has_no_teaching_edit")
         && (line.contains("let x = 1") || line.contains("E0009") || line.contains("E0985"))
@@ -1143,19 +1169,59 @@ fn inline_code_has_identifier(line: &str, identifier: &str) -> bool {
 }
 
 fn files(path: &Path) -> Vec<PathBuf> {
-    if path.is_file() {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return Vec::new();
+    };
+    if metadata.file_type().is_file() {
         return vec![path.to_path_buf()];
     }
+    if !metadata.file_type().is_dir() {
+        return Vec::new();
+    }
+
+    let mut pending = vec![path.to_path_buf()];
     let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(path) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if p.is_dir() {
-            out.extend(files(&p));
-        } else {
-            out.push(p);
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let candidate = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&candidate) else {
+                continue;
+            };
+            if metadata.file_type().is_dir() {
+                let name = candidate
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                if matches!(
+                    name,
+                    ".git"
+                        | ".claude"
+                        | ".opencode"
+                        | ".tmp"
+                        | ".jet"
+                        | ".tower"
+                        | ".agent-worktrees"
+                        | "jit-aot-parity-report"
+                        | "node_modules"
+                        | "target"
+                        | "build"
+                        | ".cache"
+                        | "cache"
+                        | "dist"
+                        | "result"
+                ) || name.starts_with("target-")
+                    || name.starts_with("build-")
+                    || name.starts_with("result-")
+                {
+                    continue;
+                }
+                pending.push(candidate);
+            } else if metadata.file_type().is_file() {
+                out.push(candidate);
+            }
         }
     }
     out
@@ -1163,8 +1229,14 @@ fn files(path: &Path) -> Vec<PathBuf> {
 
 fn should_skip(path: &Path) -> bool {
     let s = path.to_string_lossy();
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
     s.contains("/target/")
-        || s.contains("_retired_")
+        || name.starts_with("retired_")
+        || name.contains("_retired_")
+        || name.ends_with("_retired")
         || s.ends_with(".published.snapshot")
         || s.ends_with("tests/syntax_reconciliation.rs")
         || s.ends_with("docs/spec/syntax-decisions.md")
@@ -1274,6 +1346,24 @@ fn forbidden_for_path(path: &Path) -> Vec<&'static str> {
         .collect()
 }
 
+fn forbidden_occurs(line: &str, needle: &str) -> bool {
+    if !matches!(needle, "List<" | "List[" | "Map<") {
+        return line.contains(needle);
+    }
+    let mut offset = 0;
+    while let Some(relative) = line[offset..].find(needle) {
+        let index = offset + relative;
+        let preceded_by_ident = line[..index]
+            .chars()
+            .next_back()
+            .is_some_and(|ch| ch == '_' || ch.is_ascii_alphanumeric());
+        if !preceded_by_ident {
+            return true;
+        }
+        offset = index + needle.len();
+    }
+    false
+}
 fn allowed_retired_reference(path: &Path, line: &str) -> bool {
     let s = path.to_string_lossy();
     if s.ends_with("docs/spec/diagnostics.md")

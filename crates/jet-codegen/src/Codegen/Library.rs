@@ -44,18 +44,7 @@ pub fn library_export_shape(function: &crate::AST::Func) -> Option<LibraryScalar
 }
 
 fn c_symbol(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() || out.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-        out.insert(0, '_');
-    }
-    out
+    crate::Sema::guest_export_native_symbol(name)
 }
 
 fn collect_exports(bundle: &ProgramBundle) -> Vec<LibraryExport> {

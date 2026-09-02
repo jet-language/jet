@@ -133,6 +133,48 @@ fn run() {
 }
 `],
 ]);
+// Calls whose checked result is exactly Unit must still be observed without
+// asking Display to render Unit.  Keep this list aligned with the sema return
+// projections; the generator applies one observer shape to every such seed.
+const UNIT_RESULT_KEYS = new Set([
+  "core.term.binwrite",
+  "core.term.progress",
+  "core.net.set_timeout",
+  "core.net.unix_write_all_bytes",
+  "core.net.tcp_write_text",
+  "core.net.set_write_timeout",
+  "core.net.tcp_write",
+  "core.net.unix_write",
+  "core.net.tcp_reply",
+  "core.net.unix_close",
+  "core.net.set_nodelay",
+  "core.net.set_ttl",
+  "core.net.tcp_close",
+  "core.net.tcp_shutdown",
+  "core.net.tcp_write_all_bytes",
+  "core.net.set_read_timeout",
+  "core.net.unix_shutdown",
+  "core.net.udp_set_timeout",
+  "core.ui.mount",
+  "core.files.write",
+  "core.files.write_atomic",
+  "core.files.remove_dir",
+  "core.files.set_mode",
+  "core.files.remove_all",
+  "core.files.remove",
+  "core.files.rename",
+  "core.files.write_at",
+  "core.files.symlink",
+  "core.files.hard_link",
+  "core.files.write_bytes",
+  "core.mem.volatile_write",
+  "core.http.server.static_files",
+  "core.http.server.cors",
+  "core.http.server.request_id",
+  "core.perf.reset_fidelity",
+  "core.perf.override_fidelity",
+  "core.tasks.yield_now",
+]);
 
 function matching(text, start, opening, closing) {
   let depth = 0;
@@ -376,18 +418,22 @@ function rustStringConstants(source) {
   return constants;
 }
 
-function rustStringExpressions(text, constants) {
+function rustStringExpressions(text, constants, { preserveDuplicates = false } = {}) {
   const clean = withoutComments(text);
-  const names = new Set(quoted(clean));
+  const values = quoted(clean);
+  const names = preserveDuplicates ? values : new Set(values);
   for (const match of clean.matchAll(/\b(?:Syntax::)?([A-Z][A-Z0-9_]*)\b/g)) {
-    if (constants.has(match[1])) names.add(constants.get(match[1]));
+    if (!constants.has(match[1])) continue;
+    const value = constants.get(match[1]);
+    if (preserveDuplicates) values.push(value);
+    else names.add(value);
   }
   for (const match of clean.matchAll(/\bSyntax::([A-Z][A-Z0-9_]*)\b/g)) {
     if (!constants.has(match[1])) {
       throw new Error(`unresolved Syntax string constant: ${match[1]}`);
     }
   }
-  return Array.from(names);
+  return preserveDuplicates ? values : Array.from(names);
 }
 
 function quoted(text) {
@@ -406,15 +452,20 @@ function moduleItems() {
   const body = withoutComments(source.slice(start, end));
   const constants = rustStringConstants(readFileSync(MEM_SURFACE, "utf8"));
   const out = new Map();
+  const duplicateRows = new Set();
   const arms = /^\s*((?:"[^"]+"\s*(?:\|\s*)?)+)=>\s*&\[/gm;
   for (const arm of body.matchAll(arms)) {
     const modules = rustStringExpressions(arm[1], constants);
     const opening = body.indexOf("[", arm.index + arm[0].length - 1);
     const close = matching(body, opening, "[", "]");
-    const names = rustStringExpressions(body.slice(opening + 1, close), constants);
+    const names = rustStringExpressions(body.slice(opening + 1, close), constants, { preserveDuplicates: true });
     for (const module of modules) {
       if (!out.has(module)) out.set(module, new Set());
-      for (const name of names) out.get(module).add(name);
+      for (const name of names) {
+        const values = out.get(module);
+        if (module !== "core.mem" && values.has(name)) duplicateRows.add(`${module}.${name}`);
+        values.add(name);
+      }
     }
   }
 
@@ -433,9 +484,18 @@ function moduleItems() {
   if (memStart < 0 || table < 0) throw new Error("CORE_MEM_GATE_TIERS source anchor disappeared");
   const opening = memSource.indexOf("[", table);
   const close = matching(memSource, opening, "[", "]");
-  const mem = new Set(rustStringExpressions(memSource.slice(opening + 1, close), constants));
+  const memValues = rustStringExpressions(memSource.slice(opening + 1, close), constants, { preserveDuplicates: true });
+  const mem = new Set(memValues);
+  if (mem.size !== memValues.length) {
+    throw new Error("CORE_MEM_GATE_TIERS contains duplicate item names");
+  }
   if (mem.size === 0) throw new Error("CORE_MEM_GATE_TIERS resolved no item names");
   out.set("core.mem", mem);
+  if (duplicateRows.size) {
+    throw new Error(
+      `core_module_items contains duplicate denominator row(s): ${Array.from(duplicateRows).sort().join(", ")}`,
+    );
+  }
   if (out.size === 0) throw new Error("core_module_items yielded no modules");
   return out;
 }
@@ -451,14 +511,14 @@ function inventory() {
       rows.push(`${module}.${name}`);
     }
   }
-  return Array.from(new Set(rows)).sort();
+  return rows.sort();
 }
 
 function walk(dir) {
   if (!existsSync(dir)) return [];
   const files = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory() && entry.name.startsWith(".")) continue;
+    if (entry.name.startsWith(".")) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) files.push(...walk(path));
     else if (entry.isFile() && entry.name.endsWith(".jet") && entry.name !== "package.jet") files.push(path);
@@ -551,9 +611,10 @@ function observerCalls(code) {
   const observers = [];
   const pattern = /(?<![A-Za-z0-9_.])(?:print|eprint|assert)\s*\(/g;
   for (const match of code.matchAll(pattern)) {
+    const operation = match[0].match(/^(print|eprint|assert)/)[1];
     const open = match.index + match[0].lastIndexOf("(");
     try {
-      observers.push({ open, close: matching(code, open, "(", ")") });
+      observers.push({ operation, open, close: matching(code, open, "(", ")") });
     } catch {
       // An unbalanced observer cannot prove result consumption.
     }
@@ -714,7 +775,9 @@ function auditEntries(expected, witnesses, exclusions) {
     files.set(key, path);
     errors.push(...sourceErrors(key, source).map((error) => `${key}: ${error}`));
   }
-  for (const [key, reason] of Array.from(exclusions).sort(([left], [right]) => left.localeCompare(right))) {
+  for (const [key, reason] of Array.from(exclusions).sort(([left], [right]) => (
+    left < right ? -1 : left > right ? 1 : 0
+  ))) {
     if (!expectedSet.has(key)) errors.push(`${key}: carve-out is not a public Core function`);
     if (!reason) errors.push(`${key}: carve-out has no reason`);
     if (files.has(key)) errors.push(`${key}: has both a program and a carve-out`);
@@ -743,8 +806,161 @@ function audit() {
   return missing.length || errors.length ? 1 : 0;
 }
 
+function unitObserver(expression, indent) {
+  const body = expression
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => `${indent}    ${line.trim()}`)
+    .join("\n");
+  return `(() -> {\n${body}\n${indent}    true\n${indent}})()`;
+}
+
+function lineRange(source, index) {
+  const start = source.lastIndexOf("\n", index - 1) + 1;
+  const endAt = source.indexOf("\n", index);
+  return { start, end: endAt < 0 ? source.length : endAt };
+}
+
+function canonicalizeUnitWitness(key, source) {
+  if (!UNIT_RESULT_KEYS.has(key)) return source;
+  const dot = key.lastIndexOf(".");
+  const module = key.slice(0, dot);
+  const name = key.slice(dot + 1);
+  const code = codeOnly(source);
+  const usePattern = new RegExp(
+    `^\\s*use\\s+${escapedRegExp(module)}\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(?:;[ \\t]*)?\\r?$`,
+    "gm",
+  );
+  const aliases = Array.from(code.matchAll(usePattern));
+  if (aliases.length !== 1) return source;
+  const alias = aliases[0][1];
+  const call = new RegExp(
+    `(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\.\\s*${escapedRegExp(name)}\\s*(?:<[^{}]*>\\s*)?\\(`,
+    "g",
+  );
+  const calls = Array.from(code.matchAll(call));
+  if (calls.length !== 1) return source;
+  const callStart = calls[0].index;
+  const callOpen = callStart + calls[0][0].lastIndexOf("(");
+  let callClose;
+  try {
+    callClose = matching(code, callOpen, "(", ")");
+  } catch {
+    return source;
+  }
+  const observers = observerCalls(code);
+  const directObserver = observers.find(({ open, close }) => open < callStart && callStart < close);
+  if (directObserver) {
+    const argument = source.slice(directObserver.open + 1, directObserver.close);
+    const argumentCode = code.slice(directObserver.open + 1, directObserver.close).trim();
+    if (argumentCode.startsWith("(() ->")) {
+      const staleNames = ["result", "changed"].filter(
+        (value) => !new RegExp(`(?:^|[{};\\n])\\s*${escapedRegExp(value)}\\s*(?:::|:=)`).test(code),
+      );
+      if (staleNames.length === 0) return source;
+      const staleLine = new RegExp(
+        `^[ \\t]*print\\((${staleNames.map(escapedRegExp).join("|")})\\)[ \\t]*(?:\\r?\\n|$)`,
+        "gm",
+      );
+      const tailStart = directObserver.close + 1;
+      const tail = source.slice(tailStart).replace(staleLine, "");
+      return `${source.slice(0, tailStart)}${tail}`;
+    }
+    const targetCode = code.slice(callStart, callClose + 1).trim();
+    if (!argumentCode.startsWith(targetCode)) return source;
+    const suffix = argumentCode.slice(targetCode.length).trim();
+    const suffixIsPropagation = /^\?\?\s*panic\s*\(/.test(suffix);
+    const suffixIsAdditionalArgument = /^,/.test(suffix);
+    if (suffix && !suffixIsPropagation && !suffixIsAdditionalArgument) return source;
+    const { start } = lineRange(source, directObserver.open);
+    const indent = source.slice(start).match(/^\s*/)[0];
+    const expression = suffixIsAdditionalArgument
+      ? source.slice(callStart, callClose + 1)
+      : argument;
+    const marker = unitObserver(expression, indent);
+    const rewrittenArgument = suffixIsAdditionalArgument
+      ? `${marker}${argument.slice(argument.indexOf(source.slice(callClose + 1, directObserver.close)))}`
+      : marker;
+    return `${source.slice(0, directObserver.open + 1)}${rewrittenArgument}${source.slice(directObserver.close)}`;
+  }
+
+  const { start: callLineStart, end: callLineEnd } = lineRange(source, callStart);
+  const callLine = source.slice(callLineStart, callLineEnd);
+  const binding = callLine.match(/^(\s*)(@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*(.*?)\s*$/);
+  if (!binding) return source;
+  const expression = binding[3].trim();
+  const expressionCode = code.slice(callLineStart, callLineEnd).match(
+    /^\s*@?[A-Za-z_][A-Za-z0-9_]*\s*(?:::|:=)\s*(.*?)\s*$/,
+  )?.[1]?.trim();
+  const targetCode = code.slice(callStart, callClose + 1).trim();
+  if (!expressionCode || !expressionCode.startsWith(targetCode)) return source;
+  const suffix = expressionCode.slice(targetCode.length).trim();
+  if (suffix && !/^\?\?\s*panic\s*\(/.test(suffix)) return source;
+  const value = binding[2];
+  const observer = observers.find(
+    ({ open, close }) =>
+      open > callClose &&
+      new RegExp(`(?<![A-Za-z0-9_])${escapedRegExp(value)}(?![A-Za-z0-9_])`).test(
+        code.slice(open + 1, close),
+      ),
+  );
+  if (!observer) return source;
+  const observerArgument = source.slice(observer.open + 1, observer.close).trim();
+  const valuePattern = new RegExp(`^${escapedRegExp(value)}(?:\\s*,\\s*(.*))?$`);
+  const observerMatch = observerArgument.match(valuePattern);
+  if (!observerMatch) return source;
+  const indent = binding[1];
+  const marker = unitObserver(expression, indent);
+  const bindingReplacement = `${indent}print(${marker})`;
+  const observerLine = lineRange(source, observer.open);
+  const observerLineText = source.slice(observerLine.start, observerLine.end);
+  const observerCallText = observerLineText.trim();
+  const observerText = `${observer.operation}(${observerArgument})`;
+  const removeObserverLine = observerCallText === observerText;
+  const edits = [
+    { start: callLineStart, end: callLineEnd, text: bindingReplacement },
+  ];
+  if (removeObserverLine) {
+    edits.push({
+      start: observerLine.start,
+      end: observerLine.end < source.length ? observerLine.end + 1 : observerLine.end,
+      text: "",
+    });
+  } else if (observerMatch[1]) {
+    edits.push({
+      start: observer.open + 1,
+      end: observer.close,
+      text: observerMatch[1],
+    });
+  }
+  edits.sort((left, right) => right.start - left.start);
+  let rewritten = source;
+  for (const edit of edits) rewritten = `${rewritten.slice(0, edit.start)}${edit.text}${rewritten.slice(edit.end)}`;
+  return rewritten;
+}
+
+function normalizeUnitObservers(expected) {
+  for (const key of UNIT_RESULT_KEYS) {
+    if (!expected.has(key)) throw new Error(`Unit observer key is not public Core: ${key}`);
+  }
+  let normalized = 0;
+  for (const path of walk(CORPUS)) {
+    const key = keyForPath(path);
+    if (!UNIT_RESULT_KEYS.has(key)) continue;
+    const source = readFileSync(path, "utf8");
+    const rewritten = canonicalizeUnitWitness(key, source);
+    if (rewritten === source) continue;
+    writeFileSync(path, rewritten);
+    normalized += 1;
+  }
+  return normalized;
+}
+
 function generate() {
   const expected = new Set(inventory());
+  for (const key of UNIT_RESULT_KEYS) {
+    if (!expected.has(key)) throw new Error(`Unit observer key is not public Core: ${key}`);
+  }
   let generated = 0;
   for (const [key, source] of RECIPES) {
     if (!expected.has(key)) throw new Error(`recipe names non-public Core function: ${key}`);
@@ -755,7 +971,10 @@ function generate() {
     writeFileSync(path, source);
     generated += 1;
   }
-  console.log(`core conformance generator: emitted ${generated} seed program(s) from ${RECIPES.size} explicit recipe(s)`);
+  const normalized = normalizeUnitObservers(expected);
+  console.log(
+    `core conformance generator: emitted ${generated} seed program(s) from ${RECIPES.size} explicit recipe(s); normalized ${normalized} Unit observer(s)`,
+  );
   return audit();
 }
 
@@ -765,14 +984,16 @@ function hostileFixtures() {
     const visible = join(walkFixture, "visible", "ordinary.jet");
     const manifest = join(walkFixture, "visible", "package.jet");
     const hidden = join(walkFixture, "visible", ".jet", "receipts", ".package.jet");
+    const hiddenFile = join(walkFixture, "visible", ".ghost.jet");
     mkdirSync(dirname(visible), { recursive: true });
     mkdirSync(dirname(hidden), { recursive: true });
     writeFileSync(visible, "");
     writeFileSync(manifest, "manifest");
     writeFileSync(hidden, "");
+    writeFileSync(hiddenFile, "");
     const discovered = walk(walkFixture);
     if (discovered.length !== 1 || discovered[0] !== visible) {
-      throw new Error("walk included hidden receipt or visible package manifest as a witness");
+      throw new Error("walk included hidden file/receipt or visible package manifest as a witness");
     }
     const ordinaryErrors = sourceErrors("core.fake.ordinary", "");
     if (!ordinaryErrors.includes("file must start with // core-conformance: core.fake.ordinary")) {
@@ -1001,6 +1222,8 @@ fn run() {
   };
   const missing = auditEntries(expectedRows, [witness("core.fake.one", "core/fake/one.jet")], new Map());
   if (!missing.missing.includes("core.fake.two")) throw new Error("missing ledger row was accepted");
+  const duplicateDenominator = auditEntries(["core.fake.one", "core.fake.one"], [], new Map());
+  assertLedgerError("duplicate-denominator", duplicateDenominator, "denominator contains a duplicate row");
   const duplicate = auditEntries(
     expectedRows,
     [witness("core.fake.one", "core/fake/one.jet"), witness("core.fake.one", "other/one.jet")],

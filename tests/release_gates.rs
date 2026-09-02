@@ -442,19 +442,36 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
         "peer_tool_version",
         "review_status",
         "review_evidence",
-        "loss_owner",
-        "applicable_targets",
-        "peer_applies",
-        "not-applicable",
-        "tower.mjs",
-        "card show \"$owner\" --json",
-        "fresh review evidence",
-        "candidate=",
-        "reviewer=",
-        "fairness=",
-        "measurements=",
+        "review.tsv",
+        "reviewer_is_independent",
+        "review_workflow",
+        "review_run",
+        "review_actor",
+        "rust_tolerance_ratio",
+        "metric_is_loss",
     ] {
         assert!(gate.contains(field), "compiled workload gate lost {field}");
+    }
+
+    let runner = fs::read_to_string(root.join("tools/ci/compiled-workload-runner.mjs"))
+        .expect("read compiled workload runner");
+    for field in [
+        "runMeasured",
+        "process.hrtime.bigint",
+        "VmHWM",
+        "VmRSS",
+        "PeakWorkingSet64",
+        "JET_WEB_CHROMIUM",
+        "CdpDriver",
+        "network=loopback-only",
+        "network=disabled",
+        "peerMeasured",
+        "samples",
+        "targetArtifactProof",
+        "JET_CACHE_DIR",
+        ".jet",
+    ] {
+        assert!(runner.contains(field), "compiled workload runner lost {field}");
     }
 
     let self_check = fs::read_to_string(root.join("tools/ci/test-compiled-workload-gate.sh"))
@@ -478,11 +495,22 @@ fn compiled_workload_release_gate_uses_frozen_contract_and_canaries() {
     let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
         .expect("read CI workflow");
     assert!(
-        workflow.contains("name: Compiled workload gate (Unix)")
-            && workflow.contains("name: Compiled workload gate (Windows)")
+        workflow.contains("name: Compiled workload measurements (Unix)")
+            && workflow.contains("name: Compiled workload measurements (Windows)")
+            && workflow.contains("compiled-workload-runner.mjs")
             && workflow.contains("tools/ci/compiled-workload-gate.sh --contract")
             && workflow.contains("tools/ci/test-compiled-workload-gate.sh"),
-        "CI must invoke the compiled workload contract and seven-canary self-check"
+        "CI must invoke the real runner, contract, and canary self-check"
+    );
+    let review_workflow =
+        fs::read_to_string(root.join(".github/workflows/compiled-workload-review.yml"))
+            .expect("read compiled workload review workflow");
+    assert!(
+        review_workflow.contains("workflow_run:")
+            && review_workflow.contains("compiled-workload-review.mjs")
+            && review_workflow.contains("compiled-workload-reviewed-")
+            && review_workflow.contains("CANDIDATE_SHA"),
+        "review workflow must independently consume and publish immutable reports"
     );
 
     let output = Command::new("bash")

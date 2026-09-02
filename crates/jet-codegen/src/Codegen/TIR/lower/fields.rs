@@ -553,7 +553,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             | "CSVRow"
             | "Claims"
     );
-    if ui_name_collision && cx.type_names.contains(type_name) {
+    // `type_names` also contains imported/core leaves.  Only a nominal declared
+    // by the module being emitted can make this surface a user struct; core
+    // carriers must retain their ABI field names when their names are imported.
+    if ui_name_collision && cx.local_type_names.contains(type_name) {
         return None;
     }
     let known = match type_name.as_str() {
@@ -820,6 +823,31 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     if let Type::Apply { name, args } = recv_ty {
         if name == crate::Syntax::TYPE_PIN && args.len() == 1 {
             return struct_field_type(cx, &args[0], field);
+        }
+    }
+    // D-SHAREDGUARD2=A: `SharedGuard.value` is a compiler-known place rather
+    // than a stored public field. Keep the TIR projection in sync with sema,
+    // including the hidden read/edit tag carried by guard values.
+    if field == "value" {
+        if let Type::Apply { name, args } = recv_ty {
+            if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                return Some(args[0].clone());
+            }
+        }
+        if let Type::Tagged { marker, inner } = recv_ty {
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(
+                    crate::AST::InternalTag::SharedGuardRead
+                        | crate::AST::InternalTag::SharedGuardEdit
+                )
+            ) {
+                if let Type::Apply { name, args } = inner.as_ref() {
+                    if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
+                        return Some(args[0].clone());
+                    }
+                }
+            }
         }
     }
     // c109 Phase 23: a named-tuple field read (`p.x`) — resolve the field's type off

@@ -36,8 +36,25 @@ const ROUTE_FILES = Object.freeze({
   jet_run: ["crates/jet-jit/src/jit/lower_ctx.rs", "crates/jet-jit/src/jit/runtime_host.rs", "crates/jet-jit/src/jit/types_meta.rs"],
   interpreter: ["crates/jet-jit/src/ambient_interp.rs", "crates/jet-jit/src/enc_stream/mod.rs", "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs", "crates/jet-comptime/src/Comptime/CorePureParity.rs"],
 });
-const VALID_STATUSES = new Set(["covered", "missing", "unrouted", "excluded"]);
+const VALID_STATUSES = new Set(["covered", "missing", "unrouted", "invalid", "excluded", "invalid-exclusion"]);
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+function canonicalSourceIds(sourceIds = {}) {
+  return Object.fromEntries(KIND_ORDER.map((kind) => [
+    kind,
+    [...(Array.isArray(sourceIds[kind]) ? sourceIds[kind] : [])].sort(compareStable),
+  ]));
+}
+
+function sourceIdsDigest(sourceIds) {
+  return sha256(canonicalJson(canonicalSourceIds(sourceIds)));
+}
+
+function publicStableId(value) {
+  if (typeof value !== "string" || value.length === 0) return null;
+  for (const prefix of Object.values(KIND_PREFIX)) if (value.startsWith(prefix)) return value;
+  return `${KIND_PREFIX.module_call}${value}`;
+}
 
 function compareStable(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -453,6 +470,85 @@ function coreConformanceInventory(root, fallback) {
     fail(`core conformance inventory is unreadable: ${error.message}`);
   }
 }
+function sourceMembership(root) {
+  const moduleItemsSource = readFileSync(join(root, PATHS.moduleItems), "utf8");
+  const surfaceSource = readFileSync(join(root, PATHS.surface), "utf8");
+  const modules = moduleItemsFromSource(moduleItemsSource, surfaceSource);
+  const fallbackCalls = [];
+  const moduleNames = new Set(modules.keys());
+  for (const [module, names] of modules) for (const name of names) {
+    if (!/^[A-Z]/.test(name) && !VALUE_NAMES.has(name) && !moduleNames.has(`${module}.${name}`)) {
+      fallbackCalls.push(`${module}.${name}`);
+    }
+  }
+  const moduleCalls = coreConformanceInventory(root, [...new Set(fallbackCalls)].sort(compareStable))
+    .map((value) => normalizeId("module_call", value));
+  const explicit = explicitTypes(moduleItemsSource);
+  const typeSet = new Set();
+  for (const [module, names] of modules) {
+    for (const name of names) if (/^[A-Z]/.test(name)) typeSet.add(`type:${module}.${name}`);
+  }
+  for (const [module, names] of explicit) {
+    for (const name of names) typeSet.add(`type:${module}.${name}`);
+  }
+  const callsSource = readFileSync(join(root, PATHS.calls), "utf8");
+  const registry = { source: callsSource, rows: parseCoreCallRegistry(callsSource) };
+  const receivers = parseReceiverRows(callsSource);
+  const fields = parseFieldRows(readFileSync(join(root, PATHS.fields), "utf8"), surfaceSource);
+  const sourceIds = {
+    module_call: uniqueSorted(moduleCalls),
+    receiver_method: uniqueSorted(receivers.map((row) => row.stable_id)),
+    field: uniqueSorted(fields.map((row) => row.stable_id)),
+    nominal_type: uniqueSorted([...typeSet]),
+  };
+  const typeRows = sourceIds.nominal_type.map((stable_id) => ({
+    stable_id,
+    evidence: typeMembershipEvidence(moduleItemsSource, stable_id),
+  }));
+  return {
+    moduleItemsSource,
+    surfaceSource,
+    moduleCalls: sourceIds.module_call,
+    receiverRows: receivers,
+    fieldRows: fields,
+    typeRows,
+    registry,
+    sourceIds,
+  };
+}
+
+function normalizedSeedEntries(seeds) {
+  if (seeds instanceof Map) return [...seeds.entries()];
+  if (isRecord(seeds)) return Object.entries(seeds);
+  return [];
+}
+
+function seedMap(surface, members) {
+  const out = new Map();
+  const memberIds = new Set(Object.values(members).flat());
+  const paths = new Map();
+  for (const [rawId, seed] of normalizedSeedEntries(surface.seeds)) {
+    const stableId = publicStableId(rawId);
+    if (!stableId) fail("recipe has no stable public identity");
+    if (!memberIds.has(stableId)) fail(`recipe has no manifest row: ${stableId}`);
+    if (out.has(stableId)) fail(`duplicate recipe identity: ${stableId}`);
+    if (!isRecord(seed)) fail(`recipe is not an object: ${stableId}`);
+    if (seed.stable_id !== undefined && seed.stable_id !== stableId) {
+      fail(`recipe identity mismatch: ${stableId}`);
+    }
+    if (typeof seed.path !== "string" || seed.path.length === 0) {
+      fail(`recipe path is required: ${stableId}`);
+    }
+    if (!Array.isArray(seed.errors) || seed.errors.some((error) => typeof error !== "string" || error.length === 0)) {
+      fail(`recipe diagnostics are invalid: ${stableId}`);
+    }
+    if (paths.has(seed.path)) fail(`duplicate recipe path: ${seed.path}`);
+    paths.set(seed.path, stableId);
+    out.set(stableId, seed);
+  }
+  return out;
+}
+
 
 function walk(root) {
   if (!existsSync(root)) return [];
@@ -921,28 +1017,18 @@ export function sourceSnapshot(root = DEFAULT_ROOT, files = sourceFiles(root)) {
 }
 
 function defaultSurface(root) {
-  const moduleItemsSource = readFileSync(join(root, PATHS.moduleItems), "utf8");
-  const surfaceSource = readFileSync(join(root, PATHS.surface), "utf8");
-  const modules = moduleItemsFromSource(moduleItemsSource, surfaceSource);
-  const fallbackCalls = [];
-  const moduleNames = new Set(modules.keys());
-  for (const [module, names] of modules) for (const name of names) {
-    if (!/^[A-Z]/.test(name) && !VALUE_NAMES.has(name) && !moduleNames.has(`${module}.${name}`)) fallbackCalls.push(`${module}.${name}`);
-  }
-  const moduleCalls = coreConformanceInventory(root, [...new Set(fallbackCalls)].sort()).map((value) => `module:${value}`);
-  const explicit = explicitTypes(moduleItemsSource);
-  const typeSet = new Set();
-  for (const [module, names] of modules) for (const name of names) if (/^[A-Z]/.test(name)) typeSet.add(`type:${module}.${name}`);
-  for (const [module, names] of explicit) for (const name of names) typeSet.add(`type:${module}.${name}`);
-  const callsSource = readFileSync(join(root, PATHS.calls), "utf8");
-  const registry = { source: callsSource, rows: parseCoreCallRegistry(callsSource) };
-  const receiverRows = parseReceiverRows(callsSource);
-  const fieldRows = parseFieldRows(readFileSync(join(root, PATHS.fields), "utf8"), surfaceSource);
-  const plainRows = parsePlainCallRows(callsSource);
-  const typeRows = [...typeSet].sort(compareStable).map((stable_id) => ({
-    stable_id,
-    evidence: typeMembershipEvidence(moduleItemsSource, stable_id),
-  }));
+  const membership = sourceMembership(root);
+  const {
+    moduleItemsSource,
+    surfaceSource,
+    moduleCalls,
+    receiverRows,
+    fieldRows,
+    typeRows,
+    registry,
+    sourceIds,
+  } = membership;
+  const plainRows = parsePlainCallRows(registry.source);
   const routes = routeFactsFromSources(root, moduleCalls, receiverRows, fieldRows, typeRows, plainRows, registry);
   const seeds = new Map();
   const corpusRoot = join(root, "tests/conformance/corpus");
@@ -959,7 +1045,7 @@ function defaultSurface(root) {
     moduleCalls,
     receivers: receiverRows,
     fields: fieldRows,
-    types: [...typeSet].sort().map((stable_id) => ({ stable_id })),
+    types: sourceIds.nominal_type.map((stable_id) => ({ stable_id })),
     routes,
     seeds,
     exclusions,
@@ -1006,7 +1092,8 @@ function normalizedExclusions(exclusions = new Map()) {
   const out = new Map();
   const entries = exclusions instanceof Map ? exclusions.entries() : Object.entries(exclusions);
   for (const [key, value] of entries) {
-    const stable = key.includes(":") ? key : `module:${key}`;
+    const stable = typeof key === "string" && key.includes(":") ? key : `module:${key}`;
+    if (out.has(stable)) fail(`duplicate exclusion: ${stable}`);
     out.set(stable, typeof value === "string" ? { reason: value, owner: null, decision: null } : { ...value });
   }
   return out;
@@ -1068,21 +1155,36 @@ export function buildManifest({ root = DEFAULT_ROOT, surface = null } = {}) {
   const actual = surface || defaultSurface(root);
   const routes = normalizeRoutes(actual.routes);
   const exclusions = normalizedExclusions(actual.exclusions);
-  const members = {
-    module_call: [...(actual.moduleCalls || [])].map((value) => normalizeId("module_call", value)),
-    receiver_method: [...(actual.receivers || [])].map((value) => normalizeId("receiver_method", value)),
-    field: [...(actual.fields || [])].map((value) => normalizeId("field", value)),
-    nominal_type: [...(actual.types || [])].map((value) => normalizeId("nominal_type", value)),
-  };
-  for (const kind of KIND_ORDER) members[kind] = [...new Set(members[kind])].sort();
-  const rows = KIND_ORDER.flatMap((kind) => members[kind].map((value) => buildRow(kind, value, actual, routes, exclusions)))
+  const members = {};
+  for (const kind of KIND_ORDER) {
+    const values = [...(actual[kind === "module_call"
+      ? "moduleCalls"
+      : kind === "receiver_method"
+        ? "receivers"
+        : kind === "field"
+          ? "fields"
+          : "types"] || [])];
+    const ids = values.map((value) => normalizeId(kind, value));
+    const seen = new Set();
+    for (const stableId of ids) {
+      if (seen.has(stableId)) fail(`duplicate public row: ${stableId}`);
+      seen.add(stableId);
+    }
+    members[kind] = ids.sort(compareStable);
+  }
+  const seeds = seedMap(actual, members);
+  const rowSurface = { ...actual, seeds };
+  const rows = KIND_ORDER.flatMap((kind) => members[kind].map((value) => buildRow(kind, value, rowSurface, routes, exclusions)))
     .sort((left, right) => compareStable(left.stable_id, right.stable_id));
+  const sourceIdsSha256 = sourceIdsDigest(members);
   const manifest = {
     schema: SURFACE_SCHEMA,
     schema_version: SURFACE_SCHEMA_VERSION,
     source_snapshot: actual.snapshot || sourceSnapshot(root),
     denominator: {
       source_ids: members,
+      source_ids_sha256: sourceIdsSha256,
+      total: Object.values(members).reduce((sum, ids) => sum + ids.length, 0),
       counts: {
         ...Object.fromEntries(KIND_ORDER.map((kind) => [kind, members[kind].length])),
         exclusions: exclusions.size,
@@ -1093,7 +1195,16 @@ export function buildManifest({ root = DEFAULT_ROOT, surface = null } = {}) {
     rows,
   };
   manifest.content_digest = manifestContentDigest(manifest);
-  const validation = validateManifest(manifest);
+  const validation = validateManifest(manifest, {
+    expectedIds: {
+      source_ids: members,
+      source_ids_sha256: sourceIdsSha256,
+      total: manifest.denominator.total,
+      counts: manifest.denominator.counts,
+    },
+    expectedExclusions: exclusions,
+    root,
+  });
   if (!validation.ok) fail(validation.errors.join("\n"));
   return manifest;
 }
@@ -1144,7 +1255,157 @@ function validateSourceSnapshot(snapshot, errors) {
   else if (snapshot.hash !== sha256(canonicalJson(snapshot.files))) errors.push("manifest source snapshot hash does not match files");
 }
 
-export function validateManifest(manifest, { expectedIds = null, currentSnapshotHash = null } = {}) {
+function expectedSourceMembership(expectedIds, root, errors) {
+  if (expectedIds === null || expectedIds === undefined) {
+    try {
+      const sourceIds = sourceMembership(root).sourceIds;
+      const normalized = canonicalSourceIds(sourceIds);
+      return {
+        sourceIds: normalized,
+        source_ids_sha256: sourceIdsDigest(normalized),
+        total: Object.values(normalized).reduce((sum, ids) => sum + ids.length, 0),
+        counts: Object.fromEntries(KIND_ORDER.map((kind) => [kind, normalized[kind].length])),
+      };
+    } catch (error) {
+      errors.push(`authoritative public membership unavailable: ${error.message}`);
+      return null;
+    }
+  }
+
+  if (!isRecord(expectedIds) || !isRecord(expectedIds.source_ids)) {
+    errors.push("expected membership must be a complete denominator object");
+    return null;
+  }
+  const sourceIds = expectedIds.source_ids;
+  const suppliedDigest = expectedIds.source_ids_sha256;
+  const expectedTotal = expectedIds.total;
+  const expectedCounts = expectedIds.counts;
+  const normalized = canonicalSourceIds(sourceIds);
+  if (isRecord(sourceIds)) {
+    for (const key of Object.keys(sourceIds)) {
+      if (!KIND_ORDER.includes(key)) errors.push(`expected membership has unknown source IDs: ${key}`);
+    }
+  } else {
+    errors.push("expected membership source IDs are required");
+  }
+  for (const kind of KIND_ORDER) {
+    const ids = sourceIds?.[kind];
+    if (!Array.isArray(ids)) {
+      errors.push(`expected membership is missing ${kind}`);
+      continue;
+    }
+    if (new Set(ids).size !== ids.length) errors.push(`expected membership contains duplicate ${kind}`);
+    if (ids.some((id) => typeof id !== "string" || !id.startsWith(KIND_PREFIX[kind]) || id.length <= KIND_PREFIX[kind].length)) {
+      errors.push(`expected membership has invalid ${kind}`);
+    }
+    if (canonicalJson(ids) !== canonicalJson(normalized[kind])) errors.push(`expected membership ${kind} is not sorted`);
+  }
+  const digest = sourceIdsDigest(normalized);
+  if (!validDigest(suppliedDigest)) errors.push("expected membership source_ids_sha256 is missing or invalid");
+  else if (suppliedDigest !== digest) errors.push("expected membership source_ids_sha256 does not match source IDs");
+  const total = Object.values(normalized).reduce((sum, ids) => sum + ids.length, 0);
+  if (!Number.isInteger(expectedTotal) || expectedTotal < 0) errors.push("expected membership total is missing or invalid");
+  else if (expectedTotal !== total) errors.push("expected membership total is stale");
+  if (!isRecord(expectedCounts)) {
+    errors.push("expected membership counts are required");
+  } else {
+    for (const key of Object.keys(expectedCounts)) {
+      if (!KIND_ORDER.includes(key) && key !== "exclusions") errors.push(`expected membership has unknown count: ${key}`);
+    }
+    for (const kind of KIND_ORDER) {
+      if (!Number.isInteger(expectedCounts[kind]) || expectedCounts[kind] < 0) errors.push(`expected membership count is invalid: ${kind}`);
+      else if (expectedCounts[kind] !== normalized[kind].length) errors.push(`expected membership count mismatch: ${kind}`);
+    }
+    if (!Number.isInteger(expectedCounts.exclusions) || expectedCounts.exclusions < 0) errors.push("expected membership exclusion count is invalid");
+  }
+  return {
+    sourceIds: normalized,
+    source_ids_sha256: digest,
+    total,
+    counts: expectedCounts,
+  };
+}
+function expectedExclusionRecords(expectedExclusions, root, errors) {
+  let records = expectedExclusions;
+  if (records === null || records === undefined) {
+    try {
+      records = parseExclusions(root);
+    } catch (error) {
+      errors.push(`authoritative exclusions unavailable: ${error.message}`);
+      return null;
+    }
+  }
+  try {
+    const normalized = normalizedExclusions(records);
+    return new Map([...normalized.entries()].map(([stableId, details]) => {
+      const value = { ...details };
+      delete value.stable_id;
+      return [stableId, value];
+    }));
+  } catch (error) {
+    errors.push(`authoritative exclusions are invalid: ${error.message}`);
+    return null;
+  }
+}
+
+function exclusionDetails(value) {
+  const details = { ...value };
+  delete details.stable_id;
+  return details;
+}
+const CORPUS_PATH_PREFIX = "tests/conformance/corpus/";
+
+function sourceSeedId(path) {
+  if (typeof path !== "string" || !path.startsWith(CORPUS_PATH_PREFIX) || !path.endsWith(".jet")) return null;
+  const relativePath = path.slice(CORPUS_PATH_PREFIX.length).replaceAll("\\", "/");
+  if (relativePath.includes("..")) return null;
+  return `module:${relativePath.slice(0, -".jet".length).replaceAll("/", ".")}`;
+}
+
+function validateAuthoritativeRecipes(manifest, root, errors) {
+  const snapshotPaths = new Set(Array.isArray(manifest.source_snapshot?.files)
+    ? manifest.source_snapshot.files.filter(isRecord).map((file) => file.path)
+    : []);
+  const seenPaths = new Map();
+  for (const row of (Array.isArray(manifest.rows) ? manifest.rows : []).filter(isRecord)) {
+    if (row.seed === null || row.seed === undefined) continue;
+    if (typeof row.seed !== "string" || row.seed.length === 0 || row.seed.startsWith("/") || row.seed.includes("..")) {
+      errors.push(`manifest row seed path is invalid: ${row.stable_id}`);
+      continue;
+    }
+    if (seenPaths.has(row.seed)) errors.push(`duplicate manifest recipe path: ${row.seed}`);
+    seenPaths.set(row.seed, row.stable_id);
+    if (snapshotPaths.size > 0 && !snapshotPaths.has(row.seed)) errors.push(`manifest recipe is outside source snapshot: ${row.stable_id}`);
+    const seedId = sourceSeedId(row.seed);
+    if (seedId !== row.stable_id) {
+      errors.push(`manifest recipe identity mismatch: ${row.stable_id}`);
+      continue;
+    }
+    const absolute = join(root, row.seed);
+    if (!existsSync(absolute)) {
+      errors.push(`manifest recipe is unreadable: ${row.stable_id}`);
+      continue;
+    }
+    let inspection;
+    try {
+      inspection = seedInspection(untaggedId(seedId), readFileSync(absolute, "utf8"));
+    } catch (error) {
+      errors.push(`manifest recipe inspection failed: ${row.stable_id}: ${error.message}`);
+      continue;
+    }
+    if (row.status === "covered") {
+      if (inspection.errors.length > 0) errors.push(`manifest recipe is not executable: ${row.stable_id}`);
+      if (canonicalJson(row.sink) !== canonicalJson(inspection.sink)) errors.push(`manifest recipe sink differs from source: ${row.stable_id}`);
+      if (Object.hasOwn(row, "errors")) errors.push(`covered row has recipe diagnostics: ${row.stable_id}`);
+    } else if (row.status === "invalid") {
+      if (!Array.isArray(row.errors) || canonicalJson(row.errors) !== canonicalJson(inspection.errors)) errors.push(`manifest recipe diagnostics differ from source: ${row.stable_id}`);
+      if (canonicalJson(row.sink) !== canonicalJson(inspection.sink)) errors.push(`manifest recipe sink differs from source: ${row.stable_id}`);
+    }
+  }
+}
+
+
+export function validateManifest(manifest, { expectedIds = null, expectedExclusions = null, currentSnapshotHash = null, root = DEFAULT_ROOT } = {}) {
   const errors = [];
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return { ok: false, errors: ["manifest is not an object"] };
   const expectedContentDigest = manifestContentDigest(manifest);
@@ -1153,9 +1414,22 @@ export function validateManifest(manifest, { expectedIds = null, currentSnapshot
   if (!validDigest(manifest.content_digest)) errors.push("manifest content digest is missing or invalid");
   else if (manifest.content_digest !== expectedContentDigest) errors.push("manifest content digest does not match manifest");
   validateSourceSnapshot(manifest.source_snapshot, errors);
+  const expectedMembership = expectedSourceMembership(expectedIds, root, errors);
+  const ratifiedExclusions = expectedIds !== null && expectedExclusions === null
+    ? (errors.push("expected owner-ratified exclusions are required"), null)
+    : expectedExclusionRecords(expectedExclusions, root, errors);
 
   const rows = Array.isArray(manifest.rows) ? manifest.rows : [];
   if (!Array.isArray(manifest.rows)) errors.push("manifest rows are required");
+  if (expectedIds === null) {
+    try {
+      const current = sourceSnapshot(root);
+      if (manifest.source_snapshot?.hash !== current.hash) errors.push("manifest source snapshot is stale");
+    } catch (error) {
+      errors.push(`authoritative source snapshot unavailable: ${error.message}`);
+    }
+  }
+  if (expectedIds === null) validateAuthoritativeRecipes(manifest, root, errors);
   const seen = new Set();
   const rowsById = new Map();
   let previousRowId = null;
@@ -1172,6 +1446,7 @@ export function validateManifest(manifest, { expectedIds = null, currentSnapshot
     previousRowId = stableId;
 
     const prefix = KIND_PREFIX[row.kind];
+    if (!KIND_ORDER.includes(row.kind)) errors.push(`unowned public row kind: ${row.kind}: ${stableId}`);
     if (!prefix || !stableId.startsWith(prefix) || stableId.length === prefix.length) errors.push(`stable_id kind mismatch: ${stableId}`);
     for (const field of ["kind", "owner", "member", "domain", "status"]) {
       if (typeof row[field] !== "string" || row[field].length === 0) errors.push(`manifest row ${field} is required: ${stableId}`);
@@ -1230,11 +1505,29 @@ export function validateManifest(manifest, { expectedIds = null, currentSnapshot
     if (row.exclusion !== null && !isRecord(row.exclusion)) errors.push(`manifest row exclusion is invalid: ${stableId}`);
     if (!VALID_STATUSES.has(row.status)) errors.push(`unknown manifest row status ${row.status}: ${stableId}`);
     if (row.status === "covered") {
-      if (row.value_consuming !== true || !row.seed || !row.sink || row.sink.type_aware !== true || typeof row.sink.operation !== "string" || row.sink.operation.length === 0) errors.push(`executable row has no type-aware observable sink: ${stableId}`);
+      if (row.exclusion !== null) errors.push(`covered row has an exclusion record: ${stableId}`);
+      if (row.value_consuming !== true || !row.seed || !row.sink || row.sink.type_aware !== true || typeof row.sink.operation !== "string" || row.sink.operation.length === 0) {
+        errors.push(`executable row has no type-aware observable sink: ${stableId}`);
+      }
+    } else if (row.status === "excluded") {
+      if (!row.exclusion?.reason || !row.exclusion?.owner || !row.exclusion?.decision) errors.push(`exclusion is not owner-ratified: ${stableId}`);
+      if (row.seed !== null || row.value_consuming !== null || row.sink !== null) errors.push(`excluded row has executable proof: ${stableId}`);
+    } else if (row.status === "missing" || row.status === "unrouted") {
+      errors.push(`unresolved public row: ${stableId} (requires a real seed or owner-ratified exclusion)`);
+      if (row.seed !== null || row.value_consuming !== null || row.sink !== null) errors.push(`unresolved row has executable proof: ${stableId}`);
+      if (row.status === "unrouted" && tiers?.length !== 0) errors.push(`unrouted row has coverage: ${stableId}`);
+    } else if (row.status === "invalid") {
+      const diagnostics = Array.isArray(row.errors) ? row.errors : [];
+      if (!row.seed) errors.push(`recipe-invalid row has no recipe: ${stableId}`);
+      if (row.value_consuming === true) errors.push(`invalid row has executable proof: ${stableId}`);
+      if (!Array.isArray(row.errors) || diagnostics.some((error) => typeof error !== "string" || error.length === 0)) {
+        errors.push(`recipe diagnostics are invalid: ${stableId}`);
+      }
+      errors.push(`recipe-invalid public row: ${stableId}${diagnostics.length ? ` (${diagnostics.join("; ")})` : ""}`);
+    } else if (row.status === "invalid-exclusion") {
+      errors.push(`invalid owner-ratified exclusion: ${stableId}`);
+      if (row.seed !== null || row.value_consuming !== null || row.sink !== null) errors.push(`invalid exclusion has executable proof: ${stableId}`);
     }
-    if (row.status === "excluded" && (!row.exclusion?.reason || !row.exclusion?.owner || !row.exclusion?.decision)) errors.push(`exclusion is not owner-ratified: ${stableId}`);
-    if (row.status === "missing" && (row.value_consuming !== null || row.sink !== null)) errors.push(`missing row has executable proof: ${stableId}`);
-    if (row.status === "unrouted" && (tiers?.length !== 0 || row.value_consuming !== null || row.sink !== null)) errors.push(`unrouted row has coverage: ${stableId}`);
   }
 
   const denominator = isRecord(manifest.denominator) ? manifest.denominator : null;
@@ -1243,8 +1536,25 @@ export function validateManifest(manifest, { expectedIds = null, currentSnapshot
   const counts = denominator && isRecord(denominator.counts) ? denominator.counts : null;
   if (!sourceIds) errors.push("manifest denominator source_ids are required");
   if (!counts) errors.push("manifest denominator counts are required");
+  if (sourceIds && !validDigest(denominator.source_ids_sha256)) errors.push("manifest denominator source_ids_sha256 is missing or invalid");
+  else if (sourceIds && denominator.source_ids_sha256 !== sourceIdsDigest(sourceIds)) errors.push("manifest denominator source_ids_sha256 does not match source IDs");
+  if (!Number.isInteger(denominator?.total) || denominator.total < 0) errors.push("manifest denominator total is missing or invalid");
+  if (counts) {
+    for (const key of Object.keys(counts)) {
+      if (!KIND_ORDER.includes(key) && key !== "exclusions") errors.push(`manifest denominator has unknown count: ${key}`);
+    }
+    for (const kind of KIND_ORDER) {
+      if (!Number.isInteger(counts[kind]) || counts[kind] < 0) errors.push(`manifest denominator count is invalid: ${kind}`);
+    }
+    if (!Number.isInteger(counts.exclusions) || counts.exclusions < 0) errors.push("manifest exclusion count is invalid");
+  }
   const memberIds = new Set();
   const denominatorIds = new Set();
+  if (sourceIds) {
+    for (const key of Object.keys(sourceIds)) {
+      if (!KIND_ORDER.includes(key)) errors.push(`manifest denominator has unknown source IDs: ${key}`);
+    }
+  }
   for (const kind of KIND_ORDER) {
     const source = sourceIds && Array.isArray(sourceIds[kind]) ? sourceIds[kind] : null;
     if (!source) {
@@ -1268,6 +1578,34 @@ export function validateManifest(manifest, { expectedIds = null, currentSnapshot
     const rowSet = new Set(rows.filter((row) => row?.kind === kind).map((row) => row?.stable_id));
     for (const id of sourceSet) if (!rowSet.has(id)) errors.push(`source membership missing from manifest: ${id}`);
     for (const id of rowSet) if (!sourceSet.has(id)) errors.push(`manifest row is not source membership: ${id}`);
+  }
+  const sourceTotal = [...denominatorIds].length;
+  if (Number.isInteger(denominator?.total) && denominator.total !== sourceTotal) errors.push("manifest denominator total is stale");
+  if (expectedMembership && sourceIds) {
+    for (const kind of KIND_ORDER) {
+      const actual = Array.isArray(sourceIds[kind]) ? sourceIds[kind] : [];
+      const expected = expectedMembership.sourceIds[kind];
+      const actualSet = new Set(actual);
+      const expectedSet = new Set(expected);
+      for (const id of expectedSet) if (!actualSet.has(id)) errors.push(`public source membership missing from manifest: ${id}`);
+      for (const id of actualSet) if (!expectedSet.has(id)) errors.push(`manifest public row is not source membership: ${id}`);
+      if (canonicalJson(actual) !== canonicalJson(expected)) errors.push(`manifest source membership is stale: ${kind}`);
+    }
+    if (sourceIds && denominator.source_ids_sha256 !== expectedMembership.source_ids_sha256) {
+      errors.push("manifest denominator source_ids_sha256 is stale");
+    }
+  }
+  if (expectedIds !== null && expectedMembership) {
+    if (denominator?.total !== expectedMembership.total) errors.push("manifest denominator total differs from injected identity");
+    if (counts && expectedMembership.counts) {
+      for (const kind of KIND_ORDER) {
+        if (counts[kind] !== expectedMembership.counts[kind]) errors.push(`manifest denominator count differs from injected identity: ${kind}`);
+      }
+      if (counts.exclusions !== expectedMembership.counts.exclusions) errors.push("manifest exclusion count differs from injected identity");
+    }
+  }
+  if (expectedIds !== null && ratifiedExclusions && expectedMembership?.counts?.exclusions !== ratifiedExclusions.size) {
+    errors.push("expected membership exclusion count does not match owner-ratified exclusions");
   }
   if (counts && counts.exclusions === undefined) errors.push("manifest exclusion count is required");
 
@@ -1294,6 +1632,19 @@ export function validateManifest(manifest, { expectedIds = null, currentSnapshot
       }
     }
     if (counts && counts.exclusions !== exclusions.length) errors.push("denominator exclusion count mismatch");
+  }
+  if (ratifiedExclusions) {
+    for (const [stableId, expected] of ratifiedExclusions) {
+      const recorded = exclusionsById.get(stableId);
+      if (!recorded) errors.push(`manifest is missing owner-ratified exclusion: ${stableId}`);
+      else if (canonicalJson(exclusionDetails(recorded)) !== canonicalJson(expected)) errors.push(`manifest exclusion differs from owner-ratified record: ${stableId}`);
+    }
+    for (const stableId of exclusionsById.keys()) {
+      if (!ratifiedExclusions.has(stableId)) errors.push(`manifest exclusion is not owner-ratified: ${stableId}`);
+    }
+  }
+  if (ratifiedExclusions && counts && counts.exclusions !== ratifiedExclusions.size) {
+    errors.push("manifest denominator exclusion count does not match owner-ratified exclusions");
   }
   for (const row of rows.filter(isRecord)) {
     const recorded = exclusionsById.get(row.stable_id);
@@ -1368,11 +1719,6 @@ export function validateManifest(manifest, { expectedIds = null, currentSnapshot
       if (!row.owner) errors.push(`constructor has no owner: ${row.stable_id}`);
     }
   }
-  if (expectedIds) {
-    const expected = new Set(expectedIds);
-    for (const id of expected) if (!seen.has(id)) errors.push(`expected membership missing: ${id}`);
-    for (const id of seen) if (!expected.has(id)) errors.push(`unexpected membership: ${id}`);
-  }
   if (currentSnapshotHash !== null && currentSnapshotHash !== undefined && manifest.source_snapshot?.hash !== currentSnapshotHash) errors.push("manifest source snapshot is stale");
   return { ok: errors.length === 0, errors: [...new Set(errors)].sort() };
 }
@@ -1397,7 +1743,7 @@ export function readManifest(path, { root = DEFAULT_ROOT } = {}) {
 
 function hostileFixtures() {
   const surface = {
-    moduleCalls: ["core.test.call"],
+    moduleCalls: ["core.test.call", "core.test.missing"],
     receivers: [{ type: "Widget", member: "read" }],
     fields: [{ type: "Widget", field: "value" }],
     types: ["core.test.Widget"],
@@ -1410,62 +1756,93 @@ function hostileFixtures() {
       "module:core.test.call",
       { path: "tests/conformance/corpus/core/test/call.jet", errors: [], sink: { type_aware: true, operation: "print", kind: "primitive" } },
     ]]),
-    exclusions: new Map(),
+    exclusions: new Map([
+      ["module:core.test.missing", { reason: "fixture has no executable seed", owner: "owner", decision: "D-2335" }],
+      ["receiver:Widget.read", { reason: "fixture receiver is not a callable seed", owner: "owner", decision: "D-2335" }],
+      ["field:Widget.value", { reason: "fixture field is not a callable seed", owner: "owner", decision: "D-2335" }],
+      ["type:core.test.Widget", { reason: "fixture nominal type is not a callable seed", owner: "owner", decision: "D-2335" }],
+    ]),
     snapshot: sourceSnapshotFromContents({ "fixture.rs": "one" }),
     membershipSources: Object.fromEntries(KIND_ORDER.map((kind) => [kind, ["fixture.rs"]])),
   };
   const manifest = buildManifest({ surface });
-  if (!validateManifest(manifest).ok) fail("valid manifest fixture rejected");
+  const fixtureExpectedIds = JSON.parse(JSON.stringify(manifest.denominator));
+  const fixtureExpectedExclusions = surface.exclusions;
+  const validateFixture = (value, options = {}) => validateManifest(value, {
+    ...options,
+    expectedIds: fixtureExpectedIds,
+    expectedExclusions: fixtureExpectedExclusions,
+  });
+  if (!validateFixture(manifest).ok) fail("valid manifest fixture rejected");
+  const missingIdentity = JSON.parse(JSON.stringify(fixtureExpectedIds));
+  delete missingIdentity.source_ids_sha256;
+  if (validateManifest(manifest, { expectedIds: missingIdentity, expectedExclusions: fixtureExpectedExclusions }).ok) fail("missing injected denominator digest accepted");
+  if (validateManifest(manifest, { expectedIds: fixtureExpectedIds.source_ids, expectedExclusions: fixtureExpectedExclusions }).ok) fail("legacy injected membership shape accepted");
   const rehash = (value) => { value.content_digest = manifestContentDigest(value); return value; };
   const tamperedContent = JSON.parse(JSON.stringify(manifest));
   tamperedContent.rows[0].domain = "tampered";
-  const tamperedValidation = validateManifest(tamperedContent);
+  const tamperedValidation = validateFixture(tamperedContent);
   if (tamperedValidation.ok || !tamperedValidation.errors.includes("manifest content digest does not match manifest")) fail("manifest content tampering accepted");
   const missingReceiver = JSON.parse(JSON.stringify(manifest));
   missingReceiver.rows = missingReceiver.rows.filter((row) => row.stable_id !== "receiver:Widget.read");
   missingReceiver.denominator.source_ids.receiver_method = ["receiver:Widget.read"];
   rehash(missingReceiver);
-  if (validateManifest(missingReceiver).ok) fail("missing receiver accepted");
+  if (validateFixture(missingReceiver).ok) fail("missing receiver accepted");
   const missingField = JSON.parse(JSON.stringify(manifest));
   missingField.rows = missingField.rows.filter((row) => row.stable_id !== "field:Widget.value");
   rehash(missingField);
-  if (validateManifest(missingField).ok) fail("missing field accepted");
+  if (validateFixture(missingField).ok) fail("missing field accepted");
   const fakeCoverage = JSON.parse(JSON.stringify(manifest));
   fakeCoverage.rows.find((row) => row.stable_id === "module:core.test.call").projections.push({ tier: "interpreter", route: "fake:coverage", evidence: [] });
   fakeCoverage.rows.find((row) => row.stable_id === "module:core.test.call").applicable_tiers.push("interpreter");
   rehash(fakeCoverage);
-  if (validateManifest(fakeCoverage).ok) fail("fake coverage accepted");
+  if (validateFixture(fakeCoverage).ok) fail("fake coverage accepted");
   const fakeRow = JSON.parse(JSON.stringify(manifest));
   const fake = JSON.parse(JSON.stringify(fakeRow.rows[0]));
   fake.stable_id = "field:Widget.fake";
   fake.member = "fake";
   fakeRow.rows.push(fake);
   rehash(fakeRow);
-  if (validateManifest(fakeRow).ok) fail("fake row accepted");
+  if (validateFixture(fakeRow).ok) fail("fake row accepted");
   const fakeRoute = JSON.parse(JSON.stringify(manifest));
   fakeRoute.actual_routes.aot.push({ stable_id: "module:core.test.call", route: "aot:fake", seam: null, evidence: [] });
   rehash(fakeRoute);
-  if (validateManifest(fakeRoute).ok) fail("fake route accepted");
+  if (validateFixture(fakeRoute).ok) fail("fake route accepted");
   const duplicate = JSON.parse(JSON.stringify(manifest));
   duplicate.rows.push(duplicate.rows[0]);
   rehash(duplicate);
-  if (validateManifest(duplicate).ok) fail("duplicate constructor/row accepted");
+  if (validateFixture(duplicate).ok) fail("duplicate constructor/row accepted");
   const duplicateIdentity = JSON.parse(JSON.stringify(manifest));
   duplicateIdentity.denominator.source_ids.module_call.push("module:core.test.call");
   rehash(duplicateIdentity);
-  if (validateManifest(duplicateIdentity).ok) fail("duplicate denominator identity accepted");
+  if (validateFixture(duplicateIdentity).ok) fail("duplicate denominator identity accepted");
+  const staleTotal = JSON.parse(JSON.stringify(manifest));
+  staleTotal.denominator.total -= 1;
+  rehash(staleTotal);
+  if (validateFixture(staleTotal).ok) fail("stale denominator total accepted");
+  const staleSourceDigest = JSON.parse(JSON.stringify(manifest));
+  staleSourceDigest.denominator.source_ids_sha256 = sha256("forged");
+  rehash(staleSourceDigest);
+  if (validateFixture(staleSourceDigest).ok) fail("stale source membership digest accepted");
   const observerless = JSON.parse(JSON.stringify(manifest));
   const observed = observerless.rows.find((row) => row.stable_id === "module:core.test.call");
   observed.status = "covered";
   observed.value_consuming = false;
   observed.sink = null;
   rehash(observerless);
-  if (validateManifest(observerless).ok) fail("observerless value accepted");
+  if (validateFixture(observerless).ok) fail("observerless value accepted");
+  const forgedExclusion = JSON.parse(JSON.stringify(manifest));
+  const forgedRecord = forgedExclusion.exclusions.find((entry) => entry.stable_id === "module:core.test.missing");
+  const forgedRow = forgedExclusion.rows.find((row) => row.stable_id === "module:core.test.missing");
+  forgedRecord.reason = "forged reason";
+  forgedRow.exclusion.reason = "forged reason";
+  rehash(forgedExclusion);
+  if (validateFixture(forgedExclusion).ok) fail("forged exclusion accepted");
   const malformedExclusion = JSON.parse(JSON.stringify(manifest));
   malformedExclusion.exclusions.push({ stable_id: "module:core.test.call", reason: "", owner: "owner", decision: "D-2335" });
   malformedExclusion.denominator.counts.exclusions = 1;
   rehash(malformedExclusion);
-  if (validateManifest(malformedExclusion).ok) fail("malformed exclusion accepted");
+  if (validateFixture(malformedExclusion).ok) fail("malformed exclusion accepted");
   const invalidExclusion = JSON.parse(JSON.stringify(manifest));
   const excluded = invalidExclusion.rows.find((row) => row.stable_id === "module:core.test.call");
   excluded.status = "excluded";
@@ -1473,11 +1850,11 @@ function hostileFixtures() {
   excluded.value_consuming = null;
   excluded.sink = null;
   rehash(invalidExclusion);
-  if (validateManifest(invalidExclusion).ok) fail("invalid exclusion accepted");
+  if (validateFixture(invalidExclusion).ok) fail("invalid exclusion accepted");
   const stale = JSON.parse(JSON.stringify(manifest));
   stale.source_snapshot.hash = sha256("changed");
   rehash(stale);
-  if (validateManifest(stale, { currentSnapshotHash: manifest.source_snapshot.hash }).ok) fail("stale snapshot accepted");
+  if (validateFixture(stale, { currentSnapshotHash: manifest.source_snapshot.hash }).ok) fail("stale snapshot accepted");
   const inspectFixture = (body, fixtureKey = "core.test.open") => {
     const dot = fixtureKey.lastIndexOf(".");
     const fixtureModule = fixtureKey.slice(0, dot);

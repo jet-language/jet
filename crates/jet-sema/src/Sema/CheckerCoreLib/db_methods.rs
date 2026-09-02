@@ -3,7 +3,6 @@ use super::serde_diags::wrong_core_arity;
 use crate::Diagnostics::Span;
 use crate::Sema::Checker;
 use crate::Sema::Effects::Effect;
-use crate::Syntax;
 use crate::AST::Type;
 
 /// D-EFFDBREAD1=A: the `DB.Read` effect leaf a database read call proves. Unlike
@@ -26,26 +25,28 @@ fn db_write() -> String {
     format!("{}.Write", Effect::DB.name())
 }
 impl<'a> Checker<'a> {
-    /// D-DBDRIVER1: `(sql: String, params: [DBValue])` argument elaboration shared
-    /// by `.query`/`.query_one`/`.execute` — SQL text plus a separate bind list,
-    /// never a raw execute(sql) escape (the ratified build plan is explicit that
-    /// a generic `execute_raw(sql)` must not exist).
-    fn check_db_sql_params_args(
+    /// D-TYPEDSQL-SINK1=A: every singular database sink consumes one checked
+    /// `SQL` value. The template and ordered `DBValue` bindings are one value,
+    /// so no caller can pass text and binds through a separate overload.
+    fn check_db_sql_args(
         &mut self,
         name: &str,
         args: &mut [crate::AST::CallArg],
         span: Span,
     ) {
-        if args.len() != 2 {
-            self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+        if args.len() != 1 {
+            self.diags.push(wrong_core_arity(name, 1, args.len(), span));
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
             return;
         }
-        let params_ty = Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())));
-        self.expect_core_arg(name, 0, &Type::String, &mut args[0]);
-        self.expect_core_arg(name, 1, &params_ty, &mut args[1]);
+        self.expect_core_arg(
+            name,
+            0,
+            &Type::Named("SQL".to_string()),
+            &mut args[0],
+        );
     }
 
     /// D-DBPOLICY-BIND1: an unscoped connection can establish a typed policy
@@ -104,7 +105,7 @@ impl<'a> Checker<'a> {
     ) -> Option<Option<Type>> {
         match method {
             "query" => {
-                self.check_db_sql_params_args("query", args, span);
+                self.check_db_sql_args("query", args, span);
                 self.record_effect(&db_read(), span);
                 Some(Some(result_ty(
                     Type::List(Box::new(db_row_ty())),
@@ -112,7 +113,7 @@ impl<'a> Checker<'a> {
                 )))
             }
             "query_one" => {
-                self.check_db_sql_params_args("query_one", args, span);
+                self.check_db_sql_args("query_one", args, span);
                 self.record_effect(&db_read(), span);
                 Some(Some(result_ty(
                     Type::Option(Box::new(db_row_ty())),
@@ -120,12 +121,12 @@ impl<'a> Checker<'a> {
                 )))
             }
             "execute" => {
-                self.check_db_sql_params_args("execute", args, span);
+                self.check_db_sql_args("execute", args, span);
                 self.record_effect(&db_write(), span);
                 Some(Some(result_ty(Type::Int, db_error_ty())))
             }
             "live" => {
-                self.check_db_sql_params_args("live", args, span);
+                self.check_db_sql_args("live", args, span);
                 self.record_effect(&db_read(), span);
                 Some(Some(result_ty(
                     Type::Named("LiveQuery".to_string()),

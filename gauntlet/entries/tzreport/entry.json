@@ -11,6 +11,18 @@
     "fixtureGen": null,
     "expected": "expected.out"
   },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    }
+  },
   "authoring": {
     "jet": {"author": "luna-max", "turns": 7, "retries": 6, "diagnosticsHit": ["E2105: can't find the file `jet/main.jet`", "E0124: this `if`'s branches produce different types: Int (a whole number) and `Fraction`", "L0507: prefer an ordered arm table for this branch", "E0956: `for-in method collection` isn't supported by the current evaluator yet", "E3001: `panic: read meetings`", "E1803: application authority is undecided for `Env`", "E0956: ``core.time.parse_rfc3339()`` isn't supported by the current evaluator yet"], "notes": "AOT build and run pass expected.out. Default `jet run` remains blocked by evaluator E0956 on core.time.parse_rfc3339 after whole-file FS fallback fixed the streaming evaluator gap; no manual duplicate timestamp parser was added. sys.current_dir required Env authority."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses datetime.fromisoformat and timezone conversion."},

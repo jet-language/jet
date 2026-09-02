@@ -1,0 +1,94 @@
+name: Compiled workload review
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  review:
+    if: github.event.workflow_run.conclusion == 'success'
+    name: Review compiled workload (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+          - label: macos-x86_64
+          - label: windows-x86_64
+    steps:
+      - name: Checkout trusted reviewer source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          path: reviewer
+
+      - name: Download immutable producer report
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+          PRODUCER_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          artifact_name="compiled-workload-${{ matrix.label }}-${CANDIDATE_SHA}"
+          response="$(gh api --paginate --slurp \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100")"
+          artifact_ids="$(jq -r --arg name "$artifact_name" --arg sha "$CANDIDATE_SHA" --argjson run "$PRODUCER_RUN_ID" '
+            [.[] | .artifacts[] |
+              select(.name == $name and .expired == false and .workflow_run.head_sha == $sha and .workflow_run.id == $run)] |
+              .[].id
+          ' <<<"$response")"
+          count="$(printf '%s\n' "$artifact_ids" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+          test "$count" -eq 1
+          artifact_id="$(printf '%s\n' "$artifact_ids" | sed -n '1p')"
+          archive="$RUNNER_TEMP/${artifact_name}.zip"
+          unpack="$RUNNER_TEMP/compiled-workload-unpack"
+          rm -rf "$unpack" compiled-workload-report
+          mkdir -p "$unpack" compiled-workload-report
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" >"$archive"
+          unzip -q "$archive" -d "$unpack"
+          source_dir="$(find "$unpack" -type d -name compiled-workload-report -print -quit)"
+          test -n "$source_dir"
+          for file in identity.tsv samples.tsv statistics.tsv outcomes.tsv measurements.tsv tiers.tsv receipts.tsv tier_receipts.tsv peer_coverage.tsv peer_measurements.tsv; do
+            test -f "$source_dir/$file"
+            cp "$source_dir/$file" compiled-workload-report/
+          done
+          test "$(find compiled-workload-report -maxdepth 1 -type f | wc -l | tr -d '[:space:]')" -eq 10
+
+      - name: Verify Actions run provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCER_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >"$RUNNER_TEMP/review-run.json"
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${PRODUCER_RUN_ID}" >"$RUNNER_TEMP/producer-run.json"
+          jq -n \
+            --slurpfile review "$RUNNER_TEMP/review-run.json" \
+            --slurpfile producer "$RUNNER_TEMP/producer-run.json" \
+            '{review: $review[0], producer: $producer[0]}' >reviewer-provenance.json
+
+
+      - name: Independently review and validate report
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+          REVIEW_TRUSTED_CHECKOUT: "1"
+          REVIEW_PROVENANCE_FILE: reviewer-provenance.json
+        run: node reviewer/tools/ci/compiled-workload-review.mjs compiled-workload-report
+
+      - name: Upload immutable reviewed report
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-workload-reviewed-${{ matrix.label }}-${{ github.event.workflow_run.head_sha }}
+          path: compiled-workload-report/
+          retention-days: 30
+          if-no-files-found: error

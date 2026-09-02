@@ -1164,46 +1164,24 @@ fn image_layer_path_conflicts(files: &[Image::LayerFile], candidate: &str) -> bo
 
 fn read_project_image_file(root: &std::path::Path, relative: &str) -> Result<Vec<u8>, String> {
     let relative = normalize_project_relative_image_path(relative)?;
-    let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
-    let source = root.join(&relative);
-    let metadata = std::fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("image file must be a regular file, not a symlink or directory".to_string());
-    }
-    if image_file_has_multiple_links(&metadata) {
-        return Err("image file must not be a hard link to another project path".to_string());
-    }
-    if metadata.len() > 512 * 1024 * 1024 {
-        return Err("image file exceeds the 512 MiB layer limit".to_string());
-    }
-    let resolved = std::fs::canonicalize(&source).map_err(|error| error.to_string())?;
-    if !resolved.starts_with(&root) {
-        return Err("image file resolves outside the project root".to_string());
-    }
-    let data = SHA256::read_file_nofollow(&resolved, 512 * 1024 * 1024)
-        .map_err(|error| error.to_string())?;
-    if data.len() > 512 * 1024 * 1024 {
-        return Err("image file exceeded the 512 MiB layer limit while being read".to_string());
-    }
-    Ok(data)
-}
-
-fn image_file_has_multiple_links(metadata: &std::fs::Metadata) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        return metadata.nlink() > 1;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        return metadata.number_of_links() > 1;
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = metadata;
-        false
-    }
+    SHA256::read_file_nofollow_at_root(
+        root,
+        Path::new(&relative),
+        SHA256::MAX_TREE_FILE_BYTES,
+    )
+    .map_err(|error| {
+        let detail = error.to_string();
+        if detail.contains("hard link") {
+            "image file must not be a hard link to another project path".to_string()
+        } else if detail.contains("symlink")
+            || detail.contains("regular file")
+            || detail.contains("not a directory")
+        {
+            "image file must be a regular file, not a symlink or directory".to_string()
+        } else {
+            detail
+        }
+    })
 }
 
 fn image_service_commands(

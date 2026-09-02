@@ -138,7 +138,8 @@ pub fn normalize_list_tree(root: String, tree: [String]) [String] !TranscriptErr
             removed_marker = true
             next
         }
-        if entry.starts_with("file:.locks/") || (entry.starts_with("dir:.locks/") && entry != "dir:.locks/") {
+        entry_path :: Path.from(~entry).normalize()
+        if entry_path.is_within(Path.from("file:.locks").normalize()) || (entry_path.is_within(Path.from("dir:.locks").normalize()) && entry != "dir:.locks/") {
             has_other_lock_entries = true
         }
         normalized.push(~entry)

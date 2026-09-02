@@ -5595,6 +5595,53 @@ fn canvas_project_source_id_rejects_symlink_alias() {
 
 #[cfg(unix)]
 #[test]
+fn canvas_project_source_id_rejects_hardlink_alias_without_reading() {
+    let dir = temp_dir("project_source_id_hardlink");
+    let outside = dir.with_file_name(format!(
+        "jet_canvas_project_source_id_hardlink_outside_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"source_id_hardlink\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"entry\")\n}\n").unwrap();
+    let helper = dir.join("helper.jet");
+    fs::write(&helper, "fn helper() Int -> {\n    return 7\n}\n").unwrap();
+    let outside_source = outside.join("outside.jet");
+    let outside_source_text =
+        "fn leaked() {\n    print(\"hardlink source must not be returned\")\n}\n";
+    fs::write(&outside_source, outside_source_text).unwrap();
+    let alias = dir.join("leaked.jet");
+    fs::hard_link(&outside_source, &alias).unwrap();
+
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    assert!(project.contains("\"path\":\"helper.jet\""), "{project}");
+    assert!(!project.contains("\"path\":\"leaked.jet\""), "{project}");
+
+    let graph_error = jet::Canvas::graph_json_for_entry_source(&entry, Some("leaked.jet"))
+        .expect_err("Canvas must reject a hardlink source before reading bytes");
+    assert!(!graph_error.contains("hardlink source must not be returned"), "{graph_error}");
+
+    let revision = jet::Canvas::source_revision(outside_source_text);
+    let query = format!(
+        "{{\"schema_version\":1,\"op\":\"find\",\"source_id\":\"leaked.jet\",\"revision\":\"{}\",\"query\":\"leaked\"}}",
+        revision
+    );
+    let query_error = jet::Canvas::query_json_for_entry(&entry, &query)
+        .expect_err("Canvas queries must reject a hardlink source before reading bytes");
+    assert!(!query_error.contains("hardlink source must not be returned"), "{query_error}");
+
+    fs::remove_dir_all(&dir).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn canvas_rename_receipt_rejects_symlinked_metadata_directory() {
     use std::os::unix::fs::symlink;
 

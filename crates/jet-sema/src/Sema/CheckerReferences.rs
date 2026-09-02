@@ -237,14 +237,7 @@ impl<'a> Checker<'a> {
         if self.lookup(alias).is_some() {
             return None;
         }
-        let def_span = self
-            .name_ledger
-            .effective_alias(self.module_idx, alias)
-            .map(|alias| alias.span);
-        if let Some(def_span) = def_span {
-            self.name_ledger.record_alias_use(self.module_idx, def_span);
-        }
-        def_span
+        record_import_alias_use_in_ledger(self.name_ledger, self.module_idx, alias)
     }
 
     pub(crate) fn record_import_alias_reference(&mut self, alias: &str, span: Span) {
@@ -261,6 +254,7 @@ impl<'a> Checker<'a> {
             );
         }
     }
+
 
     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {
         let (import_ns, leaf) = Self::split_type_name(type_name);
@@ -333,6 +327,319 @@ impl<'a> Checker<'a> {
         }
     }
 }
+
+
+fn record_import_alias_use_in_ledger(
+    ledger: &mut jet_foundation::Names::NameLedger,
+    module_idx: usize,
+    alias: &str,
+) -> Option<Span> {
+    let def_span = ledger
+        .effective_alias(module_idx, alias)
+        .map(|alias| alias.span);
+    if let Some(def_span) = def_span {
+        ledger.record_alias_use(module_idx, def_span);
+    }
+    def_span
+}
+pub(crate) fn record_comptime_import_alias_uses(
+    ledger: &mut jet_foundation::Names::NameLedger,
+    module_idx: usize,
+    expression: &Expr,
+    imports: &HashMap<String, String>,
+    globals: &HashMap<String, crate::Comptime::CtValue>,
+) {
+    let global_aliases: HashSet<String> = imports
+        .keys()
+        .filter(|alias| globals.contains_key(*alias))
+        .cloned()
+        .collect();
+    let mut shadowed = HashSet::new();
+    expression.for_each_expr(|node| match node {
+        Expr::Lambda(lambda) => {
+            let mut lambda_aliases = HashSet::new();
+            for parameter in &lambda.params {
+                if imports.contains_key(&parameter.name) {
+                    lambda_aliases.insert(parameter.name.clone());
+                }
+            }
+            for (name, _) in &lambda.take_names {
+                if imports.contains_key(name) {
+                    lambda_aliases.insert(name.clone());
+                }
+            }
+            match &lambda.body {
+                crate::AST::LambdaBody::Expr(body) => {
+                    mark_shadowed_expr(body, &lambda_aliases, &mut shadowed);
+                }
+                crate::AST::LambdaBody::Block(body) => {
+                    mark_shadowed_stmts(body, &lambda_aliases, &mut shadowed);
+                    collect_shadowed_stmts(body, imports, &mut shadowed);
+                }
+            }
+        }
+        Expr::If {
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            let then_aliases = collect_shadowed_stmts(then_body, imports, &mut shadowed);
+            mark_shadowed_expr(then_value, &then_aliases, &mut shadowed);
+            let else_aliases = collect_shadowed_stmts(else_body, imports, &mut shadowed);
+            mark_shadowed_expr(else_value, &else_aliases, &mut shadowed);
+        }
+        Expr::OrFallback {
+            fallback:
+                crate::AST::OrFallback::Block {
+                    body, value, ..
+                },
+            ..
+        } => {
+            let mut fallback_aliases = HashSet::new();
+            if imports.contains_key(crate::Syntax::AMBIENT_ERR) {
+                fallback_aliases.insert(crate::Syntax::AMBIENT_ERR.to_string());
+            }
+            mark_shadowed_stmts(body, &fallback_aliases, &mut shadowed);
+            fallback_aliases.extend(collect_shadowed_stmts(body, imports, &mut shadowed));
+            if let Some(value) = value {
+                mark_shadowed_expr(value, &fallback_aliases, &mut shadowed);
+            }
+        }
+        _ => {}
+    });
+
+    expression.for_each_expr(|node| {
+        let alias = match node {
+            Expr::Call(call) => call
+                .name
+                .split_once('.')
+                .map(|(alias, _)| alias),
+            Expr::Field(base, ..)
+            | Expr::Index { base, .. }
+            | Expr::Slice { base, .. }
+            | Expr::MethodCall {
+                receiver: base, ..
+            }
+            | Expr::OptField { base, .. } => import_alias_root(base),
+            Expr::CallValue { callee, .. } => import_alias_root(callee),
+            Expr::PtrFromAddr { alias, .. } => Some(alias.as_str()),
+            Expr::StructLit {
+                import_ns: Some(alias),
+                ..
+            } => Some(alias.as_str()),
+            _ => None,
+        };
+        let Some(alias) = alias else {
+            return;
+        };
+        if !imports.contains_key(alias)
+            || global_aliases.contains(alias)
+            || shadowed.contains(&(node.span(), alias.to_string()))
+        {
+            return;
+        }
+        record_import_alias_use_in_ledger(ledger, module_idx, alias);
+    });
+}
+
+fn mark_shadowed_expr(
+    expression: &Expr,
+    aliases: &HashSet<String>,
+    shadowed: &mut HashSet<(Span, String)>,
+) {
+    if aliases.is_empty() {
+        return;
+    }
+    expression.for_each_expr(|node| {
+        for alias in aliases {
+            shadowed.insert((node.span(), alias.clone()));
+        }
+    });
+}
+
+fn mark_shadowed_stmt(
+    statement: &Stmt,
+    aliases: &HashSet<String>,
+    shadowed: &mut HashSet<(Span, String)>,
+) {
+    if aliases.is_empty() {
+        return;
+    }
+    statement.for_each_expr(|node| {
+        for alias in aliases {
+            shadowed.insert((node.span(), alias.clone()));
+        }
+    });
+}
+
+fn mark_shadowed_stmts(
+    statements: &[Stmt],
+    aliases: &HashSet<String>,
+    shadowed: &mut HashSet<(Span, String)>,
+) {
+    for statement in statements {
+        mark_shadowed_stmt(statement, aliases, shadowed);
+    }
+}
+
+fn binding_import_aliases(
+    binding: &crate::AST::Binding,
+    imports: &HashMap<String, String>,
+) -> HashSet<String> {
+    let mut aliases = HashSet::new();
+    if !binding.name.is_empty() && imports.contains_key(&binding.name) {
+        aliases.insert(binding.name.clone());
+    }
+    if let Some(pattern) = &binding.pattern {
+        for name in pattern.names() {
+            if imports.contains_key(&name.name) {
+                aliases.insert(name.name.clone());
+            }
+        }
+    }
+    aliases
+}
+
+fn collect_shadowed_stmts(
+    statements: &[Stmt],
+    imports: &HashMap<String, String>,
+    shadowed: &mut HashSet<(Span, String)>,
+) -> HashSet<String> {
+    let mut bound = HashSet::new();
+    for statement in statements {
+        mark_shadowed_stmt(statement, &bound, shadowed);
+        collect_shadowed_stmt_scopes(statement, imports, shadowed);
+        if let Stmt::Val(binding) = statement {
+            bound.extend(binding_import_aliases(binding, imports));
+        }
+    }
+    bound
+}
+
+fn collect_shadowed_stmt_scopes(
+    statement: &Stmt,
+    imports: &HashMap<String, String>,
+    shadowed: &mut HashSet<(Span, String)>,
+) {
+    match statement {
+        Stmt::While { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Switched { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::AuthorityScope { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::Layout { body, .. } => {
+            collect_shadowed_stmts(body, imports, shadowed);
+        }
+        Stmt::For {
+            var, var2, body, ..
+        } => {
+            let mut aliases = HashSet::new();
+            if imports.contains_key(var) {
+                aliases.insert(var.clone());
+            }
+            if let Some((var2, _)) = var2 {
+                if imports.contains_key(var2) {
+                    aliases.insert(var2.clone());
+                }
+            }
+            mark_shadowed_stmts(body, &aliases, shadowed);
+            collect_shadowed_stmts(body, imports, shadowed);
+        }
+        Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => {
+            for arm in arms {
+                collect_shadowed_stmts(&arm.body, imports, shadowed);
+            }
+            if let Some(body) = else_body {
+                collect_shadowed_stmts(body, imports, shadowed);
+            }
+        }
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            let aliases = binding_import_aliases(init, imports);
+            mark_shadowed_expr(cond, &aliases, shadowed);
+            if let Some(step) = step {
+                mark_shadowed_stmt(step, &aliases, shadowed);
+                collect_shadowed_stmt_scopes(step, imports, shadowed);
+            }
+            mark_shadowed_stmts(body, &aliases, shadowed);
+            collect_shadowed_stmts(body, imports, shadowed);
+        }
+        Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } => {
+            collect_shadowed_stmts(body, imports, shadowed);
+        }
+        Stmt::TaskGroup { body, .. } => {
+            collect_shadowed_stmts(body, imports, shadowed);
+        }
+        Stmt::ContextBlock { body, .. } => {
+            collect_shadowed_stmts(body, imports, shadowed);
+        }
+        Stmt::AssumeDet { body, .. } => {
+            collect_shadowed_stmts(body, imports, shadowed);
+        }
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_shadowed_stmts(then_body, imports, shadowed);
+            if let Some(body) = else_body {
+                collect_shadowed_stmts(body, imports, shadowed);
+            }
+        }
+        Stmt::ScopeMember { body, .. } => {
+            collect_shadowed_stmts(body, imports, shadowed);
+        }
+        _ => {}
+    }
+}
+
+fn import_alias_root(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(name, _) => Some(name),
+        Expr::Paren(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Tainted(inner, _, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _, _) => import_alias_root(inner),
+        Expr::OrFallback { value, .. } => import_alias_root(value),
+        Expr::Index { base, .. }
+        | Expr::Slice { base, .. }
+        | Expr::Field(base, ..)
+        | Expr::OptField { base, .. } => import_alias_root(base),
+        Expr::MethodCall { receiver, .. } => import_alias_root(receiver),
+        Expr::CallValue { callee, .. } => import_alias_root(callee),
+        Expr::PtrFromAddr { alias, .. } => Some(alias.as_str()),
+        Expr::StructLit {
+            import_ns: Some(alias),
+            ..
+        } => Some(alias.as_str()),
+        _ => None,
+    }
+}
+
 
 fn find_function_by_span<'a>(
     items: &'a [crate::AST::Item],

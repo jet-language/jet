@@ -1220,6 +1220,26 @@ mod tests {
         );
         assert!(Request::read(&mut raw.as_bytes()).is_err());
     }
+
+    #[test]
+    fn aggregate_request_headers_are_bounded_before_parse() {
+        let mut raw = String::from("GET / HTTP/1.1\r\n");
+        for index in 0..8 {
+            raw.push_str(&format!("X-Fill-{index}: {}\r\n", "x".repeat(4090)));
+        }
+        raw.push_str("\r\n");
+        assert!(Request::read(&mut raw.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn request_header_count_is_bounded_before_parse() {
+        let mut raw = String::from("GET / HTTP/1.1\r\n");
+        for index in 0..=MAX_REQUEST_HEADER_COUNT {
+            raw.push_str(&format!("X-Count-{index}: y\r\n"));
+        }
+        raw.push_str("\r\n");
+        assert!(Request::read(&mut raw.as_bytes()).is_err());
+    }
     #[test]
     fn traversal_is_rejected() {
         assert!(static_relative_path("/../x").is_err());

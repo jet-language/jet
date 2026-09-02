@@ -340,7 +340,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Unzip { .. } => apply_method(recv, "unzip", args, span),
         TBuiltinOp::Clear => apply_mutating(recv, "clear", args, span),
         TBuiltinOp::Chars => apply_method(recv, "chars", args, span),
-        TBuiltinOp::Bytes => apply_method(recv, "bytes", args, span),
+        TBuiltinOp::Bytes { owned: _ } => apply_method(recv, "bytes", args, span),
         TBuiltinOp::StringFromBytes => {
             apply_static_type_method("String", "from_bytes", vec![recv.clone()], span)
                 .unwrap_or_else(|| Err(unsupported("String.from_bytes", span)))

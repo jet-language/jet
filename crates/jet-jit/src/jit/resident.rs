@@ -1,16 +1,21 @@
+use cranelift_module::Module;
 use jet_codegen::Codegen::TIR::{JitProgram, TFunc};
-use jet_foundation::{JitBackend::RunOutcome, AST::Type};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use jet_foundation::{JitBackend::RunOutcome, AST::Type};
 
 use super::deopt::{
     clear_deopt_state, install_deopt_program, install_native_hook, register_native_fn,
 };
 use super::functions_compile::{compile_program, compile_program_tiered};
-use super::runtime_host::{jit_result, new_jit_module, ResidentModule};
-use super::tiers::TierPlan;
+use super::runtime_host::{jit_result, new_jit_module, JitCallableSlot, ResidentModule};
 use super::{Concurrency, JitRuntime, RESIDENT_MODULE, RESIDENT_RUNTIME};
+use super::tiers::TierPlan;
 use crate::Collections;
 
+static HTTP_LIFETIME_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+const HTTP_LIFETIME_PHASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 fn main_func(program: &JitProgram) -> Option<&TFunc> {
     let name = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
         "run"
@@ -155,6 +160,7 @@ pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRun
         decimal_values: Vec::new(),
         fraction_values: Vec::new(),
         complex_values: Vec::new(),
+        trapped_flag: AtomicBool::new(false),
         trapped: None,
         host_fault: false,
         host_fault_payload_captured: false,
@@ -169,6 +175,247 @@ pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRun
         web: crate::Web::WebState::default(),
     }
 }
+fn resident_http_lifetime_proof(
+    program: &JitProgram,
+    handler_name: &str,
+) -> Result<(), String> {
+    let _serial = HTTP_LIFETIME_TEST_LOCK
+        .lock()
+        .map_err(|_| "HTTP lifetime proof lock poisoned".to_string())?;
+    Concurrency::set_http_test_handler_hook(None);
+    Concurrency::set_http_test_shutdown_hook(None);
+    resident_teardown();
+
+    let run_live_http = |callable: i64| -> Result<
+        (
+            crate::net_http_rt::TestHttpHandler,
+            std::thread::JoinHandle<Result<(), String>>,
+            std::net::TcpStream,
+            std::sync::mpsc::Sender<()>,
+            std::thread::JoinHandle<()>,
+            std::sync::mpsc::Receiver<()>,
+            std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        ),
+        String,
+    > {
+        // Snapshot the callable before the real worker acquires the runtime
+        // guard. Capturing after handler entry would wait on that guard and
+        // prevent the independent shutdown coordinator from being spawned.
+        let captured_handler = crate::net_http_rt::test_capture_http_handler(callable);
+        let entered_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let count = entered_count.clone();
+        let release_rx = std::sync::Arc::new(std::sync::Mutex::new(release_rx));
+        let release_for_hook = release_rx.clone();
+        Concurrency::set_http_test_handler_hook(Some(std::sync::Arc::new(move || {
+            count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            let _ = entered_tx.send(());
+            let _ = release_for_hook
+                .lock()
+                .ok()
+                .and_then(|release| release.recv().ok());
+        })));
+
+        let mux = crate::net_http_rt::runtime_http_mux();
+        crate::net_http_rt::test_http_mux_add_handler(mux, "GET", "/", &captured_handler)?;
+        let server = crate::net_http_rt::runtime_http_server_bind("127.0.0.1:0".into(), mux)?;
+        let address = crate::net_http_rt::test_http_server_local_addr(server)?;
+        let server_thread =
+            std::thread::spawn(move || crate::net_http_rt::runtime_http_server_serve(server));
+        let mut client = std::net::TcpStream::connect(&address)
+            .map_err(|error| format!("HTTP lifetime client connect failed: {error}"))?;
+        std::io::Write::write_all(
+            &mut client,
+            b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        )
+        .map_err(|error| format!("HTTP lifetime request failed: {error}"))?;
+        entered_rx
+            .recv_timeout(HTTP_LIFETIME_PHASE_TIMEOUT)
+            .map_err(|error| format!("phase handler-entry recv timed out: {error}"))?;
+
+        let (attempted_tx, attempted_rx) = std::sync::mpsc::channel();
+        let (available_tx, available_rx) = std::sync::mpsc::channel();
+        let (quiesced_tx, quiesced_rx) = std::sync::mpsc::channel();
+        let quiesce_thread = std::thread::spawn(move || {
+            let _ = attempted_tx.send(());
+            let _ = available_tx.send(Concurrency::runtime_access_available_for_test());
+            Concurrency::with_http_runtime_quiesced(|| {
+                let _ = quiesced_tx.send(());
+            });
+        });
+        attempted_rx
+            .recv_timeout(HTTP_LIFETIME_PHASE_TIMEOUT)
+            .map_err(|error| format!("phase quiesce-start recv timed out: {error}"))?;
+        if available_rx
+            .recv_timeout(HTTP_LIFETIME_PHASE_TIMEOUT)
+            .map_err(|error| format!("phase runtime-lock-probe recv timed out: {error}"))?
+        {
+            let _ = release_tx.send(());
+            let _ = quiesce_thread.join();
+            drop(client);
+            Concurrency::set_http_test_handler_hook(None);
+            crate::net_http_rt::clear_net_http_handles();
+            let _ = server_thread.join();
+            return Err("HTTP runtime lock was available during a resident handler".into());
+        }
+        Ok((
+            captured_handler,
+            server_thread,
+            client,
+            release_tx,
+            quiesce_thread,
+            quiesced_rx,
+            entered_count,
+        ))
+    };
+
+    for generation in 0..2 {
+        if generation != 0 {
+            // Hot-swap leaves the replacement resident image installed. Drop
+            // it before compiling the independent full-teardown generation;
+            // the incremental resident compiler cannot redeclare its helpers.
+            resident_teardown();
+        }
+        RESIDENT_RUNTIME.with(|slot| {
+            if slot.borrow().is_none() {
+                *slot.borrow_mut() = Some(fresh_runtime());
+            }
+        });
+        ensure_resident_module(program)?;
+        let callable = RESIDENT_MODULE
+            .with(|slot| {
+                let resident = slot.borrow();
+                let resident = resident.as_ref()?;
+                let symbol = super::types_meta::jit_fn_name(handler_name);
+                let id = match resident.module.get_name(&symbol)? {
+                    cranelift_module::FuncOrDataId::Func(id) => id,
+                    _ => return None,
+                };
+                Some(resident.module.get_finalized_function(id) as usize as i64)
+            })
+            .ok_or_else(|| format!("resident HTTP handler `{handler_name}` was not compiled"))?;
+        let callable_handle = RESIDENT_RUNTIME.with(|slot| {
+            let mut runtime = slot.borrow_mut();
+            let runtime = runtime.as_mut().ok_or("resident runtime missing")?;
+            runtime.jit_callables.push(JitCallableSlot {
+                fn_ptr: callable,
+                env: 0,
+                has_env: false,
+            });
+            Ok::<i64, String>(-(runtime.jit_callables.len() as i64))
+        })?;
+        let runtime_ptr = RESIDENT_RUNTIME
+            .with(|slot| slot.borrow_mut().as_mut().map(|runtime| runtime as *mut JitRuntime))
+            .ok_or("resident runtime missing")?;
+        Concurrency::set_active_runtime(Some(runtime_ptr));
+
+        let (
+            old_handler,
+            server_thread,
+            mut client,
+            release_tx,
+            quiesce_thread,
+            quiesced_rx,
+            entered_count,
+        ) = run_live_http(callable_handle)?;
+        let (shutdown_started_tx, shutdown_started_rx) = std::sync::mpsc::channel();
+        let (allow_shutdown_tx, allow_shutdown_rx) = std::sync::mpsc::channel();
+        let allow_shutdown_rx = std::sync::Arc::new(std::sync::Mutex::new(allow_shutdown_rx));
+        let allow_for_hook = allow_shutdown_rx.clone();
+        Concurrency::set_http_test_shutdown_hook(Some(std::sync::Arc::new(move || {
+            let _ = shutdown_started_tx.send(());
+            let _ = allow_for_hook
+                .lock()
+                .ok()
+                .and_then(|allow| allow.recv().ok());
+        })));
+        // This coordinator is spawned before teardown and only exchanges
+        // channels. It never takes the runtime or lifetime-test locks, so it
+        // can release a handler even while hot-swap is blocked in shutdown.
+        let shutdown_controller = std::thread::spawn(move || -> Result<(), String> {
+            let started = shutdown_started_rx
+                .recv_timeout(HTTP_LIFETIME_PHASE_TIMEOUT)
+                .map_err(|error| format!("phase shutdown-hook recv timed out: {error}"));
+            let released = release_tx
+                .send(())
+                .map_err(|error| format!("phase handler-release send failed: {error}"));
+            let allowed = allow_shutdown_tx
+                .send(())
+                .map_err(|error| format!("phase shutdown-allow send failed: {error}"));
+            started.and(released).and(allowed)
+        });
+        let hot_swapped = generation == 0;
+        let swap_result = if hot_swapped {
+            resident_hot_swap(program, None).map(|_| ())
+        } else {
+            crate::net_http_rt::clear_net_http_handles();
+            resident_teardown();
+            Ok(())
+        };
+        let controller_result = shutdown_controller
+            .join()
+            .map_err(|_| "HTTP shutdown controller panicked".to_string())?;
+        controller_result?;
+        swap_result?;
+        quiesced_rx
+            .recv_timeout(HTTP_LIFETIME_PHASE_TIMEOUT)
+            .map_err(|error| format!("phase quiesce-complete recv timed out: {error}"))?;
+        quiesce_thread
+            .join()
+            .map_err(|_| "HTTP quiesce thread panicked".to_string())?;
+        let mut response = Vec::new();
+        std::io::Read::read_to_end(&mut client, &mut response)
+            .map_err(|error| format!("HTTP lifetime response read failed: {error}"))?;
+        if !response.starts_with(b"HTTP/1.1 200") {
+            return Err(format!(
+                "resident HTTP handler returned unexpected response: {}",
+                String::from_utf8_lossy(&response)
+            ));
+        }
+        drop(client);
+        server_thread
+            .join()
+            .map_err(|_| "HTTP server thread panicked during cleanup".to_string())?
+            .map_err(|error| format!("HTTP server cleanup failed: {error}"))?;
+        Concurrency::set_http_test_shutdown_hook(None);
+
+        let stale = crate::net_http_rt::test_invoke_captured_http_handler(&old_handler);
+        if !matches!(
+            stale.as_ref(),
+            Err(operation) if operation == "HTTP handler runtime unavailable"
+        ) {
+            return Err(format!("stale HTTP handler was invoked: {stale:?}"));
+        }
+        if entered_count.load(std::sync::atomic::Ordering::Acquire) != 1 {
+            return Err("stale HTTP handler changed callback invocation count".into());
+        }
+        Concurrency::set_http_test_handler_hook(None);
+    }
+    Concurrency::set_http_test_handler_hook(None);
+    resident_teardown();
+    Ok(())
+}
+
+impl crate::CraneliftBackend {
+    #[doc(hidden)]
+    pub fn http_worker_runtime_lifetime_proof_for_test(
+        &self,
+        program: &JitProgram,
+        handler_name: &str,
+    ) -> Result<(), String> {
+        crate::on_compiler_stack(|| resident_http_lifetime_proof(program, handler_name))
+    }
+
+    #[doc(hidden)]
+    pub fn http2_dispatch_drain_proof_for_test(&self) -> Result<(), String> {
+        let _serial = HTTP_LIFETIME_TEST_LOCK
+            .lock()
+            .map_err(|_| "HTTP lifetime proof lock poisoned".to_string())?;
+        crate::on_compiler_stack(crate::net_http_rt::test_http2_dispatch_drain)
+    }
+}
+
 
 /// Scrub heap state a trapped (partial) run created, so the NEXT resident
 /// invocation (hot-reload iteration or plain re-run) in this same process
@@ -262,11 +509,10 @@ fn take_host_fault_outcome(runtime: &mut JitRuntime) -> Option<RunOutcome> {
     let payload_captured = std::mem::take(&mut runtime.host_fault_payload_captured);
     let what = if payload_captured {
         runtime
-            .trapped
-            .take()
+            .take_trap()
             .unwrap_or_else(|| "the JIT runtime helper failed".to_string())
     } else {
-        runtime.trapped.take();
+        runtime.take_trap();
         "the JIT runtime helper failed".to_string()
     };
     runtime.exit_code.take();
@@ -436,7 +682,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         if let Some(outcome) = take_host_fault_outcome(runtime) {
             return Ok(outcome);
         }
-        if let Some(msg) = runtime.trapped.take() {
+        if let Some(msg) = runtime.take_trap() {
             // Rich require/panic already wrote AOT-matching stderr and set exit_code.
             if msg == "__jet_rich_panic__" || runtime.exit_code.is_some() {
                 let code = runtime.exit_code.take().unwrap_or(1);
@@ -682,8 +928,9 @@ mod tests {
     fn host_helper_fault_discards_raw_rust_text_at_the_engine_boundary() {
         let mut runtime = fresh_runtime();
         runtime.stdout.push_str("before\n");
-        runtime.trapped =
-            Some("thread 'main' panicked at crates/jet-jit/src/jit/runtime_host.rs".into());
+        runtime.set_trap_message(
+            "thread 'main' panicked at crates/jet-jit/src/jit/runtime_host.rs".into(),
+        );
         runtime.host_fault = true;
 
         let RunOutcome::Problems(diagnostics) =

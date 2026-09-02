@@ -4,27 +4,28 @@
     "loc": "nonblank_noncomment_lines",
     "token_metric": "source_tokens",
     "token_definition": "nonempty_runs_split_by_unicode_whitespace",
-    "loc_ratio_max": 1.2,
-    "token_verdict": "jet_less_than_python",
     "eligible_pair": "jet_and_python_sources"
   },
   "corpus": {
-    "entry_count": 19,
-    "python_pair_count": 17,
-    "matrix_cell_count": 24,
-    "allowed_uncovered_cells": ["embedded.data", "embedded.kernel"],
+    "entry_count": 22,
+    "python_pair_count": 20,
+    "matrix_cell_count": 25,
+    "allowed_uncovered_cells": [],
     "entry_names": [
       "binparse",
       "bulkrename",
       "concurrency-service",
       "csvtransform",
       "datasummary",
+      "embedded-data",
+      "embedded-sensor-ring",
       "http-client",
       "http-service",
       "logreport",
       "nbody",
       "parallel-grep",
       "procpipe",
+      "regex-find-all-4mb",
       "regex-logscan",
       "sieve",
       "taskfile-cli",
@@ -54,15 +55,29 @@
       "web": "runtime_first_stdout_seconds",
       "web-app": "runtime_first_stdout_seconds"
     },
-    "ratio_verdicts": {"win": "<1", "parity": "<=1.05", "loss": ">1.05"},
+    "ratio_verdicts": {
+      "rust": {"win": "<1", "parity": "<=1.05", "loss": ">1.05"},
+      "non_rust": {"win": "<1", "parity": null, "loss": ">=1"}
+    },
     "missing_metric_verdict": "unmeasured",
     "output_verification": "byte_exact_utf8_or_declared_probe_sequence",
-    "loss_owner_required_for": "primary_metric_loss",
+    "loss_owner_required_for": "any_comparable_metric_loss",
     "axis_schemas": {
       "live_reload": "gauntlet-axis-live-reload-v1",
       "memory_safety_fuzz": "gauntlet-axis-memory-safety-fuzz-v1"
     },
-    "axis_publication": "required_axes_complete_and_unblocked"
+    "axis_publication": "required_axes_complete_and_unblocked",
+    "metric_applicability": {
+      "default": "required",
+      "not_applicable": "explicit_structural_reason",
+      "missing": "unmeasured_and_publication_blocked"
+    },
+    "aot_only_metrics": ["cold_build_seconds", "warm_build_seconds", "binary_bytes"],
+    "peer_measurement": {
+      "ratio_tiers": ["aot", "run"],
+      "trace_only_tiers": [],
+      "sample_binding": "immutable_peer_row_reused_per_declared_jet_tier"
+    }
   },
   "axes": {
     "live_reload": {
@@ -220,10 +235,81 @@
     }
   },
   "loss_owners": {
-    "binparse": 2253,
-    "nbody": 2261,
-    "sieve": 2254,
-    "wordfreq": 2254
+    "binparse": {
+      "runtime": 2253,
+      "build": 2253,
+      "binary": 2253,
+      "rss": 2253,
+      "source": 2265
+    },
+    "bulkrename": {"source": 2265},
+    "concurrency-service": {"source": 2265},
+    "csvtransform": {"source": 2265},
+    "datasummary": {"source": 2265},
+    "embedded-data": {"source": 2265},
+    "embedded-sensor-ring": {"source": 2265},
+    "http-client": {"source": 2265},
+    "http-service": {
+      "runtime": 2255,
+      "latency": 2255,
+      "rss": 2255,
+      "build": 2255,
+      "binary": 2255,
+      "source": 2265
+    },
+    "logreport": {"source": 2265},
+    "nbody": {
+      "runtime": 2261,
+      "build": 2261,
+      "binary": 2261,
+      "rss": 2261,
+      "source": 2265
+    },
+    "parallel-grep": {
+      "runtime": 2057,
+      "build": 2057,
+      "binary": 2057,
+      "rss": 2057,
+      "source": 2265
+    },
+    "procpipe": {"source": 2265},
+    "regex-find-all-4mb": {
+      "runtime": 2256,
+      "rss": 2256,
+      "build": 2256,
+      "binary": 2256,
+      "source": 2265
+    },
+    "regex-logscan": {
+      "runtime": 2256,
+      "build": 2256,
+      "binary": 2256,
+      "rss": 2256,
+      "source": 2265
+    },
+    "sieve": {
+      "runtime": 2254,
+      "build": 2254,
+      "binary": 2254,
+      "rss": 2254,
+      "source": 2265
+    },
+    "taskfile-cli": {
+      "runtime": 2270,
+      "build": 2530,
+      "source": 2265
+    },
+    "text-script": {"source": 2265},
+    "tzreport": {"source": 2265},
+    "web-app": {"source": 2265},
+    "web-widget": {"source": 2265},
+    "wordfreq": {
+      "runtime": 2254,
+      "build": 2254,
+      "binary": 2254,
+      "rss": 2254,
+      "source": 2265
+    }
   },
   "entries": [
     { "name": "binparse", "jet": "jet/run.jet", "python": "python/main.py" },
@@ -231,12 +317,15 @@
     { "name": "concurrency-service", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "csvtransform", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "datasummary", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "embedded-data", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "embedded-sensor-ring", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "http-client", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "http-service", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "logreport", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "nbody", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "parallel-grep", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "procpipe", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "regex-find-all-4mb", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "regex-logscan", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "sieve", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "taskfile-cli", "jet": "jet/run.jet", "python": "python/main.py" },

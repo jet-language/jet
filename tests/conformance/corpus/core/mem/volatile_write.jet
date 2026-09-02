@@ -6,8 +6,11 @@ fn run() {
     #Unsafe("value is live on this stack frame and the pointer never escapes") {
         addr :: mem.address_of(value)
         pointer :: mem.Ptr<Int>.from_addr(addr)
-        result :: mem.volatile_write(pointer, 8)
+        print((() -> {
+            mem.volatile_write(pointer, 8)
+            true
+        })())
         seen :: mem.volatile_read(pointer)
-        print(result, seen)
+        print(seen)
     }
 }

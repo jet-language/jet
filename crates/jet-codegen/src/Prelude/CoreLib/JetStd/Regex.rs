@@ -1,4 +1,4 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegexFlags {
     pub case_insensitive: bool,
     pub multiline: bool,
@@ -7,14 +7,14 @@ pub struct RegexFlags {
 
 #[derive(Clone, Debug)]
 pub struct JetRegex {
-    pattern: String,
+    pattern: std::sync::Arc<str>,
     flags: RegexFlags,
     program: std::sync::Arc<RegexProgram>,
     group_names: std::sync::Arc<[Option<String>]>,
     groups: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct JetRegexMatch {
     text: std::sync::Arc<str>,
     span: (usize, usize),
@@ -22,7 +22,7 @@ pub struct JetRegexMatch {
     flags: RegexFlags,
     groups: usize,
     names: std::sync::Arc<[Option<String>]>,
-    capture_cache: std::sync::Arc<std::sync::OnceLock<Vec<Option<(usize, usize)>>>>,
+    capture_cache: std::sync::OnceLock<Vec<Option<(usize, usize)>>>,
 }
 
 #[derive(Debug)]
@@ -57,7 +57,29 @@ enum RegexMatcher {
 struct RegexClass {
     negated: bool,
     items: Vec<RegexClassItem>,
+    ascii: [u64; 2],
 }
+impl RegexClass {
+    fn new(negated: bool, items: Vec<RegexClassItem>) -> Self {
+        let mut ascii = [0u64; 2];
+        for cp in 0u8..=127 {
+            if items.iter().any(|item| regex_class_item_matches(item, cp as char, false)) {
+                ascii[(cp >> 6) as usize] |= 1u64 << (cp & 63);
+            }
+        }
+        Self {
+            negated,
+            items,
+            ascii,
+        }
+    }
+
+    fn matches_ascii(&self, ch: u8) -> bool {
+        let yes = self.ascii[(ch >> 6) as usize] & (1u64 << (ch & 63)) != 0;
+        if self.negated { !yes } else { yes }
+    }
+}
+
 
 #[derive(Clone, Debug)]
 enum RegexClassItem {
@@ -121,7 +143,7 @@ struct RegexCaptureNode {
     previous: Option<usize>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 struct RegexThread {
     pc: usize,
     start: usize,
@@ -134,6 +156,8 @@ struct RegexState {
     seen: Vec<u32>,
     stack: Vec<RegexThread>,
     epoch: u32,
+    min_start: Option<usize>,
+    matched: Option<RegexThread>,
 }
 
 impl RegexState {
@@ -143,6 +167,8 @@ impl RegexState {
             seen: vec![0; inst_count],
             stack: Vec::with_capacity(inst_count),
             epoch: 0,
+            min_start: None,
+            matched: None,
         }
     }
 
@@ -153,8 +179,63 @@ impl RegexState {
             self.seen.fill(0);
             self.epoch = 1;
         }
+        self.min_start = None;
+        self.matched = None;
     }
 }
+const REGEX_CACHE_LIMIT: usize = 32;
+
+#[derive(Debug)]
+struct RegexCache {
+    // Eight flag combinations keep lookups borrowed (`&str`) and avoid
+    // allocating a composite key on every compile call.
+    entries: [std::collections::HashMap<std::sync::Arc<str>, JetRegex>; 8],
+    order: std::collections::VecDeque<(usize, std::sync::Arc<str>)>,
+}
+
+impl RegexCache {
+    fn new() -> Self {
+        Self {
+            entries: std::array::from_fn(|_| std::collections::HashMap::new()),
+            order: std::collections::VecDeque::new(),
+        }
+    }
+
+    fn bucket(flags: &RegexFlags) -> usize {
+        usize::from(flags.case_insensitive)
+            | (usize::from(flags.multiline) << 1)
+            | (usize::from(flags.dotall) << 2)
+    }
+
+    fn get(&self, pattern: &str, flags: &RegexFlags) -> Option<JetRegex> {
+        self.entries[Self::bucket(flags)].get(pattern).cloned()
+    }
+
+    fn insert(&mut self, regex: JetRegex) {
+        let bucket = Self::bucket(&regex.flags);
+        let pattern = std::sync::Arc::clone(&regex.pattern);
+        if self.entries[bucket].contains_key(pattern.as_ref()) {
+            return;
+        }
+        self.entries[bucket].insert(std::sync::Arc::clone(&pattern), regex);
+        self.order.push_back((bucket, pattern));
+        if self.order.len() > REGEX_CACHE_LIMIT {
+            if let Some((old_bucket, old_pattern)) = self.order.pop_front() {
+                self.entries[old_bucket].remove(old_pattern.as_ref());
+            }
+        }
+    }
+}
+
+// Cache key is the exact pattern plus every compilation flag. Split limits
+// are execution arguments, not compiled-regex state, so they do not enter it.
+static REGEX_CACHE: std::sync::LazyLock<std::sync::Mutex<RegexCache>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(RegexCache::new()));
+
+fn regex_cache() -> &'static std::sync::Mutex<RegexCache> {
+    &REGEX_CACHE
+}
+
 
 #[derive(Debug)]
 struct RegexScratch {
@@ -162,6 +243,7 @@ struct RegexScratch {
     next: RegexState,
     capture_arena: Vec<RegexCaptureNode>,
 }
+
 
 fn regex_outcome<T>(value: Option<T>) -> JetOutcome<T, JetAbsent> {
     value.ok_or(JetAbsent)
@@ -224,6 +306,23 @@ impl crate::JetShow for JetRegexMatch {
         self.group(0).unwrap_or_default()
     }
 }
+impl Clone for JetRegexMatch {
+    fn clone(&self) -> Self {
+        // The capture cache is an execution hint, not observable state.
+        // Cloning a match keeps the carrier allocation-free and lets the
+        // clone materialize captures only if it is actually queried.
+        Self {
+            text: std::sync::Arc::clone(&self.text),
+            span: self.span,
+            program: std::sync::Arc::clone(&self.program),
+            flags: self.flags.clone(),
+            groups: self.groups,
+            names: std::sync::Arc::clone(&self.names),
+            capture_cache: std::sync::OnceLock::new(),
+        }
+    }
+}
+
 
 impl JetRegexMatch {
     pub fn group(&self, n: i64) -> JetOutcome<String, JetAbsent> {
@@ -343,15 +442,15 @@ impl JetRegex {
     }
 
     pub fn pattern(&self) -> String {
-        self.pattern.clone()
+        self.pattern.to_string()
     }
 
     pub fn source(&self) -> String {
-        self.pattern.clone()
+        self.pattern.to_string()
     }
 
     pub fn flags(&self) -> String {
-        let mut s = String::new();
+        let mut s = String::with_capacity(3);
         if self.flags.case_insensitive {
             s.push('i');
         }
@@ -373,11 +472,25 @@ impl JetRegex {
     }
 
     pub fn count(&self, text: &str) -> i64 {
-        self.matches(text).len() as i64
+        let mut count = 0usize;
+        regex_scan(
+            &self.program,
+            &self.flags,
+            self.groups,
+            text,
+            0,
+            false,
+            false,
+            |_run| {
+                count += 1;
+                true
+            },
+        );
+        count as i64
     }
 
     pub fn is_match(&self, text: &str) -> bool {
-        self.find_match(text).is_some()
+        self.find_span(text).is_some()
     }
 
     pub fn full_match(&self, text: &str) -> bool {
@@ -390,14 +503,52 @@ impl JetRegex {
     }
 
     pub fn find(&self, text: &str) -> JetOutcome<String, JetAbsent> {
-        regex_outcome(self.find_match(text).and_then(|m| m.group(0).ok()))
+        regex_outcome(self.find_span(text).map(|(start, end)| text[start..end].to_string()))
     }
 
     pub fn find_all(&self, text: &str) -> Vec<String> {
-        self.matches(text)
-            .into_iter()
-            .filter_map(|m| m.group(0).ok())
-            .collect()
+        let mut out = Vec::new();
+        regex_scan(
+            &self.program,
+            &self.flags,
+            self.groups,
+            text,
+            0,
+            false,
+            false,
+            |run| {
+                let (start, end) = run.span;
+                out.push(text[start..end].to_string());
+                true
+            },
+        );
+        out
+    }
+    fn find_span(&self, text: &str) -> Option<(usize, usize)> {
+        regex_run(
+            &self.program,
+            &self.flags,
+            self.groups,
+            text,
+            0,
+            false,
+            false,
+        )
+        .map(|run| run.span)
+    }
+
+    fn find_match(&self, text: &str) -> Option<JetRegexMatch> {
+        let run = regex_run(
+            &self.program,
+            &self.flags,
+            self.groups,
+            text,
+            0,
+            false,
+            true,
+        )?;
+        let text = std::sync::Arc::<str>::from(text);
+        Some(self.make_match_with_captures(&text, run.span, run.caps))
     }
 
     pub fn matches(&self, text: &str) -> Vec<JetRegexMatch> {
@@ -440,13 +591,37 @@ impl JetRegex {
     where
         F: FnMut(JetRegexMatch) -> Result<String, E>,
     {
-        let mut out = String::new();
+        let shared = std::sync::Arc::<str>::from(text);
+        let mut out = String::with_capacity(text.len());
         let mut pos = 0;
-        for found in self.matches(text) {
-            let (start, end) = found.span;
-            out.push_str(&text[pos..start]);
-            out.push_str(&replace(found)?);
-            pos = end;
+        let mut error = None;
+        regex_scan(
+            &self.program,
+            &self.flags,
+            self.groups,
+            text,
+            0,
+            false,
+            false,
+            |run| {
+                let (start, end) = run.span;
+                out.push_str(&text[pos..start]);
+                let found = self.make_match_with_captures(&shared, run.span, run.caps);
+                match replace(found) {
+                    Ok(value) => {
+                        out.push_str(&value);
+                        pos = end;
+                        true
+                    }
+                    Err(value) => {
+                        error = Some(value);
+                        false
+                    }
+                }
+            },
+        );
+        if let Some(error) = error {
+            return Err(error);
         }
         out.push_str(&text[pos.min(text.len())..]);
         Ok(out)
@@ -493,7 +668,7 @@ impl JetRegex {
         F: Fn(&JetRegexMatch) -> String,
     {
         let shared = std::sync::Arc::<str>::from(text);
-        let mut out = String::new();
+        let mut out = String::with_capacity(text.len());
         let mut pos = 0;
         regex_scan(
             &self.program,
@@ -516,27 +691,24 @@ impl JetRegex {
         out
     }
 
-    fn find_match(&self, text: &str) -> Option<JetRegexMatch> {
-        regex_run(
-            &self.program,
-            &self.flags,
-            self.groups,
-            text,
-            0,
-            false,
-            false,
-        )
-        .map(|run| {
-            let text = std::sync::Arc::<str>::from(text);
-            self.make_match(&text, run.span)
-        })
-    }
-
     fn make_match(
         &self,
         text: &std::sync::Arc<str>,
         span: (usize, usize),
     ) -> JetRegexMatch {
+        self.make_match_with_captures(text, span, None)
+    }
+
+    fn make_match_with_captures(
+        &self,
+        text: &std::sync::Arc<str>,
+        span: (usize, usize),
+        caps: Option<Vec<Option<usize>>>,
+    ) -> JetRegexMatch {
+        let capture_cache = std::sync::OnceLock::new();
+        if let Some(caps) = caps {
+            let _ = capture_cache.set(regex_slots_to_spans(&caps));
+        }
         JetRegexMatch {
             text: std::sync::Arc::clone(text),
             span,
@@ -544,7 +716,7 @@ impl JetRegex {
             flags: self.flags.clone(),
             groups: self.groups,
             names: std::sync::Arc::clone(&self.group_names),
-            capture_cache: std::sync::Arc::new(std::sync::OnceLock::new()),
+            capture_cache,
         }
     }
 }
@@ -588,6 +760,28 @@ pub fn jet_regex_literal(pattern: &str) -> JetRegex {
 }
 
 pub fn jet_regex_compile_with(pattern: &str, flags: &RegexFlags) -> Result<JetRegex, String> {
+    if let Some(regex) = regex_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(pattern, flags)
+    {
+        return Ok(regex);
+    }
+    // Do not hold the global cache lock while parsing or compiling. A cache
+    // miss is rare after warm-up; concurrent misses may compile independently,
+    // then converge on the first result inserted for this key.
+    let regex = jet_regex_compile_uncached(pattern, flags)?;
+    let mut cache = regex_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = cache.get(pattern, flags) {
+        return Ok(existing);
+    }
+    cache.insert(regex.clone());
+    Ok(regex)
+}
+
+fn jet_regex_compile_uncached(pattern: &str, flags: &RegexFlags) -> Result<JetRegex, String> {
     super::jet_regex_syntax::validate(pattern).map_err(|error| {
         format!(
             "invalid regex `{pattern}` at position {}: {}",
@@ -610,7 +804,7 @@ pub fn jet_regex_compile_with(pattern: &str, flags: &RegexFlags) -> Result<JetRe
     compiler.patch(&frag.outs, match_idx);
     let insts = compiler.insts;
     Ok(JetRegex {
-        pattern: pattern.to_string(),
+        pattern: std::sync::Arc::<str>::from(pattern),
         flags: flags.clone(),
         program: std::sync::Arc::new(RegexProgram {
             anchored_start: matches!(&insts[frag.start], RegexInst::AssertStart(_)),
@@ -827,7 +1021,7 @@ impl RegexParser {
         while let Some(ch) = self.peek() {
             if ch == ']' && !items.is_empty() {
                 self.pos += 1;
-                return Ok(RegexClass { negated, items });
+                return Ok(RegexClass::new(negated, items));
             }
             // Standard class grammar: `]` as the FIRST member (after the
             // optional `^`) is a literal — `[^]]+` matches any run of
@@ -881,38 +1075,38 @@ impl RegexParser {
 
     fn parse_escape_atom(&mut self) -> Result<RegexAtom, String> {
         match self.bump() {
-            Some('d') => Ok(RegexAtom::Class(RegexClass {
-                negated: false,
-                items: vec![RegexClassItem::Digit],
-            })),
-            Some('D') => Ok(RegexAtom::Class(RegexClass {
-                negated: true,
-                items: vec![RegexClassItem::Digit],
-            })),
-            Some('w') => Ok(RegexAtom::Class(RegexClass {
-                negated: false,
-                items: vec![RegexClassItem::Word],
-            })),
-            Some('W') => Ok(RegexAtom::Class(RegexClass {
-                negated: true,
-                items: vec![RegexClassItem::Word],
-            })),
-            Some('s') => Ok(RegexAtom::Class(RegexClass {
-                negated: false,
-                items: vec![RegexClassItem::Space],
-            })),
-            Some('S') => Ok(RegexAtom::Class(RegexClass {
-                negated: true,
-                items: vec![RegexClassItem::Space],
-            })),
-            Some('p') => Ok(RegexAtom::Class(RegexClass {
-                negated: false,
-                items: vec![self.parse_unicode_class(false)?],
-            })),
-            Some('P') => Ok(RegexAtom::Class(RegexClass {
-                negated: true,
-                items: vec![self.parse_unicode_class(true)?],
-            })),
+            Some('d') => Ok(RegexAtom::Class(RegexClass::new(
+                false,
+                vec![RegexClassItem::Digit],
+            ))),
+            Some('D') => Ok(RegexAtom::Class(RegexClass::new(
+                true,
+                vec![RegexClassItem::Digit],
+            ))),
+            Some('w') => Ok(RegexAtom::Class(RegexClass::new(
+                false,
+                vec![RegexClassItem::Word],
+            ))),
+            Some('W') => Ok(RegexAtom::Class(RegexClass::new(
+                true,
+                vec![RegexClassItem::Word],
+            ))),
+            Some('s') => Ok(RegexAtom::Class(RegexClass::new(
+                false,
+                vec![RegexClassItem::Space],
+            ))),
+            Some('S') => Ok(RegexAtom::Class(RegexClass::new(
+                true,
+                vec![RegexClassItem::Space],
+            ))),
+            Some('p') => Ok(RegexAtom::Class(RegexClass::new(
+                false,
+                vec![self.parse_unicode_class(false)?],
+            ))),
+            Some('P') => Ok(RegexAtom::Class(RegexClass::new(
+                true,
+                vec![self.parse_unicode_class(true)?],
+            ))),
             Some(ch) if ch.is_ascii_digit() => {
                 Err("invalid regex: backreferences are not supported; captures stay linear".to_string())
             }
@@ -1195,20 +1389,24 @@ fn regex_matcher_matches(matcher: &RegexMatcher, ch: char, flags: &RegexFlags) -
     }
 }
 
-fn regex_class_matches(class: &RegexClass, ch: char, flags: &RegexFlags) -> bool {
-    let yes = class.items.iter().any(|item| match item {
+fn regex_class_item_matches(
+    item: &RegexClassItem,
+    ch: char,
+    case_insensitive: bool,
+) -> bool {
+    match item {
         RegexClassItem::Char(c) => {
-            if flags.case_insensitive {
-                    regex_simple_fold(*c as u32) == regex_simple_fold(ch as u32)
+            if case_insensitive {
+                regex_simple_fold(*c as u32) == regex_simple_fold(ch as u32)
             } else {
                 *c == ch
             }
         }
         RegexClassItem::Range(a, b) => {
-            if flags.case_insensitive {
-                    let lc = char::from_u32(regex_simple_fold(ch as u32)).unwrap_or(ch);
-                    let la = char::from_u32(regex_simple_fold(*a as u32)).unwrap_or(*a);
-                    let lb = char::from_u32(regex_simple_fold(*b as u32)).unwrap_or(*b);
+            if case_insensitive {
+                let lc = char::from_u32(regex_simple_fold(ch as u32)).unwrap_or(ch);
+                let la = char::from_u32(regex_simple_fold(*a as u32)).unwrap_or(*a);
+                let lb = char::from_u32(regex_simple_fold(*b as u32)).unwrap_or(*b);
                 la <= lc && lc <= lb
             } else {
                 *a <= ch && ch <= *b
@@ -1216,18 +1414,23 @@ fn regex_class_matches(class: &RegexClass, ch: char, flags: &RegexFlags) -> bool
         }
         RegexClassItem::Digit => ch.is_ascii_digit(),
         RegexClassItem::Word => ch == '_' || ch.is_ascii_alphanumeric(),
-            RegexClassItem::Space => ch.is_whitespace(),
-            RegexClassItem::UnicodeLetter => ch.is_alphabetic(),
-            RegexClassItem::UnicodeNumber => ch.is_numeric(),
-            RegexClassItem::UnicodeAlphabetic => ch.is_alphabetic(),
-            RegexClassItem::UnicodeWhitespace => ch.is_whitespace(),
-    });
-    if class.negated {
-        !yes
-    } else {
-        yes
+        RegexClassItem::Space => ch.is_whitespace(),
+        RegexClassItem::UnicodeLetter => ch.is_alphabetic(),
+        RegexClassItem::UnicodeNumber => ch.is_numeric(),
+        RegexClassItem::UnicodeAlphabetic => ch.is_alphabetic(),
+        RegexClassItem::UnicodeWhitespace => ch.is_whitespace(),
     }
+}
 
+fn regex_class_matches(class: &RegexClass, ch: char, flags: &RegexFlags) -> bool {
+    if !flags.case_insensitive && ch.is_ascii() {
+        return class.matches_ascii(ch as u8);
+    }
+    let yes = class
+        .items
+        .iter()
+        .any(|item| regex_class_item_matches(item, ch, flags.case_insensitive));
+    if class.negated { !yes } else { yes }
 }
 
 fn regex_escaped_literal(ch: char) -> char {
@@ -1322,7 +1525,7 @@ fn regex_scan<F>(
             return;
         }
     }
-    if !flags.case_insensitive {
+    if !flags.case_insensitive && (!program.anchored_start || flags.multiline) {
         if let Some(literal) = program.required_literal.as_deref() {
             if regex_find_literal(text.as_bytes(), literal, start).is_none() {
                 return;
@@ -1337,6 +1540,7 @@ fn regex_scan<F>(
     let mut pos = start;
     let mut winner_start = None;
     let mut last_match = None;
+    let single_start = anchored || (program.anchored_start && !flags.multiline);
 
     loop {
         let can_start = !program.anchored_start
@@ -1361,22 +1565,16 @@ fn regex_scan<F>(
                 capture_arena,
             );
         }
+        if scratch.current.threads.is_empty() && single_start {
+            return;
+        }
 
-        let found_start = scratch
-            .current
-            .threads
-            .iter()
-            .filter(|thread| matches!(program.insts[thread.pc], RegexInst::Match))
-            .map(|thread| thread.start)
-            .min();
+        let found = scratch.current.matched;
         if winner_start.is_none() {
-            winner_start = found_start;
+            winner_start = found.map(|thread| thread.start);
         }
         if let Some(winner) = winner_start {
-            if let Some(found) = scratch.current.threads.iter().find(|thread| {
-                thread.start == winner
-                    && matches!(program.insts[thread.pc], RegexInst::Match)
-            }) {
+            if let Some(found) = found.filter(|thread| thread.start == winner) {
                 let caps = if capture {
                     found.caps.map(|head| {
                         let mut caps = regex_capture_slots(
@@ -1469,7 +1667,7 @@ fn regex_scan<F>(
             std::mem::swap(current, next);
         }
         if let Some(winner) = winner_start {
-            if !scratch.current.threads.iter().any(|thread| thread.start == winner) {
+            if scratch.current.min_start != Some(winner) {
                 let Some(run) = last_match.take() else { return };
                 let resume = regex_next_search_pos(text, run.span.0, run.span.1);
                 drop(scratch);
@@ -1523,7 +1721,7 @@ fn regex_add_thread(
                 state.stack.push(thread);
             }
             RegexInst::Split(a, Some(b)) => {
-                let mut right = thread.clone();
+                let mut right = thread;
                 right.pc = *b;
                 state.stack.push(right);
                 thread.pc = *a;
@@ -1543,7 +1741,28 @@ fn regex_add_thread(
                     state.stack.push(thread);
                 }
             }
-            RegexInst::Match | RegexInst::Consume(_, _) => state.threads.push(thread),
+            RegexInst::Match => {
+                state.min_start = Some(
+                    state
+                        .min_start
+                        .map_or(thread.start, |start| start.min(thread.start)),
+                );
+                if state
+                    .matched
+                    .map_or(true, |matched| thread.start < matched.start)
+                {
+                    state.matched = Some(thread);
+                }
+                state.threads.push(thread);
+            }
+            RegexInst::Consume(_, _) => {
+                state.min_start = Some(
+                    state
+                        .min_start
+                        .map_or(thread.start, |start| start.min(thread.start)),
+                );
+                state.threads.push(thread);
+            }
             _ => {}
         }
     }
@@ -1660,8 +1879,15 @@ fn regex_scan_literal<F>(
 ) where
     F: FnMut(RegexRun) -> bool,
 {
-    let mut pos = start;
-    while let Some(candidate) = regex_find_literal(text.as_bytes(), needle, pos) {
+    // A compiled literal is always valid UTF-8. Delegate the hot search to
+    // `str::find`, whose std implementation uses its optimized memmem path;
+    // unlike the byte prefilter this also guarantees UTF-8 boundary spans.
+    let Ok(needle) = std::str::from_utf8(needle) else {
+        return;
+    };
+    let mut pos = start.min(text.len());
+    while let Some(offset) = text.get(pos..).and_then(|rest| rest.find(needle)) {
+        let candidate = pos + offset;
         let end = candidate + needle.len();
         if !on_match(RegexRun {
             span: (candidate, end),
@@ -1678,19 +1904,40 @@ fn regex_scan_literal<F>(
 
 // I1: SIMD helpers are the same vetted std::arch carve-out used by
 // core.compute. Runtime dispatch keeps unsupported CPUs on scalar code.
-fn regex_find_byte(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
-    // JET_VETTED_UNSAFE_BEGIN: jet_regex_cpu_simd_dispatch
+#[derive(Clone, Copy)]
+enum RegexByteBackend {
+    Scalar,
+    #[cfg(target_arch = "x86_64")]
+    Avx2,
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
+    Sse2,
+}
+
+static REGEX_BYTE_BACKEND: std::sync::LazyLock<RegexByteBackend> =
+    std::sync::LazyLock::new(|| {
+        // JET_VETTED_UNSAFE_BEGIN: jet_regex_cpu_simd_dispatch
+        #[cfg(target_arch = "x86_64")]
         if is_x86_feature_detected!("avx2") {
-            return unsafe { regex_find_byte_avx2(haystack, needle, start) };
+            return RegexByteBackend::Avx2;
         }
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         if is_x86_feature_detected!("sse2") {
-            return unsafe { regex_find_byte_sse2(haystack, needle, start) };
+            return RegexByteBackend::Sse2;
         }
+        // JET_VETTED_UNSAFE_END: jet_regex_cpu_simd_dispatch
+        RegexByteBackend::Scalar
+    });
+
+fn regex_find_byte(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
+    match *REGEX_BYTE_BACKEND {
+        // JET_VETTED_UNSAFE_BEGIN: jet_regex_cpu_simd_dispatch
+        #[cfg(target_arch = "x86_64")]
+        RegexByteBackend::Avx2 => unsafe { regex_find_byte_avx2(haystack, needle, start) },
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        RegexByteBackend::Sse2 => unsafe { regex_find_byte_sse2(haystack, needle, start) },
+        // JET_VETTED_UNSAFE_END: jet_regex_cpu_simd_dispatch
+        RegexByteBackend::Scalar => regex_find_byte_scalar(haystack, needle, start),
     }
-    // JET_VETTED_UNSAFE_END: jet_regex_cpu_simd_dispatch
-    regex_find_byte_scalar(haystack, needle, start)
 }
 
 fn regex_find_byte_scalar(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
@@ -1855,7 +2102,7 @@ fn regex_next_char(text: &str, pos: usize) -> Option<(char, usize)> {
 }
 
 fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
-    let mut out = String::new();
+    let mut out = String::with_capacity(repl.len());
     let mut chars = repl.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch != '$' {
@@ -1881,11 +2128,17 @@ fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
                 }
             }
             Some(c) if c.is_ascii_digit() => {
-                let mut num = String::new();
+                let mut idx = 0i64;
+                let mut valid = true;
                 while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
-                    num.push(chars.next().unwrap());
+                    let digit = chars.next().unwrap() as i64 - '0' as i64;
+                    if let Some(next) = idx.checked_mul(10).and_then(|n| n.checked_add(digit)) {
+                        idx = next;
+                    } else {
+                        valid = false;
+                    }
                 }
-                if let Ok(idx) = num.parse::<i64>() {
+                if valid {
                     if let Ok(value) = mat.group(idx) {
                         out.push_str(&value);
                     }
@@ -1895,4 +2148,43 @@ fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
         }
     }
     out
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_reuses_compiled_program() {
+        let first = jet_regex_compile("__regex_cache_probe__").unwrap();
+        let second = jet_regex_compile("__regex_cache_probe__").unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first.program, &second.program));
+    }
+
+    #[test]
+    fn match_and_replacement_preserve_captures() {
+        let regex = JetRegex::parse(r"(?<word>[A-Za-z]+)_(\d+)").unwrap();
+        let Some(matched) = regex.match_value("xx Jet_2026 yy").ok() else {
+            panic!("expected regex match");
+        };
+        assert_eq!(matched.group(0).ok().as_deref(), Some("Jet_2026"));
+        assert_eq!(matched.group(1).ok().as_deref(), Some("Jet"));
+        assert_eq!(matched.group(2).ok().as_deref(), Some("2026"));
+        assert_eq!(matched.name("word").ok().as_deref(), Some("Jet"));
+        assert_eq!(matched.start(), 3);
+        assert_eq!(matched.end(), 11);
+        assert_eq!(
+            regex.replace("Jet_2026 Rust_2025", "${word}:$2"),
+            "Jet:2026 Rust:2025"
+        );
+    }
+
+    #[test]
+    fn ascii_class_bitmap_keeps_unicode_fallback() {
+        let not_close = JetRegex::parse(r"[^]]+").unwrap();
+        assert_eq!(not_close.find("abc]def").ok().as_deref(), Some("abc"));
+        assert_eq!(not_close.find("éx]def").ok().as_deref(), Some("éx"));
+
+        let alphabetic = JetRegex::parse(r"\p{Alphabetic}+").unwrap();
+        assert_eq!(alphabetic.find("123λ!").ok().as_deref(), Some("λ"));
+    }
 }

@@ -281,115 +281,45 @@ fn run() {
 
 #[test]
 fn jit_http_worker_teardown_quiesces_runtime_before_resident_drop() {
-    let prelude = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
-    assert!(
-        prelude.contains("for worker in workers {\n        let _ = worker.join();")
-            && !prelude.contains("if worker.is_finished() { let _ = worker.join(); }"),
-        "HTTP teardown must join every worker, including unfinished workers"
-    );
-    assert!(
-        prelude.contains(
-            "let already_requested = server.inner.shutdown_called.swap(true, Ordering::AcqRel);"
-        ) && prelude
-            .contains("if already_requested { return jet_http_server_wait_for_report(server); }")
-            && prelude.contains("report = server.inner.report_ready.wait(report).unwrap();"),
-        "duplicate HTTP shutdown must wait for the first shutdown's worker joins"
-    );
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_http_worker_lifetime");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("http_worker_lifetime.jet");
+    fs::write(
+        &file,
+        r#"use core.http.server as server
 
-    let concurrency = include_str!("../crates/jet-jit/src/Concurrency.rs");
-    assert!(
-        concurrency.contains("let _guard = RuntimeAccessGuard::enter();")
-            && concurrency.contains("HTTP_SHARED_RUNTIME.load(Ordering::Acquire)")
-            && concurrency.contains("static HTTP_RUNTIME_EPOCH")
-            && concurrency.contains("epoch == HTTP_RUNTIME_EPOCH.load(Ordering::Acquire)")
-            && concurrency.contains("HTTP_RUNTIME_EPOCH.fetch_add(1, Ordering::AcqRel)")
-            && concurrency.contains("set_active_runtime_local(Some(rt_ptr))"),
-        "HTTP callbacks must pin and validate the resident runtime before loading its pointer"
-    );
-    let hosts = include_str!("../crates/jet-jit/src/net_http_hosts.rs");
-    assert!(
-        hosts.contains("jet_http_server_shutdown(&server, &grace)")
-            && hosts.contains("Concurrency::with_http_runtime_quiesced(||")
-            && hosts.matches("let epoch = Concurrency::http_runtime_epoch();").count() == 3
-            && hosts
-                .matches("Concurrency::try_with_http_jet_runtime_at(epoch, ||")
-                .count()
-                == 4
-            && !hosts.contains("Concurrency::with_http_jet_runtime(||"),
-        "JIT teardown must stop HTTP servers and quiesce callbacks"
-    );
+pub fn handler(_req: HTTPRequest) HTTPResponse !HTTPError -> Ok(server.response(200, "ok"))
 
-    let resident = include_str!("../crates/jet-jit/src/jit/resident.rs");
-    let handles = resident
-        .find("crate::net_http_rt::clear_net_http_handles();")
-        .expect("resident teardown must clear HTTP handles");
-    let module = resident
-        .find("RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);")
-        .expect("resident teardown must drop the module");
+fn run() {}
+"#,
+    )
+    .unwrap();
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
+        .expect("HTTP lifetime fixture should load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
-        handles < module,
-        "HTTP handles must be quiesced before the resident module is dropped"
+        diagnostics.is_empty(),
+        "HTTP lifetime fixture diagnostics: {diagnostics:#?}"
     );
-    assert!(
-        !resident.contains(
-            "Concurrency::set_active_runtime(None);\n        Concurrency::clear_http_shared_runtime();"
-        ),
-        "normal resident invocation must not clear the shared HTTP runtime while workers live"
-    );
-    let hot_swap_start = resident
-        .find("pub(crate) fn resident_hot_swap(")
-        .expect("resident hot-swap function must exist");
-    let hot_swap = &resident[hot_swap_start..];
-    let hot_swap_handles = hot_swap
-        .find("crate::net_http_rt::clear_net_http_handles();")
-        .expect("hot-swap must quiesce HTTP workers");
-    let hot_swap_runtime = hot_swap
-        .find("let mut runtime = RESIDENT_RUNTIME")
-        .expect("hot-swap must retain the resident runtime until workers stop");
-    let hot_swap_module = hot_swap
-        .find("RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);")
-        .expect("hot-swap must replace the resident module");
-    assert!(
-        hot_swap_handles < hot_swap_runtime && hot_swap_handles < hot_swap_module,
-        "hot-swap must quiesce HTTP workers before taking the runtime or dropping the old module"
-    );
+    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("HTTP lifetime fixture should lower to JIT TIR");
+    jet_jit::CraneliftBackend::new()
+        .http_worker_runtime_lifetime_proof_for_test(&program, "handler")
+        .expect("resident HTTP lifetime proof");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn jit_http2_shutdown_race_drains_dispatch_tasks_and_epoch_guards_web_callbacks() {
-    let prelude = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
-    assert!(
-        prelude.contains("let mut dispatch_tasks = JetHTTP2DispatchTasks::default();")
-            && prelude.contains("dispatch_tasks.push(task, control.clone());")
-            && prelude.contains("drop(requests);\n    dispatch_tasks.drain();")
-            && prelude.contains("impl Drop for JetHTTP2DispatchTasks"),
-        "HTTP/2 shutdown must cancel and synchronously drain every dispatch task"
-    );
-    assert!(
-        prelude.contains("for (task, control) in std::mem::take(&mut self.tasks)")
-            && !prelude.contains(
-                "let _task = jet_scheduler_spawn_blocking_with_control(move || {\n                    let result = jet_http2_dispatch"
-            ),
-        "HTTP/2 dispatch joins must stay owned through shutdown"
-    );
-
-    let web = include_str!("../crates/jet-jit/src/Web.rs");
-    assert_eq!(
-        web.matches("let epoch = Concurrency::http_runtime_epoch();")
-            .count(),
-        3,
-        "route/page/layout, action/form/data, and mount callbacks need epochs"
-    );
-    assert_eq!(
-        web.matches("Concurrency::try_with_http_jet_runtime_at(epoch, ||")
-            .count(),
-        3,
-        "every Web callback reaching a JIT pointer must validate its epoch"
-    );
-    assert!(
-        !web.contains("Concurrency::with_http_jet_runtime(||"),
-        "Web callbacks must not use the non-validating runtime boundary"
-    );
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    jet_jit::CraneliftBackend::new()
+        .http2_dispatch_drain_proof_for_test()
+        .expect("HTTP/2 dispatch cleanup proof");
 }
 
 /// The Cranelift host path is not available on every architecture. Mirrors
@@ -719,14 +649,14 @@ fn run() {
     print(plain.code)
 
     if process.cmd(["sh", "-c", "printf 'checked-stderr-start:' >&2; printf '%05000d' 0 >&2; printf ':checked-stderr-end' >&2; exit 7"]).run_checked() == {
-        .Ok(v) -> { print("checked:unexpected") }
-        .Err(e) -> { print("checked-error") }
+        .Ok(_) -> { print("checked:unexpected") }
+        .Err(_) -> { print("checked-error") }
         else -> {}
     }
 
     if process.cmd(["sh", "-c", "printf 'signal-stderr' >&2; kill -TERM $$"]).run_checked() == {
-        .Ok(v) -> { print("signal:unexpected") }
-        .Err(e) -> { print("signal-error") }
+        .Ok(_) -> { print("signal:unexpected") }
+        .Err(_) -> { print("signal-error") }
         else -> {}
     }
 
@@ -734,10 +664,9 @@ fn run() {
     first :: child.wait() ?? panic("first signal wait failed")
     second :: child.wait() ?? panic("second signal wait failed")
     print("{first.code}:{first.success}:{second.code}:{second.success}")
-    if first.signal == second.signal {
-        print("repeat-signal-same")
-    } else {
-        print("repeat-signal-different")
+    if {
+        first.signal == second.signal -> print("repeat-signal-same")
+        else -> print("repeat-signal-different")
     }
     if first.signal == {
         .Val(signal) -> print("repeat-signal:{signal}")
@@ -787,12 +716,12 @@ fn run() {
 
 fn run() {
     if process.cmd(["sh", "-c", "printf 'checked-stderr-start:' >&2; printf '%05000d' 0 >&2; printf ':checked-stderr-end' >&2; exit 7"]).run_checked() == {
-        .Ok(v) -> { print("checked:unexpected") }
+        .Ok(_) -> { print("checked:unexpected") }
         .Err(e) -> { print(e) }
         else -> {}
     }
     if process.cmd(["sh", "-c", "printf 'signal-stderr' >&2; kill -TERM $$"]).run_checked() == {
-        .Ok(v) -> { print("signal:unexpected") }
+        .Ok(_) -> { print("signal:unexpected") }
         .Err(e) -> { print(e) }
         else -> {}
     }
@@ -846,32 +775,40 @@ fn run() {{
         .env("JET_PROCESS_PIPELINE_FLOOD", "1")
     direct_sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_sink_helper", "--nocapture"])
         .env("JET_PROCESS_PIPELINE_SINK", "1")
-    direct :: process.pipeline([direct_source, direct_sink])
-    if direct == {{
-        .Ok(_) -> {{ print("direct:accepted") }}
-        .Err(_) -> {{ print("direct:refused") }}
+    if process.pipeline([direct_source, direct_sink]) == {{
+        .Ok(receipt) -> {{
+            if receipt.success -> print("direct:accepted")
+            else -> print("direct:refused")
+        }}
+        .Err(_) -> print("direct:refused")
     }}
+
 
     source :: process.cmd(["{test_binary}", "--exact", "process_pipeline_flood_helper", "--nocapture"])
         .env("JET_PROCESS_PIPELINE_FLOOD", "1")
         .output_limit(1024)
     sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_sink_helper", "--nocapture"])
         .env("JET_PROCESS_PIPELINE_SINK", "1")
-    result :: process.pipeline([source, sink])
-    if result == {{
-        .Ok(_) -> {{ print("limit:accepted") }}
-        .Err(_) -> {{ print("limit:refused") }}
+    if process.pipeline([source, sink]) == {{
+        .Ok(receipt) -> {{
+            if receipt.success -> print("limit:accepted")
+            else -> print("limit:refused")
+        }}
+        .Err(_) -> print("limit:refused")
     }}
+
 
     broken_source :: process.cmd(["{test_binary}", "--exact", "process_pipeline_flood_helper", "--nocapture"])
         .env("JET_PROCESS_PIPELINE_FLOOD", "1")
         .output_limit(1048576)
     broken_sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_closed_sink_helper", "--nocapture"])
         .env("JET_PROCESS_PIPELINE_CLOSED_SINK", "1")
-    broken :: process.pipeline([broken_source, broken_sink])
-    if broken == {{
-        .Ok(_) -> {{ print("broken:accepted") }}
-        .Err(_) -> {{ print("broken:refused") }}
+    if process.pipeline([broken_source, broken_sink]) == {{
+        .Ok(receipt) -> {{
+            if receipt.success -> print("broken:accepted")
+            else -> print("broken:refused")
+        }}
+        .Err(_) -> print("broken:refused")
     }}
 }}
 "#,
@@ -1165,6 +1102,11 @@ fn arg_process_spec_builders_reach_the_child() {
     }
     let dir = common::unique_tmp("jit_process_arg_builders");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"jit_process_arg_builders\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Env, Exec, FS, IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let child_dir = fs::canonicalize(&dir).unwrap();
     let child_probe = child_dir.join("process-probe.txt");
     let bad_value_path = child_dir.join("bad-env-value.txt");
@@ -2012,3 +1954,80 @@ fn jit_list_mutations_preserve_dense_arena_values() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn nbody_entry_runs_on_resident_jit_without_deopt() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("gauntlet/entries/nbody/jet/run.jet");
+    let shown = file.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("nbody entry loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "nbody entry must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::tir_lowers_bundle(&bundle),
+        "nbody entry must lower to TIR: {}",
+        jet_jit::tir_lower_fail_reason(&bundle)
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "nbody entry must stay resident-JIT safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("nbody entry must compile in resident JIT: {error}"));
+
+    let run = |use_interpreter| {
+        jet::Interpreter::dev_iteration_with_args_and_gates_profile_and_settings_with_lints_and_entry(
+            &shown,
+            &["1"],
+            false,
+            use_interpreter,
+            jet::Policy::GateSet::default(),
+            "dev",
+            &std::collections::BTreeMap::new(),
+            None,
+        )
+        .outcome
+    };
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match run(false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "resident nbody exit");
+            assert_eq!(stderr, "", "resident nbody stderr");
+            stdout
+        }
+        RunOutcome::Problems(diags) => panic!("resident nbody failed: {diags:?}"),
+    };
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::deopt_invoked_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
+    assert_eq!(resident.lines().count(), 2);
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match run(true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "interpreted nbody exit");
+            assert_eq!(stderr, "", "interpreted nbody stderr");
+            stdout
+        }
+        RunOutcome::Problems(diags) => panic!("interpreted nbody failed: {diags:?}"),
+    };
+    assert_eq!(resident, interpreted);
+}
+

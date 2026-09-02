@@ -3239,6 +3239,27 @@ fn run() { print(inspect([1, 2])) }
     assert!(out.rust.contains("jet_view_new"), "{}", out.rust);
 }
 
+/// D-MEM-COPYSEM1: an indexed read window keeps the element's surface type
+/// (`String`) while preserving read-window provenance. Reusing that element in
+/// an owning assignment must materialize a copy instead of consuming the
+/// window, so a later assignment remains valid.
+#[test]
+fn indexed_read_window_string_materializes_owned_assignment() {
+    let src = r#"
+fn run() {
+    values := ["first", "last"]
+    stamp :: values[0]
+    first := ""
+    last := ""
+    first = stamp
+    last = stamp
+    print(first)
+    print(last)
+}
+"#;
+    jet::compile(src).expect("indexed String read windows must materialize on owning assignment");
+}
+
 #[test]
 fn range_window_checks_bounds_before_borrowing() {
     let src = r#"
@@ -3751,6 +3772,11 @@ fn run() { print(domain("user@example.com")) }
             "fn __jet_domain<'__jet___view>(__jet_email: &'__jet___view String) -> JetOutcome<&'__jet___view str, JetErr>"
         ),
         "generated lifetime must tie the string view to parameter 0: {}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("return Ok(__jet_result);"),
+        "a String-backed view return must lift its payload into JetOutcome: {}",
         out.rust
     );
 }

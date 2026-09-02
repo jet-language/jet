@@ -134,6 +134,9 @@ Each workload identity includes the content digest of `tools/perf/package.jet`
 and the canonical machine toolchain digest. `ci-perf-check.sh` derives the
 required row count from the report corpus count and rejects duplicate or
 missing program/state identities or changed manifest/toolchain identity.
+The matrix metadata must carry `compiler_sha256`, machine identity, rustc version,
+and `rustc_sha256`; missing identity fields fail closed.
+
 The active corpus rows are ordered `examples/features/basics/hello.jet`,
 `examples/features/collections/wordcount.jet`, `examples/features/serde/json.jet`,
 `examples/features/basics/pattern_matching.jet`, and
@@ -188,9 +191,14 @@ miss with a rebuild; no workload-specific cache bypass replaces those checks.
 
 `tools/perf/test-ci-perf-check.sh` checks that either identity changes the
 workload digest and that a changed manifest is rejected against a matching
-baseline. The report remains version 4; `tools/perf/baseline.json` remains the
-committed version-2 baseline and is not regenerated without the integrated
-measurement pass.
+baseline. The report and committed baseline use schema version 4. The
+supported refresh path is `scripts/agent/jet-env sh tools/perf/update-baseline.sh`
+and it is valid only after a complete production dashboard run. The dashboard
+writes a non-empty baseline through a run-local temporary file and atomic rename,
+so a failed run cannot truncate the committed receipt. This lane does not
+regenerate `tools/perf/baseline.json`; the orchestrator must refresh it from a
+complete native run.
+
 
 ## #2345 production receipt rows and edit parity
 
@@ -207,6 +215,56 @@ corpus program plus `jit-representative-edit`. The edit source path remains the
 execution fixture, not the receipt key. The focused canary asserts this mapping
 so an edit receipt cannot disappear because its lookup uses the edited path.
 
+Each `jit-fast` speed state now runs a separate `--trace-tiers` preflight and
+fails closed unless its receipt is `tier1 native`; an interpreter or mixed tier
+never becomes a speed row. Timed JIT and AOT commands unset diagnostic cache-log
+controls and set `JET_RECEIPT_BYPASS=1`. AOT build logs remain in build-only
+files, separate from measured program stdout and stderr.
+This keeps cached CoreLib and header diagnostics out of measured output hashes.
+
+### Matched compiler-speed peer contract
+
+The production matrix must include a peer report. The dashboard reads the path
+from `JET_PERF_PEER_REPORT`. The peer producer must run on the same target and
+machine identity as Jet, and it must use the same corpus, manifest, and inputs.
+
+The report starts with one metadata line:
+
+```text
+compiler-speed-peer version=1 run_id=... corpus_sha256=... manifest_sha256=... target=... machine=... peers=rustc:rust,... metrics=latency_ns,memory_bytes contract_sha256=... peer_count=... rows=...
+```
+
+The second line is the exact tab-separated header
+`peer`, `language`, `program`, `state`, `metric`, `value`, `workload_sha256`,
+`source_sha256`, `expected_sha256`, `manifest_sha256`, and `toolchain_sha256`.
+The producer must give one positive value for each peer, program, state, and
+metric. Every row must match the Jet workload and input identities.
+The declaration set must contain unique peer names, and `peer_count` must equal
+the number of declared peers. `rows` must equal the exact matrix
+`corpus × six states × declared peers × {latency_ns, memory_bytes}`. The
+dashboard and CI checker reject duplicate, missing, extra, null, malformed, or
+inconclusive cells; no cell may be omitted because another cell has a result.
+All per-cell values are positive integers, and every workload, source,
+expected, manifest, and toolchain identity is a complete SHA-256 digest.
+The contract digest is recomputed from the canonical corpus, manifest, target,
+machine, peer set, and metric fields before any ratio is accepted.
+
+Latency and RSS thresholds apply independently to every Jet/peer cell. The
+gate never averages cells, selects a best peer, or accepts a partial report.
+
+`tools/perf/dashboard.sh` rejects a missing, stale, malformed, or incomplete
+peer report. It also applies the competitive law before it prints evidence:
+each non-Rust ratio `Jet / peer` is less than `1.00`, and each Rust ratio is at
+most `1.05`. `tools/perf/ci-perf-check.sh` repeats these checks and compares the
+peer contract digest, peer set, machine, target, and row count with the baseline.
+Missing peers, changed inputs, duplicate rows, and a losing ratio fail closed.
+
+The focused fixture command
+`bash tools/perf/test-ci-perf-check.sh` uses peer rows only to test acceptance
+and rejection. It does not produce production evidence. A baseline refresh
+still requires `scripts/agent/jet-env sh tools/perf/update-baseline.sh` after a
+complete native 30-row run with a real peer report.
+
 ## #666 criterion evidence and removal checks
 
 This is the exact evidence map for #666. The state column records what is
@@ -215,10 +273,10 @@ available in the current tree; an unrun command is not evidence.
 | Criterion | Current evidence | State |
 | --- | --- | --- |
 | 1 | `tools/perf/dashboard.sh` functions `run_parity_checks`, `measure_state`, and `workload_digest`; `tests/dev_default_parity.rs::dev_default_matches_compiled_binary`; `tests/cli_compiler_speed.rs::compiler_speed_named_job_dev_matches_run_and_interpreter`; `tests/build_entry.rs::compiler_speed_phase_timing_reports_real_release_build` | Production rails and content identity are present; the one-corpus production rehearsal reached optimized AOT but hit the 120-second workload guard under concurrent shared builds, so no fresh differential receipt exists. |
-| 2 | `tools/perf/corpus.tsv`; the six dashboard row calls; `tools/perf/ci-perf-check.sh`; `tools/perf/test-ci-perf-check.sh`; `tools/perf/baseline.json` | No measured baseline is generated in this lane. The current five-row corpus needs 30 rows; the committed baseline remains version 2 by design. |
+| 2 | `tools/perf/corpus.tsv`; the six dashboard row calls; `tools/perf/ci-perf-check.sh`; `tools/perf/test-ci-perf-check.sh`; `tools/perf/baseline.json` | No measured baseline is generated in this lane. The current five-row corpus needs 30 rows; the committed receipt remains pending schema-v4 regeneration from a complete native run. |
 | 3 | `tools/perf/dashboard.sh` functions `check_corpus`, `check_cache_state`, `variance_file`, and `outlier_file`; `tests/cli_compiler_speed.rs::production_build_reuses_and_repairs_stdlib_objects`; `tools/perf/test-ci-perf-check.sh` | Hit/miss and identity failure rails remain present; live AOT no-change proof was not reached because the clean AOT rehearsal hit the 120-second guard. |
 | 4 | `tests/cli_compiler_speed.rs::compiler_speed_named_job_dev_matches_run_and_interpreter`; `tests/cli_compiler_speed.rs::production_build_follows_compiler_speed_plan_flags_and_linker`; `tests/cli_compiler_speed.rs::production_build_reports_missing_explicit_linker_as_tool_error`; `tests/build_entry.rs::compiler_speed_phase_timing_reports_real_release_build`; `tests/dev_default_parity.rs::dev_default_matches_compiled_binary` | Targeted production checks exist; the shell checker and direct JIT/dev/interpreter named-job smoke ran, while the Rust checks remain unrun in this lane. |
-| 5 | `docs/spec/syntax-decisions.md`; `docs/spec/architecture.md`; `docs/spec/spec.md`; this plan; `tools/perf/corpus.tsv`; expected goldens; `tools/perf/baseline.json`; `docs/reference/compiler-speed-environment-2026-08-25.json` | Open. The committed baseline and environment receipt still predate the current five-row corpus and six-row state matrix; no production regeneration is performed in this lane. |
+| 5 | `docs/spec/syntax-decisions.md`; `docs/spec/architecture.md`; `docs/spec/spec.md`; this plan; `tools/perf/corpus.tsv`; expected goldens; `tools/perf/baseline.json`; `docs/reference/compiler-speed-environment-2026-08-25.json` | Open pending orchestrator proof. The committed baseline and environment receipt still predate the current five-row corpus and six-row state matrix; no production regeneration is performed in this lane. |
 | 6 | `tests/cli_compiler_speed.rs::compiler_speed_closeout_is_backed_by_plan` | The removal canary is exact and removal-sensitive after this update; it is unrun in this lane. |
 
 The #666 removal canary requires this heading, the current production evidence

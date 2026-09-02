@@ -685,6 +685,9 @@ pub struct TLocal {
     /// binding is not read after that update; other engines ignore the AOT
     /// representation hint and retain the ordinary binding semantics.
     pub string_bytes_source: Option<Box<TLocal>>,
+    /// A lowering-proven interval for an Int local. `None` means the local may
+    /// carry a bigint value and consumers must retain checked arithmetic.
+    pub integer_bounds: Option<TIntegerBounds>,
     /// The Rust binding is a vetted Prelude storage wrapper until sema-proved
     /// initialization; ordinary TIR reads still have the declared Jet type.
     pub uninit_scalar: bool,
@@ -703,6 +706,7 @@ impl TLocal {
             persist_ty: None,
             mutable: false,
             string_bytes_source: None,
+            integer_bounds: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -725,6 +729,7 @@ impl TLocal {
             persist_ty: None,
             mutable: false,
             string_bytes_source: None,
+            integer_bounds: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -745,8 +750,9 @@ impl TLocal {
             address_lifetime: None,
             persist_key: Some(format!("{module}::{name}")),
             persist_ty: Some(ty),
-            mutable: true,
+            mutable: false,
             string_bytes_source: None,
+            integer_bounds: None,
             uninit_scalar: false,
             uninit_fixed: false,
         }
@@ -763,6 +769,11 @@ impl TLocal {
 
     pub fn with_string_bytes_source(mut self, source: TLocal) -> TLocal {
         self.string_bytes_source = Some(Box::new(source));
+        self
+    }
+
+    pub fn with_integer_bounds(mut self, bounds: TIntegerBounds) -> TLocal {
+        self.integer_bounds = Some(bounds);
         self
     }
 
@@ -3012,8 +3023,8 @@ impl TFunc {
 }
 
 /// One lowered `#Pre`/`#Post` clause. `condition` and `message` share the
-/// function's parameter bindings; postconditions additionally bind
-/// `__jet_result` to the returned value.
+/// function's parameter bindings; postconditions bind `result` to the typed
+/// sema-visible value selected by the enclosing `ContractScope`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TContractKind {
     Pre,
@@ -3486,6 +3497,34 @@ pub enum TRequireKind {
     Panic { msg: Box<TExpr> },
 }
 
+/// How a function-body contract scope binds the sema-visible `result`.
+///
+/// The function ABI may carry a `Result`/`Option` wrapper that is not part of
+/// the source declaration.  Lowering decides whether the scope projects that
+/// successful payload; emitters and the evaluator only consume this fact.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TContractResultMode {
+    Direct,
+    ResultPayload,
+    OptionPayload,
+}
+
+/// Typed result binding for a lowered function-body contract scope.
+#[derive(Clone)]
+pub struct TContractResult {
+    /// Effective return type produced by the function body and returned by the
+    /// scope, including its failure carrier when one is present.
+    pub carrier_ty: Type,
+    /// Type sema assigned to the source-level `result` binding.
+    pub binding_ty: Type,
+    /// Local holding the complete return carrier.
+    pub carrier_local: TLocal,
+    /// Local visible to lowered postconditions.
+    pub binding_local: TLocal,
+    /// Whether the successful carrier arm is projected before postconditions.
+    pub mode: TContractResultMode,
+}
+
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
 pub enum TStmt {
     /// D-FAIL-TIER1: one executable contract check.  A precondition node is
@@ -3494,13 +3533,13 @@ pub enum TStmt {
     Contract {
         contract: TContract,
     },
-    /// D-FAIL-TIER1: function-body contract scope.  The post list is checked
-    /// against the returned value on every return path by each backend.
+    /// against the sema-visible result binding on successful returns, while a
+    /// failure carrier bypasses postconditions and crosses the scope unchanged.
     ContractScope {
         pre: Vec<TContract>,
         body: Vec<TStmt>,
         post: Vec<TContract>,
-        ret: Option<Type>,
+        result: TContractResult,
     },
     /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
     /// lowering, reproducing `emit_let` (Source/Codegen/Statement.rs) byte-for-byte:
@@ -4302,11 +4341,16 @@ impl<'a> TFactChannel<'a> {
 }
 
 fn integer_bounds_for_type(ty: &Type) -> Option<TIntegerBounds> {
-    ty.integer_range().map(|(lo, hi)| TIntegerBounds { lo, hi })
+    ty.integer_range()
+        .map(|(lo, hi)| TIntegerBounds { lo, hi })
 }
 
-fn integer_bounds_for_expr(expr: &TExpr) -> Option<TIntegerBounds> {
-    match &expr.kind {
+/// Project the interval already carried by a TIR expression. This deliberately
+/// admits only literals, locals with a lowering proof, copies, and arithmetic
+/// whose operand intervals are both known. Unknown calls and other effectful
+/// forms stay unproven.
+pub(crate) fn integer_bounds_for_expr(expr: &TExpr) -> Option<TIntegerBounds> {
+    let bounds = match &expr.kind {
         TExprKind::IntLit(value, _) => Some(TIntegerBounds::exact(*value as i128)),
         TExprKind::CtLit(crate::AST::CtValue::Int(value)) => {
             Some(TIntegerBounds::exact(*value as i128))
@@ -4321,20 +4365,187 @@ fn integer_bounds_for_expr(expr: &TExpr) -> Option<TIntegerBounds> {
             lo: *lo as i128,
             hi: *hi as i128,
         }),
-        _ => integer_bounds_for_type(&expr.ty),
+        TExprKind::OrFallback { value, fallback } => {
+            let success = match &value.ty {
+                Type::Option(inner) => integer_bounds_for_type(inner),
+                // Result ?? leaves its complete success type intact. Thus a
+                // Result<Option<Int>, E> has no scalar bounds until a second
+                // ?? unwraps the Option.
+                Type::Result { ok, .. } => integer_bounds_for_type(ok.as_ref()),
+                _ => None,
+            };
+            match fallback {
+                TOrFallback::Value(fallback) => {
+                    let fallback = integer_bounds_for_expr(fallback)?;
+                    let success = success?;
+                    Some(TIntegerBounds {
+                        lo: success.lo.min(fallback.lo),
+                        hi: success.hi.max(fallback.hi),
+                    })
+                }
+                _ => success,
+            }
+        },
+        TExprKind::NumericMethod {
+            recv,
+            op: TNumericOp::CastAs { dst_rust },
+        } if dst_rust == "i64" => {
+            let bounds = integer_bounds_for_expr(recv)?;
+            (bounds.lo >= i64::MIN as i128 && bounds.hi <= i64::MAX as i128).then_some(bounds)
+        }
+        TExprKind::Local(local) => local.integer_bounds,
+        TExprKind::IncDec { op, place, .. } => {
+            let TPlace::Local(local) = place else {
+                return integer_bounds_for_type(&expr.ty);
+            };
+            let op = match op {
+                crate::AST::IncDecOp::Inc => BinOp::Add,
+                crate::AST::IncDecOp::Dec => BinOp::Sub,
+            };
+            local
+                .integer_bounds
+                .and_then(|bounds| integer_bounds_for_op(op, bounds, TIntegerBounds::exact(1)))
+        }
+        TExprKind::Unary {
+            op: UnOp::Neg,
+            operand,
+        } => integer_bounds_for_expr(operand).and_then(negate_integer_bounds),
+        TExprKind::Binary { op, lhs, rhs, .. } => {
+            let lhs = integer_bounds_for_expr(lhs)?;
+            let rhs = integer_bounds_for_expr(rhs)?;
+            integer_bounds_for_op(*op, lhs, rhs)
+        }
+        _ => None,
+    };
+    bounds.or_else(|| integer_bounds_for_type(&expr.ty))
+}
+
+fn negate_integer_bounds(bounds: TIntegerBounds) -> Option<TIntegerBounds> {
+    Some(TIntegerBounds {
+        lo: bounds.hi.checked_neg()?,
+        hi: bounds.lo.checked_neg()?,
+    })
+}
+
+fn floor_div_i128(value: i128, divisor: i128) -> Option<i128> {
+    if divisor == 0 {
+        return None;
+    }
+    let quotient = value.checked_div(divisor)?;
+    let remainder = value.checked_rem(divisor)?;
+    if remainder != 0 && (value < 0) != (divisor < 0) {
+        quotient.checked_sub(1)
+    } else {
+        Some(quotient)
     }
 }
+
+fn floor_div_bounds(lhs: TIntegerBounds, rhs: TIntegerBounds) -> Option<TIntegerBounds> {
+    if rhs.lo <= 0 && rhs.hi >= 0 {
+        return None;
+    }
+    let mut rhs_points = [0i128; 4];
+    let mut rhs_len = 0;
+    for point in [rhs.lo, rhs.hi] {
+        if point != 0 {
+            rhs_points[rhs_len] = point;
+            rhs_len += 1;
+        }
+    }
+    // The quotient is monotone on each non-zero-sign side of the divisor.
+    // Include the closest-to-zero point so an interval such as 2..9 also
+    // accounts for the possible divisor 1 when its bound is widened later.
+    if rhs.lo <= -1 && rhs.hi >= -1 {
+        rhs_points[rhs_len] = -1;
+        rhs_len += 1;
+    }
+    if rhs.lo <= 1 && rhs.hi >= 1 {
+        rhs_points[rhs_len] = 1;
+        rhs_len += 1;
+    }
+    let mut values = [0i128; 8];
+    let mut value_len = 0;
+    for value in [lhs.lo, lhs.hi] {
+        for divisor in &rhs_points[..rhs_len] {
+            values[value_len] = floor_div_i128(value, *divisor)?;
+            value_len += 1;
+        }
+    }
+    let values = &values[..value_len];
+    let (&lo, &hi) = (values.iter().min()?, values.iter().max()?);
+    Some(TIntegerBounds { lo, hi })
+}
+
+fn remainder_bounds(lhs: TIntegerBounds, rhs: TIntegerBounds) -> Option<TIntegerBounds> {
+    if rhs.lo <= 0 && rhs.hi >= 0 {
+        return None;
+    }
+    if lhs.lo == 0 && lhs.hi == 0 {
+        return Some(TIntegerBounds::exact(0));
+    }
+    let max_abs = rhs.lo.checked_abs()?.max(rhs.hi.checked_abs()?);
+    let magnitude = max_abs.checked_sub(1)?;
+    if rhs.hi < 0 {
+        Some(TIntegerBounds {
+            lo: magnitude.checked_neg()?,
+            hi: 0,
+        })
+    } else {
+        Some(TIntegerBounds {
+            lo: 0,
+            hi: magnitude,
+        })
+    }
+}
+
+pub(crate) fn integer_bounds_for_op(
+    op: BinOp,
+    lhs: TIntegerBounds,
+    rhs: TIntegerBounds,
+) -> Option<TIntegerBounds> {
+    match op {
+        BinOp::Add | BinOp::Sub | BinOp::Mul => combine_integer_bounds(op, lhs, rhs),
+        BinOp::FloorDiv => floor_div_bounds(lhs, rhs),
+        BinOp::Mod | BinOp::Rem => remainder_bounds(lhs, rhs),
+        _ => None,
+    }
+}
+
+pub(crate) fn integer_native_floor_mod_proven(
+    op: BinOp,
+    lhs: TIntegerBounds,
+    rhs: TIntegerBounds,
+    result: TIntegerBounds,
+) -> bool {
+    if !bounds_fit_inline(lhs)
+        || !bounds_fit_inline(rhs)
+        || !bounds_fit_inline(result)
+        || (rhs.lo <= 0 && rhs.hi >= 0)
+    {
+        return false;
+    }
+    let lhs_zero = lhs.lo == 0 && lhs.hi == 0;
+    let rhs_unit = (rhs.lo == -1 && rhs.hi == -1) || (rhs.lo == 1 && rhs.hi == 1);
+    let same_sign = (lhs.lo >= 0 && rhs.lo > 0) || (lhs.hi < 0 && rhs.hi < 0);
+    let exact = lhs.lo == lhs.hi
+        && rhs.lo == rhs.hi
+        && rhs.lo != 0
+        && lhs.lo.checked_rem(rhs.lo) == Some(0);
+    matches!(op, BinOp::FloorDiv | BinOp::Mod)
+        && (lhs_zero || rhs_unit || same_sign || exact)
+}
+
 /// D-INTBIG1: the inline rail is a signed 63-bit payload, represented by the
 /// same half-i64 bounds as `Prelude/Core/JetInt`. Keep this projection in TIR
 /// so cost consumers share one proof rather than reading backend constants.
 const INT_SMALL_MIN: i128 = -(1i128 << 62);
 const INT_SMALL_MAX: i128 = (1i128 << 62) - 1;
 
-fn bounds_fit_inline(bounds: TIntegerBounds) -> bool {
+pub(crate) fn bounds_fit_inline(bounds: TIntegerBounds) -> bool {
     bounds.lo >= INT_SMALL_MIN && bounds.hi <= INT_SMALL_MAX
 }
 
-fn combine_integer_bounds(
+pub(crate) fn combine_integer_bounds(
     op: BinOp,
     lhs: TIntegerBounds,
     rhs: TIntegerBounds,
@@ -7241,6 +7452,8 @@ pub enum TClosureOp {
     BagAny,
     /// `all` — `jet_list_all((recv).clone(), f)`.
     All,
+    /// `count_where(f)` — `jet_list_count_where(&(recv), f)`.
+    CountWhere,
     /// `sort_by` — `{ jet_list_sort_by(&mut recv, f); }`.
     SortBy,
     /// `sort_by_desc` — `{ jet_list_sort_by_desc(&mut recv, f); }`.
@@ -7274,6 +7487,8 @@ pub enum TClosureOp {
     GroupBy,
     /// `count_by(f)` — `jet_list_count_by((recv).clone(), f)`.
     CountBy,
+    /// `update_first(f, replacement)` — `jet_list_update_first(&mut recv, f, replacement)`.
+    UpdateFirst,
     /// `partition(f)` — inline emit; struct name embedded. `TupleStruct` is `JetTup_<hash>`.
     Partition {
         tuple_struct: String,
@@ -7682,8 +7897,11 @@ pub enum TBuiltinOp {
     Clear,
     /// `chars()` → `(recv).chars().collect::<Vec<char>>()`.
     Chars,
-    /// `bytes()` → `{root}jet_string_bytes(&(recv))`.
-    Bytes,
+    /// `bytes()` on a proven owned String rvalue consumes it; a place/view keeps
+    /// the borrowing copy helper. `owned` is a lowering fact, not an emitter guess.
+    Bytes {
+        owned: bool,
+    },
     /// `String.from_bytes(bytes)` → `{root}jet_string_from_bytes(&(recv))`.
     StringFromBytes,
     /// `String.from_bytes_lossy(bytes)` → `{root}jet_string_from_bytes_lossy(&(recv))`.
@@ -8571,14 +8789,15 @@ pub enum THandleOp {
     ServiceRuntimeDeadLetter,
     ServiceRuntimeRetain,
     ServiceRuntimeCommit,
-    /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DBError>`. Encodes
-    /// `params` via `jet_std::jet_db_encode_params`, calls the FFI bridge's
-    /// `jet_db_query`, decodes the wire result via `jet_std::jet_db_decode_query_result`.
+    /// D-TYPEDSQL-SINK1=A: `conn.query(sql)` consumes one checked `SQL` value
+    /// carrying template text and ordered `DBValue` bindings. The emitter
+    /// borrows that pair only at the final driver boundary.
     DBQuery,
-    /// D-DBDRIVER1: `conn.query_one(sql, params)` → `Result<Option<Row>, DBError>`.
-    /// Same as `DBQuery` but takes only the first row (if any).
+    /// D-TYPEDSQL-SINK1=A: `conn.query_one(sql)` consumes one checked `SQL`
+    /// value and returns only the first row (if any).
     DBQueryOne,
-    /// D-DBDRIVER1: `conn.execute(sql, params)` → `Result<Int, DBError>` (affected rows).
+    /// D-TYPEDSQL-SINK1=A: `conn.execute(sql)` consumes one checked `SQL` value
+    /// and returns affected rows.
     DBExecute,
     /// D-DBPOLICY-BIND1: scoped query registered with the same live registry as
     /// `app.live`, after policy transformation.
@@ -8611,10 +8830,9 @@ pub enum THandleOp {
     PluginCallText,
     /// D-LIB-CALLGRANT1=A: `mod.on_tick(dt)` → the checked native entry point.
     ModOnTick,
-    /// D-SHIFT1 (c7shift): `Reader.over(bytes)` constructor →
-    /// `{root}jet_reader_over(&(recv))` → `JetReader`. `recv` is the `[U8]`
-    /// argument (same "arg becomes the recv slot" shape as `PathFrom`).
-    ReaderOver,
+    /// D-SHIFT1 (c7shift): `Reader.over(bytes)` constructor. `owned` is a
+    /// sema-proven last-use fact; false retains the borrowing clone helper.
+    ReaderOver { owned: bool },
     /// D-SHIFT1: `reader.read_u8()` → `{root}jet_reader_read_u8(&mut (recv))`
     /// → `Result<U8, String>`. Bounds miss is an ordinary `Err`, never a panic.
     ReaderReadU8,
@@ -8716,6 +8934,35 @@ impl THandleOp {
             error_method: Some(method),
             width,
         })
+    }
+    /// True only for handle operations whose rendered host call still returns
+    /// Rust's `Option`.  Jet's `Type::Option` is the `JetOutcome`/`Result`
+    /// carrier, so the HandleMethod emitter adapts these operations exactly
+    /// once, before any fallback expression can inspect the value.
+    ///
+    /// This is an operation fact, not a surface-type heuristic.  Operations
+    /// that already call a canonical `JetOutcome` helper stay out of this
+    /// table, even when their Jet result type is optional.
+    pub(crate) fn raw_option_boundary(&self) -> bool {
+        match self {
+            Self::HTTPReqHeader
+            | Self::HTTPReqParam
+            | Self::HTTPRespHeader
+            | Self::DataTreeToText
+            | Self::JSONToText => true,
+            Self::HTTPClientMethod { kind, method } => {
+                matches!(
+                    (kind.as_str(), method.as_str()),
+                    ("HTTPHeaders", "first") | ("HTTPResponse", "raw_content_encoding")
+                )
+            }
+            Self::CivilTimeMethod { kind, method } => matches!(
+                (kind.as_str(), method.as_str()),
+                ("Zone", "next_transition" | "previous_transition")
+                    | ("ZonedDateTime", "next_transition" | "previous_transition")
+            ),
+            _ => false,
+        }
     }
 }
 

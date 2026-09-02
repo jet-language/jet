@@ -29,9 +29,14 @@ pub(super) fn eval(
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     match op {
-        THandleOp::ReaderOver => {
-            let bytes = bytes_of(recv).ok_or_else(|| unsupported("Reader.over subject", span))?;
-            Ok(reader_ct(&kernel::jet_reader_over(&bytes)))
+        THandleOp::ReaderOver { owned } => {
+            let bytes = if *owned {
+                bytes_owned(recv)
+            } else {
+                bytes_of(recv)
+            }
+            .ok_or_else(|| unsupported("Reader.over subject", span))?;
+            Ok(reader_ct_owned(kernel::jet_reader_over_owned(bytes)))
         }
         THandleOp::ReaderReadU8 => {
             read(recv, span, |r| kernel::jet_reader_read_u8(r).map(i64::from))
@@ -84,13 +89,11 @@ pub(super) fn eval(
         THandleOp::ReaderReadF64Be => read_float(recv, span, |r| {
             kernel::jet_reader_read_f64_be(r).map(CtFloat::f64)
         }),
-        THandleOp::ReaderPeek => {
-            let r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
-            kernel::jet_reader_peek(&r)
+        THandleOp::ReaderPeek => with_reader_plain(recv, span, |r| {
+            kernel::jet_reader_peek(r)
                 .map(i64::from)
                 .map(CtValue::Int)
-                .map_err(|message| unsupported(&message, span))
-        }
+        }),
         THandleOp::ReaderSeek | THandleOp::ReaderSkip => {
             let n = match arg(args, 0, span)? {
                 CtValue::Int(n) => *n,
@@ -114,14 +117,12 @@ pub(super) fn eval(
                 kernel::jet_reader_take(r, n).map(CtValue::Bytes)
             })
         }
-        THandleOp::ReaderRemaining => {
-            let r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
-            Ok(CtValue::Int(kernel::jet_reader_remaining(&r)))
-        }
-        THandleOp::ReaderAtEnd => {
-            let r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
-            Ok(CtValue::Bool(kernel::jet_reader_at_end(&r)))
-        }
+        THandleOp::ReaderRemaining => with_reader_plain(recv, span, |r| {
+            Ok(CtValue::Int(kernel::jet_reader_remaining(r)))
+        }),
+        THandleOp::ReaderAtEnd => with_reader_plain(recv, span, |r| {
+            Ok(CtValue::Bool(kernel::jet_reader_at_end(r)))
+        }),
         THandleOp::CursorOver => {
             let CtValue::Str(text) = recv else {
                 return Err(unsupported("Cursor.over subject", span));
@@ -163,20 +164,21 @@ pub(super) fn eval(
             })
         }
         THandleOp::ReaderTakePattern { parts, canonical } => {
-            let mut r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
+            let mut r = take_reader(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
             let hit = bin_match_scan(kernel::jet_reader_tail(&r), parts, true)
                 .and_then(|(bit_pos, binds)| bin_match_consumed(bit_pos).map(|n| (n, binds)));
-            Ok(match hit {
+            let result = match hit {
                 Some((consumed, binds)) => {
                     kernel::jet_reader_take_pattern(&mut r, consumed);
                     let value = bin_tuple(canonical, &binds);
-                    *recv = reader_ct(&r);
                     CtValue::Present(Box::new(value))
                 }
                 None => {
                     CtValue::failed(Box::new(CtValue::Str(kernel::jet_reader_pattern_miss(&r))))
                 }
-            })
+            };
+            restore_reader(recv, r).ok_or_else(|| unsupported("Reader receiver storage", span))?;
+            Ok(result)
         }
         _ => Err(unsupported("handle `stream`", span)),
     }
@@ -200,6 +202,27 @@ fn bytes_of(value: &CtValue) -> Option<Vec<u8>> {
         _ => None,
     }
 }
+fn bytes_owned(value: &mut CtValue) -> Option<Vec<u8>> {
+    match value {
+        CtValue::Bytes(bytes) => Some(std::mem::take(bytes)),
+        CtValue::List(items) => {
+            if !items.iter().all(|item| matches!(item, CtValue::Int(_))) {
+                return None;
+            }
+            let items = std::mem::take(items);
+            Some(
+                items
+                    .into_iter()
+                    .map(|item| match item {
+                        CtValue::Int(n) => n as u8,
+                        _ => unreachable!(),
+                    })
+                    .collect(),
+            )
+        }
+        _ => None,
+    }
+}
 
 fn field<'a>(recv: &'a CtValue, want: &str, name: &str) -> Option<&'a CtValue> {
     match recv {
@@ -210,7 +233,6 @@ fn field<'a>(recv: &'a CtValue, want: &str, name: &str) -> Option<&'a CtValue> {
         _ => None,
     }
 }
-
 fn pos_of(recv: &CtValue, want: &str) -> Option<usize> {
     match field(recv, want, "pos")? {
         CtValue::Int(pos) => Some(*pos as usize),
@@ -218,12 +240,6 @@ fn pos_of(recv: &CtValue, want: &str) -> Option<usize> {
     }
 }
 
-fn reader_of(recv: &CtValue) -> Option<kernel::JetReader> {
-    Some(kernel::JetReader {
-        buf: bytes_of(field(recv, READER, "buf")?)?,
-        pos: pos_of(recv, READER)?,
-    })
-}
 
 /// Move the Reader buffer through one evaluator operation instead of cloning
 /// it out of and back into `CtValue` on every read.
@@ -280,12 +296,13 @@ fn restore_reader(recv: &mut CtValue, reader: kernel::JetReader) -> Option<()> {
     Some(())
 }
 
-fn reader_ct(r: &kernel::JetReader) -> CtValue {
+fn reader_ct_owned(reader: kernel::JetReader) -> CtValue {
+    let kernel::JetReader { buf, pos } = reader;
     CtValue::Struct {
         type_name: READER.to_string(),
         fields: vec![
-            ("buf".to_string(), CtValue::Bytes(r.buf.clone())),
-            ("pos".to_string(), CtValue::Int(r.pos as i64)),
+            ("buf".to_string(), CtValue::Bytes(buf)),
+            ("pos".to_string(), CtValue::Int(pos as i64)),
         ],
     }
 }
@@ -337,6 +354,17 @@ fn with_reader(
     restore_reader(recv, reader).ok_or_else(|| unsupported("Reader receiver storage", span))?;
     Ok(result_ct(out))
 }
+fn with_reader_plain(
+    recv: &mut CtValue,
+    span: Span,
+    call: impl FnOnce(&mut kernel::JetReader) -> Result<CtValue, String>,
+) -> Result<CtValue, Diagnostic> {
+    let mut reader = take_reader(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
+    let out = call(&mut reader);
+    restore_reader(recv, reader).ok_or_else(|| unsupported("Reader receiver storage", span))?;
+    out.map_err(|message| unsupported(&message, span))
+}
+
 
 fn with_cursor(
     recv: &mut CtValue,

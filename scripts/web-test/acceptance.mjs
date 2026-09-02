@@ -100,7 +100,7 @@ console.log = (...args) => {
     box.background.includes("rgb(51, 102, 255)") || box.background.includes("#3366ff"),
     `click initial color: ${box.background}`,
   );
-  await driver.evaluate(`document.getElementById("btn").click()`);
+  await driver.evaluate(`document.querySelector("#jet-app button[data-jet-node]").click()`);
   box = await waitFor(async () => {
     const next = await domBox(driver);
     return next && next.text.includes("Clicks: 1") ? next : null;
@@ -110,7 +110,7 @@ console.log = (...args) => {
     box.background.includes("rgb(232, 121, 12)") || box.background.includes("#e8790c"),
     `click updated color: ${box.background}`,
   );
-  await driver.evaluate(`document.getElementById("btn").click()`);
+  await driver.evaluate(`document.querySelector("#jet-app button[data-jet-node]").click()`);
   box = await waitFor(async () => {
     const next = await domBox(driver);
     return next && next.text.includes("Clicks: 2") ? next : null;

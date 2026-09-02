@@ -377,6 +377,7 @@ mod tests {
             fingerprint: fp.into(),
             content_hash: None,
             source: LockSource::Path("/tmp/placeholder".into()),
+            nix_closure: None,
             locked: None,
             dependencies: vec![],
             layer: None,

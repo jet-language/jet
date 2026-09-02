@@ -3,34 +3,25 @@ use core.[encoding.json, files, process]
 struct Task { id: Int, text: String, done: Bool }
 struct Store { tasks: [Task] }
 
-fn load() [Task] !(IOError | [FieldError]) -> {
-    if !files.exists("tasks.json") -> return Ok([])
-    Ok(json.decode<Store>(files.read("tasks.json")).tasks)
-}
+fn load() [Task] !(IOError | [FieldError]) -> if files.exists("tasks.json") -> Ok(json.decode<Store>(files.read("tasks.json")).tasks) else -> Ok([])
+fn save(tasks: [Task]) !IOError { files.write("tasks.json", json.to_string(Store{tasks})) }
 
-fn save(tasks: [Task]) !IOError -> {
-    files.write("tasks.json", json.to_string(Store{tasks: tasks}))
-}
-
-fn run() !(IOError | [FieldError]) -> {
-    args :: process.argv()
-    command :: args.get(1) ?? ""
+fn run() !(IOError | [FieldError]) {
+    args :: process.args()
+    text :: args.get(1) ?? ""
     tasks := load()
 
-    if command == {
+    if (args.first() ?? "") == {
         "add" -> {
-            text :: args.get(2) ?? ""
             id :: tasks.len() + 1
-            message :: "added {id} {text}"
-            tasks.push(Task{id, text: text, done: false})
+            tasks.push(Task{id, text, done: false})
             save(tasks)
-            print(message)
+            print("added {id} {text}")
         }
         "done" -> {
-            id :: Int.parse(args.get(2) ?? "") ?? -1
-            index :: tasks.position(item -> item.id == id) ?? -1
-            if index >= 0 {
-                tasks[index].done = true
+            id :: Int.parse(text) ?? -1
+            if tasks.find(item -> item.id == id) == .Val(current) {
+                tasks.update_first(item -> item.id == id, Task{id, text: current.text, done: true})
                 save(tasks)
                 print("done {id}")
             } else {
@@ -38,14 +29,9 @@ fn run() !(IOError | [FieldError]) -> {
             }
         }
         "list" -> {
-            open := 0
-            done := 0
-            loop item in tasks {
-                mark :: if item.done -> "x" else -> " "
-                if item.done -> done += 1 else -> open += 1
-                print("[{mark}] {item.id} {item.text}")
-            }
-            print("open {open} done {done}")
+            done :: tasks.count_where(.done)
+            tasks.each(item -> print("[{if item.done -> "x" else -> " "}] {item.id} {item.text}"))
+            print("open {tasks.len() - done} done {done}")
         }
         else -> {}
     }

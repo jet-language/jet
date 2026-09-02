@@ -20,15 +20,15 @@ use crate::AST::{Item, Marker, ProgramBundle};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// D-APP-UNIFY1=B: resolve the target fact used by App capability checks. The
-/// module/file marker is the narrowest fact; the driver flag or manifest sets
-/// the broad web backend bit; freestanding is the explicit no-OS target.
+/// module/file marker is the narrowest fact; the driver or manifest selects
+/// the broad web backend bit; a no-OS target is explicit.
 pub(crate) fn resolved_app_target(
     bundle: &ProgramBundle,
     module_idx: usize,
-    freestanding: bool,
+    no_os: bool,
 ) -> &'static str {
-    if freestanding {
-        return "Freestanding";
+    if no_os {
+        return "NoOs";
     }
     let module = &bundle.modules[module_idx];
     if let Some(bucket) = module.web_target_ceiling {

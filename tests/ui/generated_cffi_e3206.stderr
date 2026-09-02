@@ -1,16 +1,7 @@
-Error [E0060]: C FFI modules use `#Import`, not `#Extern`
-  --> tests/ui/generated_cffi_e3206.jet:2:1
-    |
-  2 | #Extern module c.demo.__bindgen__ {
-    | ^^^^^^^
- Why: C FFI rules use the one PascalCase `#Rule` family in generated and hand-written bindings
- Fix: write `#Import` before `module c.<lib>`
-More: jet-lang.dev/e/E0060
-
 Error [E3206]: module path `c.demo.__bindgen__` uses the reserved segment `__bindgen__`
   --> tests/ui/generated_cffi_e3206.jet:2:16
     |
-  2 | #Extern module c.demo.__bindgen__ {
+  2 | #Import module c.demo.__bindgen__ {
     |                ^^^^^^^^^^^^^^^^^^
  Why: autogen lives in `c.<lib>.__bindgen__`; users declare overlays as `#Import module c.<lib>` only
  Fix: drop `__bindgen__` from your module path, or use `#Import module c.demo { … }`

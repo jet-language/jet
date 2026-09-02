@@ -200,6 +200,8 @@ pub const TYPE_INT: &str = "Int";
 pub const TYPE_FLOAT: &str = "Float";
 pub const TYPE_BOOL: &str = "Bool";
 pub const TYPE_STRING: &str = "String";
+/// D-TEXTHEAD-TYPE1=A / D-UNIFYLIT1=A: canonical checked HTML text type.
+pub const TYPE_HTML: &str = "HTML";
 /// S80 (ratified; amended by D-FAIL-ERROR1=A): default error type and
 /// constructor share `Err`.
 pub const TYPE_ERR: &str = "Err";

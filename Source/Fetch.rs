@@ -22,8 +22,7 @@ use std::process::Command;
     target_os = "linux",
     target_os = "android",
     target_os = "macos",
-    target_os = "ios",
-    windows
+    target_os = "ios"
 ))]
 use std::fs::File;
 
@@ -33,7 +32,7 @@ use std::fs::File;
     target_os = "macos",
     target_os = "ios"
 ))]
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::AsRawFd;
 
 // ──────────────────────────────────────────────
 // Main entry points
@@ -126,18 +125,6 @@ pub fn fetch(
     };
 
     // Write the lock file, inside the project's `.jet/` managed folder (U2).
-    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    if let Some(parent) = lock_path.parent() {
-        ensure_fetch_directory(parent).map_err(|e| {
-            vec![Diagnostic::error(
-                "E1206",
-                format!("couldn't create {}", parent.display()),
-                "the lock file lives inside the project's `.jet/` managed folder".to_string(),
-                format!("check write permissions: {}", e),
-                None,
-            )]
-        })?;
-    }
     let lock_str = Lock::write(&new_lock);
     let lock_bytes = match semantic_update.as_ref() {
         Some(semantic)
@@ -154,7 +141,7 @@ pub fn fetch(
         }
         _ => lock_str.into_bytes(),
     };
-    write_lock_atomically(&lock_path, &lock_bytes).map_err(|e| {
+    Lock::write_lock_atomically(project_root, &lock_bytes).map_err(|e| {
         vec![Diagnostic::error(
             "E1206",
             format!("couldn't write {}", Syntax::UNIFIED_LOCK_FILE),
@@ -167,34 +154,6 @@ pub fn fetch(
     Ok((new_lock, dep_dirs))
 }
 
-fn write_lock_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Ok(metadata) = std::fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "lock path is not a regular file",
-            ));
-        }
-    }
-    let parent = path.parent().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "lock has no parent")
-    })?;
-    ensure_fetch_directory(parent)?;
-    let temporary_root = jetpack::Provider::exclusive_temp_dir(parent, "jet-lock")?;
-    let temporary = temporary_root.join("lock");
-    let result = (|| {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        add_fetch_nofollow_flags(&mut options);
-        let mut file = options.open(&temporary)?;
-        use std::io::Write;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        std::fs::rename(&temporary, path)
-    })();
-    let _ = std::fs::remove_dir_all(&temporary_root);
-    result
-}
 
 fn enforce_provenance_policy(lock: &LockFile, manifest: &Manifest) -> Result<(), Diagnostic> {
     let requirement = manifest
@@ -315,6 +274,7 @@ impl<'a> Resolver<'a> {
             name: manifest.package.name.clone(),
             version: manifest.package.version.clone(),
             source: LockSource::Root,
+            nix_closure: None,
             locked: None,
             fingerprint: String::new(),
             content_hash: None,
@@ -340,6 +300,7 @@ impl<'a> Resolver<'a> {
             packages.push(LockedPackage {
                 name: name.clone(),
                 version: pkg.version.clone(),
+                nix_closure: None,
                 source: pkg.source.clone(),
                 locked: pkg.locked.clone(),
                 fingerprint: pkg.fingerprint.clone(),
@@ -853,14 +814,28 @@ impl<'a> Resolver<'a> {
                 let rev_to_fetch = self.resolve_git_rev(dep_name, url, selector, &transport)?;
                 let clone_dir = git_cache_dir(url, &rev_to_fetch).map_err(|d| vec![d])?;
 
-                // Clone/fetch if not already cached.
-                if !is_real_directory(&clone_dir) {
-                    git_clone(url, &rev_to_fetch, &clone_dir, &transport)?;
-                }
+                // Open an existing checkout through its final authority. A
+                // missing entry is published only after Git has populated a
+                // private descriptor-relative staging directory.
+                let snapshot = match Store::open_directory_authority(&clone_dir) {
+                    Ok(cache) => Store::snapshot_directory_authority(&cache).map_err(|d| vec![d])?,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        git_clone(url, &rev_to_fetch, &clone_dir, &transport)?
+                    }
+                    Err(error) => {
+                        return Err(vec![Diagnostic::error(
+                            "E1206",
+                            format!("couldn't open git cache `{}`: {}", clone_dir.display(), error),
+                            "the git cache must be held through a no-follow directory authority"
+                                .to_string(),
+                            "remove the cache entry or run `jet fetch` again".to_string(),
+                            None,
+                        )])
+                    }
+                };
 
                 // Freeze the checkout before reading package metadata. The
                 // mutable Git cache is never used as the resolved source.
-                let snapshot = Store::snapshot_tree(&clone_dir).map_err(|d| vec![d])?;
                 let source = snapshot.path();
                 let dep_manifest = self.load_dep_manifest(source, dep_name)?;
                 let dep_version = dep_manifest.package.version.clone();
@@ -2451,7 +2426,6 @@ fn git_cache_dir(url: &str, rev: &str) -> Result<PathBuf, Diagnostic> {
         .join("git-cache")
         .join(&url_hash[..16])
         .join(rev_prefix);
-    validate_git_cache_path(&path).map_err(|reason| git_cache_diagnostic(&path, &reason))?;
     Ok(path)
 }
 
@@ -2504,107 +2478,196 @@ fn git_clone(
     rev: &str,
     dest: &Path,
     transport: &ValidatedGitTransport,
-) -> Result<(), Vec<Diagnostic>> {
+) -> Result<Store::SourceSnapshot, Vec<Diagnostic>> {
     if let Err(reason) = validate_git_revision(rev) {
         return Err(vec![git_revision_diagnostic(rev, &reason)]);
     }
     if let Err(reason) = validate_cached_revision(rev) {
         return Err(vec![git_revision_diagnostic(rev, &reason)]);
     }
-    if let Err(reason) = validate_git_cache_path(dest) {
-        return Err(vec![git_cache_diagnostic(dest, &reason)]);
-    }
     let parent = dest.parent().unwrap_or_else(|| Path::new("."));
-    ensure_fetch_directory(parent).map_err(|e| {
+    let destination_name = dest.file_name().ok_or_else(|| {
         vec![Diagnostic::error(
             "E1206",
-            format!("couldn't create git cache directory: {}", e),
-            "the git cache lives in ~/.jet/git-cache/".to_string(),
-            "check disk space and permissions".to_string(),
+            format!("git cache destination `{}` has no final component", dest.display()),
+            "the Git cache destination must be one safe path component".to_string(),
+            "use a safe pinned revision and run `jet fetch` again".to_string(),
             None,
         )]
     })?;
-
-    // Clone into an absent child of an unpredictable, exclusively-created
-    // staging directory. Git needs the child path not to exist, while the
-    // parent gives cleanup and the final rename one private namespace.
-    let tmp_root = jetpack::Provider::exclusive_temp_dir(parent, "jet-fetch").map_err(|error| {
+    let parent_authority = Store::ensure_directory_authority(parent).map_err(|error| {
         vec![Diagnostic::error(
             "E1206",
-            "couldn't create temporary git cache directory".to_string(),
-            format!("the cache staging directory could not be allocated: {error}"),
-            "check disk space and permissions".to_string(),
+            format!("couldn't create git cache directory `{}`: {}", parent.display(), error),
+            "the git cache must be reached through no-follow directory authorities".to_string(),
+            "remove cache symlinks or check disk space and permissions".to_string(),
             None,
         )]
     })?;
-    let tmp = tmp_root.join("checkout");
+    let (staging_name, staging) = parent_authority
+        .create_private_child("jet-fetch")
+        .map_err(|error| {
+            vec![Diagnostic::error(
+                "E1206",
+                "couldn't create temporary git cache directory".to_string(),
+                format!("the cache staging directory could not be allocated: {error}"),
+                "check disk space and permissions".to_string(),
+                None,
+            )]
+        })?;
     let cleanup = || {
-        let _ = std::fs::remove_dir_all(&tmp_root);
+        let _ = parent_authority.remove_child_tree(&staging_name);
     };
 
-    let remote = transport.git_remote(url).map_err(|reason| {
-        cleanup();
-        vec![git_transport_diagnostic(url, &reason)]
-    })?;
-    let clone_ok = hardened_git_transport_command(transport)
-        .args([
-            "clone",
-            "--quiet",
-            "--",
-            &remote,
-            tmp.to_str().unwrap_or("."),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    if !clone_ok {
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    )))]
+    {
         cleanup();
         return Err(vec![Diagnostic::error(
-            "E1203",
-            format!("failed to clone `{}`", url),
-            "git clone returned an error".to_string(),
-            "check the git URL and your network connection".to_string(),
-            None,
-        )]);
-    }
-
-    let checkout_ok = jetpack::Provider::hardened_git_command()
-        .args([
-            "-C",
-            tmp.to_str().unwrap_or("."),
-            "checkout",
-            "--quiet",
-            rev,
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    if !checkout_ok {
-        cleanup();
-        return Err(vec![Diagnostic::error(
-            "E1203",
-            format!("couldn't check out revision `{}` from `{}`", rev, url),
-            "git checkout returned an error".to_string(),
-            "check that the revision exists in the repository".to_string(),
-            None,
-        )]);
-    }
-
-    let rename = std::fs::rename(&tmp, dest);
-    cleanup();
-    rename.map_err(|e| {
-        vec![Diagnostic::error(
             "E1206",
-            format!("couldn't move cloned repo into place: {}", e),
-            "filesystem rename failed".to_string(),
-            "check disk space and permissions".to_string(),
+            "cannot run Git without descriptor-relative cache authority".to_string(),
+            "this platform cannot pass an unredirectable private cache directory to Git".to_string(),
+            "run `jet fetch` on Linux, Android, macOS, or iOS".to_string(),
             None,
-        )]
-    })?;
+        )]);
+    }
 
-    Ok(())
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    {
+        let inheritable = staging.inheritable_clone().map_err(|error| {
+            cleanup();
+            vec![Diagnostic::error(
+                "E1206",
+                "couldn't retain Git cache authority".to_string(),
+                format!("the cache descriptor could not be inherited by Git: {error}"),
+                "check platform descriptor support and permissions".to_string(),
+                None,
+            )]
+        })?;
+        let destination_path = Store::descriptor_path_for(&inheritable);
+        let destination = match destination_path.to_str() {
+            Some(path) => path.to_owned(),
+            None => {
+                cleanup();
+                return Err(vec![Diagnostic::error(
+                    "E1206",
+                    "couldn't address the Git cache staging directory".to_string(),
+                    "the platform descriptor path is not valid UTF-8".to_string(),
+                    "run `jet fetch` on a supported platform".to_string(),
+                    None,
+                )]);
+            }
+        };
+        let remote = match transport.git_remote(url) {
+            Ok(remote) => remote,
+            Err(reason) => {
+                cleanup();
+                return Err(vec![git_transport_diagnostic(url, &reason)]);
+            }
+        };
+        let clone_ok = hardened_git_transport_command(transport)
+            .args([
+                "clone",
+                "--quiet",
+                "--",
+                &remote,
+                &destination,
+            ])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !clone_ok {
+            cleanup();
+            return Err(vec![Diagnostic::error(
+                "E1203",
+                format!("failed to clone `{}`", url),
+                "git clone returned an error".to_string(),
+                "check the git URL and your network connection".to_string(),
+                None,
+            )]);
+        }
+
+        let checkout_ok = jetpack::Provider::hardened_git_command()
+            .args([
+                "-C",
+                &destination,
+                "checkout",
+                "--quiet",
+                rev,
+            ])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !checkout_ok {
+            cleanup();
+            return Err(vec![Diagnostic::error(
+                "E1203",
+                format!("couldn't check out revision `{}` from `{}`", rev, url),
+                "git checkout returned an error".to_string(),
+                "check that the revision exists in the repository".to_string(),
+                None,
+            )]);
+        }
+
+        let snapshot = match Store::snapshot_directory_authority(&staging) {
+            Ok(snapshot) => snapshot,
+            Err(diagnostic) => {
+                cleanup();
+                return Err(vec![diagnostic]);
+            }
+        };
+        return match Store::publish_directory(
+            &parent_authority,
+            &staging_name,
+            &parent_authority,
+            destination_name,
+        ) {
+            Ok(()) => Ok(snapshot),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                drop(snapshot);
+                cleanup();
+                let winner = parent_authority
+                    .open_child_directory(destination_name)
+                    .map_err(|error| {
+                        vec![Diagnostic::error(
+                            "E1206",
+                            format!(
+                                "couldn't open concurrent git cache `{}`: {}",
+                                dest.display(),
+                                error
+                            ),
+                            "the Git cache entry must be a real directory".to_string(),
+                            "remove the cache entry and run `jet fetch` again".to_string(),
+                            None,
+                        )]
+                    })?;
+                Store::snapshot_directory_authority(&winner).map_err(|diagnostic| vec![diagnostic])
+            }
+            Err(error) => {
+                cleanup();
+                Err(vec![Diagnostic::error(
+                    "E1206",
+                    format!(
+                        "couldn't publish cloned repository into `{}`: {}",
+                        dest.display(),
+                        error
+                    ),
+                    "the Git cache publication must use an atomic no-replace rename".to_string(),
+                    "check cache permissions and disk space".to_string(),
+                    None,
+                )])
+            }
+        };
+    }
 }
 
 fn normalize_path(p: &Path) -> PathBuf {
@@ -2657,16 +2720,6 @@ fn git_revision_diagnostic(revision: &str, reason: &str) -> Diagnostic {
     )
 }
 
-fn git_cache_diagnostic(path: &Path, reason: &str) -> Diagnostic {
-    Diagnostic::error(
-        "E1206",
-        format!("git cache path `{}` is not allowed", path.display()),
-        reason.to_string(),
-        "remove the cache symlink or use a safe pinned revision, then run `jet fetch` again"
-            .to_string(),
-        None,
-    )
-}
 
 fn validate_git_revision(revision: &str) -> Result<(), String> {
     if revision.is_empty() || has_terminal_control(revision) || revision.starts_with('-') {
@@ -2693,104 +2746,8 @@ fn validate_cached_revision(revision: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_git_cache_path(path: &Path) -> Result<(), String> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component.as_os_str());
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(format!(
-                    "cache path component `{}` is a symlink",
-                    current.display()
-                ));
-            }
-            Ok(metadata) if !metadata.is_dir() => {
-                return Err(format!(
-                    "cache path component `{}` is not a directory",
-                    current.display()
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    Ok(())
-}
 
-fn ensure_fetch_directory(path: &Path) -> std::io::Result<()> {
-    let components = path.components().collect::<Vec<_>>();
-    if components.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "directory path is empty",
-        ));
-    }
-    let mut current = PathBuf::new();
-    for component in components {
-        if component == std::path::Component::ParentDir {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "directory path contains a parent component",
-            ));
-        }
-        current.push(component.as_os_str());
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "directory must not be a symlink",
-                ));
-            }
-            Ok(metadata) if metadata.is_dir() => {}
-            Ok(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    "directory path is not a directory",
-                ));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                match std::fs::create_dir(&current) {
-                    Ok(()) => {}
-                    Err(create_error)
-                        if create_error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                    Err(create_error) => return Err(create_error),
-                }
-                let metadata = std::fs::symlink_metadata(&current)?;
-                if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        "directory must not be a symlink or non-directory",
-                    ));
-                }
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
 
-fn add_fetch_nofollow_flags(options: &mut std::fs::OpenOptions) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        const O_CLOEXEC: i32 = 0o2000000;
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        const O_CLOEXEC: i32 = 0x01000000;
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        const O_NOFOLLOW: i32 = 0o400000;
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        const O_NOFOLLOW: i32 = 0x0100;
-        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-}
 
 fn has_terminal_control(value: &str) -> bool {
     value
@@ -2798,11 +2755,6 @@ fn has_terminal_control(value: &str) -> bool {
         .any(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
 }
 
-fn is_real_directory(path: &Path) -> bool {
-    std::fs::symlink_metadata(path)
-        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
-        .unwrap_or(false)
-}
 
 #[derive(Debug)]
 enum ValidatedGitTransport {
@@ -2825,10 +2777,6 @@ struct LocalGitSource {
         target_os = "ios"
     ))]
     handle: File,
-    #[cfg(windows)]
-    path: PathBuf,
-    #[cfg(windows)]
-    _handles: Vec<File>,
 }
 
 impl ValidatedGitTransport {
@@ -2927,7 +2875,10 @@ impl LocalGitSource {
 
         #[cfg(windows)]
         {
-            return Ok(self.path.to_string_lossy().into_owned());
+            let _ = self;
+            return Err(
+                "descriptor-relative Git source access is unavailable on Windows".to_string(),
+            );
         }
 
         #[cfg(not(any(
@@ -3049,7 +3000,11 @@ fn validate_git_transport_url(
         .to_socket_addrs()
         .map_err(|error| format!("could not resolve the destination: {error}"))?
         .collect::<Vec<_>>();
-    if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+    if addresses.is_empty()
+        || addresses
+            .iter()
+            .any(|address| !jet_net::is_public_ip(address.ip()))
+    {
         return Err("the destination resolves to a non-public address".to_string());
     }
     Ok(ValidatedGitTransport::Network {
@@ -3075,31 +3030,25 @@ fn validate_local_git_path(path: &Path, project_root: &Path) -> Result<LocalGitS
     if !candidate.starts_with(resolver.root()) {
         return Err("the local Git path resolves outside the project root".to_string());
     }
-    reject_git_path_symlinks(path)?;
     let relative = candidate
         .strip_prefix(resolver.root())
         .map_err(|_| "the local Git path resolves outside the project root".to_string())?;
     let directory = resolver
         .checked_directory(relative)
         .map_err(|error| format!("could not open the local Git path authority: {error}"))?;
-    let handle = duplicate_inheritable_file(directory.handle.as_ref())?;
+    let authority = Store::directory_authority_from_file(&candidate, directory.handle.as_ref())
+        .map_err(|error| format!("could not retain the local Git path authority: {error}"))?;
+    Store::hash_directory_authority(&authority, true)
+        .map_err(|error| format!("local Git source contains unsafe files: {error}"))?;
+    let handle = authority
+        .inheritable_clone()
+        .map_err(|error| format!("could not retain the local Git descriptor: {error}"))?;
     Ok(LocalGitSource { handle })
 }
 
 #[cfg(windows)]
-fn validate_local_git_path(path: &Path, project_root: &Path) -> Result<LocalGitSource, String> {
-    let root = std::fs::canonicalize(project_root)
-        .map_err(|error| format!("could not resolve the project root: {error}"))?;
-    let candidate = std::fs::canonicalize(path)
-        .map_err(|error| format!("could not resolve the local Git path: {error}"))?;
-    if !candidate.starts_with(&root) {
-        return Err("the local Git path resolves outside the project root".to_string());
-    }
-    let handles = windows_git_authority::open_chain(&root, &candidate)?;
-    Ok(LocalGitSource {
-        path: candidate,
-        _handles: handles,
-    })
+fn validate_local_git_path(_path: &Path, _project_root: &Path) -> Result<LocalGitSource, String> {
+    Err("descriptor-relative Git source access is unavailable on Windows".to_string())
 }
 
 #[cfg(not(any(
@@ -3113,187 +3062,7 @@ fn validate_local_git_path(_path: &Path, _project_root: &Path) -> Result<LocalGi
     Err("descriptor-relative Git source access is unavailable on this platform".to_string())
 }
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "macos",
-    target_os = "ios"
-))]
-fn duplicate_inheritable_file(file: &File) -> Result<File, String> {
-    unsafe extern "C" {
-        fn fcntl(file: i32, command: i32, ...) -> i32;
-    }
-    const F_DUPFD: i32 = 0;
-    let fd = unsafe { fcntl(file.as_raw_fd(), F_DUPFD, 3) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error().to_string());
-    }
-    Ok(unsafe { File::from_raw_fd(fd) })
-}
 
-#[cfg(windows)]
-mod windows_git_authority {
-    use super::*;
-    use std::ffi::c_void;
-    use std::os::windows::ffi::OsStrExt;
-    use std::os::windows::fs::OpenOptionsExt;
-    use std::os::windows::io::AsRawHandle;
-
-    const GENERIC_READ: u32 = 0x8000_0000;
-    const FILE_SHARE_READ: u32 = 0x0000_0001;
-    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
-    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-    type Handle = *mut c_void;
-
-    unsafe extern "system" {
-        fn GetFileAttributesW(name: *const u16) -> u32;
-        fn GetFinalPathNameByHandleW(
-            file: Handle,
-            path: *mut u16,
-            path_len: u32,
-            flags: u32,
-        ) -> u32;
-    }
-
-    fn wide_path(path: &Path) -> Vec<u16> {
-        path.as_os_str().encode_wide().chain(Some(0)).collect()
-    }
-
-    fn is_reparse(path: &Path) -> Result<bool, String> {
-        let wide = wide_path(path);
-        let attributes = unsafe { GetFileAttributesW(wide.as_ptr()) };
-        if attributes == u32::MAX {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-        Ok(attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
-    }
-
-    fn final_path(file: &File) -> Result<String, String> {
-        let needed =
-            unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0) };
-        if needed == 0 {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-        let mut buffer = vec![0u16; needed as usize + 1];
-        let written = unsafe {
-            GetFinalPathNameByHandleW(
-                file.as_raw_handle(),
-                buffer.as_mut_ptr(),
-                buffer.len() as u32,
-                0,
-            )
-        };
-        if written == 0 || written as usize >= buffer.len() {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-        buffer.truncate(written as usize);
-        Ok(String::from_utf16_lossy(&buffer))
-    }
-
-    fn normalized_final_path(path: String) -> String {
-        path.replace('/', "\\")
-            .trim_start_matches(r"\\?\")
-            .trim_end_matches(['\\', '/'])
-            .to_ascii_lowercase()
-    }
-
-    fn reject_reparse_components(path: &Path) -> Result<(), String> {
-        let mut current = PathBuf::new();
-        for component in path.components() {
-            match component {
-                std::path::Component::Prefix(_) | std::path::Component::RootDir => {
-                    current.push(component.as_os_str());
-                }
-                std::path::Component::CurDir => {}
-                std::path::Component::Normal(name) => {
-                    current.push(name);
-                    if is_reparse(&current)? {
-                        return Err(format!(
-                            "the local Git path contains a Windows reparse point `{}`",
-                            current.display()
-                        ));
-                    }
-                }
-                std::path::Component::ParentDir => {
-                    return Err("the local Git path contains parent traversal".to_string());
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn open_directory(path: &Path) -> Result<File, String> {
-        if is_reparse(path)? {
-            return Err(format!(
-                "the local Git path contains a Windows reparse point `{}`",
-                path.display()
-            ));
-        }
-        let directory = std::fs::OpenOptions::new()
-            .read(true)
-            .access_mode(GENERIC_READ)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(path)
-            .map_err(|error| format!("could not open the local Git path authority: {error}"))?;
-        let actual = normalized_final_path(final_path(&directory)?);
-        let expected = normalized_final_path(path.to_string_lossy().into_owned());
-        if is_reparse(path)?
-            || actual != expected
-            || !directory
-                .metadata()
-                .map_err(|error| error.to_string())?
-                .is_dir()
-        {
-            return Err(format!(
-                "the local Git path is not a real directory `{}`",
-                path.display()
-            ));
-        }
-        Ok(directory)
-    }
-
-    pub(super) fn open_chain(root: &Path, candidate: &Path) -> Result<Vec<File>, String> {
-        reject_reparse_components(root)?;
-        reject_reparse_components(candidate)?;
-        let relative = candidate
-            .strip_prefix(root)
-            .map_err(|_| "the local Git path resolves outside the project root".to_string())?;
-        let mut current = root.to_path_buf();
-        let mut handles = vec![open_directory(&current)?];
-        for component in relative.components() {
-            let std::path::Component::Normal(name) = component else {
-                return Err("the local Git path contains unsupported components".to_string());
-            };
-            current.push(name);
-            handles.push(open_directory(&current)?);
-        }
-        Ok(handles)
-    }
-}
-
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "macos",
-    target_os = "ios"
-))]
-fn reject_git_path_symlinks(path: &Path) -> Result<(), String> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component.as_os_str());
-        let metadata = std::fs::symlink_metadata(&current).map_err(|error| error.to_string())?;
-        if metadata.file_type().is_symlink() {
-            return Err(format!(
-                "the local Git path contains a symlink component `{}`",
-                current.display()
-            ));
-        }
-    }
-    Ok(())
-}
 
 fn looks_like_scp_url(url: &str) -> bool {
     url.split_once(':')
@@ -3355,40 +3124,6 @@ fn port_from_git_authority(authority: &str) -> Result<Option<u16>, String> {
             Ok(port)
         })
         .transpose()
-}
-
-fn is_public_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => {
-            let [a, b, c, _] = ip.octets();
-            !(a == 0
-                || a == 10
-                || a == 100 && (b & 0b1100_0000) == 0b0100_0000
-                || a == 127
-                || a == 169 && b == 254
-                || a == 172 && (16..=31).contains(&b)
-                || a == 192 && b == 0 && c == 0
-                || a == 192 && b == 0 && c == 2
-                || a == 192 && b == 168
-                || a == 198 && (18..=19).contains(&b)
-                || a == 198 && b == 51 && c == 100
-                || a == 203 && b == 0 && c == 113
-                || a >= 224)
-        }
-        IpAddr::V6(ip) => {
-            if let Some(ipv4) = ip.to_ipv4_mapped() {
-                return is_public_ip(IpAddr::V4(ipv4));
-            }
-            let [first, second, ..] = ip.segments();
-            (first & 0xe000) == 0x2000
-                && !ip.is_unspecified()
-                && !ip.is_loopback()
-                && !ip.is_multicast()
-                && (first & 0xfe00) != 0xfc00
-                && (first & 0xffc0) != 0xfe80
-                && !(first == 0x2001 && second == 0x0db8)
-        }
-    }
 }
 
 fn unix_now() -> u64 {

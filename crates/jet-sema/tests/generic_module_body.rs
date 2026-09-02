@@ -328,6 +328,142 @@ fn run() {}
 }
 
 #[test]
+fn imported_struct_returns_expose_all_fields_but_scalars_keep_e0302() {
+    let provider = r#"
+pub struct IngestResult {
+    pub provider: String
+    pub name: String
+    pub version: String
+    pub reference: String
+    pub source: String
+    pub expected_hash: String
+}
+
+pub struct RealizeResult {
+    pub provider: String
+    pub name: String
+    pub version: String
+    pub reference: String
+    pub source: String
+    pub expected_hash: String
+}
+
+pub fn ingest() IngestResult -> {
+    return IngestResult{
+        provider: "local",
+        name: "demo",
+        version: "1",
+        reference: "main",
+        source: "/tmp/demo",
+        expected_hash: "hash"
+    }
+}
+
+pub fn realize() RealizeResult -> {
+    return RealizeResult{
+        provider: "local",
+        name: "demo",
+        version: "1",
+        reference: "main",
+        source: "/tmp/demo",
+        expected_hash: "hash"
+    }
+}
+"#;
+    let consumer = r#"
+use "./provider" as provider
+
+fn run() {
+    ingested :: provider.ingest() ?? panic("ingest")
+    print(ingested.provider)
+    print(ingested.name)
+    print(ingested.version)
+    print(ingested.reference)
+    print(ingested.source)
+    print(ingested.expected_hash)
+
+    realized :: provider.realize() ?? panic("realize")
+    print(realized.provider)
+    print(realized.name)
+    print(realized.version)
+    print(realized.reference)
+    print(realized.source)
+    print(realized.expected_hash)
+
+    scalar :: 1
+    print(scalar.provider)
+}
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("provider.jet", provider, &[]),
+        ("consumer.jet", consumer, &[("provider", 0)]),
+    ]);
+    assert_eq!(error_codes(&diagnostics), vec!["E0302"], "{diagnostics:#?}");
+}
+
+#[test]
+fn imported_module_alias_preserves_local_struct_fields() {
+    let records = r#"
+pub struct Record {
+    pub value: String
+}
+
+pub fn inspect(record: Record) String -> {
+    return record.value
+}
+
+pub fn make() Record -> {
+    return Record{value: "ok"}
+}
+"#;
+    let consumer = r#"
+use records as alias
+
+fn run() {
+    record :: alias.make() ?? panic("make")
+    print(record.value)
+    inspected :: alias.inspect(record) ?? panic("inspect")
+    print(inspected)
+
+    scalar :: 1
+    print(scalar.value)
+}
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("records.jet", records, &[]),
+        ("consumer.jet", consumer, &[("alias", 0)]),
+    ]);
+    assert_eq!(error_codes(&diagnostics), vec!["E0302"], "{diagnostics:#?}");
+}
+
+#[test]
+fn fallible_binding_exposes_propagated_struct_success_fields() {
+    let source = r#"
+#Error
+struct LocalError {
+    message: String
+}
+
+struct Record {
+    value: String
+}
+
+fn make() Record !LocalError -> {
+    return Ok(Record{value: "ok"})
+}
+
+fn consume() String !LocalError -> {
+    record :: make()
+    return Ok(record.value)
+}
+
+fn run() {}
+"#;
+    let (_, diagnostics) = check_modules(&[("main.jet", source, &[])]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
 fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
     let base = "module boxed<T>(n: Int) { fn value() Int -> { return n } }\nmodule instance :: boxed<Int>(3)\nfn run() {}";
     let shifted = "\n\nmodule boxed<T>(n: Int) {   fn value() Int -> { return n } }\nmodule renamed :: boxed<Int>(3)\nfn run() {}";

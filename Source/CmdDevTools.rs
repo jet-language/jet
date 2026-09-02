@@ -2135,13 +2135,17 @@ fn write_generated_section(path: &str, fresh: &str, quiet: bool) {
 /// D-BUILD1). Offline by default; `--online` enables network checks; `--fix`
 /// applies the auto-fixable problems. The advisory code for rustc/cache/PATH
 /// problems is L2101.
-pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
-    // E2-M15: `jet self doctor --target=<triple>` checks cross-compilation readiness.
-    let cross_target =
-        std::env::args().find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+pub(crate) fn run_doctor(
+    online: bool,
+    apply: bool,
+    mode: OutputMode,
+    cross_target: Option<&str>,
+) {
+    // E2-M15: main parses both `--target=<triple>` and `--target <triple>`
+    // before dispatch, so Doctor receives the same effective target as build.
     let checks = jet::Doctor::run(jet::Doctor::Options {
         online,
-        cross_target,
+        cross_target: cross_target.map(str::to_string),
     });
     let color = mode.color_stderr_for(std::io::stdout().is_terminal());
 
@@ -2155,7 +2159,7 @@ pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
             }
         }
         // Re-run so the report reflects the world after fixes.
-        return run_doctor(online, false, mode);
+        return run_doctor(online, false, mode, cross_target);
     }
 
     use jet::Doctor::Health;
@@ -2688,7 +2692,7 @@ pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: Ou
 /// (owner 2026-06-18, supersedes D-CBIND3=B). Parses C function prototypes
 /// over the bindable type subset; skips and reports what it cannot map (I3).
 /// **E3208** fires only when the header is unreadable or has no bindable
-/// prototypes — use `#Extern module c.<lib>` for those declarations.
+/// prototypes — use `#Import module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
     if matches!(
         args.first().map(|arg| arg.as_str()),
@@ -2926,7 +2930,7 @@ pub(crate) fn run_bind(args: &[&String]) {
         Err(why) => bind_e3208(
             format!("Could not generate bindings from `{header}`."),
             format!("{why}."),
-            format!("hand-write `#Extern module c.{lib} {{ … }}` for the symbols you need."),
+            format!("hand-write `#Import module c.{lib} {{ … }}` for the symbols you need."),
         ),
     };
 
@@ -2986,7 +2990,7 @@ pub(crate) fn run_bind(args: &[&String]) {
     }
     if !result.skipped.is_empty() {
         println!(
-            "skipped {} declaration{} outside the bindable subset (hand-write `#Extern` for these):",
+            "skipped {} declaration{} outside the bindable subset (hand-write `#Import` for these):",
             result.skipped.len(),
             if result.skipped.len() == 1 { "" } else { "s" }
         );
@@ -5523,9 +5527,19 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
+    let source_for_parse = match jet::Package::mask_inline_package_source(&src) {
+        Ok((masked, _)) => masked,
+        Err(error) => {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, &src, &[error.diagnostic()], mode.color_stderr())
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
 
     // Lex + parse (needed for purity walk and for eval).
-    let (toks, lex_diags) = jet::Lexer::lex(&src);
+    let (toks, lex_diags) = jet::Lexer::lex(&source_for_parse);
     if !lex_diags.is_empty() {
         eprint!(
             "{}",
@@ -5630,7 +5644,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
     // is accepted. This ensures type errors (e.g. `"string" + 5`) surface with
     // their precise diagnostics rather than falling through to E0956.
     {
-        let type_diags = jet::check_for_eval(&src, file);
+        let type_diags = jet::check_for_eval(&source_for_parse, file);
         if !type_diags.is_empty() {
             eprint!(
                 "{}",
@@ -5641,7 +5655,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
     }
 
     // Evaluate via comptime and render. D-EVAL1=A: pretty by default, JSON with --json.
-    match jet::eval_pure_program_value(&src, file) {
+    match jet::eval_pure_program_value(&source_for_parse, file) {
         Ok((value, printed)) => {
             // #2068: what the program printed is program output, not noise.
             // In `--json` mode it goes to stderr so stdout stays exactly one
@@ -5988,7 +6002,14 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
         report_problems(mode, file, &src, &errors);
         exit(ExitCodes::USER_ERROR);
     }
-    let (tokens, lex_errors) = jet::Lexer::lex(&src);
+    let source_for_parse = match jet::Package::mask_inline_package_source(&src) {
+        Ok((masked, _)) => masked,
+        Err(error) => {
+            report_problems(mode, file, &src, &[error.diagnostic()]);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let (tokens, lex_errors) = jet::Lexer::lex(&source_for_parse);
     if !lex_errors.is_empty() {
         report_problems(mode, file, &src, &lex_errors);
         exit(ExitCodes::USER_ERROR);

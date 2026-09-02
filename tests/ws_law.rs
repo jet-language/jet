@@ -691,6 +691,51 @@ fn hostile_url_controls_are_rejected_before_handshake_serialization() {
 }
 
 #[test]
+fn public_aot_ws_connect_rejects_url_controls_before_connecting() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let observer = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            match listener.accept() {
+                Ok(_) => return true,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if std::time::Instant::now() >= deadline {
+                        return false;
+                    }
+                    std::thread::yield_now();
+                }
+                Err(_) => return false,
+            }
+        }
+    });
+    let source = format!(
+        r#"
+use core.net.ws as ws
+fn run() {{
+    if ws.connect("ws://{addr}/live\nInjected: yes") == {{
+        .Ok(_) -> print("accepted")
+        .Err(error) -> {{
+            if error == .InvalidUrl -> print("rejected")
+            else -> print("wrong error")
+        }}
+        else -> print("unexpected")
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_ws_law", "aot_hostile_url", &source);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "rejected\n");
+    assert!(
+        !observer.join().unwrap(),
+        "hostile public ws.connect reached the socket"
+    );
+}
+
+#[test]
 fn client_and_server_echo_text_over_live_sockets() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

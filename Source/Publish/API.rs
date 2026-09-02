@@ -20,14 +20,9 @@ pub struct ApiItem {
 /// Extract the public API surface from a parsed Jet source file.
 /// Includes `pub` items at file scope and inside inline code modules.
 pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
-    let package = std::path::Path::new(file)
-        .parent()
-        .and_then(|parent| {
-            parent
-                .ancestors()
-                .find_map(crate::Package::PackageFacts::load)
-        })
-        .and_then(Result::ok)
+    let package = crate::Loader::package_facts_for_entry(std::path::Path::new(file))
+        .ok()
+        .flatten()
         .map(|manifest| manifest.name)
         .unwrap_or_else(|| "package".to_string());
     extract_public_api_for_package(src, file, &package)

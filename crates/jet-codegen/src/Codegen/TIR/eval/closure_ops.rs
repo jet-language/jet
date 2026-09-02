@@ -7,8 +7,8 @@ use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 
 use super::{
-    progress_elapsed, progress_emit, progress_iter_parts, progress_iter_value, progress_no_color,
-    progress_now, unsupported, EvalCtx, Flow,
+    collection_semantics, progress_elapsed, progress_emit, progress_iter_parts, progress_iter_value,
+    progress_no_color, progress_now, unsupported, EvalCtx, Flow,
 };
 
 mod collection_failure_semantics {
@@ -405,6 +405,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 | TClosureOp::BagAny
                 | TClosureOp::All
                 | TClosureOp::Position
+                | TClosureOp::UpdateFirst
         );
         if !lazy && !short_circuit {
             if let Some((_, description, format, started_at, pulls, tail, total, known_total)) =
@@ -592,7 +593,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     return Err(unsupported("each receiver", self.span()));
                 };
                 for item in items {
-                    let _ = calln(self, vec![item])?;
+                    if let CtValue::Failed(report) = calln(self, vec![item])? {
+                        // Implicit fallible callbacks use the same carrier
+                        // transport as an explicit `?`: the expression returns
+                        // Unit, while the pending carrier makes its enclosing
+                        // statement/function return the callback failure.
+                        self.pending_return = Some(CtValue::Failed(report));
+                        return Ok(CtValue::Unit);
+                    }
                 }
                 Ok(CtValue::Unit)
             }
@@ -619,6 +627,60 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     &mut progress_count,
                 );
                 Ok(CtValue::absent(crate::AST::Type::Named("Any".into())))
+            }
+            TClosureOp::CountWhere => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("count_where receiver", self.span()));
+                };
+                let count = collection_semantics::list_count_where(&items, |item| {
+                    emit_progress_next(
+                        &progress,
+                        self.sink.as_ref(),
+                        &mut progress_cursor,
+                        &mut progress_count,
+                    );
+                    as_bool(&calln(self, vec![item.clone()])?, self.span())
+                })?;
+                emit_progress_finish(
+                    &progress,
+                    self.sink.as_ref(),
+                    progress_cursor,
+                    &mut progress_count,
+                );
+                Ok(CtValue::Int(count))
+            }
+            TClosureOp::UpdateFirst => {
+                if args.len() < 2 {
+                    return Err(unsupported("update_first arity", self.span()));
+                }
+                let CtValue::List(mut items) = recv_v else {
+                    return Err(unsupported("update_first receiver", self.span()));
+                };
+                let replacement = self.eval_expr_child(&args[1], scope)?;
+                let changed = collection_semantics::list_update_first(
+                    &mut items,
+                    |item| {
+                        emit_progress_next(
+                            &progress,
+                            self.sink.as_ref(),
+                            &mut progress_cursor,
+                            &mut progress_count,
+                        );
+                        as_bool(&calln(self, vec![item.clone()])?, self.span())
+                    },
+                    replacement,
+                )?;
+                if changed {
+                    self.write_back_place(recv, CtValue::List(items), scope)?;
+                    return Ok(CtValue::Bool(true));
+                }
+                emit_progress_finish(
+                    &progress,
+                    self.sink.as_ref(),
+                    progress_cursor,
+                    &mut progress_count,
+                );
+                Ok(CtValue::Bool(false))
             }
             TClosureOp::Any | TClosureOp::BagAny => {
                 let items = match recv_v {

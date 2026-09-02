@@ -155,6 +155,85 @@ fn native_and_component_exports_share_one_typed_surface() {
 }
 
 #[test]
+fn guest_import_library_calls_native_c_and_cpp_hosts() {
+    assert!(have_rustc(), "guest import proof requires rustc");
+    let cc = cc().expect("guest import C proof requires a C compiler");
+    let cxx = cxx().expect("guest import C++ proof requires a C++ compiler");
+
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/guest_import_library");
+    let scratch = Scratch::new("guest-import-library");
+    copy_tree(&fixture, &scratch.path);
+    let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
+    assert!(
+        build.status.success(),
+        "guest import Library build failed:\n{}",
+        compiler_text(&build)
+    );
+
+    let target = scratch.path.join("target");
+    let archive = target.join("libguestimport.a");
+    let header = target.join("guestimport.h");
+    assert!(archive.is_file(), "guest import build missed {}", archive.display());
+    assert!(header.is_file(), "guest import build missed {}", header.display());
+
+    let c_source = scratch.path.join("foreign.c");
+    let c_binary = scratch.path.join("foreign-c");
+    let mut c_build = Command::new(cc);
+    c_build
+        .args(["-std=c11", "-I"])
+        .arg(&target)
+        .arg(&c_source)
+        .arg(&archive)
+        .arg("-o")
+        .arg(&c_binary);
+    if cfg!(target_os = "linux") {
+        c_build.args(["-ldl", "-lpthread", "-lm"]);
+    }
+    let c_result = c_build.output().unwrap();
+    assert!(
+        c_result.status.success(),
+        "guest import C host failed to compile:\n{}",
+        compiler_text(&c_result)
+    );
+    let c = Command::new(&c_binary).output().unwrap();
+    assert!(
+        c.status.success(),
+        "guest import C host failed at runtime:\n{}",
+        compiler_text(&c)
+    );
+    assert_eq!(String::from_utf8_lossy(&c.stdout), "42\n");
+
+    let cpp_source = scratch.path.join("foreign.cpp");
+    let cpp_binary = scratch.path.join("foreign-cpp");
+    let mut cpp_build = Command::new(cxx);
+    cpp_build
+        .args(["-std=c++17", "-I"])
+        .arg(&target)
+        .arg(&cpp_source)
+        .arg(&archive)
+        .arg("-o")
+        .arg(&cpp_binary)
+        .arg("-pthread");
+    if cfg!(target_os = "linux") {
+        cpp_build.args(["-ldl", "-lpthread", "-lm"]);
+    }
+    let cpp_result = cpp_build.output().unwrap();
+    assert!(
+        cpp_result.status.success(),
+        "guest import C++ host failed to compile:\n{}",
+        compiler_text(&cpp_result)
+    );
+    let cpp = Command::new(&cpp_binary).output().unwrap();
+    assert!(
+        cpp.status.success(),
+        "guest import C++ host failed at runtime:\n{}",
+        compiler_text(&cpp)
+    );
+    assert_eq!(String::from_utf8_lossy(&cpp.stdout), "42\n");
+}
+
+#[test]
 fn library_build_load_and_foreign_call_are_one_surface() {
     assert!(have_rustc(), "Library end-to-end proof requires rustc");
     let cc = cc().expect("Library end-to-end proof requires a C compiler");
@@ -510,6 +589,88 @@ fn library_rejects_colliding_c_symbols_before_codegen() {
             .iter()
             .any(|error| error.code == "E1341" && error.what.contains("generated C symbol")),
         "missing generated allocator symbol diagnostic: {errors:?}"
+    );
+}
+
+#[test]
+fn guest_import_rejects_invalid_signature_and_duplicate_native_symbol() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/guest_import_library");
+    let scratch = Scratch::new("guest-import-negative");
+    copy_tree(&fixture, &scratch.path);
+    let source = scratch.path.join("library.jet");
+
+    fs::write(
+        &source,
+        "#Import(c) fn bad(values: [Int]) Int = \"guest_bad\"\n#Export(c) pub fn call_host(value: Int) Int -> value\n",
+    )
+    .unwrap();
+    let source_text = source.to_string_lossy();
+    let invalid = jet::compile_library(&source_text, None)
+        .expect_err("non-C-safe guest import signature accepted");
+    assert!(
+        invalid.iter().any(|error| error.code == "E3203"),
+        "missing invalid guest import signature diagnostic: {invalid:?}"
+    );
+
+    fs::write(
+        &source,
+        "#Import(c) fn mutate(value: &Int) Int = \"guest_mutate\"\n#Export(c) pub fn call_host(value: Int) Int -> value\n",
+    )
+    .unwrap();
+    let capability = jet::compile_library(&source_text, None)
+        .expect_err("capability guest import accepted by the hidden bridge");
+    assert!(
+        capability.iter().any(|error| {
+            error.code == "E1341" && error.what.contains("hidden C bridge")
+        }),
+        "missing capability bridge diagnostic: {capability:?}"
+    );
+
+    fs::write(
+        &source,
+        "#Layout(c)\nstruct Pair {\n    value: Int\n}\n#Import(c) fn use_pair(value: Pair) Int = \"guest_pair\"\n#Export(c) pub fn call_host(value: Int) Int -> value\n",
+    )
+    .unwrap();
+    let layout = jet::compile_library(&source_text, None)
+        .expect_err("C-layout guest import accepted by the hidden bridge");
+    assert!(
+        layout.iter().any(|error| {
+            error.code == "E1341" && error.what.contains("hidden C bridge")
+        }),
+        "missing C-layout bridge diagnostic: {layout:?}"
+    );
+
+    fs::write(
+        &source,
+        "#Import(c) fn first(value: Int) Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) Int -> value\n",
+    )
+    .unwrap();
+    let duplicate = jet::compile_library(&source_text, None)
+        .expect_err("duplicate guest native symbol accepted");
+    assert!(
+        duplicate.iter().any(|error| {
+            error.code == "E1341"
+                && error.what.contains("guest imports")
+                && error.what.contains("same C symbol")
+        }),
+        "missing duplicate guest import symbol diagnostic: {duplicate:?}"
+    );
+
+    fs::write(
+        &source,
+        "#Import module c.fake {\n    fn module_host(value: Int) Int = \"call_host\"\n}\n#Import(c) fn first(value: Int) Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) Int -> value\n",
+    )
+    .unwrap();
+    let c_module = jet::compile_library(&source_text, None)
+        .expect_err("C-module and guest import symbol collision accepted");
+    assert!(
+        c_module.iter().any(|error| {
+            error.code == "E1341"
+                && error.what.contains("C module imports")
+                && error.what.contains("same C symbol")
+        }),
+        "missing C-module symbol collision diagnostic: {c_module:?}"
     );
 }
 

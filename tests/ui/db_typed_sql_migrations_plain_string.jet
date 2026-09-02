@@ -1,0 +1,11 @@
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    policy := db.policy("items", "true") ?? panic("policy")
+    scope := conn.with_policy(policy, "owner")
+    tx_text := "SELECT 1"
+    _tx := db.transaction(scope, "tx", [tx_text]) ?? panic("transaction")
+    migrate_text := "SELECT 2"
+    _migrate := db.migrate(scope, "migration", [migrate_text]) ?? panic("migrate")
+}

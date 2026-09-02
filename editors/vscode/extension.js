@@ -23,6 +23,12 @@ function expandPathSetting(value, workspaceFolder) {
 }
 
 function findServer(workspaceFolder) {
+  // VS Code normally skips activation in an untrusted workspace, but keep
+  // this boundary in the extension too: no workspace-controlled setting,
+  // binary, or PATH command may become a process-launch identity.
+  if (!vscode.workspace.isTrusted) {
+    return undefined;
+  }
   const settings = vscode.workspace.getConfiguration("jet");
   // Workspace settings and workspace binaries are both untrusted until the
   // editor has crossed its workspace-trust boundary.
@@ -90,6 +96,10 @@ function uriArgToPath(uriArg) {
 }
 
 function runJetInTerminal(serverPath, args) {
+  if (!serverPath || !vscode.workspace.isTrusted) {
+    vscode.window.showErrorMessage("Jet run and test commands require a trusted workspace.");
+    return;
+  }
   const terminal = vscode.window.createTerminal({
     name: "Jet",
     shellPath: serverPath,
@@ -136,7 +146,7 @@ function activate(context) {
   };
   const debugFactory = {
     createDebugAdapterDescriptor(session) {
-      if (!debuggingIsAllowed()) {
+      if (!serverPath || !debuggingIsAllowed()) {
         throw new Error("Jet debugging requires a trusted workspace.");
       }
       const program = debugSourceForConfiguration(session.configuration);
@@ -149,22 +159,24 @@ function activate(context) {
     },
   };
 
-  client = new LanguageClient(
-    "jet",
-    "Jet Language Server",
-    {
-      command: serverPath,
-      args: ["self", "lsp"],
-      options: { cwd: workspaceFolder },
-      transport: TransportKind.stdio,
-    },
-    {
-      documentSelector: [{ scheme: "file", language: "jet" }],
-      synchronize: {
-        fileEvents: vscode.workspace.createFileSystemWatcher("**/*.jet"),
+  if (serverPath) {
+    client = new LanguageClient(
+      "jet",
+      "Jet Language Server",
+      {
+        command: serverPath,
+        args: ["self", "lsp"],
+        options: { cwd: workspaceFolder },
+        transport: TransportKind.stdio,
       },
-    }
-  );
+      {
+        documentSelector: [{ scheme: "file", language: "jet" }],
+        synchronize: {
+          fileEvents: vscode.workspace.createFileSystemWatcher("**/*.jet"),
+        },
+      }
+    );
+  }
 
   context.subscriptions.push(
     vscode.commands.registerCommand("jet.restartServer", async () => {
@@ -194,13 +206,15 @@ function activate(context) {
     vscode.debug.registerDebugAdapterDescriptorFactory("jet", debugFactory)
   );
 
-  client.start().catch(() => {
-    vscode.window.showErrorMessage(
-      `Jet language server failed to start (tried: ${serverPath}). ` +
-        `Build it with \`nix develop -c cargo build\` in the jet repo, ` +
-        `or set jet.languageServerPath to a jet binary.`
-    );
-  });
+  if (client) {
+    client.start().catch(() => {
+      vscode.window.showErrorMessage(
+        `Jet language server failed to start (tried: ${serverPath}). ` +
+          `Build it with \`nix develop -c cargo build\` in the jet repo, ` +
+          `or set jet.languageServerPath to a jet binary.`
+      );
+    });
+  }
 }
 
 function debuggingIsAllowed() {

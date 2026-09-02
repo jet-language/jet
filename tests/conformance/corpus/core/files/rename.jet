@@ -9,5 +9,8 @@ fn run() {
     writer :: files.create(source) ?? panic("create")
     writer.write_line("fixture") ?? panic("write")
     writer.flush() ?? panic("flush")
-    print(files.rename(source, destination))
+    print((() -> {
+        files.rename(source, destination)
+        true
+    })())
 }

@@ -46,7 +46,9 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
             .collect()
     }
 
-    fn map_pairs(fields: &std::collections::BTreeMap<CtKey, CtValue>) -> Option<Vec<(String, CtValue)>> {
+    fn map_pairs(
+        fields: &std::collections::BTreeMap<CtKey, CtValue>,
+    ) -> Option<Vec<(String, CtValue)>> {
         let mut pairs = Vec::with_capacity(fields.len());
         for (key, value) in fields {
             let CtKey::Str(key) = key else {
@@ -62,7 +64,11 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
             type_name,
             variant,
             args,
-        } if matches!(type_name.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") => {
+        } if matches!(
+            type_name.as_str(),
+            "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+        ) =>
+        {
             let payload = args.first().map(|(_, value)| value);
             match variant.as_str() {
                 "Null" => Some(jet_std::DataTree::Null),
@@ -79,9 +85,7 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
                     _ => None,
                 },
                 "Float" => match payload {
-                    Some(CtValue::Float(value)) => {
-                        Some(jet_std::DataTree::Float(value.as_f64()))
-                    }
+                    Some(CtValue::Float(value)) => Some(jet_std::DataTree::Float(value.as_f64())),
                     _ => None,
                 },
                 "Number" => match payload {
@@ -89,9 +93,7 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
                     _ => None,
                 },
                 "TypedText" => match payload {
-                    Some(CtValue::Str(value)) => {
-                        Some(jet_std::DataTree::TypedText(value.clone()))
-                    }
+                    Some(CtValue::Str(value)) => Some(jet_std::DataTree::TypedText(value.clone())),
                     _ => None,
                 },
                 "Text" => match payload {
@@ -785,7 +787,6 @@ pub fn sync_show_value(value: &CtValue) -> Option<String> {
         _ => None,
     }
 }
-
 
 fn ct_to_policy(v: &CtValue, span: Span) -> Result<JetRowPolicy, Diagnostic> {
     let CtValue::Struct { type_name, fields } = v else {

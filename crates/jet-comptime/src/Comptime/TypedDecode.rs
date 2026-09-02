@@ -569,13 +569,14 @@ pub(super) fn typed_decode_builtin_value(
                 .map(|result| result.map(|value| CtValue::Present(Box::new(value)))),
         },
         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-            if matches!(
+            if (matches!(
                 inner.as_ref(),
                 Type::IntN {
                     signed: false,
                     bits: 8
                 }
-            ) && matches!(tree, CtValue::Bytes(_))
+            ) || matches!(inner.as_ref(), Type::Named(name) if name == "U8"))
+                && matches!(tree, CtValue::Bytes(_))
             {
                 let CtValue::Bytes(bytes) = tree else {
                     unreachable!();
@@ -658,10 +659,16 @@ impl<'a> Interp<'a> {
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
         if let Some(type_name) = value_type_name(value) {
+            let codec_key = format!("{type_name}::encode");
             if let Some(func) = self
-                .methods
-                .get(&(type_name.clone(), "encode".to_string()))
+                .funcs
+                .get(&codec_key)
                 .copied()
+                .or_else(|| {
+                    self.methods
+                        .get(&(type_name.clone(), "encode".to_string()))
+                        .copied()
+                })
             {
                 if func.params.len() == 1 {
                     let mut frame = std::collections::HashMap::new();
@@ -738,10 +745,16 @@ impl<'a> Interp<'a> {
         name: &str,
         tree: &CtValue,
     ) -> Option<Result<CtValue, CtValue>> {
+        let codec_key = format!("{name}::decode");
         let func = self
-            .methods
-            .get(&(name.to_string(), "decode".to_string()))
-            .copied()?;
+            .funcs
+            .get(&codec_key)
+            .copied()
+            .or_else(|| {
+                self.methods
+                    .get(&(name.to_string(), "decode".to_string()))
+                    .copied()
+            })?;
         if func.params.len() != 1 {
             return Some(Err(decode_error(format!(
                 "`{name}.decode` has the wrong number of parameters"

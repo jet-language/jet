@@ -37,7 +37,7 @@ function run(args) {
 }
 try {
   if (task === "service-lifecycle-readiness-timeout") {
-    const failed = run(["services", "up", "timeout", "--no-color"]);
+    const failed = run(["services", "up", "timeout", "--trust", "--no-color"]);
     if (failed.error) throw failed.error;
     if (failed.status === 0 || !(failed.stdout + failed.stderr).includes("E1261")) throw new Error("readiness timeout did not fail with E1261");
     const lifecycle = readFileSync(`${project}/.jet/services/timeout/lifecycle`, "utf8");
@@ -51,10 +51,10 @@ try {
     if (!existsSync(`${project}/.jet/services/timeout/supervisor.error`)) throw new Error("failed service lost supervisor receipt");
     console.log("service=failed\nerror=E1261\nlimit=bounded\ndescendants=contained\nreceipt=startup-failed");
   } else {
-    if (run(["services", "up", "fixture", "--no-color"]).status !== 0) throw new Error("service up failed");
-    const health = run(["services", "health", "fixture", "--json", "--no-color"]);
+    if (run(["services", "up", "fixture", "--trust", "--no-color"]).status !== 0) throw new Error("service up failed");
+    const health = run(["services", "health", "fixture", "--trust", "--json", "--no-color"]);
     if (health.status !== 0 || !["healthy", "linux-systemd-user", "delegated-cgroup"].every((marker) => health.stdout.includes(marker))) throw new Error("service health receipt drifted");
-    const waited = run(["services", "wait", "fixture", "--no-color"]);
+    const waited = run(["services", "wait", "fixture", "--trust", "--no-color"]);
     if (waited.status !== 0 || !waited.stderr.includes("service `fixture` is ready")) throw new Error("service wait drifted");
     const logs = run(["services", "logs", "fixture", "--no-color"]);
     if (logs.status !== 0 || !logs.stdout.includes("service-started")) throw new Error("service logs drifted");

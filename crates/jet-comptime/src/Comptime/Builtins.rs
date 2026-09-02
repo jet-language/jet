@@ -76,6 +76,31 @@ pub fn exact_int_value(value: crate::Numeric::CtBigInt) -> CtValue {
         None => CtValue::BigInt(value),
     }
 }
+fn is_datatree(value: &CtValue) -> bool {
+    matches!(
+        value,
+        CtValue::Enum { type_name, .. } if matches!(type_name.as_str(), "JSON" | "DataTree")
+    )
+}
+
+fn datatree_payload<'a>(value: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
+    match value {
+        CtValue::Enum {
+            variant: actual,
+            args,
+            ..
+        } if is_datatree(value) && actual == variant => args.first().map(|(_, value)| value),
+        _ => None,
+    }
+}
+
+fn datatree_render(value: &CtValue) -> String {
+    super::JSONInterp::render_ordered_datatree(value, false, 0)
+}
+
+fn datatree_failure(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
+    CtValue::failed(Box::new(super::TypedDecode::decode_error_at(path, reason)))
+}
 
 fn list_values_equal(left: &[CtValue], right: &[CtValue]) -> bool {
     left.len() == right.len()
@@ -90,9 +115,12 @@ fn map_values_equal(
     right: &std::collections::BTreeMap<CtKey, CtValue>,
 ) -> bool {
     left.len() == right.len()
-        && left.iter().zip(right).all(|((left_key, left), (right_key, right))| {
-            left_key == right_key && values_equal(left, right)
-        })
+        && left
+            .iter()
+            .zip(right)
+            .all(|((left_key, left), (right_key, right))| {
+                left_key == right_key && values_equal(left, right)
+            })
 }
 
 fn fields_equal(left: &[(String, CtValue)], right: &[(String, CtValue)]) -> bool {
@@ -155,9 +183,11 @@ fn values_equal(left: &CtValue, right: &CtValue) -> bool {
             left_type == right_type
                 && left_variant == right_variant
                 && left_args.len() == right_args.len()
-                && left_args.iter().zip(right_args).all(|((left_name, left), (right_name, right))| {
-                    left_name == right_name && values_equal(left, right)
-                })
+                && left_args.iter().zip(right_args).all(
+                    |((left_name, left), (right_name, right))| {
+                        left_name == right_name && values_equal(left, right)
+                    },
+                )
         }
         (CtValue::Present(left), CtValue::Present(right)) => values_equal(left, right),
         (CtValue::Failed(CtReport::Clean(_)), CtValue::Failed(CtReport::Clean(_))) => true,
@@ -791,11 +821,7 @@ pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Dia
     cmp_ref(&a, &b, span)
 }
 
-fn cmp_ref(
-    a: &CtValue,
-    b: &CtValue,
-    span: Span,
-) -> Result<std::cmp::Ordering, Diagnostic> {
+fn cmp_ref(a: &CtValue, b: &CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
     use CtValue::*;
     if matches!(
         (a, b),
@@ -811,10 +837,10 @@ fn cmp_ref(
         ) if left_name == crate::Syntax::TYPE_FRACTION
             && right_name == crate::Syntax::TYPE_FRACTION
     ) {
-        let left = crate::Numeric::CtFraction::from_value(a)
-            .map_err(|error| unsupported(&error, span))?;
-        let right = crate::Numeric::CtFraction::from_value(b)
-            .map_err(|error| unsupported(&error, span))?;
+        let left =
+            crate::Numeric::CtFraction::from_value(a).map_err(|error| unsupported(&error, span))?;
+        let right =
+            crate::Numeric::CtFraction::from_value(b).map_err(|error| unsupported(&error, span))?;
         return Ok(left.cmp(&right));
     }
     match (a, b) {
@@ -847,7 +873,10 @@ fn cmp_ref(
 /// relational operators retain IEEE partial-order behavior for NaN.
 pub fn cmp_for_sort(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
     if let (CtValue::Float(left), CtValue::Float(right)) = (&a, &b) {
-        return Ok(float_ordering::jet_float_sort_cmp(left.as_f64(), right.as_f64()));
+        return Ok(float_ordering::jet_float_sort_cmp(
+            left.as_f64(),
+            right.as_f64(),
+        ));
     }
     cmp(a, b, span)
 }
@@ -1086,13 +1115,15 @@ pub fn apply_static_type_method(
                     string_bytes_semantics::jet_string_decode_utf8_lossy(&bytes),
                 )))
             } else {
-                Some(Ok(match string_bytes_semantics::jet_string_decode_utf8(&bytes) {
-                    Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-                    Err(message) => CtValue::failed(Box::new(CtValue::Struct {
-                        type_name: "UTF8Error".to_string(),
-                        fields: vec![("message".to_string(), CtValue::Str(message))],
-                    })),
-                }))
+                Some(Ok(
+                    match string_bytes_semantics::jet_string_decode_utf8(&bytes) {
+                        Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                        Err(message) => CtValue::failed(Box::new(CtValue::Struct {
+                            type_name: "UTF8Error".to_string(),
+                            fields: vec![("message".to_string(), CtValue::Str(message))],
+                        })),
+                    },
+                ))
             }
         }
         ("Secret", "from_bytes") => {
@@ -1251,6 +1282,10 @@ pub fn apply_mutating_with_type(
         }
     }
     match (recv, method) {
+        (CtValue::List(xs), "insert") => {
+            super::CollectionEval::list_insert_args(xs, &args, span)?;
+            Ok(CtValue::Unit)
+        }
         (CtValue::List(xs), "push") => {
             xs.push(args.into_iter().next().unwrap_or(CtValue::Unit));
             Ok(CtValue::Unit)
@@ -1550,19 +1585,23 @@ pub fn apply_method(
         // D-DATATREE-ERGO1=A: dynamic tree methods marshal through the shared
         // Prelude implementation. The type guard keeps ordinary user enums
         // from acquiring DataTree-only operations in the interpreter.
-        (
-            v @ CtValue::Enum { type_name, .. },
-            "to_text",
-        ) if matches!(type_name.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") => {
+        (v @ CtValue::Enum { type_name, .. }, "to_text")
+            if matches!(
+                type_name.as_str(),
+                "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+            ) =>
+        {
             Ok(match super::SyncLite::datatree_to_text(v) {
                 Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
                 None => CtValue::absent(Type::String),
             })
         }
-        (
-            v @ CtValue::Enum { type_name, .. },
-            "equal_unordered",
-        ) if matches!(type_name.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") => {
+        (v @ CtValue::Enum { type_name, .. }, "equal_unordered")
+            if matches!(
+                type_name.as_str(),
+                "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+            ) =>
+        {
             let Some(other) = args.into_iter().next() else {
                 return Err(unsupported(
                     "`.equal_unordered` requires one DataTree argument",
@@ -1584,66 +1623,138 @@ pub fn apply_method(
             _ => CtValue::absent(Type::Int),
         }),
         (CtValue::Failed(CtReport::Clean(t)), "zip") => Ok(CtValue::absent(t.clone())),
-        // D-SERDE-ACCESS=B: dynamic `JSON`/`Data` accessors — `Option`-returning
-        // reads over the tagged tree `JSONInterp::json_variant` builds
-        // (`.parse()`'s result, or a value built by hand with `JSON.Object(…)`).
-        // `.field`/`.at` don't match a non-Object/Array receiver or a missing
-        // key/index; `.int`/`.text`/`.bool`/`.float` don't match a value tagged
-        // with a different variant — all four report absence via `None` rather
-        // than an error, matching the `?? panic(…)` call-site convention.
-        // Guarded to an actual `JSON`-tagged value (`v @ CtValue::Enum { .. }`)
-        // rather than matching any receiver — `.int`/`.float` in particular
-        // would otherwise shadow the `core.math.random` RNG struct's own same-named
-        // methods further down (match arms are tried in order).
-        (v @ CtValue::Enum { .. }, "field") => {
+        // D-SERDE-ACCESS=B: dynamic `JSON`/`DataTree` accessors follow the
+        // canonical typed-codec contract. Every mismatch returns a told
+        // `[FieldError]` value; only a matching read returns `Present`.
+        (v @ CtValue::Enum { .. }, "field") if is_datatree(v) => {
             let key = match args.into_iter().next() {
                 Some(CtValue::Str(s)) => s,
-                _ => return Err(unsupported("`.field` requires a string argument", span)),
+                _ => return Ok(datatree_failure("", "field name must be Text")),
             };
-            Ok(match super::JSONInterp::json_payload(v, "Object") {
-                Some(CtValue::Map(m)) => match m.get(&CtKey::Str(key)) {
+            Ok(match datatree_payload(v, "Object") {
+                Some(CtValue::Map(m)) => match m.get(&CtKey::Str(key.clone())) {
                     Some(found) => CtValue::Present(Box::new(found.clone())),
-                    None => CtValue::absent(Type::Named("JSON".to_string())),
+                    None => datatree_failure(key.clone(), format!("field `{key}` not found")),
                 },
-                Some(CtValue::Struct { fields, .. }) => {
-                    match fields.iter().find(|(n, _)| n == &key) {
+                Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
+                    match fields.iter().find(|(name, _)| name == &key) {
                         Some((_, found)) => CtValue::Present(Box::new(found.clone())),
-                        None => CtValue::absent(Type::Named("JSON".to_string())),
+                        None => datatree_failure(key.clone(), format!("field `{key}` not found")),
                     }
                 }
-                _ => CtValue::absent(Type::Named("JSON".to_string())),
+                _ => datatree_failure(
+                    key,
+                    format!("expected object, got {}", datatree_render(v)),
+                ),
             })
         }
-        (v @ CtValue::Enum { .. }, "at") => {
-            let i = as_int(args.first().unwrap_or(&CtValue::Int(-1)), span)?;
-            Ok(match super::JSONInterp::json_payload(v, "Array") {
-                Some(CtValue::List(xs)) if i >= 0 && (i as usize) < xs.len() => {
-                    CtValue::Present(Box::new(xs[i as usize].clone()))
+        (v @ CtValue::Enum { .. }, "at") if is_datatree(v) => {
+            let index = match args.first() {
+                Some(CtValue::Int(index)) => *index,
+                _ => -1,
+            };
+            Ok(match datatree_payload(v, "Array") {
+                Some(CtValue::List(items)) => {
+                    let resolved = if index < 0 {
+                        index
+                            .checked_neg()
+                            .and_then(|value| usize::try_from(value).ok())
+                            .and_then(|value| items.len().checked_sub(value))
+                    } else {
+                        usize::try_from(index).ok()
+                    };
+                    match resolved.and_then(|index| items.get(index)) {
+                        Some(found) => CtValue::Present(Box::new(found.clone())),
+                        None => datatree_failure(
+                            format!("[{index}]"),
+                            format!("index {index} out of bounds (len {})", items.len()),
+                        ),
+                    }
                 }
-                _ => CtValue::absent(Type::Named("JSON".to_string())),
+                _ => datatree_failure(
+                    format!("[{index}]"),
+                    format!("expected array, got {}", datatree_render(v)),
+                ),
             })
         }
-        (v @ CtValue::Enum { .. }, "int") => Ok(match super::JSONInterp::json_payload(v, "Int") {
-            Some(n) => CtValue::Present(Box::new(n.clone())),
-            None => CtValue::absent(Type::Int),
-        }),
-        (v @ CtValue::Enum { .. }, "text") => {
-            Ok(match super::JSONInterp::json_payload(v, "Text") {
-                Some(s) => CtValue::Present(Box::new(s.clone())),
-                None => CtValue::absent(Type::String),
-            })
+        (v @ CtValue::Enum { .. }, "int") if is_datatree(v) => {
+            let value = match datatree_payload(v, "Int") {
+                Some(value @ (CtValue::Int(_) | CtValue::BigInt(_))) => Some(value.clone()),
+                _ => match datatree_payload(v, "Number") {
+                    Some(CtValue::Str(text)) => crate::Numeric::CtBigInt::from_json_number(text)
+                        .ok()
+                        .map(exact_int_value),
+                    _ => None,
+                },
+            };
+            Ok(value
+                .map(|value| CtValue::Present(Box::new(value)))
+                .unwrap_or_else(|| {
+                    datatree_failure(
+                        "",
+                        format!("expected int, got {}", datatree_render(v)),
+                    )
+                }))
         }
-        (v @ CtValue::Enum { .. }, "bool") => {
-            Ok(match super::JSONInterp::json_payload(v, "Bool") {
-                Some(b) => CtValue::Present(Box::new(b.clone())),
-                None => CtValue::absent(Type::Bool),
-            })
+        (v @ CtValue::Enum { .. }, "text") if is_datatree(v) => {
+            let value = datatree_payload(v, "Text")
+                .or_else(|| datatree_payload(v, "TypedText"))
+                .and_then(|value| matches!(value, CtValue::Str(_)).then(|| value.clone()));
+            Ok(value
+                .map(|value| CtValue::Present(Box::new(value)))
+                .unwrap_or_else(|| {
+                    datatree_failure(
+                        "",
+                        format!("expected text, got {}", datatree_render(v)),
+                    )
+                }))
         }
-        (v @ CtValue::Enum { .. }, "float") => {
-            Ok(match super::JSONInterp::json_payload(v, "Float") {
-                Some(f) => CtValue::Present(Box::new(f.clone())),
-                None => CtValue::absent(Type::Float),
-            })
+        (v @ CtValue::Enum { .. }, "bool") if is_datatree(v) => {
+            let value = datatree_payload(v, "Bool")
+                .and_then(|value| matches!(value, CtValue::Bool(_)).then(|| value.clone()));
+            Ok(value
+                .map(|value| CtValue::Present(Box::new(value)))
+                .unwrap_or_else(|| {
+                    datatree_failure(
+                        "",
+                        format!("expected bool, got {}", datatree_render(v)),
+                    )
+                }))
+        }
+        (v @ CtValue::Enum { .. }, "float") if is_datatree(v) => {
+            let value = match datatree_payload(v, "Float") {
+                Some(value @ CtValue::Float(_)) => Some(value.clone()),
+                _ => datatree_payload(v, "Int")
+                    .and_then(|value| match value {
+                        CtValue::Int(value) => {
+                            Some(CtValue::Float(CtFloat::f64(*value as f64)))
+                        }
+                        CtValue::BigInt(value) => value
+                            .to_string_rep()
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|value| value.is_finite())
+                            .map(|value| CtValue::Float(CtFloat::f64(value))),
+                        _ => None,
+                    })
+                    .or_else(|| match datatree_payload(v, "Number") {
+                        Some(CtValue::Str(text)) => text
+                            .trim()
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|value| value.is_finite())
+                            .map(|value| CtValue::Float(CtFloat::f64(value))),
+                        _ => None,
+                    }),
+            };
+            Ok(value
+                .map(|value| CtValue::Present(Box::new(value)))
+                .unwrap_or_else(|| {
+                    datatree_failure(
+                        "",
+                        format!("expected float, got {}", datatree_render(v)),
+                    )
+                }))
         }
         (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "abs") => Ok(exact_int_value(
             exact_big(value).expect("whole-number absolute value").abs(),
@@ -1744,9 +1855,7 @@ pub fn apply_method(
         }
         (CtValue::List(xs), "step_by") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-            if let Some(message) =
-                super::CollectionEval::sequence_argument_message("step_by", n)
-            {
+            if let Some(message) = super::CollectionEval::sequence_argument_message("step_by", n) {
                 return Err(comptime_panic(message, span));
             }
             Ok(CtValue::List(
@@ -1879,9 +1988,7 @@ pub fn apply_method(
         }
         (CtValue::List(xs), "chunks") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?;
-            if let Some(message) =
-                super::CollectionEval::sequence_argument_message("chunks", n)
-            {
+            if let Some(message) = super::CollectionEval::sequence_argument_message("chunks", n) {
                 return Err(comptime_panic(message, span));
             }
             Ok(CtValue::List(
@@ -1892,9 +1999,7 @@ pub fn apply_method(
         }
         (CtValue::List(xs), "windows") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?;
-            if let Some(message) =
-                super::CollectionEval::sequence_argument_message("windows", n)
-            {
+            if let Some(message) = super::CollectionEval::sequence_argument_message("windows", n) {
                 return Err(comptime_panic(message, span));
             }
             Ok(CtValue::List(
@@ -2399,20 +2504,24 @@ pub fn apply_method(
         // `core.regex.compile`/`is_match`/`find` already run (`regex_is_match`/
         // `regex_find` in Methods/core_calls.rs), composed for a String receiver.
         (CtValue::Str(s), "matches") => match args.into_iter().next() {
-            Some(CtValue::Str(pattern)) => Ok(match super::regex_kernel::JetRegex::parse(&pattern) {
-                Ok(re) => CtValue::Present(Box::new(CtValue::Bool(re.is_match(s)))),
-                Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
-            }),
+            Some(CtValue::Str(pattern)) => {
+                Ok(match super::regex_kernel::JetRegex::parse(&pattern) {
+                    Ok(re) => CtValue::Present(Box::new(CtValue::Bool(re.is_match(s)))),
+                    Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
+                })
+            }
             _ => Err(unsupported("matches with a non-text argument", span)),
         },
         (CtValue::Str(s), "match") => match args.into_iter().next() {
-            Some(CtValue::Str(pattern)) => Ok(match super::regex_kernel::JetRegex::parse(&pattern) {
-                Ok(re) => CtValue::Present(Box::new(match re.find(s).ok() {
-                    Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-                    None => CtValue::absent(Type::String),
-                })),
-                Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
-            }),
+            Some(CtValue::Str(pattern)) => {
+                Ok(match super::regex_kernel::JetRegex::parse(&pattern) {
+                    Ok(re) => CtValue::Present(Box::new(match re.find(s).ok() {
+                        Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                        None => CtValue::absent(Type::String),
+                    })),
+                    Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
+                })
+            }
             _ => Err(unsupported("match with a non-text argument", span)),
         },
         (CtValue::Str(s), "rsplit") => match args.into_iter().next() {

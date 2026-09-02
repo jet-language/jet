@@ -170,11 +170,27 @@ fn try_sparse_member_fetch(
         // No git at all: let the full-clone path produce the "need git" error.
         return SparseOutcome::NotMonorepo;
     }
-    let tmp = match super::exclusive_temp_dir(&std::env::temp_dir(), "jetpack-sparse") {
+    let cache_parent = match held_fs::HeldCacheParent::open_or_create(cache) {
+        Ok(parent) => parent,
+        Err(_) => return SparseOutcome::SparseFailed,
+    };
+    match cache_parent.is_real_directory() {
+        Ok(true) => return SparseOutcome::Materialized(cache.to_path_buf()),
+        Ok(false) => {}
+        Err(_) => return SparseOutcome::SparseFailed,
+    }
+    let staging = match cache_parent
+        .directory()
+        .create_temp_directory("jetpack-sparse")
+    {
+        Ok(staging) => staging,
+        Err(_) => return SparseOutcome::SparseFailed,
+    };
+    let tmp = match staging.process_path() {
         Ok(path) => path,
         Err(_) => return SparseOutcome::SparseFailed,
     };
-    let _guard = super::TempDirGuard(tmp.clone());
+    let _guard = staging;
 
     let git_ok = |args: &[&str]| -> bool {
         super::hardened_git_command()
@@ -282,30 +298,42 @@ fn try_sparse_member_fetch(
         return SparseOutcome::SparseFailed;
     }
 
-    // Validate before the fast rename too. A successful same-filesystem rename
-    // would otherwise publish Git symlinks without reaching the checked copy
-    // fallback.
-    if publish_remote_checkout(&tmp, cache).is_err() {
+    // Keep the opened checkout authority through validation and publication.
+    if publish_remote_checkout_held(_guard.entry(), &cache_parent).is_err() {
         return SparseOutcome::SparseFailed;
     }
     SparseOutcome::Materialized(cache.to_path_buf())
 }
 
+#[cfg(test)]
 fn publish_remote_checkout(tmp: &Path, cache: &Path) -> Result<(), String> {
-    if let Some(parent) = cache.parent() {
-        ensure_real_directory(parent).map_err(|error| error.to_string())?;
-    }
-    // Validate the complete checkout before the fast rename. Git can materialize
-    // symlinks from an untrusted remote, and rename would otherwise publish them
-    // without reaching the checked copy fallback.
-    tree_fingerprint(tmp)?;
-    match std::fs::rename(tmp, cache) {
+    let source = held_fs::HeldDirectoryEntry::open(tmp).map_err(|error| error.to_string())?;
+    let cache_parent =
+        held_fs::HeldCacheParent::open_or_create(cache).map_err(|error| error.to_string())?;
+    publish_remote_checkout_held(&source, &cache_parent)
+}
+
+fn publish_remote_checkout_held(
+    source: &held_fs::HeldDirectoryEntry,
+    cache: &held_fs::HeldCacheParent,
+) -> Result<(), String> {
+    cache
+        .validate_existing()
+        .map_err(|error| error.to_string())?;
+    tree_fingerprint_held(source.directory()).map_err(|error| error.to_string())?;
+    match source.rename_into(cache) {
         Ok(()) => Ok(()),
-        Err(rename_error) => copy_tree(tmp, cache).map_err(|copy_error| {
-            format!("rename failed: {rename_error}; checked copy failed: {copy_error}")
-        }),
+        Err(rename_error) => {
+            let destination = cache
+                .open_or_create_directory()
+                .map_err(|error| error.to_string())?;
+            copy_tree_held(source.directory(), &destination).map_err(|copy_error| {
+                format!("rename failed: {rename_error}; checked copy failed: {copy_error}")
+            })
+        }
     }
 }
+
 
 /// The directories that contain a package marker (workspace members,
 /// `find()` semantics), from a `git ls-tree -r --name-only` listing. Root-level
@@ -526,13 +554,24 @@ pub(super) fn fetch_remote_repo(
         ));
     }
 
-    let parent = cache.parent().unwrap_or(ctx.store_dir);
-    ensure_real_directory(parent)
-        .map_err(|e| ProviderError::CoreBuild(format!("could not create source cache: {e}")))?;
-    let tmp_root = super::exclusive_temp_dir(parent, "jetpack-source").map_err(|e| {
-        ProviderError::CoreBuild(format!("could not create temporary source checkout: {e}"))
+    let cache_parent = held_fs::HeldCacheParent::open_or_create(&cache).map_err(|error| {
+        ProviderError::CoreBuild(format!("could not create source cache: {error}"))
     })?;
-    let _guard = super::TempDirGuard(tmp_root.clone());
+    if cache_parent.is_real_directory().map_err(|error| {
+        ProviderError::CoreBuild(format!("could not inspect source cache: {error}"))
+    })? {
+        return Ok(cache);
+    }
+    let staging = cache_parent
+        .directory()
+        .create_temp_directory("jetpack-source")
+        .map_err(|e| {
+            ProviderError::CoreBuild(format!("could not create temporary source checkout: {e}"))
+        })?;
+    let tmp_root = staging.process_path().map_err(|e| {
+        ProviderError::CoreBuild(format!("could not address temporary source checkout: {e}"))
+    })?;
+    let _guard = staging;
     let tmp = tmp_root.join("checkout");
 
     let output = super::hardened_git_command()
@@ -579,7 +618,14 @@ pub(super) fn fetch_remote_repo(
         }
     }
 
-    publish_remote_checkout(&tmp, &cache).map_err(|error| {
+    let checkout = held_fs::HeldDirectoryEntry::from_child(
+        _guard.directory(),
+        std::ffi::OsStr::new("checkout"),
+    )
+    .map_err(|error| {
+        ProviderError::CoreBuild(format!("could not open fetched source checkout: {error}"))
+    })?;
+    publish_remote_checkout_held(&checkout, &cache_parent).map_err(|error| {
         ProviderError::CoreBuild(format!("could not place fetched source in cache: {error}"))
     })?;
     Ok(cache)
@@ -599,21 +645,15 @@ pub(super) fn source_cache_dir(store_dir: &Path, remote: &RemoteSource) -> PathB
 }
 
 fn cache_is_real_directory(cache: &Path) -> Result<bool, ProviderError> {
-    if let Some(parent) = cache.parent() {
-        validate_existing_directory(parent).map_err(|error| {
+    match held_fs::HeldCacheParent::open(cache) {
+        Ok(parent) => parent.is_real_directory().map_err(|error| {
             ProviderError::CoreBuild(format!(
-                "source cache parent must contain only real directories: {error}"
+                "source cache must contain only real directories: {error}"
             ))
-        })?;
-    }
-    match std::fs::symlink_metadata(cache) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(ProviderError::CoreBuild(
-            format!("source cache must not be a symlink: {}", cache.display()),
-        )),
-        Ok(metadata) => Ok(metadata.is_dir()),
+        }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(ProviderError::CoreBuild(format!(
-            "could not inspect source cache: {error}"
+            "source cache parent must contain only real directories: {error}"
         ))),
     }
 }
@@ -749,7 +789,6 @@ mod tests {
         let cache_link = root.join("cache");
         symlink(&outside, &cache_link).unwrap();
         assert!(cache_is_real_directory(&cache_link).is_err());
-
         let parent_link = root.join("parent");
         symlink(&outside, &parent_link).unwrap();
         assert!(cache_is_real_directory(&parent_link.join("cache")).is_err());
@@ -784,6 +823,916 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&outside);
     }
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    fn unique_remote_test_root(label: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "jetpack-remote-{label}-{}-{sequence}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn remote_tree_fingerprint_and_copy_reject_multiply_linked_source_files() {
+        let root = unique_remote_test_root("hardlink");
+        let outside = unique_remote_test_root("hardlink-outside");
+        let source = root.join("checkout");
+        let destination = root.join("cache");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(&outside, "outside bytes").unwrap();
+        std::fs::hard_link(&outside, source.join("linked.txt")).unwrap();
+
+        assert!(tree_fingerprint(&source).is_err());
+        assert!(copy_tree(&source, &destination).is_err());
+        assert!(!destination.join("linked.txt").exists());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "outside bytes");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn remote_checkout_ancestor_swap_stays_on_held_checkout_and_cache() {
+        use std::os::unix::fs::symlink;
+
+        let root = unique_remote_test_root("ancestor-swap");
+        let outside = unique_remote_test_root("ancestor-swap-outside");
+        let holder = root.join("holder");
+        let checkout = holder.join("checkout");
+        let destination = root.join("cache");
+        let held_holder = root.with_file_name(format!(
+            "{}-held",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&held_holder);
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(checkout.join("value.txt"), "inside bytes").unwrap();
+        std::fs::write(outside.join("value.txt"), "outside bytes").unwrap();
+
+        let source = held_fs::HeldDirectoryEntry::open(&checkout).unwrap();
+        let destination_parent = held_fs::HeldCacheParent::open_or_create(&destination).unwrap();
+        let destination_dir = destination_parent.open_or_create_directory().unwrap();
+        let expected = tree_fingerprint_held(source.directory()).unwrap();
+
+        std::fs::rename(&holder, &held_holder).unwrap();
+        symlink(&outside, &holder).unwrap();
+
+        assert_eq!(tree_fingerprint_held(source.directory()).unwrap(), expected);
+        copy_tree_held(source.directory(), &destination_dir).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(destination.join("value.txt")).unwrap(),
+            "inside bytes"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("value.txt")).unwrap(),
+            "outside bytes"
+        );
+
+        let _ = std::fs::remove_file(&holder);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&held_holder);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn remote_cache_publication_stays_on_held_parent_after_ancestor_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = unique_remote_test_root("publish-swap");
+        let outside = unique_remote_test_root("publish-swap-outside");
+        let parent = root.join("cache-parent");
+        let checkout = parent.join("checkout");
+        let cache = parent.join("cache");
+        let held_parent = root.with_file_name(format!(
+            "{}-held",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&held_parent);
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(checkout.join("value.txt"), "inside bytes").unwrap();
+        std::fs::write(outside.join("sentinel"), "outside sentinel").unwrap();
+
+        let source = held_fs::HeldDirectoryEntry::open(&checkout).unwrap();
+        let cache_parent = held_fs::HeldCacheParent::open_or_create(&cache).unwrap();
+        std::fs::rename(&parent, &held_parent).unwrap();
+        symlink(&outside, &parent).unwrap();
+
+        publish_remote_checkout_held(&source, &cache_parent).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(held_parent.join("cache/value.txt")).unwrap(),
+            "inside bytes"
+        );
+        assert!(!outside.join("cache").exists());
+        assert_eq!(
+            std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+            "outside sentinel"
+        );
+
+        let _ = std::fs::remove_file(&parent);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&held_parent);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn remote_staging_cleanup_stays_on_held_parent_after_ancestor_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = unique_remote_test_root("cleanup-swap");
+        let outside = unique_remote_test_root("cleanup-swap-outside");
+        let parent = root.join("cache-parent");
+        let cache = parent.join("cache");
+        let held_parent = root.with_file_name(format!(
+            "{}-held",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&held_parent);
+        std::fs::create_dir_all(&parent).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "outside sentinel").unwrap();
+
+        let cache_parent = held_fs::HeldCacheParent::open_or_create(&cache).unwrap();
+        let staging = cache_parent
+            .directory()
+            .create_temp_directory("remote-cleanup")
+            .unwrap();
+        let staging_name = staging.entry().name().to_os_string();
+
+        std::fs::rename(&parent, &held_parent).unwrap();
+        symlink(&outside, &parent).unwrap();
+        drop(staging);
+
+        assert!(!held_parent.join(&staging_name).exists());
+        assert!(!outside.join(&staging_name).exists());
+        assert_eq!(
+            std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+            "outside sentinel"
+        );
+
+        let _ = std::fs::remove_file(&parent);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&held_parent);
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+mod held_fs {
+    use std::ffi::{c_char, CString, OsStr, OsString};
+    use std::fs::{self, File, FileType, Metadata, OpenOptions};
+    use std::io;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+    use std::path::{Component, Path, PathBuf};
+
+    const O_RDONLY: i32 = 0;
+    const O_WRONLY: i32 = 1;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_CREAT: i32 = 0o100;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_EXCL: i32 = 0o200;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_CREAT: i32 = 0x0200;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_EXCL: i32 = 0x0800;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_CLOEXEC: i32 = 0o2000000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_CLOEXEC: i32 = 0x01000000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_DIRECTORY: i32 = 0o200000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_DIRECTORY: i32 = 0x00100000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_NOFOLLOW: i32 = 0x0100;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NONBLOCK: i32 = 0o4000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_NONBLOCK: i32 = 0x0004;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const AT_REMOVEDIR: i32 = 0x200;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const AT_REMOVEDIR: i32 = 0x80;
+
+    unsafe extern "C" {
+        fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
+        fn mkdirat(directory: i32, path: *const c_char, mode: u32) -> i32;
+        fn renameat(
+            old_directory: i32,
+            old_path: *const c_char,
+            new_directory: i32,
+            new_path: *const c_char,
+        ) -> i32;
+        fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
+    }
+
+    pub(super) struct DirectoryEntry {
+        pub(super) name: OsString,
+        pub(super) file_type: FileType,
+    }
+
+    pub(super) struct HeldDirectory {
+        path: PathBuf,
+        file: File,
+    }
+
+    pub(super) struct HeldDirectoryEntry {
+        parent: HeldDirectory,
+        name: OsString,
+        directory: HeldDirectory,
+    }
+
+    pub(super) struct HeldTempDirectory {
+        entry: HeldDirectoryEntry,
+    }
+
+    pub(super) struct HeldCacheParent {
+        directory: HeldDirectory,
+        name: OsString,
+    }
+
+    fn name(value: &OsStr) -> io::Result<CString> {
+        CString::new(value.as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in path component"))
+    }
+
+    fn open_base(absolute: bool) -> io::Result<File> {
+        let path = if absolute {
+            Path::new("/")
+        } else {
+            Path::new(".")
+        };
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            .open(path)
+    }
+
+    fn open_at(parent: &File, child: &OsStr, flags: i32, mode: u32) -> io::Result<File> {
+        let child = name(child)?;
+        let fd = unsafe { openat(parent.as_raw_fd(), child.as_ptr(), flags, mode) };
+        if fd < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(unsafe { File::from_raw_fd(fd) })
+        }
+    }
+
+    fn remove_at(parent: &File, child: &OsStr, flags: i32) -> io::Result<()> {
+        let child = name(child)?;
+        if unsafe { unlinkat(parent.as_raw_fd(), child.as_ptr(), flags) } != 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    impl HeldDirectory {
+        pub(super) fn open(path: &Path) -> io::Result<Self> {
+            Self::walk(path, false)
+        }
+
+        pub(super) fn open_or_create(path: &Path) -> io::Result<Self> {
+            Self::walk(path, true)
+        }
+
+        fn walk(path: &Path, create: bool) -> io::Result<Self> {
+            let mut current = Self {
+                path: if path.is_absolute() {
+                    PathBuf::from("/")
+                } else {
+                    PathBuf::from(".")
+                },
+                file: open_base(path.is_absolute())?,
+            };
+            for component in path.components() {
+                let part = match component {
+                    Component::Normal(part) => part,
+                    Component::RootDir | Component::CurDir => continue,
+                    Component::ParentDir => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "directory path contains a parent component",
+                        ))
+                    }
+                    Component::Prefix(_) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "directory path has an unsupported prefix",
+                        ))
+                    }
+                };
+                match current.open_directory(part) {
+                    Ok(next) => current = next,
+                    Err(error) if create && error.kind() == io::ErrorKind::NotFound => {
+                        current.create_directory(part)?;
+                        current = current.open_directory(part)?;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok(current)
+        }
+
+        pub(super) fn duplicate(&self) -> io::Result<Self> {
+            Ok(Self {
+                path: self.path.clone(),
+                file: self.file.try_clone()?,
+            })
+        }
+
+        pub(super) fn process_path(&self) -> io::Result<PathBuf> {
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            {
+                Ok(PathBuf::from(format!("/proc/self/fd/{}", self.file.as_raw_fd())))
+            }
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            {
+                Ok(PathBuf::from(format!("/dev/fd/{}", self.file.as_raw_fd())))
+            }
+        }
+
+        pub(super) fn path(&self) -> &Path {
+            &self.path
+        }
+
+        pub(super) fn open_directory(&self, child: &OsStr) -> io::Result<Self> {
+            let file = open_at(
+                &self.file,
+                child,
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )?;
+            if !file.metadata()?.is_dir() {
+                return Err(io::Error::other("opened path is not a directory"));
+            }
+            Ok(Self {
+                path: self.path.join(child),
+                file,
+            })
+        }
+
+        pub(super) fn open_file(&self, child: &OsStr) -> io::Result<File> {
+            let file = open_at(
+                &self.file,
+                child,
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK,
+                0,
+            )?;
+            if !file.metadata()?.is_file() {
+                return Err(io::Error::other("opened path is not a regular file"));
+            }
+            Ok(file)
+        }
+
+        pub(super) fn entries(&self) -> io::Result<Vec<DirectoryEntry>> {
+            let entries_path = self.process_path()?;
+            let mut entries = fs::read_dir(entries_path)?
+                .map(|entry| {
+                    let entry = entry?;
+                    Ok(DirectoryEntry {
+                        name: entry.file_name(),
+                        file_type: entry.file_type()?,
+                    })
+                })
+                .collect::<io::Result<Vec<_>>>()?;
+            entries.sort_by(|left, right| left.name.cmp(&right.name));
+            Ok(entries)
+        }
+
+        pub(super) fn create_directory(&self, child: &OsStr) -> io::Result<()> {
+            let child = name(child)?;
+            if unsafe { mkdirat(self.file.as_raw_fd(), child.as_ptr(), 0o700) } != 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() != io::ErrorKind::AlreadyExists {
+                    return Err(error);
+                }
+            }
+            Ok(())
+        }
+
+        pub(super) fn open_or_create_directory(&self, child: &OsStr) -> io::Result<Self> {
+            match self.open_directory(child) {
+                Ok(directory) => Ok(directory),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    self.create_directory(child)?;
+                    self.open_directory(child)
+                }
+                Err(error) => Err(error),
+            }
+        }
+
+        pub(super) fn create_temp_directory(
+            &self,
+            prefix: &str,
+        ) -> io::Result<HeldTempDirectory> {
+            if prefix.is_empty()
+                || prefix == "."
+                || prefix == ".."
+                || prefix.chars().any(char::is_control)
+                || prefix.contains(['/', '\\'])
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "temporary-directory prefix must be one safe path component",
+                ));
+            }
+            for _ in 0..16 {
+                let bytes = crate::TrustRoot::os_random_bytes::<16>()?;
+                let suffix = bytes
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                let child = OsString::from(format!("{prefix}-{suffix}"));
+                let child_name = name(&child)?;
+                if unsafe { mkdirat(self.file.as_raw_fd(), child_name.as_ptr(), 0o700) != 0 } {
+                    let error = io::Error::last_os_error();
+                    if error.kind() == io::ErrorKind::AlreadyExists {
+                        continue;
+                    }
+                    return Err(error);
+                }
+                let directory = self.open_directory(&child)?;
+                return Ok(HeldTempDirectory {
+                    entry: HeldDirectoryEntry {
+                        parent: self.duplicate()?,
+                        name: child.clone(),
+                        directory,
+                    },
+                });
+            }
+            Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "could not allocate an exclusive temporary directory",
+            ))
+        }
+
+        fn create_temp_file(&self, prefix: &str, mode: u32) -> io::Result<(OsString, File)> {
+            for _ in 0..16 {
+                let bytes = crate::TrustRoot::os_random_bytes::<16>()?;
+                let suffix = bytes
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                let child = OsString::from(format!("{prefix}-{suffix}"));
+                match open_at(
+                    &self.file,
+                    &child,
+                    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                    mode,
+                ) {
+                    Ok(file) => return Ok((child, file)),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "could not allocate an exclusive temporary file",
+            ))
+        }
+
+        pub(super) fn rename_child(
+            &self,
+            old: &OsStr,
+            destination: &HeldCacheParent,
+        ) -> io::Result<()> {
+            let old = name(old)?;
+            let new = name(destination.name())?;
+            if unsafe {
+                renameat(
+                    self.file.as_raw_fd(),
+                    old.as_ptr(),
+                    destination.directory().file.as_raw_fd(),
+                    new.as_ptr(),
+                )
+            } != 0
+            {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        }
+
+        pub(super) fn replace_child(&self, old: &OsStr, new: &OsStr) -> io::Result<()> {
+            let old = name(old)?;
+            let new = name(new)?;
+            if unsafe {
+                renameat(
+                    self.file.as_raw_fd(),
+                    old.as_ptr(),
+                    self.file.as_raw_fd(),
+                    new.as_ptr(),
+                )
+            } != 0
+            {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        }
+
+        pub(super) fn remove_tree(&self, child: &OsStr) -> io::Result<()> {
+            let child_directory = match self.open_directory(child) {
+                Ok(directory) => Some(directory),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+                Err(_) => None,
+            };
+            if let Some(directory) = child_directory {
+                for entry in directory.entries()? {
+                    directory.remove_tree(&entry.name)?;
+                }
+                remove_at(&self.file, child, AT_REMOVEDIR)?;
+                return Ok(());
+            }
+            match remove_at(&self.file, child, 0) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
+            }
+        }
+    }
+
+    impl HeldDirectoryEntry {
+        pub(super) fn open(path: &Path) -> io::Result<Self> {
+            let name = path.file_name().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "directory path has no final name")
+            })?;
+            let parent_path = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let parent = HeldDirectory::open(parent_path)?;
+            let directory = parent.open_directory(name)?;
+            Ok(Self {
+                parent,
+                name: name.to_os_string(),
+                directory,
+            })
+        }
+
+        pub(super) fn from_child(parent: &HeldDirectory, name: &OsStr) -> io::Result<Self> {
+            let directory = parent.open_directory(name)?;
+            Ok(Self {
+                parent: parent.duplicate()?,
+                name: name.to_os_string(),
+                directory,
+            })
+        }
+
+        pub(super) fn directory(&self) -> &HeldDirectory {
+            &self.directory
+        }
+
+        #[cfg(test)]
+        pub(super) fn name(&self) -> &OsStr {
+            &self.name
+        }
+
+        pub(super) fn rename_into(&self, destination: &HeldCacheParent) -> io::Result<()> {
+            self.parent.rename_child(&self.name, destination)
+        }
+    }
+
+    impl HeldTempDirectory {
+        pub(super) fn entry(&self) -> &HeldDirectoryEntry {
+            &self.entry
+        }
+
+        pub(super) fn directory(&self) -> &HeldDirectory {
+            self.entry.directory()
+        }
+
+        pub(super) fn process_path(&self) -> io::Result<PathBuf> {
+            self.entry.directory.process_path()
+        }
+    }
+
+    impl Drop for HeldTempDirectory {
+        fn drop(&mut self) {
+            let _ = self.entry.parent.remove_tree(&self.entry.name);
+        }
+    }
+
+    impl HeldCacheParent {
+        pub(super) fn open(cache: &Path) -> io::Result<Self> {
+            Self::open_with(cache, false)
+        }
+
+        pub(super) fn open_or_create(cache: &Path) -> io::Result<Self> {
+            Self::open_with(cache, true)
+        }
+
+        fn open_with(cache: &Path, create: bool) -> io::Result<Self> {
+            let name = cache.file_name().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "cache path has no final name")
+            })?;
+            let parent_path = cache
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let directory = if create {
+                HeldDirectory::open_or_create(parent_path)?
+            } else {
+                HeldDirectory::open(parent_path)?
+            };
+            Ok(Self {
+                directory,
+                name: name.to_os_string(),
+            })
+        }
+
+        pub(super) fn directory(&self) -> &HeldDirectory {
+            &self.directory
+        }
+
+        pub(super) fn name(&self) -> &OsStr {
+            &self.name
+        }
+
+
+        pub(super) fn is_real_directory(&self) -> io::Result<bool> {
+            match self.directory.open_directory(&self.name) {
+                Ok(_) => Ok(true),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                Err(error) if error.kind() == io::ErrorKind::NotADirectory => {
+                    let path = self.directory.path.join(&self.name);
+                    match fs::symlink_metadata(path) {
+                        Ok(metadata) if metadata.file_type().is_symlink() => Err(
+                            io::Error::new(
+                                io::ErrorKind::PermissionDenied,
+                                "source cache path must not be a symlink",
+                            ),
+                        ),
+                        _ => Ok(false),
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
+
+        pub(super) fn validate_existing(&self) -> io::Result<()> {
+            match self.directory.open_directory(&self.name) {
+                Ok(_) => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::NotADirectory => {
+                    let file = self.directory.open_file(&self.name)?;
+                    let metadata = file.metadata()?;
+                    reject_multiply_linked(&metadata)
+                }
+                Err(error) => Err(error),
+            }
+        }
+
+        pub(super) fn open_or_create_directory(&self) -> io::Result<HeldDirectory> {
+            self.directory.open_or_create_directory(&self.name)
+        }
+    }
+
+    pub(super) fn reject_multiply_linked(metadata: &Metadata) -> io::Result<()> {
+        if metadata.nlink() > 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "multiply linked files are not accepted in a remote checkout",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn copy_file(
+        source: &HeldDirectory,
+        source_name: &OsStr,
+        destination: &HeldDirectory,
+        destination_name: &OsStr,
+    ) -> io::Result<()> {
+        let mut source_file = source.open_file(source_name)?;
+        let source_metadata = source_file.metadata()?;
+        reject_multiply_linked(&source_metadata)?;
+
+        match destination.open_file(destination_name) {
+            Ok(existing) => {
+                let metadata = existing.metadata()?;
+                if !metadata.is_file() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "copy destination must be a regular file",
+                    ));
+                }
+                reject_multiply_linked(&metadata)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+
+        let mode = source_metadata.permissions().mode();
+        let (temporary_name, mut destination_file) =
+            destination.create_temp_file(".jetpack-copy", mode & 0o7777)?;
+        let result = (|| {
+            io::copy(&mut source_file, &mut destination_file)?;
+            destination_file.set_permissions(fs::Permissions::from_mode(mode & 0o7777))?;
+            destination_file.sync_all()?;
+            let after = source_file.metadata()?;
+            if !after.is_file()
+                || after.dev() != source_metadata.dev()
+                || after.ino() != source_metadata.ino()
+                || after.len() != source_metadata.len()
+                || after.modified().ok() != source_metadata.modified().ok()
+            {
+                return Err(io::Error::other("source file changed while copying"));
+            }
+            destination.replace_child(&temporary_name, destination_name)
+        })();
+        if result.is_err() {
+            let _ = remove_at(&destination.file, &temporary_name, 0);
+        }
+        result
+    }
+}
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const _: fn(&held_fs::HeldDirectory) -> std::io::Result<std::path::PathBuf> =
+    held_fs::HeldDirectory::process_path;
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+)))]
+mod held_fs {
+    use super::Path;
+    use std::ffi::{OsStr, OsString};
+    use std::fs::{File, FileType};
+    use std::io;
+    use std::path::PathBuf;
+
+    fn unsupported<T>() -> io::Result<T> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "remote checkout authority is unsupported on this platform",
+        ))
+    }
+
+    pub(super) struct DirectoryEntry {
+        pub(super) name: OsString,
+        pub(super) file_type: FileType,
+    }
+    pub(super) struct HeldDirectory;
+    pub(super) struct HeldDirectoryEntry;
+    pub(super) struct HeldTempDirectory;
+    pub(super) struct HeldCacheParent;
+
+    impl HeldDirectory {
+        pub(super) fn open(_: &Path) -> io::Result<Self> {
+            unsupported()
+        }
+        pub(super) fn open_or_create(_: &Path) -> io::Result<Self> {
+            unsupported()
+        }
+        pub(super) fn path(&self) -> &Path {
+            unreachable!()
+        }
+        pub(super) fn process_path(&self) -> io::Result<PathBuf> {
+            unsupported()
+        }
+        pub(super) fn open_directory(&self, _: &OsStr) -> io::Result<Self> {
+            unsupported()
+        }
+        pub(super) fn open_file(&self, _: &OsStr) -> io::Result<File> {
+            unsupported()
+        }
+        pub(super) fn entries(&self) -> io::Result<Vec<DirectoryEntry>> {
+            unsupported()
+        }
+        pub(super) fn create_directory(&self, _: &OsStr) -> io::Result<()> {
+            unsupported()
+        }
+        pub(super) fn open_or_create_directory(&self, _: &OsStr) -> io::Result<Self> {
+            unsupported()
+        }
+        pub(super) fn create_temp_directory(&self, _: &str) -> io::Result<HeldTempDirectory> {
+            unsupported()
+        }
+    }
+
+    impl HeldDirectoryEntry {
+        pub(super) fn open(_: &Path) -> io::Result<Self> {
+            unsupported()
+        }
+        pub(super) fn from_child(_: &HeldDirectory, _: &OsStr) -> io::Result<Self> {
+            unsupported()
+        }
+        pub(super) fn directory(&self) -> &HeldDirectory {
+            unreachable!()
+        }
+        pub(super) fn path(&self) -> &Path {
+            unreachable!()
+        }
+        pub(super) fn rename_into(&self, _: &HeldCacheParent) -> io::Result<()> {
+            unsupported()
+        }
+    }
+
+    impl HeldTempDirectory {
+        pub(super) fn entry(&self) -> &HeldDirectoryEntry {
+            unreachable!()
+        }
+        pub(super) fn directory(&self) -> &HeldDirectory {
+            unreachable!()
+        }
+        pub(super) fn process_path(&self) -> io::Result<PathBuf> {
+            unsupported()
+        }
+    }
+
+    impl HeldCacheParent {
+        pub(super) fn open(_: &Path) -> io::Result<Self> {
+            unsupported()
+        }
+        pub(super) fn open_or_create(_: &Path) -> io::Result<Self> {
+            unsupported()
+        }
+        pub(super) fn directory(&self) -> &HeldDirectory {
+            unreachable!()
+        }
+        pub(super) fn name(&self) -> &OsStr {
+            unreachable!()
+        }
+        pub(super) fn path(&self) -> &Path {
+            unreachable!()
+        }
+        pub(super) fn is_real_directory(&self) -> io::Result<bool> {
+            unsupported()
+        }
+        pub(super) fn validate_existing(&self) -> io::Result<()> {
+            unsupported()
+        }
+        pub(super) fn open_or_create_directory(&self) -> io::Result<HeldDirectory> {
+            unsupported()
+        }
+    }
+
+    pub(super) fn reject_multiply_linked(_: &std::fs::Metadata) -> io::Result<()> {
+        unsupported()
+    }
+
+    pub(super) fn copy_file(
+        _: &HeldDirectory,
+        _: &OsStr,
+        _: &HeldDirectory,
+        _: &OsStr,
+    ) -> io::Result<()> {
+        unsupported()
+    }
 }
 
 /// A content fingerprint over a whole directory tree: every file's relative
@@ -791,208 +1740,119 @@ mod tests {
 /// compiler's `.jet`-only `tree_hash`, this addresses *any* package tree, so
 /// distinct packages never collide in the store.
 pub(super) fn tree_fingerprint(root: &Path) -> Result<String, String> {
-    let metadata = std::fs::symlink_metadata(root).map_err(|error| error.to_string())?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(format!(
-            "fingerprint root must be a real directory: {}",
-            root.display()
-        ));
-    }
-    let real_root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
-    let mut files: Vec<PathBuf> = Vec::new();
-    collect_files(root, &mut files)?;
-    files.sort();
-    let mut input: Vec<u8> = Vec::new();
-    for path in &files {
-        let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
-        input.extend_from_slice(rel.as_bytes());
+    let source = held_fs::HeldDirectoryEntry::open(root).map_err(|error| error.to_string())?;
+    tree_fingerprint_held(source.directory())
+}
+
+fn tree_fingerprint_held(root: &held_fs::HeldDirectory) -> Result<String, String> {
+    let mut files = Vec::new();
+    collect_fingerprint_files(root, Path::new(""), &mut files)
+        .map_err(|error| error.to_string())?;
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut input = Vec::new();
+    for (relative, bytes, mode) in files {
+        input.extend_from_slice(relative.to_string_lossy().as_bytes());
         input.push(0);
-        let real_path = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
-        if !real_path.starts_with(&real_root) {
-            return Err(format!(
-                "fingerprint path escapes its source root: {}",
-                path.display()
-            ));
-        }
-        let bytes = std::fs::read(real_path).map_err(|error| error.to_string())?;
         input.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
         input.extend_from_slice(&bytes);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let meta = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
-            input.extend_from_slice(&meta.permissions().mode().to_be_bytes());
-        }
+        input.extend_from_slice(&mode.to_be_bytes());
     }
     Ok(SHA256::sha256_hex(&input))
 }
 
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let p = entry.path();
-        let metadata = std::fs::symlink_metadata(&p).map_err(|error| error.to_string())?;
-        if metadata.file_type().is_symlink() {
-            return Err(format!(
+fn collect_fingerprint_files(
+    directory: &held_fs::HeldDirectory,
+    relative: &Path,
+    files: &mut Vec<(PathBuf, Vec<u8>, u32)>,
+) -> std::io::Result<()> {
+    use std::io::Read;
+
+    for entry in directory.entries()? {
+        let child_relative = relative.join(&entry.name);
+        if entry.file_type.is_symlink() {
+            return Err(std::io::Error::other(format!(
                 "refusing symlink in fingerprinted package tree: {}",
-                p.display()
-            ));
+                directory.path().join(&entry.name).display()
+            )));
         }
-        if metadata.is_dir() {
-            collect_files(&p, out)?;
-        } else if metadata.is_file() {
-            out.push(p);
+        if entry.file_type.is_dir() {
+            let child = directory.open_directory(&entry.name)?;
+            collect_fingerprint_files(&child, &child_relative, files)?;
+        } else if entry.file_type.is_file() {
+            let mut file = directory.open_file(&entry.name)?;
+            let metadata = file.metadata()?;
+            held_fs::reject_multiply_linked(&metadata)?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            let after = file.metadata()?;
+            held_fs::reject_multiply_linked(&after)?;
+            if !same_file_identity(&metadata, &after) {
+                return Err(std::io::Error::other(format!(
+                    "fingerprinted source file changed while reading: {}",
+                    directory.path().join(&entry.name).display()
+                )));
+            }
+            files.push((child_relative, bytes, file_mode(&metadata)));
         } else {
-            return Err(format!(
+            return Err(std::io::Error::other(format!(
                 "unsupported fingerprinted package entry: {}",
-                p.display()
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Recursively copy a directory tree, preserving Unix file modes (so `bin/`
-/// executables stay executable). std-only (I6).
-pub(super) fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
-    let source_metadata = std::fs::symlink_metadata(src)?;
-    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("copy source must be a real directory: {}", src.display()),
-        ));
-    }
-    let source_root = std::fs::canonicalize(src)?;
-    ensure_real_directory(dst)?;
-    let destination_root = std::fs::canonicalize(dst)?;
-    copy_tree_contents(src, dst, &source_root, &destination_root)
-}
-
-fn copy_tree_contents(
-    src: &Path,
-    dst: &Path,
-    source_root: &Path,
-    destination_root: &Path,
-) -> std::io::Result<()> {
-    let real_source = std::fs::canonicalize(src)?;
-    if !real_source.starts_with(source_root) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("copy source escapes its root: {}", src.display()),
-        ));
-    }
-    ensure_real_directory(dst)?;
-    let real_destination = std::fs::canonicalize(dst)?;
-    if !real_destination.starts_with(destination_root) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("copy destination escapes its root: {}", dst.display()),
-        ));
-    }
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        let metadata = std::fs::symlink_metadata(&from)?;
-        if metadata.file_type().is_symlink() {
-            return Err(std::io::Error::other(format!(
-                "refusing symlink in copied package tree: {}",
-                from.display()
-            )));
-        }
-        let real_from = std::fs::canonicalize(&from)?;
-        if !real_from.starts_with(source_root) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!("copy source escapes its root: {}", from.display()),
-            ));
-        }
-        if metadata.is_dir() {
-            ensure_real_directory(&to)?;
-            copy_tree_contents(&from, &to, source_root, destination_root)?;
-        } else if metadata.is_file() {
-            copy_regular_file_nofollow(&from, &to, &metadata)?;
-        } else {
-            return Err(std::io::Error::other(format!(
-                "refusing non-file in copied package tree: {}",
-                from.display()
+                directory.path().join(&entry.name).display()
             )));
         }
     }
     Ok(())
 }
 
-fn copy_regular_file_nofollow(
-    src: &Path,
-    dst: &Path,
-    expected: &std::fs::Metadata,
-) -> std::io::Result<()> {
-    if let Ok(metadata) = std::fs::symlink_metadata(dst) {
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!("copy destination must be a regular file: {}", dst.display()),
-            ));
-        }
-    }
-    let mut source_options = std::fs::OpenOptions::new();
-    source_options.read(true);
-    add_nofollow_flags(&mut source_options);
-    let mut source = source_options.open(src)?;
-    let opened = source.metadata()?;
-    if !opened.is_file() || !same_file_identity(expected, &opened) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("copy source file changed before copy: {}", src.display()),
-        ));
-    }
-
-    let mut destination_options = std::fs::OpenOptions::new();
-    destination_options
-        .write(true)
-        .create(true)
-        .truncate(true);
-    add_nofollow_flags(&mut destination_options);
-    let mut destination = destination_options.open(dst)?;
-    std::io::copy(&mut source, &mut destination)?;
+fn file_mode(metadata: &std::fs::Metadata) -> u32 {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        destination.set_permissions(std::fs::Permissions::from_mode(
-            expected.permissions().mode(),
-        ))?;
+        metadata.permissions().mode()
     }
-    destination.sync_all()?;
-    let after = std::fs::symlink_metadata(src)?;
-    if !same_file_identity(expected, &after) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("copy source file changed while copying: {}", src.display()),
-        ));
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        0
     }
-    Ok(())
 }
 
-fn add_nofollow_flags(options: &mut std::fs::OpenOptions) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        const O_CLOEXEC: i32 = 0o2000000;
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        const O_CLOEXEC: i32 = 0x01000000;
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        const O_NOFOLLOW: i32 = 0o400000;
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        const O_NOFOLLOW: i32 = 0x0100;
-        options.custom_flags(O_NOFOLLOW | O_CLOEXEC);
+/// Recursively copy a directory tree, preserving Unix file modes (so `bin/`
+/// executables stay executable). Every source and destination operation is
+/// relative to a held directory descriptor.
+pub(super) fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let source = held_fs::HeldDirectoryEntry::open(src)?;
+    let destination_parent = held_fs::HeldCacheParent::open_or_create(dst)?;
+    let destination = destination_parent.open_or_create_directory()?;
+    copy_tree_held(source.directory(), &destination)
+}
+
+fn copy_tree_held(
+    source: &held_fs::HeldDirectory,
+    destination: &held_fs::HeldDirectory,
+) -> std::io::Result<()> {
+    for entry in source.entries()? {
+        let source_path = source.path().join(&entry.name);
+        if entry.file_type.is_symlink() {
+            return Err(std::io::Error::other(format!(
+                "refusing symlink in copied package tree: {}",
+                source_path.display()
+            )));
+        }
+        if entry.file_type.is_dir() {
+            let child_destination = destination.open_or_create_directory(&entry.name)?;
+            let child_source = source.open_directory(&entry.name)?;
+            copy_tree_held(&child_source, &child_destination)?;
+        } else if entry.file_type.is_file() {
+            held_fs::copy_file(source, &entry.name, destination, &entry.name)?;
+        } else {
+            return Err(std::io::Error::other(format!(
+                "refusing non-file in copied package tree: {}",
+                source_path.display()
+            )));
+        }
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    }
+    Ok(())
 }
 
 fn same_file_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
@@ -1002,6 +1862,7 @@ fn same_file_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bo
         return left.dev() == right.dev()
             && left.ino() == right.ino()
             && left.len() == right.len()
+            && left.nlink() == right.nlink()
             && left.modified().ok() == right.modified().ok();
     }
     #[cfg(not(unix))]
@@ -1010,84 +1871,4 @@ fn same_file_identity(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bo
             && left.len() == right.len()
             && left.modified().ok() == right.modified().ok()
     }
-}
-
-fn validate_existing_directory(path: &Path) -> std::io::Result<()> {
-    if path.as_os_str().is_empty() {
-        return Ok(());
-    }
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        if component == std::path::Component::ParentDir {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "directory path contains a parent component",
-            ));
-        }
-        current.push(component.as_os_str());
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    format!("directory must be real: {}", current.display()),
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
-
-fn ensure_real_directory(path: &Path) -> std::io::Result<()> {
-    let components = path.components().collect::<Vec<_>>();
-    if components.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "directory path is empty",
-        ));
-    }
-    let mut current = PathBuf::new();
-    for component in components {
-        if component == std::path::Component::ParentDir {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "directory path contains a parent component",
-            ));
-        }
-        current.push(component.as_os_str());
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    format!("directory must not be a symlink: {}", current.display()),
-                ));
-            }
-            Ok(metadata) if metadata.is_dir() => {}
-            Ok(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    format!("directory path is not a directory: {}", current.display()),
-                ));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                match std::fs::create_dir(&current) {
-                    Ok(()) => {}
-                    Err(create_error)
-                        if create_error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                    Err(create_error) => return Err(create_error),
-                }
-                let metadata = std::fs::symlink_metadata(&current)?;
-                if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        format!("directory must be real: {}", current.display()),
-                    ));
-                }
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
 }

@@ -1809,7 +1809,11 @@ impl<'a> Checker<'a> {
             Stmt::Expr(_) => {
                 if self.rewrite_anonymous_taskgroup_spawn(stmt) {
                     if let Stmt::Val(b) = stmt {
+                        let synthetic_name = b.name.clone();
                         self.check_binding(b);
+                        // A nested block can pop before its enclosing task
+                        // group gets a chance to consume pending spawns.
+                        self.mark_taskgroup_spawn_owned(&synthetic_name);
                         crate::Sema::Effects::record_authority_alias(self, b);
                     }
                     return;
@@ -3169,7 +3173,7 @@ impl<'a> Checker<'a> {
             // effect), so it is rejected inside `#Pure fn` (same rule as `io.input`).
             // `use core.term` is NOT required to write a `live` block — the block
             // is its own syntactic gate. `term.read_key()` does need the import.
-            // E3301: freestanding builds have no terminal device.
+            // E3301: no-OS targets have no terminal device.
             Stmt::Live { body, span } => {
                 if self.in_pure {
                     self.diags.push(crate::Sema::e3401(
@@ -3179,10 +3183,10 @@ impl<'a> Checker<'a> {
                         *span,
                     ));
                 }
-                if self.freestanding {
+                if self.no_os {
                     self.diags.push(crate::Sema::e3301(
                             "#Live { … }",
-                            "Terminal I/O requires an OS terminal device. Build without `--freestanding`.",
+                            "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider.",
                             *span,
                         ));
                 }

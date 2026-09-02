@@ -47,6 +47,7 @@ printf '%s\n' 'site output' >"$repo/site/dist/index.html"
 printf '%s\n' 'ledger' >"$repo/docs/reference/core-surface-ledger.json"
 printf '%s\n' 'prior discovery' >"$repo/docs/audits/security-deep-scan-2026-08-03.md"
 printf '%s\n' 'prior discovery' >"$repo/docs/audits/security-deep-scan-2026-08-03-full.md"
+printf '%s\n' 'prior discovery' >"$repo/docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md"
 printf '%s\n' 'prior final' >"$repo/docs/audits/security-final-prior/report.md"
 printf '%s\n' 'cargo output' >"$repo/target/generated/file"
 printf '%s\n' 'build output' >"$repo/build/generated/file"
@@ -75,6 +76,7 @@ indexed_paths=(
   docs/reference/core-surface-ledger.json
   docs/audits/security-deep-scan-2026-08-03.md
   docs/audits/security-deep-scan-2026-08-03-full.md
+  docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md
   docs/audits/security-final-prior/report.md
   target/generated/file
   build/generated/file
@@ -143,6 +145,7 @@ for (const excluded of [
   "docs/reference/core-surface-ledger.json",
   "docs/audits/security-deep-scan-2026-08-03.md",
   "docs/audits/security-deep-scan-2026-08-03-full.md",
+  "docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md",
   "docs/audits/security-final-prior/report.md",
   "target/generated/file",
   "build/generated/file",

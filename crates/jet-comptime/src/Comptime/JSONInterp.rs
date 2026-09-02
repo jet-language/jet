@@ -207,6 +207,15 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
         {
             match variant.as_str() {
                 "Null" => "null".to_string(),
+                // Typed JSON keeps a lexical Number payload so published-schema
+                // unknown fields can round-trip without turning `2` into `"2"`.
+                "Number" => args
+                    .first()
+                    .and_then(|(_, payload)| match payload {
+                        CtValue::Str(value) => Some(value.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "null".to_string()),
                 _ => args
                     .first()
                     .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth))
@@ -304,7 +313,10 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
         CtValue::Bool(b) => b.to_string(),
         CtValue::Int(n) => n.to_string(),
         CtValue::Float(f) => {
-            assert!(f.as_f64().is_finite(), "JSON cannot encode a non-finite Float");
+            assert!(
+                f.as_f64().is_finite(),
+                "JSON cannot encode a non-finite Float"
+            );
             format!("{:?}", f)
         }
         CtValue::BigInt(value) => value.to_string_rep(),
@@ -415,4 +427,38 @@ fn quote_json(s: &str) -> String {
     }
     out.push('"');
     out
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nested_json(depth: usize) -> String {
+        format!("{}{}", "[".repeat(depth), "]".repeat(depth))
+    }
+
+    #[test]
+    fn comptime_json_routes_share_the_depth_boundary() {
+        type ParseRoute = fn(&str) -> Result<CtValue, jet_foundation::EncodingJson::Error>;
+        let routes: &[(&str, ParseRoute)] = &[
+            ("parse_json", parse_json),
+            ("parse_json_ordered", parse_json_ordered),
+            ("parse_json_typed_ordered", parse_json_typed_ordered),
+        ];
+
+        for (name, parse) in routes {
+            let boundary = nested_json(jet_foundation::EncodingJson::MAX_JSON_DEPTH);
+            assert!(
+                parse(&boundary).is_ok(),
+                "{name} must accept the maximum JSON nesting depth"
+            );
+
+            let too_deep = nested_json(jet_foundation::EncodingJson::MAX_JSON_DEPTH + 1);
+            let error = parse(&too_deep).expect_err("{name} must reject excessive nesting");
+            assert_eq!(error.line, 1, "{name} reported the wrong error line");
+            assert_eq!(
+                error.message, "JSON value is nested too deeply",
+                "{name} changed the shared depth-limit error"
+            );
+        }
+    }
 }

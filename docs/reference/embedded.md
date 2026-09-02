@@ -1,7 +1,8 @@
-# Embedded and Freestanding Builds (E2-M15)
+# Embedded and Typed Target Profiles (E2-M15)
 
-Jet supports cross-compilation and freestanding (no-OS) builds using rustc's
-target matrix. This document covers the local QEMU harness (D-CROSS3 option A).
+Jet supports cross-compilation and typed no-OS and hosted WASM profiles using
+rustc's target matrix. This document covers the local QEMU harness
+(D-CROSS3 option A).
 
 ## Cross-compilation
 
@@ -78,50 +79,53 @@ entry, nested calls, allocator ownership, thread-local entry, signal
 preservation, and repeated load/unload cycles; `tests/library_outputs.rs` also
 invokes a panic-only Library through that host in a child process.
 
-## Freestanding machine
+## Typed target profiles
 
-The `--freestanding` flag rejects OS-dependent APIs at compile time (E3301)
-and compiles with `panic=abort` (D-CROSS2). Only `core`-level modules are
-permitted:
+Embedded and hosted WASM builds use named `TargetMachine` profiles. The
+selected profile supplies one typed target dossier to sema, codegen, and the
+artifact cache. There is no standalone no-OS switch and no alternate Prelude:
 
-| Allowed | Rejected |
-|---------|---------|
-| `core.math` | `core.files` |
-| `core.encoding.json` | `core.term` |
-| `core.mem` | `core.net` |
-| `core.math.random` | `core.tasks` |
-| `core.sys` | `core.time` |
-| `Path` values | `core.http` |
-| `core.crypto` | `core.log` |
-|             | `core.time` |
+| Profile | Triple | Runtime layer | Providers |
+|---------|--------|---------------|-----------|
+| `wasm.browser` | `wasm32-unknown-unknown` | Hosted | browser DOM/JS output, clocks, entropy, scheduler |
+| `wasm.wasi` | `wasm32-wasip2` | Hosted | WASI startup, files, sockets, output, clocks, entropy |
+| `wasm.no-os` | `wasm32-unknown-unknown` | Core | no OS, heap, standard streams, or ambient providers |
 
-Example:
+Select a profile with `--target=<name>`:
 
-```
-jet build --freestanding examples/features/lowlevel/freestanding.jet
+```sh
+jet build --target=wasm.browser examples/features/lowlevel/cross.jet
+jet build --target=wasm.wasi examples/features/lowlevel/cross.jet
+jet build --target=wasm.no-os examples/features/lowlevel/freestanding.jet
 ```
 
-Combine with a cross target:
+The no-OS profile admits only the shared Core layer. OS-dependent APIs produce
+E3301 before codegen. A no-OS target must declare typed allocator, panic,
+startup, input/output, time, entropy, scheduler, linker, and memory facts when
+the program uses those capabilities. Missing facts are target admission
+errors, not rustc fallbacks.
 
-```
-jet build --freestanding --target=aarch64-unknown-linux-gnu 61_freestanding.jet
-```
+Named target profiles also work for `jet inspect dossier target` and carry
+provider identities, Prelude closure, linker identity, compiler identity,
+dependency identity, environment, execution tier, and a stable artifact key.
+Hosted single-file programs keep their existing hidden defaults unless a
+named target is selected.
 
 ## Typed target machine facts
 
-Card #239 / D-TARGET-* makes freestanding and embedded builds use typed board
-machines. Hosted Jet keeps hidden defaults. A selected no-OS machine carries
-these facts before codegen and into build artifacts:
+Card #239 / D-TARGET-* makes embedded builds use typed board machines. Hosted
+Jet keeps hidden defaults. A selected target machine carries these facts before
+codegen and into build artifacts:
 
-- target triple plus `no-os`
+- target triple plus runtime layer (`Core`, `Alloc`, or `Hosted`)
 - named memory regions: origin, size in bytes/KiB/MiB, kind (`flash`, `ram`,
   `mmio`, `reserved`), access (`r`, `rw`, `rx`, `rwx`)
 - linker provenance: generated from machine facts, or a file path with a
   `sha256:` hash
-- allocator policy: none, fixed region/size, or hosted default
+- allocator policy: none, fixed region/size, supplied provider, or hosted default
 - panic policy: abort, report sink, or hosted default
 - execution honesty: no-OS machines are AOT-only (`dev` / `jit` rejected)
-- audit requirements for build artifact plus dossier lens
+- provider identities, Prelude closure, and stable artifact/cache identity
 
 Validation is data-first. It reports missing flash/RAM, overlapping or
 overflowing memory, RAM budget overflow, heap use with no allocator, hosted
@@ -198,6 +202,6 @@ Adds a `cross` section to the doctor report:
   `targets: { machine: … }` wiring stays on the existing `targets:` surface.
 - Machine validation errors remain data (`TargetMachineError`) until a follow-up
   diagnostic ballot promotes them to registered codes.
-- WASM is deferred to post-epoch (no browser runtime in v1).
-- E3303 (missing global allocator in freestanding) is registered. The typed
+- WASM profiles use the named browser, WASI, and no-OS provider sets above.
+- E3303 (missing allocator on a no-OS target) remains registered; the typed
   machine model catches the same fact as data.

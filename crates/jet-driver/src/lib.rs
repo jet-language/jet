@@ -3,8 +3,8 @@
 // Re-export all lower seams so driver source files can use `crate::AST`, `crate::Sema` etc.
 pub use jet_codegen::{
     development_receipt, program_allocator, scheduler, CanonicalAST, Codegen, Collections,
-    Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Sema, Syntax, TargetMachine,
-    Traits, AST, SHA256,
+    Comptime, Diagnostics, Generics, Lexer, Parser, Sema, Syntax, TargetMachine, Traits, AST,
+    SHA256,
 };
 
 /// Install the canonical TIR evaluator into comptime/REPL/dev entry points.
@@ -48,6 +48,7 @@ pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
 
 pub mod BudgetView;
 pub mod Compile;
+pub mod Formatter;
 pub mod Driver;
 pub mod FixEngine;
 pub mod Foreign;
@@ -78,7 +79,7 @@ pub use jet_pkg_model::JetLib::{JetLibAccess, JetLibArtifact, JetLibExport, JetL
 pub use jet_pkg_model::{
     AdaBind, CBind, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FortranBind,
     GoBind, JavaBind, JavaScriptBind, LintPolicy, Lock, LuaBind, Manifest, OctaveBind, Package,
-    PascalBind, PerlBind, PhpBind, Policy, PowerShellBind, PythonBind, RBind, RubyBind, ScriptDeps,
-    Store, TclBind, CFFI, FFI,
+    PascalBind, PerlBind, PhpBind, Policy, PowerShellBind, Public, PythonBind, RBind, RubyBind,
+    ScriptDeps, Store, TclBind, CFFI, FFI,
 };
 pub use Compile::CompileOutput;

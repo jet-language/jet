@@ -71,6 +71,7 @@ where
         directories: VecDeque<(PathBuf, i64)>,
         active_workers: usize,
         error: Option<E>,
+        error_path: Option<PathBuf>,
     }
 
     let root = PathBuf::from(path);
@@ -82,6 +83,7 @@ where
             directories: VecDeque::from([(root.clone(), 0)]),
             active_workers: 0,
             error: None,
+            error_path: None,
         }),
         Condvar::new(),
     ));
@@ -110,9 +112,6 @@ where
                     .lock()
                     .unwrap_or_else(|_| panic!("filesystem walk queue poisoned"));
                 loop {
-                    if queue.error.is_some() {
-                        return;
-                    }
                     if let Some(task) = queue.directories.pop_front() {
                         queue.active_workers += 1;
                         break task;
@@ -130,13 +129,10 @@ where
             let result = (|| {
                 jet_fs_validate_walk_root(&dir)
                     .map_err(|error| make_error(&shown, error))?;
-                let mut entries = Vec::new();
-                for entry in std::fs::read_dir(&dir).map_err(|error| make_error(&shown, error))? {
-                    entries.push(entry.map_err(|error| make_error(&shown, error))?);
-                }
-                let mut batch = Vec::with_capacity(entries.len());
+                let mut batch = Vec::with_capacity(64);
                 let mut children = Vec::new();
-                for entry in entries {
+                for entry in std::fs::read_dir(&dir).map_err(|error| make_error(&shown, error))? {
+                    let entry = entry.map_err(|error| make_error(&shown, error))?;
                     let child = entry.path();
                     let file_type = entry.file_type();
                     let is_dir = file_type.as_ref().is_ok_and(std::fs::FileType::is_dir);
@@ -174,7 +170,15 @@ where
                         .unwrap_or_else(|_| panic!("filesystem walk sink poisoned"))
                         .extend(batch);
                 }
-                Err(error) => queue.error = Some(error),
+                Err(error) => {
+                    let is_earlier = queue.error_path.as_ref().map_or(true, |current| {
+                        dir.as_path() < current.as_path()
+                    });
+                    if is_earlier {
+                        queue.error_path = Some(dir.clone());
+                        queue.error = Some(error);
+                    }
+                }
             }
             wake.notify_all();
         }));
@@ -187,6 +191,7 @@ where
                 .lock()
                 .unwrap_or_else(|_| panic!("filesystem walk queue poisoned"));
             if queue.error.is_none() {
+                queue.error_path = Some(PathBuf::new());
                 queue.error = Some(make_error(
                     &shown,
                     std::io::Error::new(

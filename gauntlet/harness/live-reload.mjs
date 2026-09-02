@@ -9,9 +9,8 @@ import { performance } from "node:perf_hooks";
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepoDir = path.resolve(harnessDir, "../..");
-const defaultEnvRunner = path.join(defaultRepoDir, "scripts/agent/jet-env");
 const AXIS_OUTPUT_LIMIT = 4_000;
-const AXIS_HTTP_BODY_LIMIT = 64 * 1024;
+const AXIS_HTTP_BODY_LIMIT = 4 * 1024 * 1024;
 const PROCESS_TERM_TIMEOUT_MS = 5_000;
 const PROCESS_KILL_TIMEOUT_MS = 1_000;
 
@@ -94,10 +93,18 @@ async function stageAxisFiles(repoDir, stageDir, files) {
   }
   return staged;
 }
+function processInvocation(envRunner, args, { envRunnerArgs = [] } = {}) {
+  const command = args.map(shellQuote).join(" ");
+  const profileArgs = Array.isArray(envRunnerArgs) ? envRunnerArgs : [];
+  return envRunner
+    ? { file: envRunner, args: [...profileArgs, "sh", "-c", command] }
+    : { file: "/bin/sh", args: ["-c", command] };
+}
 
-async function runProcess(envRunner, cwd, args, { timeoutMs = 10_000 } = {}) {
+async function runProcess(envRunner, cwd, args, { timeoutMs = 10_000, envRunnerArgs = [] } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(envRunner, ["sh", "-c", args.map(shellQuote).join(" ")], {
+    const invocation = processInvocation(envRunner, args, { envRunnerArgs });
+    const child = spawn(invocation.file, invocation.args, {
       cwd,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -137,13 +144,29 @@ async function runProcess(envRunner, cwd, args, { timeoutMs = 10_000 } = {}) {
   });
 }
 
-async function probeAxisTool(envRunner, cwd, tool, jetBin) {
+function toolVersion(tool, result) {
+  const stdout = result.stdout?.toString("utf8") ?? "";
+  const stderr = result.stderr?.toString("utf8") ?? "";
+  const output = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n").slice(0, AXIS_OUTPUT_LIMIT);
+  if (tool === "entr") {
+    const release = output.split(/\r?\n/).map((line) => line.trim()).find((line) => /^release:\s+\S+/.test(line));
+    if ((result.code === 0 || result.code === 1) && release) return { ok: true, version: release, output };
+    return { ok: false, reason: "entr help probe did not report a release line", output };
+  }
+  if (result.code !== 0 || !output) {
+    return { ok: false, reason: `${tool} version probe failed (exit ${result.code})`, output };
+  }
+  return { ok: true, version: output.split(/\r?\n/, 1)[0], output };
+}
+
+
+async function probeAxisTool(envRunner, cwd, tool, jetBin, { envRunnerArgs = [] } = {}) {
   if (tool === "jet") {
     const resolved = path.resolve(jetBin);
     try {
       const stat = await fs.stat(resolved);
       if (!stat.isFile()) return { tool, status: "probe_failed", reason: `Jet binary is not a file: ${resolved}` };
-      const versionResult = await runProcess(envRunner, cwd, [resolved, "--version"]);
+      const versionResult = await runProcess(envRunner, cwd, [resolved, "--version"], { envRunnerArgs });
       const versionOutput = versionResult.stdout.toString("utf8").trim() || versionResult.stderr.toString("utf8").trim();
       return {
         tool,
@@ -158,22 +181,35 @@ async function probeAxisTool(envRunner, cwd, tool, jetBin) {
       return { tool, status: "probe_failed", reason: `could not inspect Jet binary ${resolved}: ${error.message}` };
     }
   }
-  const result = await runProcess(envRunner, cwd, ["sh", "-c", `command -v ${shellQuote(tool)}`]);
+  const result = await runProcess(envRunner, cwd, ["sh", "-c", `command -v ${shellQuote(tool)} || exit 127`], { envRunnerArgs });
   const output = result.stdout.toString("utf8").trim();
   if (result.code === 0 && output) {
     const resolved = output.split(/\r?\n/, 1)[0];
-    const versionFlag = tool === "entr" ? "-V" : "--version";
-    const versionResult = await runProcess(envRunner, cwd, [tool, versionFlag]);
-    const versionOutput = versionResult.stdout.toString("utf8").trim() || versionResult.stderr.toString("utf8").trim();
+    const versionArgs = tool === "entr" ? ["-h"] : ["--version"];
+    const versionResult = await runProcess(envRunner, cwd, [tool, ...versionArgs], { envRunnerArgs });
+    const version = toolVersion(tool, versionResult);
+    if (!version.ok) {
+      return {
+        tool,
+        status: "probe_failed",
+        resolved,
+        reason: version.reason,
+        version: version.version ?? null,
+        version_output: version.output,
+        exit_code: versionResult.code,
+        stderr: versionResult.stderr.toString("utf8").trim().slice(0, AXIS_OUTPUT_LIMIT),
+      };
+    }
     return {
       tool,
       status: "available",
       resolved,
-      version: versionOutput.split(/\r?\n/, 1)[0].slice(0, 300),
+      version: version.version,
+      version_output: version.output,
       version_exit_code: versionResult.code,
     };
   }
-  if (result.code === 1 && !output && !result.stderr.toString("utf8").trim()) {
+  if (result.code === 127 && !output) {
     return { tool, status: "unavailable", reason: `${tool} is absent from the declared tool environment` };
   }
   return {
@@ -185,10 +221,10 @@ async function probeAxisTool(envRunner, cwd, tool, jetBin) {
   };
 }
 
-async function probeAxisTools(envRunner, cwd, tools, jetBin) {
+async function probeAxisTools(envRunner, cwd, tools, jetBin, { envRunnerArgs = [] } = {}) {
   if (!Array.isArray(tools) || tools.length === 0) throw new Error("axis runner declares no tools");
   const probes = [];
-  for (const tool of tools) probes.push(await probeAxisTool(envRunner, cwd, tool, jetBin));
+  for (const tool of tools) probes.push(await probeAxisTool(envRunner, cwd, tool, jetBin, { envRunnerArgs }));
   return probes;
 }
 
@@ -238,7 +274,8 @@ function httpProbe(port, probe, timeoutMs = 5_000) {
       response.on("data", (chunk) => {
         bytes += chunk.length;
         if (bytes > AXIS_HTTP_BODY_LIMIT) {
-          request.destroy(new Error(`HTTP probe body exceeded ${AXIS_HTTP_BODY_LIMIT} bytes`));
+          finish({ ok: false, error: `HTTP probe body exceeded ${AXIS_HTTP_BODY_LIMIT} bytes`, fatal: true });
+          request.destroy();
           return;
         }
         chunks.push(chunk);
@@ -280,6 +317,7 @@ async function waitForAxisReady(child, port, readiness, timeoutMs, pollIntervalM
         ? `readiness body was not a non-negative integer: ${JSON.stringify(result.body)}`
         : `readiness counter ${JSON.stringify(result.body)} did not exceed ${previousValue}`;
     } else if (!result.ok) {
+      if (result.fatal) throw new Error(result.error);
       lastReason = result.error;
     } else {
       lastReason = `readiness status ${result.status}, expected ${expectedStatus}`;
@@ -340,9 +378,14 @@ async function waitForAxisOutput(child, port, output, expectedMarker, staleMarke
         observed_at_ms: observedAt,
       };
     }
-    if (!result.ok) lastReason = result.error;
-    else if (result.status !== expectedStatus) lastReason = `output status ${result.status}, expected ${expectedStatus}`;
-    else lastReason = `output body did not contain only the current marker ${JSON.stringify(expectedMarker)}`;
+    if (!result.ok) {
+      if (result.fatal) throw new Error(result.error);
+      lastReason = result.error;
+    } else if (result.status !== expectedStatus) {
+      lastReason = `output status ${result.status}, expected ${expectedStatus}`;
+    } else {
+      lastReason = `output body did not contain only the current marker ${JSON.stringify(expectedMarker)}`;
+    }
     await sleep(Math.min(pollIntervalMs, Math.max(1, timeoutMs - (monotonicNow() - started))));
   }
   throw new Error(`${output.path} did not acknowledge ${JSON.stringify(expectedMarker)} within ${timeoutMs}ms: ${lastReason}`);
@@ -397,8 +440,9 @@ async function restoreAxisEdit(file, from, to) {
   throw new Error(`axis edit cannot restore ${path.basename(file)} to its baseline marker`);
 }
 
-function startProcess(envRunner, cwd, args) {
-  const child = spawn(envRunner, ["sh", "-c", args.map(shellQuote).join(" ")], {
+function startProcess(envRunner, cwd, args, { envRunnerArgs = [] } = {}) {
+  const invocation = processInvocation(envRunner, args, { envRunnerArgs });
+  const child = spawn(invocation.file, invocation.args, {
     cwd,
     env: process.env,
     stdio: ["ignore", "ignore", "pipe"],
@@ -490,7 +534,7 @@ function validateSampleTimestamps(sample) {
   sample.reload_latency_ms = latency;
 }
 
-export async function runLiveReloadSample({ runner, stageDir, editPath, phase, index, jetBin, budget, envRunner = defaultEnvRunner }) {
+export async function runLiveReloadSample({ runner, stageDir, editPath, phase, index, jetBin, budget, envRunner = null, envRunnerArgs = [] }) {
   const port = await freeTcpPort();
   const command = axisCommand(runner.command, { port, jet_bin: jetBin });
   const sample = {
@@ -512,7 +556,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
   let child = null;
   try {
     await normalizeAxisMarker(editPath, budget.edit_from, budget.edit_to);
-    child = startProcess(envRunner, stageDir, command);
+    child = startProcess(envRunner, stageDir, command, { envRunnerArgs });
     sample.pid = child.pid ?? null;
     const initial = await waitForAxisState({
       child,
@@ -638,12 +682,12 @@ function median(values) {
   return numbers.length % 2 === 1 ? numbers[middle] : (numbers[middle - 1] + numbers[middle]) / 2;
 }
 
-export async function runLiveReloadRunner(axis, runner, axisDir, jetBin, { repoDir = defaultRepoDir, envRunner = defaultEnvRunner } = {}) {
+export async function runLiveReloadRunner(axis, runner, axisDir, jetBin, { repoDir = defaultRepoDir, envRunner = null, envRunnerArgs = [] } = {}) {
   const runnerDir = path.join(axisDir, runner.id.replaceAll(/[^A-Za-z0-9_.-]/g, "_"));
   const budget = validateAxisBudget(axis);
   await fs.mkdir(runnerDir, { recursive: true });
   const files = await stageAxisFiles(repoDir, runnerDir, runner.files);
-  const probes = await probeAxisTools(envRunner, runnerDir, runner.tools, jetBin);
+  const probes = await probeAxisTools(envRunner, runnerDir, runner.tools, jetBin, { envRunnerArgs });
   const result = {
     id: runner.id,
     output_acknowledgement: runner.output ?? runner.acknowledgement ?? runner.output_acknowledgement,
@@ -681,7 +725,7 @@ export async function runLiveReloadRunner(axis, runner, axisDir, jetBin, { repoD
   await normalizeAxisMarker(editPath, budget.edit_from, budget.edit_to);
   for (const phase of ["cold", "warm"]) {
     for (let index = 1; index <= budget.sample_count; index += 1) {
-      result.measurements.push(await runLiveReloadSample({ runner, stageDir: runnerDir, editPath, phase, index, jetBin, budget, envRunner }));
+      result.measurements.push(await runLiveReloadSample({ runner, stageDir: runnerDir, editPath, phase, index, jetBin, budget, envRunner, envRunnerArgs }));
     }
   }
   result.summary = liveReloadSummary(result.measurements);
@@ -739,6 +783,7 @@ export const liveReloadInternals = {
   markerMatches,
   normalizeAxisMarker,
   outputSpec,
+  toolVersion,
   probeAxisTool,
   validateAxisBudget,
   validateSampleTimestamps,

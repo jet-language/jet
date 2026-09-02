@@ -288,8 +288,8 @@ card #1574. The reference doc restructure rides that cutover.
 - **D-CORE-TREE1=A** — Core uses a consistent nested tree. It keeps
   `core.files`, nests random under `core.math.random` and `fmt` under
   `core.text.fmt`, merges env and os into `core.sys`, and splits terminal,
-  process, and encoding surfaces into their canonical homes. It does not add
-  `core.json` or retain retired free namespaces.
+  process, and encoding surfaces into their canonical homes. JSON stays under
+  `core.encoding.json`; retired free namespaces have no aliases or re-exports.
 - **D-CORE-USELIST1=A** — every grouped `use` uses square brackets. `as`
   gives a shorter local name; without `as`, the local name is the last part
   after the final dot. Existing brace item imports move to the same list.

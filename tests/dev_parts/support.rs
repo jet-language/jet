@@ -1133,13 +1133,12 @@ fn core_conformance_corpus_entries() -> Vec<(String, String)> {
         }) {
             let path = entry.expect("Core conformance corpus entry").path();
             let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+            if name.starts_with(".") || name == "package.jet" {
+                continue;
+            }
             if path.is_dir() {
-                if !name.starts_with('.') {
-                    walk(&path, files);
-                }
-            } else if name != "package.jet"
-                && path.extension().and_then(|value| value.to_str()) == Some("jet")
-            {
+                walk(&path, files);
+            } else if path.extension().and_then(|value| value.to_str()) == Some("jet") {
                 files.push(path);
             }
         }

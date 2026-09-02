@@ -11,6 +11,9 @@ mod common;
 mod jetpack_fixtures;
 use jetpack_fixtures::*;
 
+#[path = "support/nix_index_cache_server.rs"]
+mod nix_index_cache_server;
+
 #[test]
 fn hangar_ingest_path_law_reserved_is_e1299() {
     let root = Scratch::new("hangar-v2-path-root");
@@ -1775,4 +1778,80 @@ fn hangar_quota_evicts_oldest_unreferenced_before_publishing_past_ceiling() {
     assert!(!root.path.join("hangar").join(&oldest.id).exists());
     assert!(root.path.join("hangar").join(&newer.id).exists());
     assert!(root.path.join("hangar").join(&admitted.id).exists());
+}
+
+#[test]
+fn nix_project_cas_bundle_rejects_tamper_and_missing_bytes() {
+    let root = Scratch::new("nix-cas-bundle-root");
+    let project = Scratch::new("nix-cas-bundle-project");
+    let server = nix_index_cache_server::NixIndexCacheServer::start_ripgrep(&project.path);
+    server.install(&root.path);
+    fs::write(
+        project.join("env.jet"),
+        "module dev {\n    sources: { default: NixOS/nixpkgs/nixpkgs-unstable@github }\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::write(
+        project.join(".jet/lock"),
+        format!(
+            "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+            nix_index_cache_server::CHANNEL,
+            nix_index_cache_server::REVISION,
+        ),
+    )
+    .unwrap();
+    let build = jetpack()
+        .args(["env", "--prep", "--no-color", "--trust", "--yes"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let roots = jetpack::Store::Roots::at(root.path.clone());
+    let entry = jetpack::Store::list_checked(&roots)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.name == "ripgrep")
+        .expect("index-backed Nix entry");
+    let producer =
+        jetpack::Store::ProducerRecord::decode(&entry.producer_record).expect("Nix producer");
+    assert_eq!(producer.provider, "nix");
+    assert_eq!(
+        producer.facts.get("nix.index.revision").map(String::as_str),
+        Some(nix_index_cache_server::REVISION)
+    );
+    assert_eq!(
+        producer.facts.get("nix.index.system").map(String::as_str),
+        Some(nix_index_cache_server::SYSTEM)
+    );
+    assert!(producer
+        .facts
+        .get("nix.cache.key")
+        .is_some_and(|value| value.len() == 64));
+
+    let digest =
+        jetpack::Store::publish_nix_cas_bundle(&project.path, &roots, &entry.id).unwrap();
+    let bundle = project.path.join(".jet/nix-cas").join(&digest);
+    let mut bytes = fs::read(&bundle).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&bundle, bytes).unwrap();
+    let imported_root = Scratch::new("nix-cas-bundle-import");
+    let imported = jetpack::Store::Roots::at(imported_root.path.clone());
+    assert!(
+        jetpack::Store::import_nix_cas_bundle(&project.path, &imported, &digest).is_err(),
+        "tampered project CAS bytes must fail closed"
+    );
+    fs::remove_file(bundle).unwrap();
+    assert!(
+        jetpack::Store::import_nix_cas_bundle(&project.path, &imported, &digest).is_err(),
+        "missing project CAS bytes must fail closed"
+    );
 }

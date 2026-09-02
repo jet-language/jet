@@ -11,7 +11,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, LazyLock, Mutex, OnceLock, Weak};
 
 use jet_codegen::Diagnostics::{Diagnostic, Span};
 use jet_codegen::AST::{CtFloat, CtKey, CtValue, Type};
@@ -424,7 +424,8 @@ struct InterpStdinReader {
 }
 
 thread_local! {
-    static INTERP_FILE_READERS: RefCell<Vec<fs_prelude::JetFileReader>> = RefCell::new(Vec::new());
+    static INTERP_FILE_READERS: RefCell<Vec<Option<fs_prelude::JetFileReader>>> =
+        RefCell::new(Vec::new());
     static INTERP_STDIN_READERS: RefCell<Vec<InterpStdinReader>> = RefCell::new(Vec::new());
 }
 
@@ -441,13 +442,43 @@ fn ambient_fs_open(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> 
     let handle = INTERP_FILE_READERS.with(|readers| {
         let mut readers = readers.borrow_mut();
         let handle = readers.len() as i64;
-        readers.push(reader);
+        readers.push(Some(reader));
         handle
     });
     Ok(CtValue::Present(Box::new(CtValue::Struct {
         type_name: "FileReader".to_string(),
         fields: vec![("handle".to_string(), CtValue::Int(handle))],
     })))
+}
+
+fn interp_file_reader_handle(value: &CtValue) -> Option<usize> {
+    let CtValue::Struct { type_name, .. } = value else {
+        return None;
+    };
+    if type_name != "FileReader" {
+        return None;
+    }
+    process_field(value, "handle").and_then(|value| match value {
+        CtValue::Int(handle) if *handle >= 0 => usize::try_from(*handle).ok(),
+        _ => None,
+    })
+}
+
+fn take_interp_file_reader(
+    handle: usize,
+) -> Result<crate::enc_stream::runtime::JetFileReader, String> {
+    let reader = INTERP_FILE_READERS.with(|readers| {
+        let mut readers = readers.borrow_mut();
+        let slot = readers
+            .get_mut(handle)
+            .ok_or_else(|| "bad FileReader".to_string())?;
+        slot.take()
+            .ok_or_else(|| "FileReader already moved".to_string())
+    })?;
+    Ok(crate::enc_stream::runtime::JetFileReader {
+        inner: reader.inner,
+        path: reader.path,
+    })
 }
 
 fn ambient_stdin() -> CtValue {
@@ -481,7 +512,7 @@ fn ambient_line_handle(
             let Some(handle) = handle else {
                 return Err(unsupported("FileReader receiver", span));
             };
-            let Some(reader) = readers.get_mut(handle) else {
+            let Some(Some(reader)) = readers.get_mut(handle) else {
                 return Err(unsupported("FileReader handle", span));
             };
             match fs_prelude::jet_std_file_reader_read_line(reader) {
@@ -546,22 +577,22 @@ fn ambient_fs_walk_files(args: &[CtValue], span: Span) -> Result<CtValue, Diagno
     ambient_fs_walk_with_filter(args, span, true)
 }
 
-fn ambient_process_args(
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+fn ambient_process_args(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     if !args.is_empty() {
-        return Err(unsupported(&format!("core.process.{method} arguments"), span));
+        return Err(unsupported(
+            &format!("core.process.{method} arguments"),
+            span,
+        ));
     }
-    let argv = jet_codegen::Comptime::runtime_argv()
-        .unwrap_or_else(|| vec!["jet".to_string()]);
+    let argv = jet_codegen::Comptime::runtime_argv().unwrap_or_else(|| vec!["jet".to_string()]);
     let values = if method == "args" {
         process_args_kernel::jet_process_args_view(argv)
     } else {
         argv
     };
-    Ok(CtValue::List(values.into_iter().map(CtValue::Str).collect()))
+    Ok(CtValue::List(
+        values.into_iter().map(CtValue::Str).collect(),
+    ))
 }
 
 fn ambient_fs_walk_with_filter(
@@ -785,7 +816,7 @@ pub(crate) mod mem_sentry_prelude {
             method,
             "valid_ptr",
         ) {
-            let report = jet_foundation::Outcome::jet_render_runtime_sentry(
+            let report = jet_foundation::Outcome::jet_render_runtime_sentry_with_context(
                 fault.code,
                 &fault.file,
                 fault.line,
@@ -793,6 +824,9 @@ pub(crate) mod mem_sentry_prelude {
                 &fault.operation,
                 &fault.obligation,
                 &fault.detail,
+                fault.obligation_status.as_str(),
+                fault.foreign_component.as_deref(),
+                fault.foreign_fenced,
             );
             return Some(Err(jet_codegen::Sema::Diagnostics::render_registered(
                 report.code,
@@ -2933,24 +2967,24 @@ fn service_delivery_from_value(value: &CtValue) -> Option<service_prelude::JetDe
         fields
             .iter()
             .find_map(|(field, value)| match (field.as_str(), value) {
-            (field, CtValue::Str(value)) if field == name => Some(value.clone()),
-            _ => None,
-        })
+                (field, CtValue::Str(value)) if field == name => Some(value.clone()),
+                _ => None,
+            })
     };
     let int = |name: &str| {
         fields
             .iter()
             .find_map(|(field, value)| match (field.as_str(), value) {
-            (field, CtValue::Int(value)) if field == name => Some(*value),
-            _ => None,
-        })
+                (field, CtValue::Int(value)) if field == name => Some(*value),
+                _ => None,
+            })
     };
     let duplicate = fields
         .iter()
         .find_map(|(field, value)| match (field.as_str(), value) {
-        ("duplicate", CtValue::Bool(value)) => Some(*value),
-        _ => None,
-    })?;
+            ("duplicate", CtValue::Bool(value)) => Some(*value),
+            _ => None,
+        })?;
     Some(service_prelude::JetDelivery {
         id: string("id")?,
         store: string("store")?,
@@ -3113,54 +3147,97 @@ fn row_map(row: wire::JetDBRow) -> CtValue {
     CtValue::Map(m)
 }
 
-fn db_params(list: &CtValue, span: Span) -> Result<Vec<wire::DBValue>, Diagnostic> {
-    let CtValue::List(items) = list else {
-        return Err(unsupported("db params list", span));
+fn ct_db_row(value: &CtValue) -> Option<wire::JetDBRow> {
+    let CtValue::Map(entries) = value else {
+        return None;
     };
-    let mut vals = Vec::with_capacity(items.len());
-    for item in items {
-        vals.push(ct_db_value(item).ok_or_else(|| unsupported("DBValue param", span))?);
+    let mut row = wire::JetDBRow::new();
+    for (key, value) in entries {
+        let CtKey::Str(key) = key else {
+            return None;
+        };
+        row.insert(key.clone(), ct_db_value(value)?);
     }
-    Ok(vals)
+    Some(row)
+}
+
+fn db_row_and_key(args: &[CtValue], span: Span) -> Result<(wire::JetDBRow, String), Diagnostic> {
+    let row = args
+        .first()
+        .and_then(ct_db_row)
+        .ok_or_else(|| unsupported("core.db row", span))?;
+    let Some(CtValue::Str(key)) = args.get(1) else {
+        return Err(unsupported("core.db row key", span));
+    };
+    Ok((row, key.clone()))
+}
+
+fn ct_sql_value(value: &CtValue, span: Span) -> Result<wire::SQL, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("SQL value", span));
+    };
+    if type_name != "SQL" {
+        return Err(unsupported("SQL value", span));
+    }
+    let template = fields.iter().find_map(|(name, value)| {
+        (name == "template").then(|| match value {
+            CtValue::Str(template) => Some(template.clone()),
+            _ => None,
+        })
+    }).flatten();
+    let params = fields.iter().find_map(|(name, value)| {
+        (name == "params").then(|| match value {
+            CtValue::List(params) => Some(params),
+            _ => None,
+        })
+    }).flatten();
+    let (Some(template), Some(params)) = (template, params) else {
+        return Err(unsupported("malformed SQL value", span));
+    };
+    let params = params
+        .iter()
+        .map(|value| ct_db_value(value).ok_or_else(|| unsupported("DBValue parameter", span)))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((template, params))
 }
 
 fn ambient_db_scope_execute(
     scope: &(u64, String, wire::JetRowPolicyExpr, String),
-    sql: &str,
-    params: &Vec<wire::DBValue>,
+    sql: &wire::SQL,
     allow_schema: bool,
 ) -> Result<i64, wire::DBError> {
     let (handle, table, compiled, user) = scope;
-    let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy_with_proof(
-            sql, params, table, *compiled, user,
-        )?
-        .into_parts()?
+    let sql = if allow_schema {
+        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, table, *compiled, user)?
+            .into_sql()?
     } else {
-        wire::jet_db_apply_compiled_policy_with_proof(sql, params, table, *compiled, user)?
-            .into_parts()?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, table, *compiled, user)?.into_sql()?
     };
-    let result = DB::runtime_execute(*handle, &sql, &wire::jet_db_encode_params(&values));
+    let result = DB::runtime_execute(
+        *handle,
+        &sql.0,
+        &wire::jet_db_encode_params(&sql.1),
+    );
     wire::jet_db_decode_execute_result(&result)
 }
 
 fn ambient_db_scope_query(
     scope: &(u64, String, wire::JetRowPolicyExpr, String),
-    sql: &str,
-    params: &Vec<wire::DBValue>,
+    sql: &wire::SQL,
     allow_schema: bool,
 ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
     let (handle, table, compiled, user) = scope;
-    let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy_with_proof(
-            sql, params, table, *compiled, user,
-        )?
-        .into_parts()?
+    let sql = if allow_schema {
+        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, table, *compiled, user)?
+            .into_sql()?
     } else {
-        wire::jet_db_apply_compiled_policy_with_proof(sql, params, table, *compiled, user)?
-            .into_parts()?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, table, *compiled, user)?.into_sql()?
     };
-    let result = DB::runtime_query(*handle, &sql, &wire::jet_db_encode_params(&values));
+    let result = DB::runtime_query(
+        *handle,
+        &sql.0,
+        &wire::jet_db_encode_params(&sql.1),
+    );
     wire::jet_db_decode_query_result(&result)
 }
 
@@ -3183,25 +3260,26 @@ impl wire::JetDBBackend for AmbientDbBackend {
 
     fn execute(
         &mut self,
-        sql: &String,
-        params: &Vec<wire::DBValue>,
+        sql: &wire::SQL,
         allow_schema: bool,
     ) -> Result<i64, wire::DBError> {
-        ambient_db_scope_execute(&self.scope, sql, params, allow_schema)
+        ambient_db_scope_execute(&self.scope, sql, allow_schema)
     }
 
     fn query(
         &mut self,
-        sql: &String,
-        params: &Vec<wire::DBValue>,
+        sql: &wire::SQL,
         allow_schema: bool,
     ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
-        ambient_db_scope_query(&self.scope, sql, params, allow_schema)
+        ambient_db_scope_query(&self.scope, sql, allow_schema)
     }
 }
 
-fn ambient_db_steps(value: &CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
-    ct_string_list(value).ok_or_else(|| unsupported("database steps list", span))
+fn ambient_db_steps(value: &CtValue, span: Span) -> Result<Vec<wire::SQL>, Diagnostic> {
+    let CtValue::List(items) = value else {
+        return Err(unsupported("database steps list", span));
+    };
+    items.iter().map(|item| ct_sql_value(item, span)).collect()
 }
 
 fn to_secret(v: &CtValue, span: Span) -> Result<Crypto::runtime::Secret, Diagnostic> {
@@ -3237,7 +3315,10 @@ fn ambient_int_arg(
     match args.get(index) {
         Some(CtValue::Int(value)) => Ok(*value),
         Some(CtValue::BigInt(value)) => value.try_i64().ok_or_else(|| {
-            unsupported(&format!("{name} expects an Int that fits the host call"), span)
+            unsupported(
+                &format!("{name} expects an Int that fits the host call"),
+                span,
+            )
         }),
         _ => Err(unsupported(
             &format!("{name} expects an Int argument"),
@@ -3442,7 +3523,7 @@ fn ambient_time_call(
                 .first()
                 .and_then(duration_ns)
                 .ok_or_else(|| unsupported("time.sleep expects a Duration", span))?;
-            jet_codegen::scheduler::jet_std_time_sleep_duration_ns(nanos);
+            crate::Concurrency::ambient_time_sleep(nanos);
             Ok(CtValue::Unit)
         }
         ("core.time", "start") => Ok(CtValue::Struct {
@@ -4079,11 +4160,7 @@ fn ws_outcome<T>(result: Result<T, CtValue>, map: impl FnOnce(T) -> CtValue) -> 
     }
 }
 
-fn ambient_ws_core_call(
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+fn ambient_ws_core_call(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     match method {
         "connect" if args.len() == 1 => {
             let Some(CtValue::Str(url)) = args.first() else {
@@ -4205,9 +4282,9 @@ pub fn ambient_core_call(
         let value = args.first().cloned().unwrap_or(CtValue::Unit);
         return Some(Ok(keep_kernel::jet_keep(value)));
     }
-        if module == "core.files" {
-            match method {
-                "open" => return Some(ambient_fs_open(&args, span)),
+    if module == "core.files" {
+        match method {
+            "open" => return Some(ambient_fs_open(&args, span)),
             "rename" => return Some(ambient_fs_rename(&args, span)),
             "fsync" => return Some(ambient_fs_fsync(&args, span)),
             "symlink" => return Some(ambient_fs_symlink(&args, span)),
@@ -4218,15 +4295,15 @@ pub fn ambient_core_call(
             "absolute" => return Some(ambient_fs_absolute(&args, span)),
             "walk" | "walk_parallel" => return Some(ambient_fs_walk(&args, span)),
             "walk_files" => return Some(ambient_fs_walk_files(&args, span)),
-                _ => {}
-            }
+            _ => {}
         }
-        if module == "core.process" && matches!(method, "argv" | "args") {
-            return Some(ambient_process_args(method, &args, span));
-        }
-        if module == "core.term" && method == "stdin" {
-            return Some(Ok(ambient_stdin()));
-        }
+    }
+    if module == "core.process" && matches!(method, "argv" | "args") {
+        return Some(ambient_process_args(method, &args, span));
+    }
+    if module == "core.term" && method == "stdin" {
+        return Some(Ok(ambient_stdin()));
+    }
     if module == "core.term" {
         match method {
             "input" => {
@@ -4385,6 +4462,51 @@ pub fn ambient_core_call(
         };
         return Some(result);
     }
+    if module == "core.encoding.csv" && method == "reader" {
+        if let Some(handle) = args.first().and_then(interp_file_reader_handle) {
+            return Some(crate::enc_stream::ambient_csv_reader_from_file(
+                &args,
+                span,
+                || take_interp_file_reader(handle),
+            ));
+        }
+    }
+    if module == "core.encoding.json" && method == "reader" {
+        if let Some(handle) = args.first().and_then(interp_file_reader_handle) {
+            return Some(crate::enc_stream::ambient_json_reader_from_file(
+                &args,
+                span,
+                || take_interp_file_reader(handle),
+            ));
+        }
+    }
+    if module == "core.encoding.jsonl" && method == "reader" {
+        if let Some(handle) = args.first().and_then(interp_file_reader_handle) {
+            return Some(crate::enc_stream::ambient_jsonl_reader_from_file(
+                &args,
+                span,
+                || take_interp_file_reader(handle),
+            ));
+        }
+    }
+    if module == "core.encoding.xml" && method == "reader" {
+        if let Some(handle) = args.first().and_then(interp_file_reader_handle) {
+            return Some(crate::enc_stream::ambient_xml_reader_from_file(
+                &args,
+                span,
+                || take_interp_file_reader(handle),
+            ));
+        }
+    }
+    if module == "core.encoding.cbor" && method == "reader" {
+        if let Some(handle) = args.first().and_then(interp_file_reader_handle) {
+            return Some(crate::enc_stream::ambient_cbor_reader_from_file(
+                &args,
+                span,
+                || take_interp_file_reader(handle),
+            ));
+        }
+    }
     if let Some(result) = crate::enc_stream::ambient_core_call(module, method, args.clone(), span) {
         return Some(result);
     }
@@ -4455,13 +4577,42 @@ pub fn ambient_core_call(
     if module == "core.http.server" {
         return Some(ambient_http_server_call(method, &args, span));
     }
-    if module == "core.http.client" && method == "request" {
-        let result = match args.as_slice() {
-            [CtValue::Str(method), CtValue::Str(url)] => Ok(http_handle_value(
-                "HTTPRequest",
-                crate::net_http_rt::runtime_http_request_new(method.clone(), url.clone()),
-            )),
-            _ => Err(unsupported("core.http.client.request arguments", span)),
+    // I9: one-shot and configurable HTTP client calls marshal through the
+    // same Prelude/native adapters used by AOT; this arm owns no URL policy.
+    if matches!(module, "core.http" | "core.http.client") {
+        let result = match (method, args.as_slice()) {
+            ("get", [CtValue::Str(url)]) => {
+                let url = url.clone();
+                Ok(start_interp_http_job(interp_http_pump(), move || {
+                    Ok(ws_outcome(
+                        crate::net_http_rt::runtime_http_client_get(url),
+                        |handle| http_handle_value("HTTPResponse", handle),
+                    ))
+                }))
+            }
+            ("post", [CtValue::Str(url), CtValue::Str(body)]) => {
+                let url = url.clone();
+                let body = body.clone();
+                Ok(start_interp_http_job(interp_http_pump(), move || {
+                    Ok(ws_outcome(
+                        crate::net_http_rt::runtime_http_client_post(url, body),
+                        |handle| http_handle_value("HTTPResponse", handle),
+                    ))
+                }))
+            }
+            ("request", [CtValue::Str(request_method), CtValue::Str(url)]) => {
+                Ok(http_handle_value(
+                    "HTTPRequest",
+                    crate::net_http_rt::runtime_http_request_new(
+                        request_method.clone(),
+                        url.clone(),
+                    ),
+                ))
+            }
+            ("get", _) => Err(unsupported(&format!("{module}.get arguments"), span)),
+            ("post", _) => Err(unsupported(&format!("{module}.post arguments"), span)),
+            ("request", _) => Err(unsupported(&format!("{module}.request arguments"), span)),
+            _ => return None,
         };
         return Some(result);
     }
@@ -4616,6 +4767,18 @@ pub fn ambient_core_call(
                 return Some(Err(unsupported("core.net.tcp_connect address", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_tcp_connect(address.clone())))
+        }
+        ("core.net", "tcp_shutdown") => {
+            let (Some(stream), Some(how)) = (
+                args.first()
+                    .and_then(|value| http_handle_id(value, "TcpStream")),
+                args.get(1).and_then(net_shutdown_value),
+            ) else {
+                return Some(Err(unsupported("core.net.tcp_shutdown arguments", span)));
+            };
+            Some(Ok(crate::net_http_rt::runtime_tcp_stream_shutdown(
+                stream, how,
+            )))
         }
         ("core.net", "tcp_connect_addr") => {
             let Some(address) = args
@@ -5081,6 +5244,29 @@ pub fn ambient_core_call(
                 service_prelude::apply(method, &args, span)
             }))
         }
+        ("core.ui", "button" | "key_event") => {
+            jet_codegen::Comptime::apply_core_pure_call(module, method, &args, span)
+        }
+        ("core.ui", "tui_backend") => Some(Ok(tui_backend_value())),
+        ("core.db", "row_value" | "row_int" | "row_float" | "row_text" | "row_bool") => {
+            let (row, key) = match db_row_and_key(&args, span) {
+                Ok(parts) => parts,
+                Err(error) => return Some(Err(error)),
+            };
+            let result = match method {
+                "row_value" => wire::jet_db_row_value(&row, &key).map(wire_db_value),
+                "row_int" => wire::jet_db_row_int(&row, &key).map(CtValue::Int),
+                "row_float" => wire::jet_db_row_float(&row, &key)
+                    .map(|value| CtValue::Float(CtFloat::f64(value))),
+                "row_text" => wire::jet_db_row_text(&row, &key).map(CtValue::Str),
+                "row_bool" => wire::jet_db_row_bool(&row, &key).map(CtValue::Bool),
+                _ => unreachable!(),
+            };
+            Some(Ok(match result {
+                Ok(value) => CtValue::Present(Box::new(value)),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            }))
+        }
         ("core.db", "policy") => {
             let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) =
                 (args.first(), args.get(1))
@@ -5310,9 +5496,9 @@ pub fn ambient_core_call(
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Bytes(
-                Crypto::runtime::jet_crypto_hmac_sha256(&key, &data),
-            )))
+            Some(Ok(CtValue::Bytes(Crypto::runtime::jet_crypto_hmac_sha256(
+                &key, &data,
+            ))))
         }
         ("core.crypto", "pbkdf2_hmac") => {
             let password = match as_bytes(args.first()?, span) {
@@ -5756,7 +5942,7 @@ struct InterpHttpCallbackPump {
 
 struct InterpHttpJob {
     pump: Arc<InterpHttpCallbackPump>,
-    result: Mutex<mpsc::Receiver<Result<(), String>>>,
+    result: Mutex<mpsc::Receiver<Result<CtValue, String>>>,
 }
 
 thread_local! {
@@ -5764,6 +5950,8 @@ thread_local! {
 }
 
 static INTERP_HTTP_JOBS: OnceLock<Mutex<Vec<Arc<InterpHttpJob>>>> = OnceLock::new();
+static INTERP_HTTP_MUX_PUMPS: LazyLock<Mutex<HashMap<i64, Weak<InterpHttpCallbackPump>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn interp_http_pump() -> Arc<InterpHttpCallbackPump> {
     INTERP_HTTP_PUMP.with(|slot| {
@@ -5784,6 +5972,13 @@ fn interp_http_pump() -> Arc<InterpHttpCallbackPump> {
 fn interp_http_jobs() -> &'static Mutex<Vec<Arc<InterpHttpJob>>> {
     INTERP_HTTP_JOBS.get_or_init(|| Mutex::new(Vec::new()))
 }
+fn interp_http_mux_pumps() -> &'static Mutex<HashMap<i64, Weak<InterpHttpCallbackPump>>> {
+    &INTERP_HTTP_MUX_PUMPS
+}
+
+fn interp_http_mux_pump(mux: i64) -> Option<Arc<InterpHttpCallbackPump>> {
+    interp_http_mux_pumps().lock().ok()?.get(&mux)?.upgrade()
+}
 
 fn interp_http_job_value(index: usize) -> CtValue {
     CtValue::Struct {
@@ -5802,9 +5997,9 @@ fn interp_http_job(value: &CtValue) -> Option<Arc<InterpHttpJob>> {
     let index = fields
         .iter()
         .find_map(|(name, value)| match (name.as_str(), value) {
-        ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
-        _ => None,
-    })?;
+            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+            _ => None,
+        })?;
     interp_http_jobs().lock().ok()?.get(index).cloned()
 }
 
@@ -5830,8 +6025,10 @@ fn interp_http_callback(
     receive.recv().unwrap_or(CtValue::Unit)
 }
 
-fn start_interp_http_job(run: impl FnOnce() -> Result<(), String> + Send + 'static) -> CtValue {
-    let pump = interp_http_pump();
+fn start_interp_http_job(
+    pump: Arc<InterpHttpCallbackPump>,
+    run: impl FnOnce() -> Result<CtValue, String> + Send + 'static,
+) -> CtValue {
     let (result_sender, result_receiver) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = result_sender.send(run());
@@ -5896,10 +6093,11 @@ fn interp_http_job_next(job: &Arc<InterpHttpJob>) -> CtValue {
         .expect("interpreter HTTP job result poisoned")
         .try_recv()
     {
-        Ok(Ok(())) => CtValue::Struct {
+        Ok(Ok(value)) => CtValue::Struct {
             type_name: "__JetInterpHttpDone".to_string(),
             fields: vec![
                 ("ok".to_string(), CtValue::Bool(true)),
+                ("value".to_string(), value),
                 ("error".to_string(), CtValue::Str(String::new())),
             ],
         },
@@ -6053,6 +6251,133 @@ fn materialize_interp_app(
     Ok(app)
 }
 
+fn tui_backend_value() -> CtValue {
+    CtValue::Struct {
+        type_name: "TuiBackend".to_string(),
+        fields: vec![
+            ("focus_labels".to_string(), CtValue::List(Vec::new())),
+            ("focused_index".to_string(), CtValue::Int(-1)),
+        ],
+    }
+}
+
+fn ui_node_label(value: &CtValue) -> Option<String> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "UiNode" {
+        return None;
+    }
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("label", CtValue::Str(label)) => Some(label.clone()),
+            _ => None,
+        })
+}
+
+fn ui_key_code(value: &CtValue) -> Option<&str> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    else {
+        return None;
+    };
+    if type_name != "InputEvent" || variant != "Key" {
+        return None;
+    }
+    args.iter()
+        .find_map(|(name, value)| match (name.as_deref(), value) {
+            (Some("code"), CtValue::Str(code)) => Some(code.as_str()),
+            _ => None,
+        })
+}
+
+fn ui_event_result(variant: &str) -> CtValue {
+    CtValue::Enum {
+        type_name: "EventResult".to_string(),
+        variant: variant.to_string(),
+        args: Vec::new(),
+    }
+}
+
+fn ambient_ui_handle(
+    op: &str,
+    recv: &mut CtValue,
+    args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    let method = op.strip_prefix("UiBackend:")?;
+    let CtValue::Struct { type_name, fields } = recv else {
+        return Some(Err(unsupported("UI backend receiver", span)));
+    };
+    if type_name != "TuiBackend" {
+        return Some(Err(unsupported("UI backend receiver", span)));
+    }
+    let Some(labels_index) = fields.iter().position(|(name, _)| name == "focus_labels") else {
+        return Some(Err(unsupported("UI backend focus labels", span)));
+    };
+    let Some(focused_index) = fields.iter().position(|(name, _)| name == "focused_index") else {
+        return Some(Err(unsupported("UI backend focused index", span)));
+    };
+    Some(match method {
+        "set_focus_group" => {
+            let Some(CtValue::List(nodes)) = args.first() else {
+                return Some(Err(unsupported("UI focus group", span)));
+            };
+            let labels = nodes
+                .iter()
+                .filter_map(ui_node_label)
+                .map(CtValue::Str)
+                .collect::<Vec<_>>();
+            let index = if labels.is_empty() { -1 } else { 0 };
+            fields[labels_index].1 = CtValue::List(labels);
+            fields[focused_index].1 = CtValue::Int(index);
+            Ok(CtValue::Unit)
+        }
+        "on_event" => {
+            let Some(event) = args.first() else {
+                return Some(Err(unsupported("UI input event", span)));
+            };
+            let code = ui_key_code(event).unwrap_or_default();
+            let labels_len = match &fields[labels_index].1 {
+                CtValue::List(labels) => labels.len(),
+                _ => 0,
+            };
+            if code == "Tab" && labels_len > 0 {
+                let current = match &fields[focused_index].1 {
+                    CtValue::Int(index) => (*index).max(0) as usize,
+                    _ => 0,
+                };
+                fields[focused_index].1 = CtValue::Int(((current + 1) % labels_len) as i64);
+            }
+            Ok(ui_event_result(if code.is_empty() {
+                "Ignored"
+            } else {
+                "Handled"
+            }))
+        }
+        "focused_label" => {
+            let index = match &fields[focused_index].1 {
+                CtValue::Int(index) if *index >= 0 => *index as usize,
+                _ => usize::MAX,
+            };
+            let label = match &fields[labels_index].1 {
+                CtValue::List(labels) => labels.get(index).and_then(|value| match value {
+                    CtValue::Str(label) => Some(label.clone()),
+                    _ => None,
+                }),
+                _ => None,
+            }
+            .unwrap_or_default();
+            Ok(CtValue::Str(label))
+        }
+        _ => Err(unsupported(&format!("UI backend method `{method}`"), span)),
+    })
+}
+
 fn ambient_app_handle(
     op: &str,
     recv: &mut CtValue,
@@ -6182,6 +6507,9 @@ pub fn ambient_handle(
         return Some(result);
     }
     if let Some(result) = ambient_net_handle(op, recv, args, span) {
+        return Some(result);
+    }
+    if let Some(result) = ambient_ui_handle(op, recv, args, span) {
         return Some(result);
     }
     if let Some(result) = ambient_app_handle(op, recv, args, span) {
@@ -6351,90 +6679,11 @@ pub fn ambient_handle(
         "DBClose" => Some(Ok(CtValue::Bool(DB::runtime_close(handle)))),
         "DBExecute" => {
             let sql = match args.first() {
-                Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("DBScope.execute sql", span))),
-            };
-            let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
-                Ok(p) => p,
-                Err(e) => return Some(Err(e)),
-            };
-            let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, compiled, user)) => {
-                    match wire::jet_db_apply_compiled_policy_with_proof(
-                        &sql, &values, &table, compiled, &user,
-                    ) {
-                        Ok(application) => match application.into_parts() {
-                            Ok((sql, values)) => (handle, sql, values),
-                            Err(error) => {
-                                return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
-                            }
-                        },
-                        Err(error) => {
-                            return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))))
-                        }
-                    }
-                }
-                None => {
-                    return Some(Ok(CtValue::failed(Box::new(db_err(
-                        "database row operations require a policy scope",
-                    )))))
-                }
-            };
-            let params = wire::jet_db_encode_params(&values);
-            let out = DB::runtime_execute(handle, &sql, &params);
-            Some(Ok(match wire::jet_db_decode_execute_result(&out) {
-                Ok(n) => CtValue::Present(Box::new(CtValue::Int(n))),
-                Err(e) => CtValue::failed(Box::new(db_err(e.message))),
-            }))
-        }
-        "DBQuery" => {
-            let sql = match args.first() {
-                Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("DBScope.query sql", span))),
-            };
-            let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
-                Ok(p) => p,
-                Err(e) => return Some(Err(e)),
-            };
-            let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, compiled, user)) => {
-                    match wire::jet_db_apply_compiled_policy_with_proof(
-                        &sql, &values, &table, compiled, &user,
-                    ) {
-                        Ok(application) => match application.into_parts() {
-                            Ok((sql, values)) => (handle, sql, values),
-                            Err(error) => {
-                                return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
-                            }
-                        },
-                        Err(error) => {
-                            return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))))
-                        }
-                    }
-                }
-                None => {
-                    return Some(Ok(CtValue::failed(Box::new(db_err(
-                        "database row operations require a policy scope",
-                    )))))
-                }
-            };
-            let params = wire::jet_db_encode_params(&values);
-            let out = DB::runtime_query(handle, &sql, &params);
-            Some(Ok(match wire::jet_db_decode_query_result(&out) {
-                Ok(rows) => CtValue::Present(Box::new(CtValue::List(
-                    rows.into_iter().map(row_map).collect(),
-                ))),
-                Err(e) => CtValue::failed(Box::new(db_err(e.message))),
-            }))
-        }
-        "DBQueryOne" => {
-            let sql = match args.first() {
-                Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("DBScope.query_one sql", span))),
-            };
-            let values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
-                Ok(p) => p,
-                Err(e) => return Some(Err(e)),
+                Some(value) => match ct_sql_value(value, span) {
+                    Ok(sql) => sql,
+                    Err(error) => return Some(Err(error)),
+                },
+                None => return Some(Err(unsupported("DBScope.execute SQL", span))),
             };
             let scope = match db_scope_parts(recv) {
                 Some(scope) => scope,
@@ -6444,31 +6693,72 @@ pub fn ambient_handle(
                     )))))
                 }
             };
-            Some(Ok(
-                match ambient_db_scope_query(&scope, &sql, &values, false) {
-                    Ok(rows) => {
-                        let opt = match wire::jet_db_first_row(rows) {
-                            Ok(row) => CtValue::Present(Box::new(row_map(row))),
-                            Err(_) => CtValue::absent(Type::Map {
-                                key: Box::new(Type::String),
-                                key_span: None,
-                                value: Box::new(Type::Named("DBValue".into())),
-                            }),
-                        };
-                        CtValue::Present(Box::new(opt))
-                    }
-                    Err(e) => CtValue::failed(Box::new(db_err(e.message))),
+            Some(Ok(match ambient_db_scope_execute(&scope, &sql, false) {
+                Ok(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                Err(error) => CtValue::failed(Box::new(db_err(error.message))),
+            }))
+        }
+        "DBQuery" => {
+            let sql = match args.first() {
+                Some(value) => match ct_sql_value(value, span) {
+                    Ok(sql) => sql,
+                    Err(error) => return Some(Err(error)),
                 },
-            ))
+                None => return Some(Err(unsupported("DBScope.query SQL", span))),
+            };
+            let scope = match db_scope_parts(recv) {
+                Some(scope) => scope,
+                None => {
+                    return Some(Ok(CtValue::failed(Box::new(db_err(
+                        "database row operations require a policy scope",
+                    )))))
+                }
+            };
+            Some(Ok(match ambient_db_scope_query(&scope, &sql, false) {
+                Ok(rows) => CtValue::Present(Box::new(CtValue::List(
+                    rows.into_iter().map(row_map).collect(),
+                ))),
+                Err(error) => CtValue::failed(Box::new(db_err(error.message))),
+            }))
+        }
+        "DBQueryOne" => {
+            let sql = match args.first() {
+                Some(value) => match ct_sql_value(value, span) {
+                    Ok(sql) => sql,
+                    Err(error) => return Some(Err(error)),
+                },
+                None => return Some(Err(unsupported("DBScope.query_one SQL", span))),
+            };
+            let scope = match db_scope_parts(recv) {
+                Some(scope) => scope,
+                None => {
+                    return Some(Ok(CtValue::failed(Box::new(db_err(
+                        "database row operations require a policy scope",
+                    )))))
+                }
+            };
+            Some(Ok(match ambient_db_scope_query(&scope, &sql, false) {
+                Ok(rows) => {
+                    let opt = match wire::jet_db_first_row(rows) {
+                        Ok(row) => CtValue::Present(Box::new(row_map(row))),
+                        Err(_) => CtValue::absent(Type::Map {
+                            key: Box::new(Type::String),
+                            key_span: None,
+                            value: Box::new(Type::Named("DBValue".into())),
+                        }),
+                    };
+                    CtValue::Present(Box::new(opt))
+                }
+                Err(error) => CtValue::failed(Box::new(db_err(error.message))),
+            }))
         }
         "DBLive" => {
-            let raw_sql = match args.first() {
-                Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("DBScope.live sql", span))),
-            };
-            let raw_values = match db_params(args.get(1).unwrap_or(&CtValue::List(vec![])), span) {
-                Ok(values) => values,
-                Err(error) => return Some(Err(error)),
+            let sql = match args.first() {
+                Some(value) => match ct_sql_value(value, span) {
+                    Ok(sql) => sql,
+                    Err(error) => return Some(Err(error)),
+                },
+                None => return Some(Err(unsupported("DBScope.live SQL", span))),
             };
             let (handle, table, compiled, user) = match db_scope_parts(recv) {
                 Some(parts) => parts,
@@ -6478,62 +6768,28 @@ pub fn ambient_handle(
                     )))))
                 }
             };
-            let (sql, values) = match wire::jet_db_apply_compiled_policy_with_proof(
-                &raw_sql,
-                &raw_values,
-                &table,
-                compiled,
-                &user,
-            ) {
-                Ok(application) => match application.into_parts() {
-                    Ok(value) => value,
-                    Err(error) => {
-                        return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
-                    }
-                },
+            let scope = (handle, table.clone(), compiled, user.clone());
+            let rows = match ambient_db_scope_query(&scope, &sql, false) {
+                Ok(rows) => rows,
                 Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
             };
-            let out = DB::runtime_query(handle, &sql, &wire::jet_db_encode_params(&values));
-            Some(Ok(match wire::jet_db_decode_query_result(&out) {
-                Ok(rows) => {
-                    // SQL text is not a footprint token: spaces and operators
-                    // are deliberately rejected by the shared footprint parser.
-                    // Table scope is conservative and reruns every live query
-                    // on that table until the app graph supplies columns.
-                    let footprint = table.clone();
-                    let initial = format!("{rows:?}");
-                    let rerun_table = table.clone();
-                    let rerun_compiled = compiled;
-                    let rerun_user = user.clone();
-                    let rerun_sql = raw_sql.clone();
-                    let rerun_values = raw_values.clone();
-                    let query = jet_codegen::Comptime::AppLite::live_query_with(
-                        footprint,
-                        initial,
-                        move || {
-                            let (sql, values) = wire::jet_db_apply_compiled_policy_with_proof(
-                                &rerun_sql,
-                                &rerun_values,
-                                &rerun_table,
-                                rerun_compiled,
-                                &rerun_user,
-                            )
-                            .and_then(|application| application.into_parts())
-                            .map_err(|error| error.message)?;
-                            let out = DB::runtime_query(
-                                handle,
-                                &sql,
-                                &wire::jet_db_encode_params(&values),
-                            );
-                            wire::jet_db_decode_query_result(&out)
-                                .map(|rows| format!("{rows:?}"))
-                                .map_err(|error| error.message)
-                        },
-                    );
-                    CtValue::Present(Box::new(query))
-                }
-                Err(error) => CtValue::failed(Box::new(db_err(error.message))),
-            }))
+            // SQL text is not a footprint token: spaces and operators are
+            // deliberately rejected by the shared footprint parser. Table
+            // scope is conservative and reruns every live query on that table.
+            let footprint = table.clone();
+            let initial = format!("{rows:?}");
+            let rerun_scope = (handle, table, compiled, user);
+            let rerun_sql = sql;
+            let query = jet_codegen::Comptime::AppLite::live_query_with(
+                footprint,
+                initial,
+                move || {
+                    ambient_db_scope_query(&rerun_scope, &rerun_sql, false)
+                        .map(|rows| format!("{rows:?}"))
+                        .map_err(|error| error.message)
+                },
+            );
+            Some(Ok(CtValue::Present(Box::new(query))))
         }
         _ => None,
     }
@@ -6725,6 +6981,31 @@ fn ambient_net_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if op == "IOReaderRead" {
+        let stream_type = match recv {
+            CtValue::Struct { type_name, .. } => type_name.clone(),
+            _ => return None,
+        };
+        if !matches!(stream_type.as_str(), "TcpStream" | "UnixStream" | "TLSStream") {
+            return None;
+        }
+        let Some(CtValue::Int(limit)) = args.first() else {
+            return Some(Err(unsupported("Reader.read limit", span)));
+        };
+        if args.len() != 1 {
+            return Some(Err(unsupported("Reader.read arguments", span)));
+        }
+        let Some(stream) = http_handle_id(recv, &stream_type) else {
+            return Some(Err(unsupported("Reader receiver", span)));
+        };
+        return Some(Ok(match stream_type.as_str() {
+            "TcpStream" => crate::net_http_rt::runtime_tcp_stream_read_io(stream, *limit),
+            #[cfg(unix)]
+            "UnixStream" => crate::net_http_rt::runtime_unix_stream_read_io(stream, *limit),
+            "TLSStream" => crate::net_http_rt::runtime_tls_stream_read_io(stream, *limit),
+            _ => unreachable!("IOReaderRead receiver was checked above"),
+        }));
+    }
     if matches!(
         op,
         "TLSClientConfigDefault"
@@ -7320,8 +7601,10 @@ fn ambient_http_server_call(
                 "HTTPMux",
             )
             .ok_or_else(|| unsupported("core.http.server mux handle", span))?;
-            Ok(start_interp_http_job(move || {
+            let pump = interp_http_mux_pump(mux).unwrap_or_else(interp_http_pump);
+            Ok(start_interp_http_job(pump, move || {
                 crate::net_http_rt::runtime_http_serve_once_listener(listener, mux)
+                    .map(|_| CtValue::Present(Box::new(CtValue::Unit)))
             }))
         }
         "serve_once" if args.len() == 2 => {
@@ -7335,8 +7618,10 @@ fn ambient_http_server_call(
                 "HTTPMux",
             )
             .ok_or_else(|| unsupported("core.http.server mux handle", span))?;
-            Ok(start_interp_http_job(move || {
+            let pump = interp_http_mux_pump(mux).unwrap_or_else(interp_http_pump);
+            Ok(start_interp_http_job(pump, move || {
                 crate::net_http_rt::runtime_http_serve_once(address, mux)
+                    .map(|_| CtValue::Present(Box::new(CtValue::Unit)))
             }))
         }
         "serve" if args.len() == 2 => {
@@ -7350,8 +7635,10 @@ fn ambient_http_server_call(
                 "HTTPMux",
             )
             .ok_or_else(|| unsupported("core.http.server mux handle", span))?;
-            Ok(start_interp_http_job(move || {
+            let pump = interp_http_mux_pump(mux).unwrap_or_else(interp_http_pump);
+            Ok(start_interp_http_job(pump, move || {
                 crate::net_http_rt::runtime_http_serve(address, mux)
+                    .map(|_| CtValue::Present(Box::new(CtValue::Unit)))
             }))
         }
         "bind" if args.len() == 2 => {
@@ -7370,7 +7657,7 @@ fn ambient_http_server_call(
                     Ok(handle) => {
                         CtValue::Present(Box::new(http_handle_value("HTTPServer", handle)))
                     }
-                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+                    Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
                 },
             )
         }
@@ -7590,8 +7877,8 @@ fn ambient_ws_handle(
     let Some(method) = message_method else {
         return None;
     };
-    let message = http_handle_id(recv, "WsMessage")
-        .ok_or_else(|| unsupported("WsMessage receiver", span));
+    let message =
+        http_handle_id(recv, "WsMessage").ok_or_else(|| unsupported("WsMessage receiver", span));
     let result = match method {
         "is_text" if args.is_empty() => message.and_then(|message| {
             crate::net_http_rt::runtime_ws_message_is_text(message)
@@ -7725,7 +8012,14 @@ fn ambient_http_handle(
             return Some(Err(unsupported("HTTPMux route path", span)));
         };
         let callable = args[1].clone();
+        let Some(mux) = http_handle_id(recv, "HTTPMux") else {
+            return Some(Err(unsupported("HTTPMux route receiver", span)));
+        };
         let pump = interp_http_pump();
+        interp_http_mux_pumps()
+            .lock()
+            .expect("interpreter HTTP mux pump registry poisoned")
+            .insert(mux, Arc::downgrade(&pump));
         let takes_request = match &callable {
             CtValue::Closure(data) => !data.lambda.params.is_empty(),
             _ => interp_http_callable_arity(&callable)
@@ -7738,13 +8032,8 @@ fn ambient_http_handle(
                     Ok(interp_http_callback(&pump, callable.clone(), vec![request]))
                 })
             } else {
-                Arc::new(move |_request| {
-                    Ok(interp_http_callback(&pump, callable.clone(), vec![]))
-                })
+                Arc::new(move |_request| Ok(interp_http_callback(&pump, callable.clone(), vec![])))
             };
-        let Some(mux) = http_handle_id(recv, "HTTPMux") else {
-            return Some(Err(unsupported("HTTPMux route receiver", span)));
-        };
         return Some(
             crate::net_http_rt::runtime_http_mux_add_callback(
                 mux,
@@ -8098,15 +8387,18 @@ fn ambient_http_projection(
             })
         }
         "HTTPClient:HTTPRequest:send" if args.is_empty() => {
-            handle("HTTPRequest", "HTTPRequest.send receiver").and_then(|request| {
-                crate::net_http_rt::runtime_http_request_send(request)
-                    .map_err(|error| unsupported(&error, span))
-                    .map(|result| match result {
-                        Ok(response) => CtValue::Present(Box::new(http_handle_value(
-                            "HTTPResponse", response,
-                        ))),
-                        Err(error) => CtValue::failed(Box::new(error)),
+            handle("HTTPRequest", "HTTPRequest.send receiver").map(|request| {
+                start_interp_http_job(interp_http_pump(), move || {
+                    crate::net_http_rt::runtime_http_request_send(request).map(|result| {
+                        match result {
+                            Ok(response) => CtValue::Present(Box::new(http_handle_value(
+                                "HTTPResponse",
+                                response,
+                            ))),
+                            Err(error) => CtValue::failed(Box::new(error)),
+                        }
                     })
+                })
             })
         }
         op if op.starts_with("HTTPServer:HTTPRouterRegister:") => Err(unsupported(

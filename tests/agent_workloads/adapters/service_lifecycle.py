@@ -43,7 +43,7 @@ try:
         )
 
     if task == "service-lifecycle-readiness-timeout":
-        failed = run(["services", "up", "timeout", "--no-color"])
+        failed = run(["services", "up", "timeout", "--trust", "--no-color"])
         if failed.returncode == 0 or "E1261" not in failed.stderr + failed.stdout:
             raise SystemExit("readiness timeout did not fail with E1261")
         lifecycle = (project / ".jet/services/timeout/lifecycle").read_text()
@@ -61,12 +61,12 @@ try:
             raise SystemExit("failed service lost supervisor receipt")
         print("service=failed\nerror=E1261\nlimit=bounded\ndescendants=contained\nreceipt=startup-failed")
     else:
-        if run(["services", "up", "fixture", "--no-color"]).returncode != 0:
+        if run(["services", "up", "fixture", "--trust", "--no-color"]).returncode != 0:
             raise SystemExit("service up failed")
-        health = run(["services", "health", "fixture", "--json", "--no-color"])
+        health = run(["services", "health", "fixture", "--trust", "--json", "--no-color"])
         if health.returncode != 0 or not all(marker in health.stdout for marker in ("healthy", "linux-systemd-user", "delegated-cgroup")):
             raise SystemExit("service health receipt drifted")
-        waited = run(["services", "wait", "fixture", "--no-color"])
+        waited = run(["services", "wait", "fixture", "--trust", "--no-color"])
         if waited.returncode != 0 or "service `fixture` is ready" not in waited.stderr:
             raise SystemExit("service wait drifted")
         logs = run(["services", "logs", "fixture", "--no-color"])

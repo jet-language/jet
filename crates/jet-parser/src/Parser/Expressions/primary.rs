@@ -274,10 +274,10 @@ impl<'a> Parser<'a> {
                 ) =>
             {
                 let takes = self.parse_lambda_takes()?;
-                Ok(Expr::Lambda(self.parse_lambda(takes)?))
+                Ok(Expr::Lambda(Box::new(self.parse_lambda(takes)?)))
             }
             TokKind::LParen if self.after_lparen_is_lambda() => {
-                Ok(Expr::Lambda(self.parse_lambda(vec![])?))
+                Ok(Expr::Lambda(Box::new(self.parse_lambda(vec![])?)))
             }
             // D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param
             // lambda with no parens — `m -> m.hp > 0`. Sema accepts it only
@@ -293,7 +293,7 @@ impl<'a> Parser<'a> {
             TokKind::Ident(_)
                 if allow_struct_lit && Self::at_unified_arrow_token(&self.peek2().kind) =>
             {
-                Ok(Expr::Lambda(self.parse_bare_lambda()?))
+                Ok(Expr::Lambda(Box::new(self.parse_bare_lambda()?)))
             }
             TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
             TokKind::Ident(name) if false && name == Syntax::FOREIGN_LAMBDA => {
@@ -363,6 +363,22 @@ impl<'a> Parser<'a> {
                     span,
                     value: None,
                 })
+            }
+            TokKind::KwIn => {
+                let span = self.bump().span;
+                Err(Diagnostic::error(
+                    "E0003",
+                    format!("`{}` is reserved as the source-loop keyword", Syntax::KW_IN),
+                    format!(
+                        "the `{}` keyword marks the boundary between a loop binding and its source",
+                        Syntax::KW_IN
+                    ),
+                    format!(
+                        "choose a different identifier name, or use `{}` in a source loop; after `.` it is allowed as a member name",
+                        Syntax::KW_IN
+                    ),
+                    Some(span),
+                ))
             }
             TokKind::Ident(name) if name == Syntax::KW_CONC_TASK => self.task_surface_expr(),
             TokKind::Ident(name) => {
@@ -811,7 +827,7 @@ impl<'a> Parser<'a> {
                     type_args: Vec::new(),
                     args: vec![CallArg {
                         convention: AccessConvention::Read,
-                        expr: Expr::Lambda(lambda),
+                        expr: Expr::Lambda(Box::new(lambda)),
                         span: body_span,
                         flags: crate::AST::CallArgFlags::default(),
                         label: None,
@@ -943,7 +959,7 @@ impl<'a> Parser<'a> {
             type_args: Vec::new(),
             args: vec![CallArg {
                 convention: AccessConvention::Read,
-                expr: Expr::Lambda(lambda),
+                expr: Expr::Lambda(Box::new(lambda)),
                 span: body_span,
                 flags: crate::AST::CallArgFlags::default(),
                 label: None,

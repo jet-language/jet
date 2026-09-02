@@ -20,10 +20,8 @@ use jet_foundation::Reflection::ReflectionField;
 #[derive(Debug, Clone, Default)]
 pub struct ProgramSemanticFacts {
     pub effects: std::collections::HashMap<String, Vec<String>>,
-    pub arithmetic: std::collections::HashMap<
-        String,
-        Vec<jet_foundation::AST::ArithmeticPolicyFact>,
-    >,
+    pub arithmetic:
+        std::collections::HashMap<String, Vec<jet_foundation::AST::ArithmeticPolicyFact>>,
     pub reaches_panic: std::collections::BTreeSet<String>,
     pub fact_registry: jet_foundation::Facts::FactRegistry,
     pub name_ledger: jet_foundation::Names::NameLedger,
@@ -1306,20 +1304,12 @@ fn build_method_info_with_vocabulary(
         "MethodInfo",
         &[
             ("name", ct_str(method.name.clone())),
-            (
-                "return_type",
-                ct_str(
-                    method.effective_return_type().name(),
-                ),
-            ),
+            ("return_type", ct_str(method.effective_return_type().name())),
             (
                 "failure_contract",
                 ct_str(method.failure_contract().effective_type().name()),
             ),
-            (
-                "failure_source",
-                ct_str(method.failure_contract().source()),
-            ),
+            ("failure_source", ct_str(method.failure_contract().source())),
             ("params", ct_list(param_strs)),
             ("signature", ct_str(format_method_sig(method))),
             ("effects", build_effect_info(&effects)),
@@ -1648,15 +1638,14 @@ pub fn reflect_type_value_with_target_and_graph_and_facts(
                 let graph = graph.or_else(|| {
                     facts.and_then(|facts| facts.state_graph(&format!("{}.State", def.name)))
                 });
-                let mut info =
-                    build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
-                        def,
-                        &states,
-                        &format!("{module}.{type_name}"),
-                        None,
-                        &layout_engine,
-                        graph,
-                    );
+                let mut info = build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
+                    def,
+                    &states,
+                    &format!("{module}.{type_name}"),
+                    None,
+                    &layout_engine,
+                    graph,
+                );
                 append_trait_contracts_from_items(
                     &mut info,
                     items,
@@ -1843,15 +1832,15 @@ pub(crate) fn fact_read_value_with_registry(
                 .map(|(dimension, _)| build_dimension_info(&dimension)),
             _ => None,
         }),
-        jet_foundation::Registry::FactRead::States => fact_registry
-            .state_members(subject_name)
-            .map(|states| {
+        jet_foundation::Registry::FactRead::States => {
+            fact_registry.state_members(subject_name).map(|states| {
                 build_state_infos_with_graph(
                     subject_name,
                     states,
                     fact_registry.state_graph(&format!("{subject_name}.State")),
                 )
-            }),
+            })
+        }
         jet_foundation::Registry::FactRead::Effects => items.iter().find_map(|item| match item {
             Item::Func(function) if function.name == subject_name => Some(build_effect_info(
                 &function
@@ -2140,7 +2129,7 @@ pub fn build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
             ("transitions", ct_list(transition_info)),
             ("facts", ct_list(facts)),
             ("dimensions", ct_list(dimensions)),
-                (
+            (
                 "implements",
                 ct_list(
                     s.trait_impls
@@ -2291,9 +2280,7 @@ fn trait_contracts_from_items(
     let mut contracts = Vec::new();
     for item in items {
         match item {
-            Item::Impl(implementation)
-                if type_leaf(&implementation.type_name) == owner =>
-            {
+            Item::Impl(implementation) if type_leaf(&implementation.type_name) == owner => {
                 if let Some(trait_name) = &implementation.trait_name {
                     contracts.push(trait_contract_info(
                         trait_name,
@@ -2561,7 +2548,7 @@ fn build_enum_type_info_with_engine(
                         def.trait_impls
                             .iter()
                             .map(|implementation| ct_str(implementation.trait_name.clone()))
-                        .collect(),
+                            .collect(),
                     ),
                 ),
                 ("trait_contracts", ct_list(Vec::new())),
@@ -2936,10 +2923,7 @@ fn build_function_info(
                 "failure_contract",
                 ct_str(func.failure_contract().effective_type().name()),
             ),
-            (
-                "failure_source",
-                ct_str(func.failure_contract().source()),
-            ),
+            ("failure_source", ct_str(func.failure_contract().source())),
             (
                 "params",
                 ct_list(
@@ -2982,10 +2966,10 @@ fn arithmetic_operation_info(fact: &jet_foundation::AST::ArithmeticPolicyFact) -
         &[
             (
                 "operation",
-                ct_str(
-                    fact.operation
-                        .map_or("operation", jet_foundation::AST::ArithmeticOperation::as_str),
-                ),
+                ct_str(fact.operation.map_or(
+                    "operation",
+                    jet_foundation::AST::ArithmeticOperation::as_str,
+                )),
             ),
             ("policy", ct_str(format!(".{}", fact.mode.as_str()))),
             ("operation_span", source_span_value(fact.operation_span)),

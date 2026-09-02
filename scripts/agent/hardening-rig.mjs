@@ -30,6 +30,7 @@ import {
   batchMutations,
   bundleIdentity,
   checkJetSource,
+  readManifestArtifact,
   discoverCorpusSeeds,
   executeCase,
   makeResultBundle,
@@ -37,6 +38,7 @@ import {
   tierCommand,
 } from "./hardening-oracle-layer.mjs";
 import { hardeningDedupKey as buildHardeningDedupKey, redTeamMain } from "./hardening-red-team.mjs";
+import { canonicalJson, reproContentDigest } from "./hardening-repro.mjs";
 import { buildDashboard } from "./hardening-dashboard.mjs";
 
 import {
@@ -589,13 +591,48 @@ function writeFailureLog(record) {
   const line = Buffer.from(`${JSON.stringify(record)}\n`);
   atomicWrite(FAILURE_LOG_PATH, line.subarray(0, LOG_CAP_BYTES));
 }
+function sealResult(result) {
+  result.content_digest = reproContentDigest(result);
+  return result.content_digest;
+}
+
+function addExclusion(result, entry) {
+  if (!Array.isArray(result.exclusions)) result.exclusions = [];
+  result.exclusions.push({
+    valid: false,
+    ...entry,
+  });
+}
+
+function recordRefusal(result, run, error, source = "preflight") {
+  result.preflight = [...run.preflight];
+  result.resources_before = run.resources_before || null;
+  result.refusal = { reason: error.reason, details: error.details };
+  addExclusion(result, {
+    kind: "refused",
+    source,
+    reason: error.reason,
+    details: error.details,
+  });
+}
+
+function recordWindowReset(result, reason, details = {}) {
+  result.window_reset = {
+    required: true,
+    reason,
+    commit: result.commit,
+    ...details,
+  };
+}
 
 function archiveCycle(result) {
   if (!result?.run_id || !/^[A-Za-z0-9_.-]+$/.test(result.run_id)) {
     throw new Error("cycle result has no safe run id for archival");
   }
+  sealResult(result);
   atomicJson(join(CYCLE_ROOT, `cycle-${result.run_id}.json`), result);
 }
+
 
 function loadState() {
   const state = readJson(STATE_PATH);
@@ -656,6 +693,18 @@ function manifestIdentity() {
     return { path: relative(ROOT, path), sha256: sha256File(path), present: true };
   }
   return { path: null, sha256: null, present: false };
+}
+function discoveryManifest(identity) {
+  if (!identity?.path) return null;
+  if (!process.env.JET_HARDENING_MANIFEST && !identity.path.endsWith("hardening-manifest.json")) return null;
+  try {
+    return readManifestArtifact(resolve(ROOT, identity.path));
+  } catch (error) {
+    throw new Refusal("oracle manifest artifact is invalid", {
+      path: identity.path,
+      error: error.message,
+    });
+  }
 }
 
 function csvEnv(name, fallback) {
@@ -756,7 +805,7 @@ function config() {
     mutation_max_cases: boundedIntegerEnv("JET_HARDENING_MUTATION_MAX_CASES", MUTATION_CATALOG.length, 1, MUTATION_CATALOG.length),
     mutation_disabled_killers: mutationDisabledKillers,
   };
-  return { ...value, hash: sha256(JSON.stringify(value)) };
+  return { ...value, config_sha256: sha256(canonicalJson(value)) };
 }
 
 function cycleEnvironment(scratch, cfg) {
@@ -829,7 +878,7 @@ function baseResult(run, cfg, identity, manifest) {
     target: `${process.platform}-${process.arch}`,
     registry_snapshot: manifest,
     config: cfg,
-    config_sha256: cfg.hash,
+    config_sha256: cfg.config_sha256,
     seed: cfg.seed,
     mutation_arm: null,
     source: null,
@@ -844,8 +893,14 @@ function baseResult(run, cfg, identity, manifest) {
     property: null,
     grammar: null,
     mutation: null,
+    composition: null,
     tower: null,
     cleanup: null,
+    exclusions: [],
+    window_reset: null,
+    resources_before: null,
+    resources_after: null,
+    content_digest: null,
   };
 }
 
@@ -863,9 +918,12 @@ function simulatedGuard(simulate) {
 
 async function preflight(run, cfg, simulate) {
   const checks = [];
+  run.resources_before = sizeReport();
+
   const check = (name, ok, reason, details = {}) => {
     const row = { name, ok, reason: reason || null, ...details };
     checks.push(row);
+    run.preflight = [...checks];
     if (!ok) throw new Refusal(reason || `${name} failed`, row);
   };
 
@@ -876,21 +934,29 @@ async function preflight(run, cfg, simulate) {
   const scratch = diskBacked(SCRATCH_ROOT);
   check("scratch", scratch.ok, scratch.reason, { path: SCRATCH_ROOT, filesystem: scratch.filesystem || null });
   const stale = cleanupStaleScratch();
-  if (stale.length) checks.push({ name: "stale-scratch", ok: true, recovered: stale.length });
+  if (stale.length) {
+    checks.push({ name: "stale-scratch", ok: true, recovered: stale.length });
+    run.preflight = [...checks];
+  }
 
   const synthetic = simulatedGuard(simulate);
-  if (synthetic && simulate !== "stale-lease") throw new Refusal(synthetic, { simulated: true });
+  if (synthetic && simulate !== "stale-lease") {
+    run.preflight = [...checks];
+    throw new Refusal(synthetic, { simulated: true });
+  }
 
   if (simulate !== "tmp-guard") {
     check("tmp-guard", existsSync(TMP_GUARD), "tmp-guard is missing", { command: TMP_GUARD });
     const guard = await runCommand("tmp-guard", TMP_GUARD, [], cycleEnvironment(SCRATCH_ROOT, cfg), 60_000);
     checks.push({ name: "tmp-guard", ...childSummary(guard) });
+    run.preflight = [...checks];
     if (!guard.ok) throw new Refusal("tmp-guard failed", { command: guard.command, exit: guard.exit, stderr: guard.stderr_base64 });
   }
 
   if (simulate !== "dirty") {
     const identity = gitIdentity();
     checks.push({ name: "git", clean: identity.clean, commit: identity.commit, dirty_paths: identity.dirty_paths });
+    run.preflight = [...checks];
     check("git", identity.clean, "checkout is dirty", { commit: identity.commit, dirty_paths: identity.dirty_paths });
     run.identity = identity;
   } else {
@@ -925,6 +991,7 @@ async function preflight(run, cfg, simulate) {
         }
       })();
   checks.push({ name: "memory", available_gib: availableGib });
+  run.preflight = [...checks];
   check("memory", simulate !== "memory" && availableGib != null && availableGib >= MIN_MEMORY_GIB,
     `available memory below ${MIN_MEMORY_GIB}GiB`, { available_gib: availableGib, minimum_gib: MIN_MEMORY_GIB });
   check("target-cap", simulate !== "target" && resources.target_bytes != null && resources.target_bytes <= TARGET_CAP_BYTES,
@@ -1007,6 +1074,109 @@ function findingClassification(caseResult) {
   };
 }
 
+function caseBundleDigest(bundle) {
+  const content = { ...bundle };
+  delete content.digest_sha256;
+  return sha256(canonicalJson(content));
+}
+
+function caseObservationBytes(observation, key) {
+  const encoded = observation[`${key}_base64`];
+  if (typeof encoded === "string") return encoded.startsWith("base64:") ? encoded : `base64:${encoded}`;
+  const value = observation[`${key}_bytes`] ?? observation[key];
+  if (typeof value === "string") return value.startsWith("base64:") ? value : `base64:${Buffer.from(value, "utf8").toString("base64")}`;
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) return `base64:${Buffer.from(value).toString("base64")}`;
+  return "base64:";
+}
+
+function stableCaseValue(value) {
+  if (value === undefined) return null;
+  try {
+    return JSON.parse(canonicalJson(value));
+  } catch {
+    return String(value);
+  }
+}
+function requireBundleIdentity(manifest, cfg, hasCases, manifestArtifact) {
+  if (!hasCases) return;
+  if (!manifestArtifact) {
+    throw new Refusal("oracle hardening manifest artifact is missing", {
+      manifest_path: manifest?.path || null,
+    });
+  }
+  const digest = /^[0-9a-f]{64}$/;
+  if (!digest.test(manifest?.sha256 || "")) {
+    throw new Refusal("oracle manifest digest is missing or invalid", { manifest_sha256: manifest?.sha256 || null });
+  }
+  if (!digest.test(cfg?.config_sha256 || "")) {
+    throw new Refusal("oracle config digest is missing or invalid", { config_sha256: cfg?.config_sha256 || null });
+  }
+}
+
+
+function qualificationCaseBundle(run, caseInput, caseResult, manifest, cfg) {
+  const observations = (Array.isArray(caseResult.observations) ? caseResult.observations : []).map((observation) => ({
+    tier: observation.tier,
+    value: stableCaseValue(observation.value ?? observation.normalized_value),
+    relation: observation.relation || observation.actual_relation || "",
+    exit: observation.exit ?? null,
+    signal: observation.signal ?? null,
+    timeout: observation.timeout === true || observation.timed_out === true,
+    stdout_bytes: caseObservationBytes(observation, "stdout"),
+    stderr_bytes: caseObservationBytes(observation, "stderr"),
+  }));
+  const expectedValue = Object.hasOwn(caseResult, "expected_value")
+    ? caseResult.expected_value
+    : Object.hasOwn(caseInput, "expected_value")
+      ? caseInput.expected_value
+      : null;
+  const bundle = {
+    id: caseInput.case_id,
+    row_id: caseInput.row_id || caseInput.stable_surface_id,
+    domain: caseInput.domain,
+    layer: "oracle",
+    seed_id: caseInput.seed_id || caseInput.seed,
+    manifest_sha256: manifest.sha256 || "",
+    config_sha256: cfg.config_sha256,
+    applicable_tiers: [...(caseResult.applicable_tiers || caseInput.applicable_tiers || [])],
+    input: caseInput.source,
+    expected_relation: caseInput.expected_relation || caseResult.expected_relation || "",
+    expected_value: stableCaseValue(expectedValue),
+    observations,
+    validity: "valid",
+    rejection_reason: null,
+  };
+  return { ...bundle, digest_sha256: caseBundleDigest(bundle) };
+}
+
+function rejectedQualificationCaseBundle(rejected, manifest, cfg) {
+  const rowId = String(rejected.row_id || rejected.stable_surface_id || "unknown");
+  const seedId = String(rejected.seed_id || rejected.seed || "unknown");
+  const mutationArm = String(rejected.mutation_arm || "unknown");
+  const id = rejected.case_id || sha256(canonicalJson({
+    row_id: rowId,
+    seed_id: seedId,
+    mutation_arm: mutationArm,
+  })).slice(0, 16);
+  const bundle = {
+    id,
+    row_id: rowId,
+    domain: String(rejected.domain || "unknown"),
+    layer: "oracle",
+    seed_id: seedId,
+    manifest_sha256: manifest.sha256 || "",
+    config_sha256: cfg.config_sha256,
+    applicable_tiers: [],
+    input: null,
+    expected_relation: "rejected",
+    expected_value: null,
+    observations: [],
+    validity: "rejected",
+    rejection_reason: String(rejected.reason || "mutation case rejected"),
+  };
+  return { ...bundle, digest_sha256: caseBundleDigest(bundle) };
+}
+
 function findingBundle(run, caseInput, caseResult, manifest, cfg) {
   const input = caseResult.result_bundle_input;
   if (!input) throw new Error(`oracle returned no finding input for ${caseInput.case_id}`);
@@ -1034,51 +1204,135 @@ function findingBundle(run, caseInput, caseResult, manifest, cfg) {
     commit: run.identity.commit,
     binary_sha256: run.result?.binary_sha256 || sha256File(JET_BINARY) || "sha256:unknown-binary",
     registry_snapshot_hash: manifest.sha256 || "sha256:unknown-registry",
-    config_hash: cfg.hash,
+    config_hash: cfg.config_sha256,
     classification: classification.classification,
     tower_action: "create-or-update",
     tier_observations: caseResult.observations,
     applicable_tiers: caseInput.applicable_tiers,
   });
 }
+function hardeningCommands(bundle) {
+  const observations = Array.isArray(bundle?.tier_observations) ? bundle.tier_observations : [];
+  const commands = observations.map((observation) => {
+    const tier = typeof observation?.tier === "string" ? observation.tier.trim() : "";
+    const command = observation?.tier_command || observation?.command;
+    if (command === undefined || command === null || String(command).trim() === "") return "";
+    const value = String(command).trim();
+    return tier ? `${tier}: ${value}` : value;
+  }).filter(Boolean);
+  if (!commands.length && bundle?.tier_command) {
+    const tier = typeof bundle.tier === "string" ? bundle.tier.trim() : "";
+    const command = String(bundle.tier_command).trim();
+    if (command) commands.push(tier ? `${tier}: ${command}` : command);
+  }
+  return [...new Set(commands)];
+}
 
-function towerPayload(caseInput, caseResult, bundle) {
-  const classification = findingClassification(caseResult);
-  const hardeningSeam = caseInput.semantic_primitive || caseInput.root_seam || "unclassified";
-  const hardeningWrongTierMask = caseResult.differences;
-  const hardeningInputPartition = caseInput.mutation_arm;
-  const commands = caseResult.tier_results.map((observation) => `${observation.tier}: ${observation.tier_command}`);
-  const hardeningKey = buildHardeningDedupKey({
+function hardeningWrongTierMask(bundle) {
+  const observations = Array.isArray(bundle?.tier_observations) ? bundle.tier_observations : [];
+  const actual = bundle?.actual_relation;
+  const differing = observations
+    .filter((observation) => typeof observation?.tier === "string"
+      && observation.relation !== actual)
+    .map((observation) => observation.tier.trim())
+    .filter(Boolean);
+  if (differing.length) return [...new Set(differing)].sort();
+  if (typeof bundle?.tier === "string" && bundle.tier.trim()) return [bundle.tier.trim()];
+  const applicable = Array.isArray(bundle?.applicable_tiers) ? bundle.applicable_tiers : [];
+  return [...new Set(applicable.map((tier) => String(tier).trim()).filter(Boolean))].sort();
+}
+
+function hardeningInputPartition(bundle) {
+  return bundle?.mutation_arm
+    || bundle?.generated_partition
+    || bundle?.partition
+    || bundle?.law_id
+    || bundle?.construct_id
+    || bundle?.mutant_id
+    || "unknown-partition";
+}
+
+function hardeningIdentity(bundle, overrides = {}) {
+  const seam = overrides.seam
+    ?? bundle?.seam
+    ?? bundle?.semantic_primitive
+    ?? bundle?.root_seam
+    ?? "unclassified";
+  const relation = overrides.relation ?? bundle?.expected_relation;
+  const wrongTierMask = overrides.wrongTierMask ?? hardeningWrongTierMask(bundle);
+  const inputPartition = overrides.inputPartition ?? hardeningInputPartition(bundle);
+  const key = buildHardeningDedupKey({
     bundle,
-    hardening_seam: hardeningSeam,
-    violated_relation: bundle.expected_relation,
-    wrong_tier_mask: hardeningWrongTierMask,
-    input_partition: hardeningInputPartition,
+    hardening_seam: seam,
+    violated_relation: relation,
+    wrong_tier_mask: wrongTierMask,
+    input_partition: inputPartition,
   });
+  return { key, seam, relation, wrongTierMask, inputPartition };
+}
+
+function hardeningEvidenceCore(bundle, key, commands, findingId = null) {
   return {
-    title: `Layer-1 hardening finding: ${caseInput.stable_surface_id} (${caseInput.mutation_arm})`,
-    body: "Confirmed by the bounded layer-1 differential oracle.",
-    hardeningSeam,
-    hardeningRelation: bundle.expected_relation,
-    hardeningWrongTierMask,
-    hardeningInputPartition,
-    hardeningDedupKey: hardeningKey,
-    hardeningEvidence: {
-      source: bundle.source,
-      commands,
-      expectedRelation: bundle.expected_relation,
-      actualRelation: bundle.actual_relation,
-      seed: bundle.seed,
-      targetCommit: bundle.commit,
-      bundleDigest: bundleIdentity(bundle),
-      classification: bundle.classification,
-      stdoutBytes: bundle.stdout_bytes,
-      stderrBytes: bundle.stderr_bytes,
-      exit: bundle.exit,
-      signal: bundle.signal,
-      timeout: bundle.timeout,
-      normalization: bundle.normalization,
-    },
+    schema_version: 1,
+    repro_schema: "jet.hardening.repro.v1",
+    finding_id: findingId || `HF-${sha256(key).slice(0, 16)}`,
+    stable_key: key,
+    source: String(bundle?.source ?? "").trim(),
+    commands: [...commands],
+    expected_relation: String(bundle?.expected_relation ?? "").trim(),
+    actual_relation: String(bundle?.actual_relation ?? "").trim(),
+    seed: String(bundle?.seed ?? "").trim(),
+    target_commit: String(bundle?.commit ?? "").trim(),
+    classification: String(bundle?.classification ?? "").trim(),
+    stdout_bytes: bundle?.stdout_bytes ?? bundle?.stdout ?? "",
+    stderr_bytes: bundle?.stderr_bytes ?? bundle?.stderr ?? "",
+    exit: bundle?.exit ?? null,
+    signal: bundle?.signal ?? null,
+    timeout: bundle?.timeout === true,
+    normalization: Array.isArray(bundle?.normalization) ? bundle.normalization : [],
+  };
+}
+
+function hardeningEvidence(bundle, key, commands, findingId = null) {
+  const core = hardeningEvidenceCore(bundle, key, commands, findingId);
+  return {
+    source: core.source,
+    commands: core.commands,
+    expectedRelation: core.expected_relation,
+    actualRelation: core.actual_relation,
+    seed: core.seed,
+    targetCommit: core.target_commit,
+    bundleDigest: `sha256:${sha256(canonicalJson(core))}`,
+    classification: core.classification,
+    stdoutBytes: core.stdout_bytes,
+    stderrBytes: core.stderr_bytes,
+    exit: core.exit,
+    signal: core.signal,
+    timeout: core.timeout,
+    normalization: core.normalization,
+  };
+}
+
+function layerFindingPayload(layer, bundle, extra = {}) {
+  const identity = hardeningIdentity(bundle, extra);
+  const commands = Array.isArray(extra.commands) && extra.commands.length
+    ? [...new Set(extra.commands.map((command) => String(command).trim()).filter(Boolean))]
+    : hardeningCommands(bundle);
+  if (!commands.length) throw new Error(`layer-${layer} finding has no reconstructible tier command`);
+  const evidence = hardeningEvidence(bundle, identity.key, commands, extra.findingId || null);
+  const bundleDigest = bundleIdentity(bundle);
+  return {
+    title: extra.title || `Layer-${layer} hardening finding: ${bundle.stable_surface_id || bundle.mutant_id || "unknown"}`,
+    body: extra.body || `Confirmed by the bounded ${layer} hardening layer.`,
+    hardeningLayer: layer,
+    hardeningSchemaVersion: 1,
+    hardeningSeam: identity.seam,
+    hardeningRelation: identity.relation,
+    hardeningWrongTierMask: identity.wrongTierMask,
+    hardeningInputPartition: identity.inputPartition,
+    hardeningDedupKey: identity.key,
+    hardeningEvidence: evidence,
+    bundleIdentity: bundleDigest,
     source: bundle.source,
     commands,
     expectedRelation: bundle.expected_relation,
@@ -1091,13 +1345,37 @@ function towerPayload(caseInput, caseResult, bundle) {
     signal: bundle.signal,
     timeout: bundle.timeout,
     normalization: bundle.normalization,
-    classification: classification.classification,
-    silentWrongData: classification.silentWrongData,
-    defaultJetRunDivergence: classification.defaultJetRunDivergence,
-    loudFailure: classification.loudFailure,
+    classification,
+    silentWrongData: classification === "silent-data",
+    defaultJetRunDivergence: classification === "default-jet-run-divergence",
+    loudFailure: Boolean(bundle.timeout || bundle.signal || (bundle.exit !== null && bundle.exit !== 0)),
     tier: bundle.tier,
     oracle: bundle.oracle,
+    proof: bundle.proof || null,
+    ...(extra.mutation ? {
+      mutantId: extra.mutation.mutant_id || bundle.mutant_id || null,
+      expectedLayer: extra.mutation.expected_layer || bundle.expected_layer || null,
+      astMutation: extra.mutation.ast_mutation || bundle.ast_mutation || null,
+      missingProof: extra.mutation.missing_proof || null,
+      gapCard: extra.mutation.gapCard || null,
+      mutationScore: extra.mutation.mutationScore,
+      survivorIds: extra.mutation.survivorIds,
+    } : {}),
   };
+}
+
+function towerPayload(caseInput, caseResult, bundle) {
+  const classification = findingClassification(caseResult);
+  const commands = caseResult.tier_results.map((observation) => `${observation.tier}: ${observation.tier_command}`);
+  return layerFindingPayload("1", bundle, {
+    seam: caseInput.semantic_primitive || caseInput.root_seam || "unclassified",
+    wrongTierMask: caseResult.differences,
+    inputPartition: caseInput.mutation_arm,
+    commands,
+    title: `Layer-1 hardening finding: ${caseInput.stable_surface_id} (${caseInput.mutation_arm})`,
+    body: "Confirmed by the bounded layer-1 differential oracle.",
+    classification: classification.classification,
+  });
 }
 
 async function runLayerOne(run, cfg, manifest, environment) {
@@ -1107,7 +1385,11 @@ async function runLayerOne(run, cfg, manifest, environment) {
     conformance_root: relative(ROOT, paths.conformance),
     differential_manifest: includeDifferential ? relative(ROOT, paths.differential_manifest) : null,
   });
-  const discovered = discoverCorpusSeeds(ROOT, { includeDifferential });
+  const manifestArtifact = discoveryManifest(manifest);
+  const discovered = discoverCorpusSeeds(ROOT, {
+    includeDifferential,
+    manifest: manifestArtifact,
+  });
   const selected = boundedOracleSelection(discovered, cfg);
   const summary = {
     engine: "hardening-oracle-layer",
@@ -1123,10 +1405,23 @@ async function runLayerOne(run, cfg, manifest, environment) {
     batch_size: cfg.oracle_batch_size,
     timeout_ms: cfg.oracle_timeout_ms,
     rejected: [...discovered.rejected],
+    exclusions: [
+      ...discovered.rejected.map((entry) => ({ ...entry, kind: "invalid", source: "oracle", valid: false })),
+      ...(selected.omitted_seed_count > 0
+        ? [{
+            kind: "bounded",
+            source: "oracle",
+            valid: false,
+            reason: "seed omitted by bounded selection",
+            count: selected.omitted_seed_count,
+          }]
+        : []),
+    ],
     attempted: 0,
     valid_case_count: 0,
     batch_count: 0,
     cases: [],
+    case_bundles: [],
     findings: [],
     finding_payloads: [],
     serialized_bundles: "",
@@ -1148,13 +1443,16 @@ async function runLayerOne(run, cfg, manifest, environment) {
     arms: selected.arms,
     maxCases: cfg.oracle_max_cases,
   });
+  requireBundleIdentity(manifest, cfg, batch.attempted > 0, manifestArtifact);
   summary.attempted = batch.attempted;
   summary.valid_case_count = batch.valid_case_count;
   summary.batch_count = batch.batches.length;
   summary.cases = batch.cases.map((caseInput) => ({
     case_id: caseInput.case_id,
+    row_id: caseInput.row_id || caseInput.stable_surface_id,
     stable_surface_id: caseInput.stable_surface_id,
     seed: caseInput.seed,
+    seed_id: caseInput.seed_id || caseInput.seed,
     domain: caseInput.domain,
     mutation_arm: caseInput.mutation_arm,
     mutator_version: caseInput.mutator_version,
@@ -1166,8 +1464,16 @@ async function runLayerOne(run, cfg, manifest, environment) {
     oracle: caseInput.oracle,
     expected_relation: caseInput.expected_relation,
     applicable_tiers: caseInput.applicable_tiers,
+    valid: true,
   }));
   summary.rejected.push(...batch.rejected);
+  summary.exclusions.push(...batch.rejected.map((entry) => ({
+    ...entry,
+    kind: "invalid",
+    source: "oracle",
+    valid: false,
+  })));
+  summary.case_bundles.push(...batch.rejected.map((entry) => rejectedQualificationCaseBundle(entry, manifest, cfg)));
   if (!batch.cases.length) {
     transition(run, "oracle_skipped", { reason: "no valid bounded mutations", rejected: batch.rejected.length });
     return summary;
@@ -1179,7 +1485,16 @@ async function runLayerOne(run, cfg, manifest, environment) {
   for (const caseInput of batch.cases) {
     const caseResult = await executeCase(caseInput, {
       executor: (request) => executeOracleTier(run, request, environment, cfg),
-      validate: false,
+      require_expected: true,
+      validate: true,
+      validation: {
+        root: ROOT,
+        jet_env: JET_ENV,
+        cwd: ROOT,
+        env: environment,
+        timeout_ms: cfg.oracle_timeout_ms,
+        capture_limit: MAX_CAPTURE_BYTES,
+      },
       applicable_tiers: caseInput.applicable_tiers,
       normalization: caseInput.normalization,
       stdin: caseInput.stdin || "",
@@ -1203,6 +1518,7 @@ async function runLayerOne(run, cfg, manifest, environment) {
         tier_observations: caseResult.observations,
       };
     }
+    summary.case_bundles.push(qualificationCaseBundle(run, caseInput, caseResult, manifest, cfg));
     if (caseResult.ok) continue;
     const bundle = findingBundle(run, caseInput, caseResult, manifest, cfg);
     findings.push(bundle);
@@ -1352,7 +1668,7 @@ async function runLayerTwo(run, cfg, manifest, environment) {
       commit: run.identity.commit,
       binary_sha256: run.result.binary_sha256 || sha256File(JET_BINARY) || "sha256:unknown-binary",
       registry_snapshot_hash: manifest.sha256 || "sha256:unknown-registry",
-      config_hash: cfg.hash,
+      config_hash: cfg.config_sha256,
     },
   });
   return propertyLayerSummary(generated, result);
@@ -1391,7 +1707,7 @@ async function runLayerThree(run, cfg, environment, manifest) {
       commit: run.identity.commit,
       binary_sha256: run.result.binary_sha256 || sha256File(JET_BINARY) || "sha256:unknown-binary",
       registry_snapshot_hash: diagnosticRegistryHash(),
-      config_hash: cfg.hash,
+      config_hash: cfg.config_sha256,
     },
   });
   return {
@@ -1457,7 +1773,7 @@ async function runLayerFour(run, cfg, environment, manifest) {
       commit: run.identity.commit,
       binary_sha256: baseline.target_sha256,
       registry_snapshot_hash: manifest.sha256 || "sha256:unknown-registry",
-      config_hash: cfg.hash,
+      config_hash: cfg.config_sha256,
     },
   });
 }
@@ -1470,51 +1786,313 @@ const WITNESS_MUTATION_SOURCE = `fn run() {
 
 function layerFindingEntries(layer, layerResult) {
   if (layer === "4" && Array.isArray(layerResult?.gap_cards)) {
+    const bundles = Array.isArray(layerResult.bundles) ? layerResult.bundles : [];
     return layerResult.gap_cards.map((card) => {
-      const payload = card.payload || {};
+      const gap = card.payload || {};
+      const mutantId = gap.mutant_id || gap.mutantId;
+      const bundle = bundles.find((candidate) => candidate.mutant_id === mutantId);
+      if (!bundle) {
+        throw new Error(`layer-4 mutation gap ${mutantId || "unknown"} has no result bundle`);
+      }
       return {
-        bundle_identity: card.identity,
-        payload: {
+        bundle_identity: bundleIdentity(bundle),
+        payload: layerFindingPayload("4", bundle, {
+          seam: gap.seam || bundle.seam || "unclassified",
+          relation: gap.expected_relation || bundle.expected_relation,
+          inputPartition: gap.input_partition || mutantId || bundle.mutant_id,
           title: card.title,
           body: card.reason,
-          hardeningLayer: layer,
-          hardeningSeam: payload.seam || "unclassified",
-          mutantId: payload.mutant_id || null,
-          expectedLayer: payload.expected_layer || null,
-          astMutation: payload.ast_mutation || null,
-          missingProof: payload.missing_proof || null,
-          gapCard: payload,
-          mutationScore: layerResult.mutation_score,
-          survivorIds: layerResult.survivor_ids,
-          classification: "hardening-gap-survivor",
-        },
+          mutation: {
+            mutant_id: mutantId,
+            expected_layer: gap.expected_layer,
+            ast_mutation: gap.ast_mutation,
+            missing_proof: gap.missing_proof,
+            gapCard: gap,
+            mutationScore: layerResult.mutation_score,
+            survivorIds: layerResult.survivor_ids,
+          },
+        }),
       };
     });
   }
   return (layerResult?.findings || layerResult?.bundles || []).map((bundle) => ({
     bundle_identity: bundleIdentity(bundle),
-    payload: {
-      title: `Layer-${layer} hardening finding: ${bundle.stable_surface_id}`,
-      body: `Confirmed by the bounded ${layer} hardening layer.`,
-      hardeningLayer: layer,
-      hardeningSeam: bundle.seam || bundle.law_id || bundle.construct_id || bundle.mutant_id || "unclassified",
-      source: bundle.source,
-      expectedRelation: bundle.expected_relation,
-      actualRelation: bundle.actual_relation,
-      seed: bundle.seed,
-      targetCommit: bundle.commit,
-      classification: bundle.classification,
-      oracle: bundle.oracle,
-      proof: bundle.proof || null,
-    },
+    payload: layerFindingPayload(layer, bundle),
   }));
 }
 
+function integerValue(value) {
+  return Number.isInteger(value) ? value : null;
+}
+
+function bundleRegistryHash(bundle) {
+  return bundle?.registry_snapshot_hash ?? bundle?.manifest_sha256 ?? null;
+}
+
+function bundleConfigHash(bundle) {
+  return bundle?.config_hash ?? bundle?.config_sha256 ?? null;
+}
+
+function validateBundleIdentity(bundle, identity, label, errors) {
+  if (!bundle || typeof bundle !== "object") {
+    errors.push(`${label} bundle is not an object`);
+    return;
+  }
+  if (identity.commit && bundle.commit !== undefined && bundle.commit !== identity.commit) {
+    errors.push(`${label} bundle commit does not match cycle`);
+  }
+  if (identity.binary_sha256 && bundle.binary_sha256 !== undefined && bundle.binary_sha256 !== identity.binary_sha256) {
+    errors.push(`${label} bundle binary identity does not match cycle`);
+  }
+  const registry = bundleRegistryHash(bundle);
+  if (identity.registry_snapshot_hash && registry !== identity.registry_snapshot_hash) {
+    errors.push(`${label} bundle registry identity does not match cycle`);
+  }
+  const configHash = bundleConfigHash(bundle);
+  if (identity.config_sha256 && configHash !== identity.config_sha256) {
+    errors.push(`${label} bundle config identity does not match cycle`);
+  }
+}
+
+function validateCaseBundles(summary, name, identity, errors, seenIds, seenDigests) {
+  if (!Object.hasOwn(summary, "case_bundles")) return 0;
+  if (!Array.isArray(summary.case_bundles)) {
+    errors.push(`${name} case_bundles is not an array`);
+    return 0;
+  }
+  let valid = 0;
+  for (const [index, bundle] of summary.case_bundles.entries()) {
+    const label = `${name}.case_bundles[${index}]`;
+    validateBundleIdentity(bundle, identity, label, errors);
+    if (!bundle || typeof bundle !== "object") continue;
+    if (typeof bundle.id !== "string" || !bundle.id.trim()) errors.push(`${label} id is missing`);
+    else if (seenIds.has(bundle.id)) errors.push(`${label} id is duplicated`);
+    else seenIds.add(bundle.id);
+    if (!/^[0-9a-f]{64}$/.test(bundle.digest_sha256 || "")) {
+      errors.push(`${label} digest is missing or invalid`);
+    } else if (seenDigests.has(bundle.digest_sha256)) {
+      errors.push(`${label} digest is duplicated`);
+    } else {
+      seenDigests.add(bundle.digest_sha256);
+    }
+    if (!["valid", "rejected"].includes(bundle.validity)) errors.push(`${label} validity is invalid`);
+    if (bundle.validity === "valid" && bundle.rejection_reason !== null) errors.push(`${label} valid bundle has a rejection reason`);
+    if (bundle.validity === "rejected" && typeof bundle.rejection_reason !== "string") {
+      errors.push(`${label} rejected bundle has no reason`);
+    }
+    if (bundle.digest_sha256 && /^[0-9a-f]{64}$/.test(bundle.digest_sha256)) {
+      const expectedDigest = caseBundleDigest(bundle);
+      if (bundle.digest_sha256 !== expectedDigest) errors.push(`${label} digest does not match content`);
+    }
+    if (bundle.validity === "valid" && bundle.rejection_reason === null) valid += 1;
+  }
+  return valid;
+}
+
+function validateLayerSummary(name, summary, enabled, identity, errors, seenIds, seenDigests, allowFindings) {
+  if (!summary || typeof summary !== "object") {
+    if (enabled) errors.push(`${name} layer summary is missing`);
+    return { valid: 0, denominatorFailure: Boolean(enabled) };
+  }
+  const status = String(summary.status || "").toUpperCase();
+  if (status === "DISABLED") {
+    if (enabled) errors.push(`${name} layer is disabled while enabled`);
+    if (Array.isArray(summary.case_bundles) && summary.case_bundles.length) {
+      errors.push(`${name} disabled layer contains case bundles`);
+    }
+    return { valid: 0, denominatorFailure: false };
+  }
+  const findings = Array.isArray(summary.findings) ? summary.findings : [];
+  if (findings.length && !allowFindings) errors.push(`${name} findings are not allowed in a passing composition`);
+  if (!["PASS", "FINDINGS"].includes(status)) {
+    errors.push(`${name} layer status is ${status || "missing"}`);
+  }
+  const attempted = integerValue(summary.attempted);
+  const validCount = integerValue(summary.valid_case_count)
+    ?? (name === "mutation" && Array.isArray(summary.bundles) ? summary.bundles.length : null);
+  if (attempted === null || attempted < 0) errors.push(`${name} attempted count is missing or invalid`);
+  if (validCount === null || validCount < 0) errors.push(`${name} valid case count is missing or invalid`);
+  if (attempted !== null && validCount !== null && validCount > attempted) {
+    errors.push(`${name} valid case count exceeds attempted count`);
+  }
+  const bundleValid = validateCaseBundles(summary, name, identity, errors, seenIds, seenDigests);
+  if (Object.hasOwn(summary, "case_bundles")) {
+    if (attempted !== null && attempted !== summary.case_bundles.length) {
+      errors.push(`${name} attempted count does not match case bundles`);
+    }
+    if (validCount !== null && validCount !== bundleValid) {
+      errors.push(`${name} valid case count does not match case bundles`);
+    }
+  }
+  if (name === "mutation" && Array.isArray(summary.bundles)) {
+    for (const [index, bundle] of summary.bundles.entries()) {
+      validateBundleIdentity(bundle, identity, `${name}.bundles[${index}]`, errors);
+    }
+  }
+  for (const [index, bundle] of findings.entries()) {
+    validateBundleIdentity(bundle, identity, `${name}.findings[${index}]`, errors);
+  }
+  const denominatorFailure = status !== "FINDINGS" && (validCount === null || validCount === 0);
+  return { valid: validCount || 0, denominatorFailure };
+}
+
+function evidenceCoreFromPayload(evidence, key, findingId = null) {
+  return {
+    schema_version: 1,
+    repro_schema: "jet.hardening.repro.v1",
+    finding_id: findingId || `HF-${sha256(key).slice(0, 16)}`,
+    stable_key: key,
+    source: String(evidence?.source ?? "").trim(),
+    commands: Array.isArray(evidence?.commands) ? evidence.commands.map((value) => String(value).trim()).filter(Boolean) : [],
+    expected_relation: String(evidence?.expectedRelation ?? evidence?.expected_relation ?? "").trim(),
+    actual_relation: String(evidence?.actualRelation ?? evidence?.actual_relation ?? "").trim(),
+    seed: String(evidence?.seed ?? "").trim(),
+    target_commit: String(evidence?.targetCommit ?? evidence?.target_commit ?? "").trim(),
+    classification: String(evidence?.classification ?? "").trim(),
+    stdout_bytes: evidence?.stdoutBytes ?? evidence?.stdout_bytes ?? evidence?.stdout ?? "",
+    stderr_bytes: evidence?.stderrBytes ?? evidence?.stderr_bytes ?? evidence?.stderr ?? "",
+    exit: evidence?.exit ?? null,
+    signal: evidence?.signal ?? null,
+    timeout: evidence?.timeout === true,
+    normalization: Array.isArray(evidence?.normalization) ? evidence.normalization : [],
+  };
+}
+
+function validateFindingEntry(entry, identity, errors, label) {
+  const payload = entry?.payload;
+  if (!payload || typeof payload !== "object") {
+    errors.push(`${label} payload is missing`);
+    return;
+  }
+  for (const [field, value] of [
+    ["hardeningDedupKey", payload.hardeningDedupKey],
+    ["hardeningSeam", payload.hardeningSeam],
+    ["hardeningRelation", payload.hardeningRelation],
+    ["hardeningWrongTierMask", payload.hardeningWrongTierMask],
+    ["hardeningInputPartition", payload.hardeningInputPartition],
+  ]) {
+    if (value === undefined || value === null || String(value).trim() === "") errors.push(`${label} ${field} is missing`);
+  }
+  const expectedKey = hardeningIdentity({
+    expected_relation: payload.hardeningRelation,
+    seam: payload.hardeningSeam,
+    mutation_arm: payload.hardeningInputPartition,
+  }, {
+    seam: payload.hardeningSeam,
+    relation: payload.hardeningRelation,
+    wrongTierMask: payload.hardeningWrongTierMask,
+    inputPartition: payload.hardeningInputPartition,
+  }).key;
+  if (payload.hardeningDedupKey !== expectedKey) errors.push(`${label} hardening dedup key is not canonical`);
+  const evidence = payload.hardeningEvidence;
+  if (!evidence || typeof evidence !== "object") {
+    errors.push(`${label} hardening evidence is missing`);
+    return;
+  }
+  const core = evidenceCoreFromPayload(evidence, payload.hardeningDedupKey, payload.hardeningFindingId || null);
+  const required = [
+    ["source", core.source],
+    ["commands", core.commands.length],
+    ["expectedRelation", core.expected_relation],
+    ["actualRelation", core.actual_relation],
+    ["seed", core.seed],
+    ["targetCommit", core.target_commit],
+  ];
+  for (const [field, value] of required) if (!value) errors.push(`${label} evidence ${field} is missing`);
+  if (identity.commit && core.target_commit !== identity.commit) {
+    errors.push(`${label} evidence target commit does not match cycle`);
+  }
+  const digest = `sha256:${sha256(canonicalJson(core))}`;
+  if (evidence.bundleDigest !== digest) errors.push(`${label} evidence digest is not canonical`);
+  if (entry.bundle_identity && payload.bundleIdentity && entry.bundle_identity !== payload.bundleIdentity) {
+    errors.push(`${label} bundle identity is inconsistent`);
+  }
+}
+
+function validateCycleComposition({
+  run,
+  result,
+  manifest,
+  cfg,
+  findingEntries = [],
+  allowFindings = false,
+  checkOptionalLayers = true,
+} = {}) {
+  const errors = [];
+  const seenIds = new Set();
+  const seenDigests = new Set();
+  const identity = {
+    commit: run?.identity?.commit || result?.commit || null,
+    binary_sha256: result?.binary_sha256 || null,
+    registry_snapshot_hash: manifest?.sha256 || null,
+    config_sha256: cfg?.config_sha256 || null,
+  };
+  const summaries = {
+    oracle: result?.oracle,
+    property: result?.property,
+    grammar: result?.grammar,
+    mutation: result?.mutation,
+  };
+  const enabled = {
+    oracle: true,
+    property: checkOptionalLayers && cfg?.property_enabled === true,
+    grammar: checkOptionalLayers && cfg?.grammar_enabled === true,
+    mutation: checkOptionalLayers && cfg?.mutation_enabled === true,
+  };
+  let validCaseCount = 0;
+  let denominatorFailure = false;
+  const emptyOracle = summaries.oracle?.status === "SKIPPED"
+    && summaries.oracle?.discovered_seed_count === 0
+    && summaries.oracle?.selected_seed_count === 0;
+  for (const name of Object.keys(summaries)) {
+    const summary = summaries[name];
+    if (name === "oracle" && emptyOracle) {
+      if (summary?.case_bundles?.length) errors.push("oracle empty denominator contains bundles");
+      continue;
+    }
+    const checked = validateLayerSummary(name, summary, enabled[name], identity, errors, seenIds, seenDigests, allowFindings);
+    validCaseCount += checked.valid;
+    denominatorFailure ||= checked.denominatorFailure;
+  }
+  for (const [index, entry] of findingEntries.entries()) {
+    validateFindingEntry(entry, identity, errors, `finding[${index}]`);
+  }
+  const findingCount = Object.values(summaries).reduce(
+    (count, summary) => count + (Array.isArray(summary?.findings) ? summary.findings.length : 0),
+    0,
+  );
+  if (findingCount && !findingEntries.length) errors.push("confirmed findings were not routed to Tower");
+  if (findingEntries.length < findingCount) errors.push("some confirmed findings were dropped before Tower");
+  if (summaries.mutation && enabled.mutation && summaries.mutation.status === "PASS") {
+    const mutation = summaries.mutation;
+    if (!Array.isArray(mutation.catalog) || !Array.isArray(mutation.bundles)) {
+      errors.push("mutation PASS is missing its catalog or bundles");
+    } else {
+      if (mutation.attempted !== mutation.catalog.length || mutation.bundles.length !== mutation.catalog.length) {
+        errors.push("mutation PASS denominator does not cover the full catalog");
+      }
+      if (Array.isArray(mutation.omitted_mutant_ids) && mutation.omitted_mutant_ids.length) {
+        errors.push("mutation PASS contains omitted mutants");
+      }
+      if (mutation.survivors !== 0 || (Array.isArray(mutation.survivor_ids) && mutation.survivor_ids.length)) {
+        errors.push("mutation PASS contains survivors");
+      }
+    }
+  }
+  return {
+    ok: errors.length === 0,
+    errors: [...new Set(errors)],
+    denominator: emptyOracle ? "EMPTY" : denominatorFailure ? "INVALID" : "COUNTABLE",
+    valid_case_count: validCaseCount,
+    finding_count: findingCount,
+  };
+}
 function towerDryRun() {
   return TEST_MODE || process.env.JET_HARDENING_DRY_RUN === "1";
 }
 
 async function writeTowerFinding(run, entry, environment, cfg) {
+
   if (towerDryRun()) {
     return {
       status: "SKIPPED",
@@ -1557,6 +2135,9 @@ async function writeTowerFindings(run, oracle, environment, cfg) {
   for (const entry of oracle.finding_payloads) {
     actions.push(await writeTowerFinding(run, entry, environment, cfg));
   }
+  if (!towerDryRun() && actions.some((action) => action.status !== "WRITTEN")) {
+    throw new Error("Tower did not confirm every hardening finding write");
+  }
   return actions;
 }
 
@@ -1568,6 +2149,8 @@ async function runCycle(options) {
     transitions: [],
     children: new Map(),
     preflight: [],
+    resources_before: null,
+    resources_after: null,
     scratch: null,
     scratch_removed: false,
     rigLease: null,
@@ -1594,7 +2177,7 @@ async function runCycle(options) {
       if (error instanceof Refusal) {
         refusal = error;
         result.status = "SKIPPED";
-        result.refusal = { reason: error.reason, details: error.details };
+        recordRefusal(result, run, error);
         transition(run, "refused", { status: "SKIPPED", reason: error.reason });
         return finalizeCycle(run, result, null, null, refusal);
       }
@@ -1610,7 +2193,7 @@ async function runCycle(options) {
       if (error instanceof Refusal) {
         refusal = error;
         result.status = "SKIPPED";
-        result.refusal = { reason: error.reason, details: error.details };
+        recordRefusal(result, run, error, "rig-lease");
         transition(run, "refused", { status: "SKIPPED", reason: error.reason });
         return finalizeCycle(run, result, null, null, refusal);
       }
@@ -1626,7 +2209,7 @@ async function runCycle(options) {
       if (error instanceof Refusal) {
         refusal = error;
         result.status = "SKIPPED";
-        result.refusal = { reason: error.reason, details: error.details };
+        recordRefusal(result, run, error, "build-lease");
         transition(run, "refused", { status: "SKIPPED", reason: error.reason });
         return finalizeCycle(run, result, null, null, refusal);
       }
@@ -1697,6 +2280,23 @@ async function runCycle(options) {
 
     const oracle = await runLayerOne(run, run.config, manifest, environment);
     result.oracle = oracle;
+    const oracleEntries = oracle.finding_payloads;
+    const oracleComposition = validateCycleComposition({
+      run,
+      result,
+      manifest,
+      cfg: run.config,
+      findingEntries: oracleEntries,
+      allowFindings: true,
+      checkOptionalLayers: false,
+    });
+    result.composition = oracleComposition;
+    if (!oracleComposition.ok) {
+      if (oracleComposition.denominator === "INVALID") {
+        throw new Refusal("hardening cycle denominator is not countable", { errors: oracleComposition.errors });
+      }
+      throw new Error(`hardening cycle composition is invalid: ${oracleComposition.errors.join("; ")}`);
+    }
     if (oracle.findings.length) {
       transition(run, "tower_card_findings", { finding_count: oracle.findings.length });
       const towerActions = await writeTowerFindings(run, oracle, environment, run.config);
@@ -1707,6 +2307,7 @@ async function runCycle(options) {
       };
       result.status = "RED";
       result.failure_stage = "oracle";
+      recordWindowReset(result, "finding", { finding_count: oracle.findings.length, source: "oracle" });
       const findingError = new Error(`layer-1 oracle confirmed ${oracle.findings.length} finding(s)`);
       transition(run, "record_findings", {
         status: result.status,
@@ -1726,6 +2327,21 @@ async function runCycle(options) {
       ...layerFindingEntries("3", grammar),
       ...layerFindingEntries("4", mutation),
     ];
+    const layerComposition = validateCycleComposition({
+      run,
+      result,
+      manifest,
+      cfg: run.config,
+      findingEntries: layerFindings,
+      allowFindings: true,
+    });
+    result.composition = layerComposition;
+    if (!layerComposition.ok) {
+      if (layerComposition.denominator === "INVALID") {
+        throw new Refusal("hardening cycle denominator is not countable", { errors: layerComposition.errors });
+      }
+      throw new Error(`hardening cycle composition is invalid: ${layerComposition.errors.join("; ")}`);
+    }
     if (layerFindings.length) {
       transition(run, "layer_findings", { finding_count: layerFindings.length });
       const towerActions = await writeTowerFindings(run, { finding_payloads: layerFindings }, environment, run.config);
@@ -1735,6 +2351,7 @@ async function runCycle(options) {
         actions: towerActions,
       };
       result.status = "RED";
+      recordWindowReset(result, "finding", { finding_count: layerFindings.length, source: "hardening-layers" });
       result.failure_stage = "hardening-layers";
       const findingError = new Error(`hardening layers confirmed ${layerFindings.length} finding(s)`);
       transition(run, "record_findings", {
@@ -1751,6 +2368,13 @@ async function runCycle(options) {
     return finalizeCycle(run, result, childResult, null, null);
 
   } catch (error) {
+    if (error instanceof Refusal) {
+      refusal = error;
+      result.status = "SKIPPED";
+      recordRefusal(result, run, error, "qualification-identity");
+      transition(run, "refused", { status: "SKIPPED", reason: error.reason });
+      return finalizeCycle(run, result, null, null, refusal);
+    }
     if (error instanceof ChildFailure) {
       childResult = error.result;
       result.failure_stage = error.label;
@@ -1760,6 +2384,12 @@ async function runCycle(options) {
       result.signal = run.signal;
     }
     result.status = "RED";
+    addExclusion(result, {
+      kind: "failure",
+      source: result.failure_stage || "cycle",
+      reason: error.message,
+      signal: result.signal || null,
+    });
     transition(run, "failure", {
       status: "RED",
       reason: error.message,
@@ -1800,17 +2430,22 @@ async function finalizeCycle(run, result, childResult, error, refusal) {
     transition(run, "cleanup_failure", { error: cleanupError.message });
   }
 
-  if (error && !(error instanceof Refusal)) {
-    const bundle = failureBundle(result, childResult, error);
-    atomicJson(FAILURE_PATH, bundle);
-    writeFailureLog(bundle);
-  }
   rotateFailureLog();
   const resources = sizeReport();
+  run.resources_after = resources;
   const violations = capViolations(resources);
   result.resources = resources;
+  result.resources_before = run.resources_before || null;
+  result.resources_after = run.resources_after || resources;
   result.resource_violations = violations;
   if (violations.length) {
+    addExclusion(result, {
+      kind: "resource-blocked",
+      source: "finalize",
+      reason: "cycle exceeded a resource budget",
+      violations,
+      valid: false,
+    });
     result.status = "RED";
     const state = loadState();
     atomicJson(STATE_PATH, {
@@ -1831,6 +2466,11 @@ async function finalizeCycle(run, result, childResult, error, refusal) {
     transition(run, "archive_failure", { status: "RED", error: archiveFailure.message });
     result.transitions = [...run.transitions];
   }
+  if (error && !(error instanceof Refusal)) {
+    const bundle = failureBundle(result, childResult, error);
+    atomicJson(FAILURE_PATH, bundle);
+    writeFailureLog(bundle);
+  }
   const state = loadState();
   atomicJson(STATE_PATH, {
     ...state,
@@ -1843,6 +2483,7 @@ async function finalizeCycle(run, result, childResult, error, refusal) {
       resource_violations: violations,
     },
   });
+  sealResult(result);
   atomicJson(RESULT_PATH, result);
   return result;
 }

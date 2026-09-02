@@ -18,7 +18,8 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TUnsafeGate;
 use crate::Codegen::TIR::TWebParamReconstruction;
 use crate::Codegen::TIR::{
-    TContract, TContractDisposition, TContractKind, TExpr, TExprKind, TStmt,
+    TContract, TContractDisposition, TContractKind, TContractResult, TContractResultMode, TExpr,
+    TExprKind, TStmt,
 };
 use crate::Syntax;
 use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Stmt, Type};
@@ -528,35 +529,79 @@ fn lower_contract_clause(
     }
 }
 
+fn contract_result_mode(carrier_ty: &Type, binding_ty: &Type) -> TContractResultMode {
+    if carrier_ty == binding_ty {
+        return TContractResultMode::Direct;
+    }
+    match carrier_ty {
+        Type::Result { .. } => TContractResultMode::ResultPayload,
+        Type::Option(_) => TContractResultMode::OptionPayload,
+        Type::Tagged { inner, .. } => contract_result_mode(inner, binding_ty),
+        other => {
+            debug_assert_eq!(
+                other, binding_ty,
+                "contract result binding must match a non-carrier return type"
+            );
+            TContractResultMode::Direct
+        }
+    }
+}
+
+fn contract_result_for_scope(
+    f: &Func,
+    owner_type: Option<&str>,
+    ret: Option<Type>,
+    cx: &Cx,
+) -> TContractResult {
+    let declared = f
+        .return_type
+        .clone()
+        .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+    let declared = owner_type
+        .map(|owner| resolve_self_ty(&declared, owner))
+        .unwrap_or(declared);
+    let binding_ty = cx.expand_type_aliases(&declared);
+    let carrier_ty = ret
+        .map(|ty| cx.expand_type_aliases(&ty))
+        .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
+    let mode = contract_result_mode(&carrier_ty, &binding_ty);
+    let binding_local = TLocal::generated("result");
+    let carrier_local = match mode {
+        TContractResultMode::Direct => binding_local.clone(),
+        TContractResultMode::ResultPayload | TContractResultMode::OptionPayload => {
+            TLocal::generated("result_carrier")
+        }
+    };
+    TContractResult {
+        carrier_ty,
+        binding_ty,
+        carrier_local,
+        binding_local,
+        mode,
+    }
+}
+
 fn lower_post_contracts_for_owner(
     f: &Func,
     owner_type: Option<&str>,
+    result: &TContractResult,
     stack_sentry_needed: &Rc<Cell<bool>>,
     cx: &Cx,
 ) -> Vec<TContract> {
-    let ret_ty = {
-        let ty = owner_type
-            .map(|owner| resolve_self_ty(&f.effective_return_type(), owner))
-            .unwrap_or_else(|| f.effective_return_type());
-        cx.expand_type_aliases(&ty)
-    };
-    let result_name = mangle_generated("result");
-    let post = f
-        .post
+    f.post
         .iter()
         .map(|clause| {
             lower_contract_clause(
                 f,
                 clause,
-                Some((&result_name, &ret_ty)),
+                Some((&result.binding_local.name, &result.binding_ty)),
                 TContractKind::Post,
                 owner_type,
                 stack_sentry_needed,
                 cx,
             )
         })
-        .collect();
-    post
+        .collect()
 }
 
 fn wrap_contract_scope(
@@ -567,7 +612,8 @@ fn wrap_contract_scope(
     stack_sentry_needed: &Rc<Cell<bool>>,
     cx: &Cx,
 ) -> Vec<TStmt> {
-    let post = lower_post_contracts_for_owner(f, owner_type, stack_sentry_needed, cx);
+    let result = contract_result_for_scope(f, owner_type, ret, cx);
+    let post = lower_post_contracts_for_owner(f, owner_type, &result, stack_sentry_needed, cx);
     if post.is_empty() {
         body
     } else {
@@ -578,7 +624,7 @@ fn wrap_contract_scope(
             pre: Vec::new(),
             body,
             post,
-            ret,
+            result,
         }]
     }
 }
@@ -970,7 +1016,9 @@ fn lower_trait_method_inner(
     let raw_protocol_return = raw_protocol_return
         || matches!(
             trait_name,
-            crate::Generics::DISPLAY
+            crate::Generics::ENCODE
+                | crate::Generics::DECODE
+                | crate::Generics::DISPLAY
                 | crate::Generics::DEBUG
                 | crate::Generics::EQUATABLE
                 | crate::Generics::COMPARABLE

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 fn field_self_read(f: &Field) -> String {
     let m = mangle(&f.name);
     if f.computed.is_some() {
-        format!("(self).{m}()")
+        format!("match (self).{m}() {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}")
     } else {
         format!("(self).{m}")
     }
@@ -1658,7 +1658,7 @@ pub(crate) fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
         | Type::Quantity { base: inner, .. } => jet_showable_type(cx, inner),
         Type::Result { ok, err } => jet_showable_type(cx, ok) && jet_showable_type(cx, err),
         Type::Map { key, value, .. } => jet_showable_type(cx, key) && jet_showable_type(cx, value),
-        Type::Union(members) => members.iter().all(|member| jet_showable_type(cx, member)),
+        Type::Union(_) => !cx.type_contains_shared_guard(ty),
         Type::Named(name) => {
             name == "str" || cx.has_auto_printable_type(name) || cx.is_distinct_type_name(name)
         }
@@ -2509,7 +2509,7 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
                         )
                     });
                     out.push_str(&format!(
-                        "    __pairs.push(({key:?}.to_string(), __jet_Encode::jet_encode(&{}())));\n",
+                        "    let __default = match {}() {{ Ok(__value) => __value, Err(__error) => return Err(vec![jet_std::FieldError {{ path: {key:?}.to_string(), reason: __error.message }}]) }};\n    __pairs.push(({key:?}.to_string(), __jet_Encode::jet_encode(&__default)));\n",
                         mangle(df)
                     ));
                 }
@@ -2529,7 +2529,7 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
                         None => crate::Sema::error_conv_fn_name(&from_ty.name(), &to_ty.name()),
                     };
                     out.push_str(&format!(
-                        "    for __p in __pairs.iter_mut() {{\n        if __p.0 == {key:?} {{\n            let __old: {old_rust} = <{old_rust} as __jet_Decode>::jet_decode(&__p.1).map_err(|__e| jet_std::FieldError::under_errors({key:?}, __e))?;\n            __p.1 = __jet_Encode::jet_encode(&{conv}(__old));\n        }}\n    }}\n"
+                        "    for __p in __pairs.iter_mut() {{\n        if __p.0 == {key:?} {{\n            let __old: {old_rust} = <{old_rust} as __jet_Decode>::jet_decode(&__p.1).map_err(|__e| jet_std::FieldError::under_errors({key:?}, __e))?;\n            let __new = match {conv}(__old) {{ Ok(__value) => __value, Err(__error) => return Err(vec![jet_std::FieldError {{ path: {key:?}.to_string(), reason: __error.message }}]) }};\n            __p.1 = __jet_Encode::jet_encode(&__new);\n        }}\n    }}\n"
                     ));
                 }
             }
@@ -3168,10 +3168,13 @@ fn emit_checked_text_constructors(type_name: &str, out: &mut String) {
 pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     let rust_name = mangle_path(&d.name);
     let base_rust = cx.rust_type(&d.base);
-    // Backend representation derives only. The distinct type's Jet
-    // Equatable/Comparable implementations come from the sema source path.
+    // Backend representation derives only. Distinct values always carry
+    // structural Rust equality because anonymous union/collection storage uses
+    // `PartialEq` even when Jet equality is dispatched through the generated
+    // `Equatable` hook. The derive is representation support, not inherited
+    // user-facing operators.
     let base_is_copy = matches!(d.base, Type::Int | Type::Float | Type::Bool | Type::Char);
-    let mut rust_derives = vec!["Debug", "Clone"];
+    let mut rust_derives = vec!["Debug", "Clone", "PartialEq"];
     if base_is_copy {
         rust_derives.push("Copy");
     }
@@ -3180,9 +3183,8 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     {
         // #Numeric keeps its specialized native ordering rule. #Comparable
         // dispatches through the sema-generated Jet hook instead.
-        // Rust's `PartialOrd` derive requires `PartialEq`; this is a backend
-        // representation prerequisite, not a new Jet capability.
-        rust_derives.push("PartialEq");
+        // Rust's `PartialOrd` derive requires `PartialEq`; the equality derive
+        // above is the shared representation prerequisite.
         rust_derives.push("PartialOrd");
     }
     out.push_str(&format!(
@@ -3364,9 +3366,11 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
 }
 
 pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
-    // D-FFI-INLINE1: the executable definition lives in the hidden bridge;
-    // calls are already routed through `extern_funcs`.
-    if f.inline_foreign.is_some() {
+    // D-FFI-INLINE1 / D-ADOPT-GUEST1: executable definitions live in the
+    // hidden bridge; calls are already routed through `extern_funcs`.
+    if f.inline_foreign.is_some()
+        || crate::Sema::guest_import_function_signature(f).is_some()
+    {
         return;
     }
     // c148: expose the current function's type-parameter names so `rust_type` and

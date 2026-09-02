@@ -254,10 +254,25 @@ fn local_nix_fallback_imports_exact_lock_once_then_uses_jetpack() {
     assert!(producer.facts.contains_key("nix.fallback.graph"));
     assert!(producer.facts.contains_key("nix.fallback.proof"));
     let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
-    assert!(lock.contains("postgres@jetpack"));
+    let parsed_lock = jetpack::Lock::parse(&lock).expect("local fallback lock parses");
+    let locked = parsed_lock
+        .packages
+        .iter()
+        .find(|package| package.name == "postgres")
+        .expect("local fallback lock package");
+    assert!(
+        matches!(
+            &locked.source,
+            jetpack::Lock::LockSource::Registry { registry, .. } if registry == "jetpackage"
+        ),
+        "local fallback must use the canonical local provider lock source"
+    );
+    assert!(
+        locked.nix_closure.is_none(),
+        "local fallback must not fabricate a portable Nix closure"
+    );
     assert!(lock.contains("local-nix:"));
     assert!(lock.contains("github:NixOS/nixpkgs#"));
-
     let cached = jetpack()
         .args(["build", "postgres", "--no-color"])
         .current_dir(&project)

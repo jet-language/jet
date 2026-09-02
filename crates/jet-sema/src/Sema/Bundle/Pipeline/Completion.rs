@@ -4,7 +4,7 @@ pub(super) fn complete_bundle_check(
     bundle: &mut ProgramBundle,
     states: &[ModuleState],
     mode: CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     mut incremental: Option<&mut IncrementalSemaCache>,
@@ -265,7 +265,7 @@ pub(super) fn complete_bundle_check(
             &states,
             &declared_effect_facts,
             mode,
-            freestanding,
+            no_os,
             gates,
             &mut local_summaries,
             &mut embed_inputs,
@@ -582,7 +582,7 @@ pub(super) fn complete_bundle_check(
 
     // D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating —
     // mixed-axis conflicts and unmatched cross-gate calls.
-    diags.extend(check_os_target(bundle, freestanding));
+    diags.extend(check_os_target(bundle, no_os));
 
     // D-FACTMODEL1=A: one erased fact model for tags, effects, and states.
     // Keep the pass in its own frame; this bundle checker already carries the

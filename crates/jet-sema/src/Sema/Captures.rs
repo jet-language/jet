@@ -433,7 +433,11 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
                     _ => false,
                 }
         }
-        Expr::Lambda(_) => false,
+        Expr::Lambda(lambda) => {
+            !lambda.params.iter().any(|param| param.name == name)
+                && (lambda.take_names.iter().any(|(capture, _)| capture == name)
+                    || lambda_body_refs_name(&lambda.body, name))
+        }
         Expr::Str(parts, _) => parts.iter().any(|p| {
             if let StrPart::Interp(e, _) = p {
                 expr_refs_name(e, name)

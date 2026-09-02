@@ -33,6 +33,11 @@ pub const JETPACK_TOML: &str = "jetpack.toml";
 /// `@run.jet`.
 pub const DEFAULT_ENTRY_FILE: &str = "run.jet";
 
+/// D-ECO-INLINEPACKAGE1=A: one optional leading contextual Package carrier
+/// may live in the entry source as `package { … }`. The word remains
+/// contextual so `pub(package)` keeps its existing visibility meaning.
+pub const INLINE_PACKAGE_DECL: &str = "package";
+
 /// Pre-ruling project entry name, retained only as a one-time migration sentinel.
 pub const LEGACY_ENTRY_FILE: &str = "main.jet";
 

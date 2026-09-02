@@ -3666,12 +3666,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("DBScope".to_string()))],
             Some(Type::String),
         )),
-        ("core.db", "params") => Some((
-            vec![(read, Type::Named("SQL".to_string()))],
-            Some(Type::List(Box::new(Type::Named(
-                Syntax::TYPE_DB_VALUE.to_string(),
-            )))),
-        )),
         ("core.db", "row_value") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
             Some(Type::Result {
@@ -3711,7 +3705,7 @@ fn core_fixed_sig_impl(
             vec![
                 (read, Type::Named("DBScope".to_string())),
                 (read, Type::String),
-                (read, Type::List(Box::new(Type::String))),
+                (read, Type::List(Box::new(Type::Named("SQL".to_string())))),
             ],
             Some(result_ty(Type::Int, db_error_ty())),
         )),
@@ -4199,4 +4193,39 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
         ]),
         _ => None,
     }
+}
+/// Apply a Core call's table-defined defaults before the pre-sema comptime
+/// evaluator runs. This uses the same binder and `CoreParam` contract as the
+/// ordinary sema path, so a folded call receives the same fixed argument list.
+pub(crate) fn apply_core_call_defaults(
+    module: &str,
+    name: &str,
+    args: &mut Vec<crate::AST::CallArg>,
+    call_span: crate::Diagnostics::Span,
+) -> bool {
+    let Some(contract) = core_param_contract(module, name) else {
+        return false;
+    };
+    let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
+        .iter()
+        .map(|param| crate::Sema::CallBinder::BindParam {
+            label: param.label,
+            name: param.label,
+            zone: param.zone,
+            default: None,
+            convention: crate::AST::AccessConvention::Read,
+            ty: None,
+            variadic: false,
+            core_default: param.default,
+        })
+        .collect();
+    let mut ignored_diagnostics = Vec::new();
+    crate::Sema::CallBinder::bind_call_args(
+        name,
+        &params,
+        args,
+        call_span,
+        &mut ignored_diagnostics,
+    )
+    .is_some()
 }

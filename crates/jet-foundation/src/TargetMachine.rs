@@ -1,11 +1,12 @@
 //! D-TARGET-* typed target machine facts.
 //!
-//! Internal model for embedded/freestanding builds. Validation errors stay data
+//! Internal model for no-OS and embedded builds. Validation errors stay data
 //! (not new user diagnostics) until a follow-up surface ballot lands. Hosted
 //! Jet keeps hidden defaults; selecting a no-OS machine exposes memory, linker,
 //! allocator, panic, startup, MMIO, clock, entropy, scheduler, byte-sink, and
 //! audit facts.
 
+use crate::Facts::TargetDossier;
 use crate::RingLayer::{classify_prelude_closure, RuntimeLayer};
 use std::fmt::Write;
 
@@ -59,7 +60,8 @@ impl TargetMachine {
         }
     }
 
-    pub fn freestanding(name: impl Into<String>, triple: impl Into<String>) -> Self {
+    /// Construct a named no-OS machine with all boundary facts explicit.
+    pub fn bare_metal(name: impl Into<String>, triple: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             triple: triple.into(),
@@ -81,6 +83,98 @@ impl TargetMachine {
         }
     }
 
+    pub fn environment_identity(&self) -> &'static str {
+        if self.no_os {
+            "no-os"
+        } else if self.triple.contains("wasip") {
+            "wasi"
+        } else if self.triple == "wasm32-unknown-unknown" {
+            "browser"
+        } else {
+            "hosted"
+        }
+    }
+
+    /// Whether this machine selects the browser WebAssembly boundary.
+    ///
+    /// The target triple and the explicit machine facts are authoritative. A
+    /// profile name never turns an otherwise hosted or no-OS target into a
+    /// browser target.
+    pub fn is_browser_target(&self) -> bool {
+        self.environment_identity() == "browser" && !self.no_os
+    }
+
+    /// Whether this machine selects a WASI component boundary.
+    pub fn is_wasi_target(&self) -> bool {
+        self.environment_identity() == "wasi" && !self.no_os
+    }
+
+    /// Whether this machine emits the browser web artifact rather than a
+    /// native Rust artifact.
+    pub fn is_web_target(&self) -> bool {
+        self.is_browser_target()
+    }
+
+    /// Stable identity of every selected provider and target boundary input.
+    pub fn provider_identity(&self) -> String {
+        let mut bytes = Vec::new();
+        append_identity_frame(&mut bytes, "environment", self.environment_identity());
+        append_identity_frame(&mut bytes, "linker", &self.linker.audit_json());
+        append_identity_frame(&mut bytes, "allocator", &self.allocator.audit_json());
+        append_identity_frame(&mut bytes, "panic", &self.panic.audit_json());
+        append_identity_frame(&mut bytes, "memory", &memory_json(&self.memory));
+        append_identity_frame(&mut bytes, "mmio", &self.mmio.audit_json());
+        append_identity_frame(&mut bytes, "time_wall", &self.wall_clock.audit_json());
+        append_identity_frame(
+            &mut bytes,
+            "time_monotonic",
+            &self.monotonic_clock.audit_json(),
+        );
+        append_identity_frame(&mut bytes, "time_zone_data", &self.zone_data.audit_json());
+        append_identity_frame(&mut bytes, "time_sleep", &self.sleep.audit_json());
+        append_identity_frame(&mut bytes, "entropy", &self.entropy.audit_json());
+        append_identity_frame(&mut bytes, "scheduler", &self.scheduler.audit_json());
+        append_identity_frame(&mut bytes, "byte_sink", &self.byte_sink.audit_json());
+        append_identity_frame(&mut bytes, "startup", &self.startup.audit_json());
+        format!(
+            "target-providers-v1:{}",
+            crate::SHA256::sha256_hex(&bytes)
+        )
+    }
+
+    /// Build the complete target dossier consumed by artifact and Prelude
+    /// cache keys. `compiler_identity` and `dependency_identity` are supplied
+    /// by the enclosing compiler session because the machine cannot discover
+    /// those inputs itself.
+    pub fn target_dossier(
+        &self,
+        usage: &TargetMachineUse,
+        tier: ExecutionTier,
+        compiler_identity: impl AsRef<str>,
+        dependency_identity: impl AsRef<str>,
+    ) -> TargetDossier {
+        let closure = classify_prelude_closure(usage.core_apis.iter());
+        let mut closure_bytes = Vec::new();
+        for (api, layer) in &closure {
+            append_identity_frame(&mut closure_bytes, "api", api);
+            append_identity_frame(&mut closure_bytes, "layer", layer.as_str());
+        }
+        let closure_identity = format!(
+            "prelude-closure-v1:{}",
+            crate::SHA256::sha256_hex(&closure_bytes)
+        );
+        TargetDossier::new(
+            self.max_runtime_layer(),
+            self.provider_identity(),
+            closure_identity,
+        )
+        .with_linker_identity(self.linker.identity())
+        .with_tier_identity(tier.as_str())
+        .with_compiler_identity(compiler_identity.as_ref())
+        .with_environment_identity(self.environment_identity())
+        .with_dependency_identity(dependency_identity.as_ref())
+    }
+
     pub fn max_runtime_layer(&self) -> RuntimeLayer {
         if !self.no_os {
             RuntimeLayer::Std
@@ -91,11 +185,16 @@ impl TargetMachine {
         }
     }
     /// Return whether this machine supplies one explicit target capability.
-    /// Hosted defaults are available only on hosted machines; freestanding
-    /// profiles must name a provider for positive capabilities.
+    /// Hosted defaults are available only on the hosted environment; named
+    /// browser/WASI/no-OS profiles must name their own positive providers.
     pub fn provides_capability(&self, capability: TargetCapability) -> bool {
-        let hosted = !self.no_os;
+        let hosted = self.environment_identity() == "hosted";
         match capability {
+            TargetCapability::Allocator => match &self.allocator {
+                AllocatorPolicy::HostedDefault | AllocatorPolicy::Counting { .. } => hosted,
+                AllocatorPolicy::Provider { .. } | AllocatorPolicy::Fixed { .. } => true,
+                AllocatorPolicy::Unspecified | AllocatorPolicy::None => false,
+            },
             TargetCapability::Mmio => self.mmio.provides(hosted),
             TargetCapability::TimeWall => self.wall_clock.provides(hosted),
             TargetCapability::TimeMonotonic => self.monotonic_clock.provides(hosted),
@@ -146,11 +245,13 @@ impl TargetMachine {
         push_field(
             &mut out,
             "environment",
-            if self.no_os {
-                "\"no-os\""
-            } else {
-                "\"hosted\""
-            },
+            &json_str(self.environment_identity()),
+            false,
+        );
+        push_field(
+            &mut out,
+            "provider_identity",
+            &json_str(&self.provider_identity()),
             false,
         );
         push_field(&mut out, "linker", &self.linker.audit_json(), false);
@@ -171,6 +272,13 @@ impl TargetMachine {
         push_field(&mut out, "scheduler", &self.scheduler.audit_json(), false);
         push_field(&mut out, "byte_sink", &self.byte_sink.audit_json(), false);
         push_field(&mut out, "startup", &self.startup.audit_json(), false);
+        let dossier = self.target_dossier(usage, ExecutionTier::Aot, "unspecified", "unspecified");
+        push_field(
+            &mut out,
+            "target_dossier",
+            &target_dossier_json(&dossier, &self.triple),
+            false,
+        );
         push_field(
             &mut out,
             "unavailable_core_apis",
@@ -380,7 +488,7 @@ impl TargetMachine {
 
     /// Representative MCU board used by card #239 proofs.
     pub fn board_sensor_v1() -> Self {
-        let mut machine = Self::freestanding("board.sensor_v1", "thumbv7em-none-eabihf");
+        let mut machine = Self::bare_metal("board.sensor_v1", "thumbv7em-none-eabihf");
         machine.memory = vec![
             MemoryRegion::new(
                 "flash",
@@ -454,9 +562,9 @@ impl TargetMachine {
         machine
     }
 
-    /// Linux freestanding / QEMU virt proof board.
+    /// Linux no-OS / QEMU virt proof board.
     pub fn board_virt_aarch64() -> Self {
-        let mut machine = Self::freestanding("board.virt_aarch64", "aarch64-unknown-none");
+        let mut machine = Self::bare_metal("board.virt_aarch64", "aarch64-unknown-none");
         machine.memory = vec![
             MemoryRegion::new(
                 "flash",
@@ -508,6 +616,121 @@ impl TargetMachine {
                 "board.virt_aarch64.startup",
                 "sha256:board-virt-startup",
             ),
+        };
+        machine
+    }
+    /// Browser Wasm profile: browser/JS adapters are explicit target facts.
+    pub fn wasm_browser() -> Self {
+        let mut machine = Self::hosted("wasm32-unknown-unknown");
+        machine.name = "wasm.browser".to_string();
+        machine.allocator = AllocatorPolicy::Provider {
+            provider: wasm_provider("wasm.browser.allocator", "wasm-browser-allocator"),
+        };
+        machine.panic = PanicPolicy::Report {
+            provider: wasm_provider("wasm.browser.report", "wasm-browser-report"),
+        };
+        machine.mmio = MmioPolicy::None;
+        machine.wall_clock = ClockPolicy::Provider {
+            provider: wasm_provider("wasm.browser.wall_clock", "wasm-browser-wall"),
+        };
+        machine.monotonic_clock = ClockPolicy::Provider {
+            provider: wasm_provider("wasm.browser.monotonic_clock", "wasm-browser-mono"),
+        };
+        machine.zone_data = ClockPolicy::Provider {
+            provider: wasm_provider("wasm.browser.zone_data", "wasm-browser-zone"),
+        };
+        machine.sleep = ClockPolicy::Provider {
+            provider: wasm_provider("wasm.browser.sleep", "wasm-browser-sleep"),
+        };
+        machine.entropy = EntropyPolicy::Provider {
+            provider: wasm_provider("wasm.browser.entropy", "wasm-browser-entropy"),
+        };
+        machine.scheduler = SchedulerPolicy::Cooperative {
+            provider: wasm_provider("wasm.browser.scheduler", "wasm-browser-scheduler"),
+        };
+        machine.byte_sink = ByteSinkPolicy::Provider {
+            read: Some(wasm_provider("wasm.browser.io_read", "wasm-browser-read")),
+            write: Some(wasm_provider("wasm.browser.io_write", "wasm-browser-write")),
+            report: Some(wasm_provider("wasm.browser.report", "wasm-browser-report")),
+        };
+        machine.startup = StartupPolicy::Generated {
+            provider: wasm_provider("wasm.browser.startup", "wasm-browser-startup"),
+        };
+        machine
+    }
+
+    /// WASI Preview 2 profile. The supported component target is
+    /// `wasm32-wasip2`; every host boundary remains named and digestable.
+    pub fn wasm_wasi() -> Self {
+        let mut machine = Self::hosted("wasm32-wasip2");
+        machine.name = "wasm.wasi".to_string();
+        machine.allocator = AllocatorPolicy::Provider {
+            provider: wasm_provider("wasm.wasi.allocator", "wasm-wasi-allocator"),
+        };
+        machine.panic = PanicPolicy::Report {
+            provider: wasm_provider("wasm.wasi.report", "wasm-wasi-report"),
+        };
+        machine.mmio = MmioPolicy::None;
+        machine.wall_clock = ClockPolicy::Provider {
+            provider: wasm_provider("wasm.wasi.wall_clock", "wasm-wasi-wall"),
+        };
+        machine.monotonic_clock = ClockPolicy::Provider {
+            provider: wasm_provider("wasm.wasi.monotonic_clock", "wasm-wasi-mono"),
+        };
+        machine.zone_data = ClockPolicy::Provider {
+            provider: wasm_provider("wasm.wasi.zone_data", "wasm-wasi-zone"),
+        };
+        machine.sleep = ClockPolicy::Provider {
+            provider: wasm_provider("wasm.wasi.sleep", "wasm-wasi-sleep"),
+        };
+        machine.entropy = EntropyPolicy::Provider {
+            provider: wasm_provider("wasm.wasi.entropy", "wasm-wasi-entropy"),
+        };
+        machine.scheduler = SchedulerPolicy::BoardRuntime {
+            provider: wasm_provider("wasm.wasi.scheduler", "wasm-wasi-scheduler"),
+        };
+        machine.byte_sink = ByteSinkPolicy::Provider {
+            read: Some(wasm_provider("wasm.wasi.io_read", "wasm-wasi-read")),
+            write: Some(wasm_provider("wasm.wasi.io_write", "wasm-wasi-write")),
+            report: Some(wasm_provider("wasm.wasi.report", "wasm-wasi-report")),
+        };
+        machine.startup = StartupPolicy::Generated {
+            provider: wasm_provider("wasm.wasi.startup", "wasm-wasi-startup"),
+        };
+        machine
+    }
+
+    /// No-OS Wasm profile. It is a heap-free Core target and is AOT-only.
+    pub fn wasm_no_os() -> Self {
+        let mut machine = Self::bare_metal("wasm.no-os", "wasm32-unknown-unknown");
+        machine.memory = vec![
+            MemoryRegion::new(
+                "flash",
+                0,
+                ByteSize::mib(16),
+                MemoryKind::Flash,
+                MemoryAccess::Rx,
+            ),
+            MemoryRegion::new(
+                "ram",
+                0x0100_0000,
+                ByteSize::mib(16),
+                MemoryKind::Ram,
+                MemoryAccess::Rw,
+            ),
+        ];
+        machine.allocator = AllocatorPolicy::None;
+        machine.panic = PanicPolicy::Abort;
+        machine.mmio = MmioPolicy::None;
+        machine.wall_clock = ClockPolicy::None;
+        machine.monotonic_clock = ClockPolicy::None;
+        machine.zone_data = ClockPolicy::None;
+        machine.sleep = ClockPolicy::None;
+        machine.entropy = EntropyPolicy::None;
+        machine.scheduler = SchedulerPolicy::None;
+        machine.byte_sink = ByteSinkPolicy::None;
+        machine.startup = StartupPolicy::Generated {
+            provider: wasm_provider("wasm.no-os.startup", "wasm-no-os-startup"),
         };
         machine
     }
@@ -713,10 +936,24 @@ impl LinkerInput {
             ),
         }
     }
+
+    /// Stable linker identity for target dossiers and artifact keys.
+    pub fn identity(&self) -> String {
+        let kind = match self {
+            Self::HostedDefault => "hosted-default",
+            Self::Unspecified => "unspecified",
+            Self::Generated => "generated",
+            Self::File { .. } => "file",
+        };
+        format!(
+            "linker-{kind}-v1:{}",
+            crate::SHA256::sha256_hex(self.audit_json().as_bytes())
+        )
+    }
 }
 
 /// D-TARGET-ALLOC1 / D-ALLOC-PROGRAM1=A: one typed allocator fact for
-/// freestanding targets and hosted programs. Hosted programs may wrap the
+/// no-OS targets and hosted programs. Hosted programs may wrap the
 /// hidden system heap with the built-in counting allocator and an optional
 /// hard cap; no fact keeps the existing hidden heap.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -724,6 +961,9 @@ pub enum AllocatorPolicy {
     HostedDefault,
     Unspecified,
     None,
+    /// A non-host allocator supplied by a named runtime (for example a Wasm
+    /// linear-memory allocator).
+    Provider { provider: ProviderContract },
     Fixed { region: String, size: ByteSize },
     Counting { cap: Option<ByteSize> },
 }
@@ -739,11 +979,11 @@ impl AllocatorPolicy {
         matches!(
             self,
             AllocatorPolicy::HostedDefault
+                | AllocatorPolicy::Provider { .. }
                 | AllocatorPolicy::Fixed { .. }
                 | AllocatorPolicy::Counting { .. }
         )
     }
-
     fn fixed_size(&self) -> u64 {
         match self {
             AllocatorPolicy::Fixed { size, .. } => size.bytes,
@@ -756,6 +996,9 @@ impl AllocatorPolicy {
             AllocatorPolicy::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             AllocatorPolicy::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
             AllocatorPolicy::None => "{\"kind\":\"none\"}".to_string(),
+            AllocatorPolicy::Provider { provider } => {
+                format!("{{\"kind\":\"provider\",\"contract\":{}}}", provider.audit_json())
+            }
             AllocatorPolicy::Fixed { region, size } => format!(
                 "{{\"kind\":\"fixed\",\"region\":{},\"size_bytes\":{}}}",
                 json_str(region),
@@ -774,21 +1017,30 @@ pub enum PanicPolicy {
     HostedDefault,
     Unspecified,
     Abort,
-    Report { sink: String },
+    /// A reporting panic provider is a target fact, not an untyped sink name.
+    Report { provider: ProviderContract },
 }
 
 impl PanicPolicy {
+    fn provider(&self) -> Option<&ProviderContract> {
+        match self {
+            Self::Report { provider } => Some(provider),
+            _ => None,
+        }
+    }
+
     fn audit_json(&self) -> String {
         match self {
             PanicPolicy::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             PanicPolicy::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
             PanicPolicy::Abort => "{\"kind\":\"abort\"}".to_string(),
-            PanicPolicy::Report { sink } => {
-                format!("{{\"kind\":\"report\",\"sink\":{}}}", json_str(sink))
+            PanicPolicy::Report { provider } => {
+                format!("{{\"kind\":\"report\",\"contract\":{}}}", provider.audit_json())
             }
         }
     }
 }
+
 /// D-FREESTAND-FACTS1=A: every selected target provider carries an explicit
 /// identity and digest. A target triple never supplies either value implicitly.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -803,6 +1055,18 @@ impl ProviderContract {
             provider: provider.into(),
             sha256: sha256.into(),
         }
+    }
+
+    /// Build a contract from the bytes that implement the provider boundary.
+    ///
+    /// Target profiles use this instead of treating a profile label as a
+    /// provider digest. Callers supplying external providers may continue to
+    /// pass their recorded `sha256:` value through [`Self::new`].
+    pub fn from_source(provider: impl Into<String>, source: &[u8]) -> Self {
+        Self::new(
+            provider,
+            format!("sha256:{}", crate::SHA256::sha256_hex(source)),
+        )
     }
 
     pub fn is_valid(&self) -> bool {
@@ -1023,9 +1287,6 @@ impl Default for ByteSinkPolicy {
 }
 
 impl ByteSinkPolicy {
-    fn is_declared(&self) -> bool {
-        !matches!(self, Self::Unspecified)
-    }
 
     fn provides_read(&self, hosted: bool) -> bool {
         match self {
@@ -1129,6 +1390,7 @@ impl Default for AuditPolicy {
 /// One reachable Prelude requirement against the target fact plane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetCapability {
+    Allocator,
     Mmio,
     TimeWall,
     TimeMonotonic,
@@ -1145,6 +1407,7 @@ pub enum TargetCapability {
 impl TargetCapability {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Allocator => "Target.Allocator",
             Self::Mmio => "Target.MMIO",
             Self::TimeWall => "Time.Wall",
             Self::TimeMonotonic => "Time.Monotonic",
@@ -1168,6 +1431,111 @@ pub struct TargetMachineUse {
     pub core_apis: Vec<String>,
     pub mmio: Vec<MmioAccess>,
     pub required_capabilities: Vec<TargetCapability>,
+}
+
+impl TargetMachineUse {
+    /// Derive target requirements from the complete semantic Prelude closure.
+    /// Callers may still add stack, static-RAM, MMIO, or capability facts that
+    /// are discovered outside the core-usage walk.
+    pub fn from_core_apis<I, S>(core_apis: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut usage = Self {
+            core_apis: core_apis
+                .into_iter()
+                .map(|api| api.as_ref().to_string())
+                .collect(),
+            ..Self::default()
+        };
+        usage.core_apis.sort();
+        usage.core_apis.dedup();
+        let closure = classify_prelude_closure(usage.core_apis.iter());
+        usage.heap_required = closure.values().any(|layer| *layer >= RuntimeLayer::Alloc);
+        for api in &usage.core_apis {
+            for capability in capabilities_for_core_usage(api) {
+                if !usage.required_capabilities.contains(&capability) {
+                    usage.required_capabilities.push(capability);
+                }
+            }
+        }
+        usage
+    }
+}
+fn capabilities_for_core_usage(api: &str) -> Vec<TargetCapability> {
+    let (module, helper) = api
+        .split_once("::")
+        .map_or((api, ""), |(module, helper)| (module, helper));
+    let mut capabilities = Vec::new();
+    let add = |capabilities: &mut Vec<TargetCapability>, capability| {
+        if !capabilities.contains(&capability) {
+            capabilities.push(capability);
+        }
+    };
+    match module {
+        "core.term" => {
+            if helper.is_empty()
+                || matches!(
+                    helper,
+                    "input"
+                        | "readline"
+                        | "read_until"
+                        | "read_all_input"
+                        | "take"
+                        | "buffered"
+                        | "stdin"
+                        | "binread"
+                        | "read_key"
+                        | "confirm"
+                        | "choose"
+                        | "select"
+                )
+            {
+                add(&mut capabilities, TargetCapability::IoRead);
+            }
+            if helper.is_empty()
+                || matches!(
+                    helper,
+                    "print"
+                        | "eprint"
+                        | "progress"
+                        | "binwrite"
+                        | "stdout"
+                        | "stderr"
+                        | "style"
+                        | "style_force"
+                )
+            {
+                add(&mut capabilities, TargetCapability::IoWrite);
+            }
+        }
+        "core.concurrency" | "core.tasks" => {
+            add(&mut capabilities, TargetCapability::Scheduler);
+        }
+        "core.time" => {
+            if matches!(
+                helper,
+                "sleep" | "delay" | "yield" | "wait"
+            ) {
+                add(&mut capabilities, TargetCapability::TimeSleep);
+            } else if matches!(
+                helper,
+                "instant" | "monotonic" | "elapsed" | "elapsed_millis"
+            ) {
+                add(&mut capabilities, TargetCapability::TimeMonotonic);
+            } else if matches!(helper, "zone" | "zone_data" | "named_zone") {
+                add(&mut capabilities, TargetCapability::TimeZoneData);
+            } else if !matches!(helper, "" | "typed_head" | "__duration__" | "duration") {
+                add(&mut capabilities, TargetCapability::TimeWall);
+            }
+        }
+        "core.crypto.random" | "core.crypto.uuid" => {
+            add(&mut capabilities, TargetCapability::Entropy);
+        }
+        _ => {}
+    }
+    capabilities
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1327,8 +1695,11 @@ fn validate_allocator(machine: &TargetMachine, errors: &mut Vec<TargetMachineErr
         AllocatorPolicy::Unspecified if machine.no_os => {
             errors.push(TargetMachineError::MissingAllocatorPolicy)
         }
-        AllocatorPolicy::Counting { .. } if machine.no_os => {
+        AllocatorPolicy::HostedDefault | AllocatorPolicy::Counting { .. } if machine.no_os => {
             errors.push(TargetMachineError::HostedAllocatorRequiresOs)
+        }
+        AllocatorPolicy::Provider { provider } => {
+            validate_provider_contract(TargetCapability::Allocator, provider, errors);
         }
         AllocatorPolicy::Fixed { region, size } => {
             match machine.memory.iter().find(|r| r.name == *region) {
@@ -1360,6 +1731,9 @@ fn validate_panic(machine: &TargetMachine, errors: &mut Vec<TargetMachineError>)
         )
     {
         errors.push(TargetMachineError::MissingPanicPolicy);
+    }
+    if let Some(provider) = machine.panic.provider() {
+        validate_provider_contract(TargetCapability::PanicReport, provider, errors);
     }
 }
 
@@ -1399,7 +1773,7 @@ fn validate_core_usage(
     usage: &TargetMachineUse,
     errors: &mut Vec<TargetMachineError>,
 ) {
-    if usage.heap_required && !machine.allocator.provides_heap() {
+    if usage.heap_required && !machine.provides_capability(TargetCapability::Allocator) {
         errors.push(TargetMachineError::HeapRequiresAllocator);
     }
 
@@ -1486,20 +1860,32 @@ fn validate_target_capabilities(
 
     match &machine.byte_sink {
         ByteSinkPolicy::HostedDefault if machine.no_os => {
-            push_unique(
-                errors,
-                TargetMachineError::HostedCapabilityRequiresOs {
-                    capability: "IO.Read/IO.Write/Panic.Report".to_string(),
-                },
-            );
+            for capability in [
+                TargetCapability::IoRead,
+                TargetCapability::IoWrite,
+                TargetCapability::PanicReport,
+            ] {
+                push_unique(
+                    errors,
+                    TargetMachineError::HostedCapabilityRequiresOs {
+                        capability: capability.as_str().to_string(),
+                    },
+                );
+            }
         }
-        ByteSinkPolicy::Unspecified if machine.no_os && !machine.byte_sink.is_declared() => {
-            push_unique(
-                errors,
-                TargetMachineError::MissingTargetCapability {
-                    capability: "IO.Read/IO.Write/Panic.Report".to_string(),
-                },
-            );
+        ByteSinkPolicy::Unspecified if machine.no_os => {
+            for capability in [
+                TargetCapability::IoRead,
+                TargetCapability::IoWrite,
+                TargetCapability::PanicReport,
+            ] {
+                push_unique(
+                    errors,
+                    TargetMachineError::MissingTargetCapability {
+                        capability: capability.as_str().to_string(),
+                    },
+                );
+            }
         }
         ByteSinkPolicy::Provider {
             read,
@@ -1548,6 +1934,36 @@ fn validate_target_capabilities(
             );
         }
     }
+}
+fn target_dossier_json(dossier: &TargetDossier, target_triple: &str) -> String {
+    let artifact_key =
+        crate::SHA256::sha256_hex(&dossier.cache_bytes(target_triple));
+    format!(
+        "{{\"layer\":{},\"provider_identity\":{},\"closure_identity\":{},\"linker_identity\":{},\"tier_identity\":{},\"compiler_identity\":{},\"environment_identity\":{},\"dependency_identity\":{},\"artifact_key\":{}}}",
+        json_str(dossier.layer.as_str()),
+        json_str(&dossier.provider_identity),
+        json_str(&dossier.closure_identity),
+        json_str(&dossier.linker_identity),
+        json_str(&dossier.tier_identity),
+        json_str(&dossier.compiler_identity),
+        json_str(&dossier.environment_identity),
+        json_str(&dossier.dependency_identity),
+        json_str(&artifact_key),
+    )
+}
+
+fn append_identity_frame(bytes: &mut Vec<u8>, label: &str, value: &str) {
+    bytes.extend_from_slice(&(label.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(label.as_bytes());
+    bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(value.as_bytes());
+}
+
+fn wasm_provider(name: &str, implementation: &str) -> ProviderContract {
+    let mut source = Vec::new();
+    append_identity_frame(&mut source, "provider", name);
+    append_identity_frame(&mut source, "implementation", implementation);
+    ProviderContract::from_source(name, &source)
 }
 
 fn validate_simple_capability(
@@ -1750,7 +2166,7 @@ mod tests {
     use super::*;
 
     fn valid_machine() -> TargetMachine {
-        let mut machine = TargetMachine::freestanding("board.sensor_v1", "thumbv7em-none-eabihf");
+        let mut machine = TargetMachine::bare_metal("board.sensor_v1", "thumbv7em-none-eabihf");
         machine.memory = vec![
             MemoryRegion::new(
                 "flash",
@@ -1856,7 +2272,7 @@ mod tests {
     }
 
     #[test]
-    fn freestanding_machine_rejects_hosted_counting_wrapper() {
+    fn no_os_machine_rejects_hosted_counting_wrapper() {
         let mut machine = valid_machine();
         machine.allocator = AllocatorPolicy::Counting { cap: None };
         let errors = machine.validate(&TargetMachineUse::default());
@@ -1864,7 +2280,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_freestanding_machine_passes() {
+    fn valid_no_os_machine_passes() {
         let usage = TargetMachineUse {
             stack_bytes: ByteSize::kib(4).bytes,
             static_ram_bytes: ByteSize::kib(8).bytes,
@@ -1884,7 +2300,7 @@ mod tests {
 
     #[test]
     fn validation_reports_missing_required_no_os_facts() {
-        let machine = TargetMachine::freestanding("", "");
+        let machine = TargetMachine::bare_metal("", "");
         let errors = machine.validate(&TargetMachineUse::default());
         assert!(errors.contains(&TargetMachineError::MissingTargetTriple));
         assert!(errors.contains(&TargetMachineError::MissingMemoryKind {
@@ -1947,9 +2363,48 @@ mod tests {
             ..TargetMachineUse::default()
         };
         let json = valid_machine().audit_json(&usage);
-        assert_eq!(
-            json,
-            "{\"name\":\"board.sensor_v1\",\"triple\":\"thumbv7em-none-eabihf\",\"environment\":\"no-os\",\"linker\":{\"kind\":\"generated\"},\"allocator\":{\"kind\":\"fixed\",\"region\":\"ram\",\"size_bytes\":16384},\"panic\":{\"kind\":\"abort\"},\"memory\":[{\"name\":\"flash\",\"origin\":134217728,\"size_bytes\":524288,\"kind\":\"flash\",\"access\":\"rx\"},{\"name\":\"ram\",\"origin\":536870912,\"size_bytes\":131072,\"kind\":\"ram\",\"access\":\"rw\"},{\"name\":\"gpio\",\"origin\":1073872896,\"size_bytes\":1024,\"kind\":\"mmio\",\"access\":\"rw\"}],\"mmio_capability\":{\"kind\":\"provider\",\"contract\":{\"provider\":\"test.mmio\",\"sha256\":\"sha256:test-mmio\"}},\"time_wall\":{\"kind\":\"none\"},\"time_monotonic\":{\"kind\":\"provider\",\"contract\":{\"provider\":\"test.monotonic\",\"sha256\":\"sha256:test-monotonic\"}},\"time_zone_data\":{\"kind\":\"none\"},\"time_sleep\":{\"kind\":\"provider\",\"contract\":{\"provider\":\"test.sleep\",\"sha256\":\"sha256:test-sleep\"}},\"entropy\":{\"kind\":\"none\"},\"scheduler\":{\"kind\":\"none\"},\"byte_sink\":{\"kind\":\"none\"},\"startup\":{\"kind\":\"generated\",\"contract\":{\"provider\":\"test.startup\",\"sha256\":\"sha256:test-startup\"}},\"unavailable_core_apis\":[\"core.files\"],\"mmio\":[{\"address\":1073872896,\"size_bytes\":4,\"unsafe_reason\":\"GPIO register write\"}],\"execution\":{\"aot\":true,\"dev\":false,\"jit\":false}}"
+        let repeat = valid_machine().audit_json(&usage);
+        assert_eq!(json, repeat);
+        assert!(json.contains("\"provider_identity\":\"target-providers-v1:"));
+        assert!(json.contains("\"target_dossier\":"));
+    }
+
+    #[test]
+    fn named_wasm_profiles_have_distinct_provider_identities() {
+        let browser = TargetMachine::wasm_browser();
+        let wasi = TargetMachine::wasm_wasi();
+        let no_os = TargetMachine::wasm_no_os();
+        assert_eq!(browser.environment_identity(), "browser");
+        assert_eq!(wasi.environment_identity(), "wasi");
+        assert_eq!(no_os.environment_identity(), "no-os");
+        assert_eq!(browser.max_runtime_layer(), RuntimeLayer::Std);
+        assert_eq!(wasi.max_runtime_layer(), RuntimeLayer::Std);
+        assert_eq!(no_os.max_runtime_layer(), RuntimeLayer::Core);
+        assert_ne!(browser.provider_identity(), wasi.provider_identity());
+        assert_ne!(browser.provider_identity(), no_os.provider_identity());
+        assert_ne!(wasi.provider_identity(), no_os.provider_identity());
+    }
+
+    #[test]
+    fn target_dossier_carries_closure_and_execution_identity() {
+        let machine = TargetMachine::wasm_no_os();
+        let usage = TargetMachineUse::from_core_apis(["core.encoding.json"]);
+        let dossier = machine.target_dossier(
+            &usage,
+            ExecutionTier::Aot,
+            "jet@2300",
+            "deps:none",
+        );
+        assert_eq!(dossier.layer, RuntimeLayer::Core);
+        assert!(dossier.closure_identity.starts_with("prelude-closure-v1:"));
+        assert_eq!(dossier.tier_identity, "aot");
+        assert_eq!(dossier.compiler_identity, "jet@2300");
+        assert_eq!(dossier.dependency_identity, "deps:none");
+        assert_ne!(
+            dossier.cache_bytes(&machine.triple),
+            machine
+                .target_dossier(&usage, ExecutionTier::Jit, "jet@2300", "deps:none")
+                .cache_bytes(&machine.triple)
         );
     }
 

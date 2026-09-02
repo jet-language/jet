@@ -62,7 +62,7 @@ impl<'a> Parser<'a> {
                 },
             };
             return Ok(Expr::CallValue {
-                callee: Box::new(Expr::Lambda(lambda)),
+                callee: Box::new(Expr::Lambda(Box::new(lambda))),
                 args: Vec::new(),
                 span: Span::new(start.start, end),
             });
@@ -294,7 +294,7 @@ impl<'a> Parser<'a> {
                 },
             };
             return Ok(Expr::CallValue {
-                callee: Box::new(Expr::Lambda(lambda)),
+                callee: Box::new(Expr::Lambda(Box::new(lambda))),
                 args: Vec::new(),
                 span: Span::new(start.start, end),
             });
@@ -399,7 +399,7 @@ impl<'a> Parser<'a> {
             },
         };
         Ok(Expr::CallValue {
-            callee: Box::new(Expr::Lambda(lambda)),
+            callee: Box::new(Expr::Lambda(Box::new(lambda))),
             args: Vec::new(),
             span: Span::new(start.start, end),
         })
@@ -2908,6 +2908,22 @@ impl<'a> Parser<'a> {
                 }
                 self.finish_stmt()?;
                 Ok(Stmt::Expr(expr))
+            }
+            TokKind::KwIn => {
+                let span = self.bump().span;
+                Err(Diagnostic::error(
+                    "E0003",
+                    format!("`{}` is reserved as the source-loop keyword", Syntax::KW_IN),
+                    format!(
+                        "the `{}` keyword marks the boundary between a loop binding and its source",
+                        Syntax::KW_IN
+                    ),
+                    format!(
+                        "choose a different identifier name, or use `{}` in a source loop; after `.` it is allowed as a member name",
+                        Syntax::KW_IN
+                    ),
+                    Some(span),
+                ))
             }
             other => {
                 let found = describe(other);

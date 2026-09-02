@@ -86,7 +86,7 @@ fn shared_access_call(handle: Expr, method: &str, body: LambdaBody, span: Span) 
         type_args: Vec::new(),
         args: vec![CallArg {
             convention: AccessConvention::Read,
-            expr: Expr::Lambda(lambda),
+            expr: Expr::Lambda(Box::new(lambda)),
             span,
             flags: CallArgFlags {
                 shared_access_desugar: true,

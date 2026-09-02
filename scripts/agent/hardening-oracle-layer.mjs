@@ -551,17 +551,22 @@ function selfDiffOracle(row) {
 }
 
 function catalogRow(row) {
-  const automaticReason = nonCallableExclusionReason(row.kind);
-  const executable = automaticReason === null && row.status === "covered";
+  // Membership kind does not decide executability. Receiver methods can be
+  // callable, and fields/types remain denominator rows until their producer
+  // records an explicit owner-ratified exclusion.
+  const executable = row.status === "covered" && !row.exclusion;
   const external = executable ? oracleForRow(row) : null;
   const oracle = executable ? external || selfDiffOracle(row) : null;
-  const status = automaticReason === null ? row.status : "excluded";
+  const status = row.status;
   const rejection = executable
     ? null
     : {
         status,
-        reason: automaticReason || row.exclusion?.reason || row.errors?.join("; ") || `manifest row is ${row.status}`,
-        owner_decision: row.exclusion?.decision || row.exclusion?.owner || null,
+        reason: row.exclusion?.reason || row.errors?.join("; ") || `manifest row is ${row.status}`,
+        owner_decision: row.exclusion?.owner_decision
+          || row.exclusion?.decision
+          || row.exclusion?.owner
+          || null,
       };
   return {
     stable_surface_id: row.stable_id,
@@ -625,8 +630,9 @@ function legacyCatalog(surfaceRows, sourceSnapshotHash) {
     .map((row) => normalizeSurfaceRow(row, seen))
     .sort((left, right) => left.stable_id.localeCompare(right.stable_id));
   const rows = normalized.map((row) => {
-    const automaticReason = nonCallableExclusionReason(row.kind);
-    const excluded = Boolean(row.exclusion) || automaticReason !== null;
+    // A row kind is membership evidence, not an exclusion decision. Only the
+    // row's explicit owner-ratified exclusion may remove it from execution.
+    const excluded = Boolean(row.exclusion);
     return {
       ...row,
       stable_surface_id: row.stable_id,
@@ -636,8 +642,8 @@ function legacyCatalog(surfaceRows, sourceSnapshotHash) {
       valid: !excluded,
       rejection: excluded ? {
         status: "excluded",
-        reason: automaticReason || row.exclusion.reason,
-        owner_decision: row.exclusion?.owner_decision || null,
+        reason: row.exclusion.reason,
+        owner_decision: row.exclusion.owner_decision || null,
       } : null,
       tier_self_diff: !excluded,
       external_oracle: !excluded,
@@ -1128,15 +1134,173 @@ function sourceSeed(item) {
   if (Buffer.byteLength(item.source, "utf8") > MAX_SOURCE_BYTES) {
     throw new Error(`seed source exceeds ${MAX_SOURCE_BYTES} bytes: ${item.stable_surface_id}`);
   }
+  if (item.manifest_backed === true) {
+    if (!Array.isArray(item.applicable_tiers) || item.applicable_tiers.length === 0) {
+      throw new Error(`manifest-backed seed has no applicable tiers: ${item.stable_surface_id}`);
+    }
+    requireTierList(item.applicable_tiers, `tiers for ${item.stable_surface_id}`);
+  }
   return item;
 }
 
 function seedOracle(seed) {
-  const row = { domain: mutationDomain(seed.domain), seed: seed.seed, normalization: seed.normalization || [] };
+  if (seed.source_kind === "differential"
+    && seed.oracle_input
+    && typeof seed.oracle_input.expected_output === "string") {
+    return {
+      kind: "external-oracle",
+      name: "differential-golden-output",
+      version: "1",
+      input_digest: sha256(canonicalJson({
+        source: seed.path || seed.seed,
+        expected_output: seed.oracle_input.expected_output,
+      })),
+      independence_class: "blessed-golden",
+      provenance: "checked-in-differential-fixture",
+      normalization: Array.isArray(seed.normalization) ? [...seed.normalization].sort() : [],
+    };
+  }
+  const row = {
+    domain: mutationDomain(seed.domain),
+    seed: seed.seed,
+    normalization: seed.normalization || [],
+  };
   return oracleForRow(row) || selfDiffOracle(row);
 }
 
-function rejectedMutation(seed, mutation_arm, error) {
+function executableOracle(seed) {
+  const oracle = seedOracle(seed);
+  let oracle_input;
+  try {
+    oracle_input = Object.hasOwn(seed, "oracle_input")
+      ? clone(seed.oracle_input)
+      : undefined;
+  } catch (error) {
+    return {
+      ok: false,
+      oracle,
+      reason: `reference oracle input is invalid for ${seed.stable_surface_id}: ${error.message}`,
+    };
+  }
+  const differentialGolden = oracle.name === "differential-golden-output"
+    && oracle_input
+    && typeof oracle_input.expected_output === "string";
+  if (differentialGolden) {
+    if (!Object.hasOwn(seed, "expected_value") || seed.expected_value === undefined) {
+      return { ok: false, oracle, oracle_input, reason: `differential golden output is missing for ${seed.stable_surface_id}` };
+    }
+    let expected_value;
+    try {
+      expected_value = clone(seed.expected_value);
+    } catch (error) {
+      return {
+        ok: false,
+        oracle,
+        oracle_input,
+        reason: `differential golden output is invalid for ${seed.stable_surface_id}: ${error.message}`,
+      };
+    }
+    if (!equalValue(expected_value, oracle_input.expected_output)) {
+      return {
+        ok: false,
+        oracle,
+        oracle_input,
+        expected_value,
+        reason: `differential golden output disagrees with its paired output for ${seed.stable_surface_id}`,
+      };
+    }
+    const expected_relation = seed.expected_relation || oracle_input.relation || "differential:golden-output";
+    requireString(expected_relation, `expected relation for ${seed.stable_surface_id}`);
+    return {
+      ok: true,
+      oracle,
+      oracle_input,
+      expected_value,
+      expected_relation,
+      expected_value_relation: relationText(expected_value),
+    };
+  }
+
+  let item;
+  try {
+    item = oracleAdapter(seed.domain);
+  } catch {
+    return {
+      ok: false,
+      oracle,
+      reason: `reference oracle is unavailable for domain: ${seed.domain}`,
+    };
+  }
+  let resolvedInput;
+  try {
+    resolvedInput = oracle_input === undefined ? clone(item.input) : oracle_input;
+  } catch (error) {
+    return {
+      ok: false,
+      oracle,
+      reason: `reference oracle input is invalid for ${seed.stable_surface_id}: ${error.message}`,
+    };
+  }
+  if (resolvedInput === undefined) {
+    return { ok: false, oracle, reason: `reference oracle input is missing for ${seed.stable_surface_id}` };
+  }
+  let expected_value;
+  try {
+    expected_value = clone(item.reference(resolvedInput));
+  } catch (error) {
+    return {
+      ok: false,
+      oracle,
+      oracle_input: resolvedInput,
+      reason: `reference oracle failed for ${seed.stable_surface_id}: ${error.message}`,
+    };
+  }
+  if (expected_value === undefined) {
+    return { ok: false, oracle, oracle_input: resolvedInput, reason: `reference oracle returned undefined for ${seed.stable_surface_id}` };
+  }
+  if (Object.hasOwn(seed, "expected_value")) {
+    let agrees;
+    try {
+      agrees = equalValue(seed.expected_value, expected_value);
+    } catch (error) {
+      return {
+        ok: false,
+        oracle,
+        oracle_input: resolvedInput,
+        expected_value,
+        reason: `carried expected value is invalid for ${seed.stable_surface_id}: ${error.message}`,
+      };
+    }
+    if (!agrees) {
+      return {
+        ok: false,
+        oracle,
+        oracle_input: resolvedInput,
+        expected_value,
+        reason: `carried expected value disagrees with reference oracle for ${seed.stable_surface_id}`,
+      };
+    }
+  }
+  const expected_relation = `oracle:${item.oracle}`;
+  const expected_value_relation = relationText(expected_value);
+  return {
+    ok: true,
+    oracle: {
+      ...oracle,
+      input_digest: sha256(canonicalJson({
+        domain: mutationDomain(seed.domain),
+        seed: seed.seed,
+        input: resolvedInput,
+      })),
+    },
+    oracle_input: resolvedInput,
+    expected_value,
+    expected_relation,
+    expected_value_relation,
+  };
+}
+
+function rejectedMutation(seed, mutation_arm, error, oracleSpec = null) {
   return {
     stable_surface_id: seed.stable_surface_id,
     seed: seed.seed,
@@ -1144,6 +1308,10 @@ function rejectedMutation(seed, mutation_arm, error) {
     mutation_arm,
     valid: false,
     reason: error.message,
+    oracle: oracleSpec?.oracle ? clone(oracleSpec.oracle) : seedOracle(seed),
+    ...(oracleSpec?.oracle_input === undefined ? {} : { oracle_input: clone(oracleSpec.oracle_input) }),
+    ...(oracleSpec?.expected_value === undefined ? {} : { expected_value: clone(oracleSpec.expected_value) }),
+    ...(oracleSpec?.expected_relation === undefined ? {} : { expected_relation: oracleSpec.expected_relation }),
   };
 }
 
@@ -1173,10 +1341,15 @@ export function batchMutations(seeds, {
     .map(sourceSeed)
     .sort((left, right) => `${left.stable_surface_id}\u0000${left.seed}`.localeCompare(`${right.stable_surface_id}\u0000${right.seed}`))
     .forEach((seed) => {
+      const oracleSpec = executableOracle(seed);
       for (const mutation_arm of [...arms].sort()) {
         const key = `${seed.stable_surface_id}\u0000${seed.seed}\u0000${mutation_arm}`;
         if (seen.has(key)) throw new Error(`duplicate mutation case: ${key}`);
         seen.add(key);
+        if (!oracleSpec.ok) {
+          rejected.push(rejectedMutation(seed, mutation_arm, new Error(oracleSpec.reason), oracleSpec));
+          continue;
+        }
         let mutation;
         try {
           mutation = mutateValueSource(seed.source, {
@@ -1189,15 +1362,19 @@ export function batchMutations(seeds, {
             type_skeleton: seed.type_skeleton,
           });
         } catch (error) {
-          rejected.push(rejectedMutation(seed, mutation_arm, error));
-          return;
+          rejected.push(rejectedMutation(seed, mutation_arm, error, oracleSpec));
+          continue;
         }
-        const oracle = seedOracle(seed);
         cases.push({
           case_id: sha256(key).slice("sha256:".length, "sha256:".length + 16),
           stable_surface_id: seed.stable_surface_id,
+          row_id: seed.row_id || seed.stable_surface_id,
           seed: seed.seed,
+          seed_id: seed.seed_id || seed.seed,
           domain: mutationDomain(seed.domain),
+          kind: seed.kind || null,
+          owner: seed.owner || null,
+          member: seed.member || null,
           mutation_arm,
           mutator_version: MUTATOR_VERSION,
           source: mutation.source,
@@ -1206,16 +1383,22 @@ export function batchMutations(seeds, {
           type_skeleton: mutation.type_skeleton || null,
           normalization: [...(seed.normalization || [])].sort(),
           oracle: {
-            name: oracle.name,
-            version: oracle.version,
-            input_digest: sha256(canonicalJson({ seed: seed.seed, domain: mutation.domain })),
-            independence_class: oracle.independence_class,
-            provenance: oracle.provenance,
+            name: oracleSpec.oracle.name,
+            version: oracleSpec.oracle.version,
+            input_digest: oracleSpec.oracle.input_digest,
+            independence_class: oracleSpec.oracle.independence_class,
+            provenance: oracleSpec.oracle.provenance,
           },
-          expected_relation: oracle.kind === "tier-self-diff"
-            ? "tier-self-diff:aot-vs-jet_run-vs-interpreter"
-            : `oracle:${oracle.name}`,
+          oracle_input: clone(oracleSpec.oracle_input),
+          expected_value: clone(oracleSpec.expected_value),
+          expected_relation: oracleSpec.expected_relation,
+          expected_value_relation: oracleSpec.expected_value_relation,
           applicable_tiers: [...(seed.applicable_tiers || TIERS)],
+          dispatcher_arms: [...(seed.dispatcher_arms || [])],
+          observable_sink: seed.observable_sink ? clone(seed.observable_sink) : null,
+          manifest_backed: seed.manifest_backed === true,
+          manifest_status: seed.manifest_status || null,
+          source_kind: seed.source_kind || null,
           validation: checkSource ? "checked" : "deferred-to-executable-runner",
         });
       }
@@ -1226,12 +1409,20 @@ export function batchMutations(seeds, {
     const batch = cases.slice(index, index + batchSize);
     const protocol = batch.map((item) => canonicalJson({
       case_id: item.case_id,
+      row_id: item.row_id,
       stable_surface_id: item.stable_surface_id,
       seed: item.seed,
+      seed_id: item.seed_id,
       mutation_arm: item.mutation_arm,
       source: item.source,
       oracle: item.oracle,
+      oracle_input: item.oracle_input,
+      expected_value: item.expected_value,
       expected_relation: item.expected_relation,
+      expected_value_relation: item.expected_value_relation,
+      applicable_tiers: item.applicable_tiers,
+      dispatcher_arms: item.dispatcher_arms,
+      observable_sink: item.observable_sink,
       normalization: item.normalization,
     })).join("\n") + (batch.length ? "\n" : "");
     batches.push({ index: batches.length, cases: batch, line_protocol: protocol });
@@ -1569,9 +1760,17 @@ export async function batchMutationsExecutable(seeds, options = {}) {
     } catch (error) {
       rejected.push({
         stable_surface_id: item.stable_surface_id,
+        row_id: item.row_id,
         seed: item.seed,
+        seed_id: item.seed_id,
         domain: item.domain,
         mutation_arm: item.mutation_arm,
+        oracle: clone(item.oracle),
+        oracle_input: clone(item.oracle_input),
+        expected_value: clone(item.expected_value),
+        expected_relation: item.expected_relation,
+        expected_value_relation: item.expected_value_relation,
+        applicable_tiers: [...item.applicable_tiers],
         valid: false,
         reason: error.message,
       });
@@ -1582,12 +1781,20 @@ export async function batchMutationsExecutable(seeds, options = {}) {
     const current = cases.slice(index, index + batch.batch_size);
     const line_protocol = current.map((item) => canonicalJson({
       case_id: item.case_id,
+      row_id: item.row_id,
       stable_surface_id: item.stable_surface_id,
       seed: item.seed,
+      seed_id: item.seed_id,
       mutation_arm: item.mutation_arm,
       source: item.source,
       oracle: item.oracle,
+      oracle_input: item.oracle_input,
+      expected_value: item.expected_value,
       expected_relation: item.expected_relation,
+      expected_value_relation: item.expected_value_relation,
+      applicable_tiers: item.applicable_tiers,
+      dispatcher_arms: item.dispatcher_arms,
+      observable_sink: item.observable_sink,
       normalization: item.normalization,
     })).join("\n") + (current.length ? "\n" : "");
     batches.push({ index: batches.length, cases: current, line_protocol });
@@ -1748,6 +1955,9 @@ export function compareCaseObservations({
   requireString(domain, "comparison domain");
   if (!Array.isArray(observations) || observations.length === 0) throw new Error("case observations are required");
   const tiers = requireTierList(applicable_tiers, "applicable tiers");
+  if (expected_value === undefined && typeof expected_relation === "string" && expected_relation.startsWith("oracle:")) {
+    throw new Error("reference oracle expected value is missing");
+  }
   const normalized = observations.map((observation) => ({
     ...observation,
     normalized_value: normalizeObservedValue(domain, observation, normalization),
@@ -1758,9 +1968,13 @@ export function compareCaseObservations({
   const tierParity = compareTierObservations(normalized, tiers, normalization);
   const expected = expected_value === undefined ? undefined : clone(expected_value);
   const adapterItem = (() => { try { return oracleAdapter(domain); } catch { return null; } })();
-  const oracleChecks = expected === undefined || !adapterItem
+  const oracleChecks = expected === undefined
     ? normalized.map(() => true)
-    : normalized.map((observation) => adapterItem.relation(expected, observation.normalized_value).ok);
+    : normalized.map((observation) => (
+      adapterItem
+        ? adapterItem.relation(expected, observation.normalized_value).ok
+        : exactRelation(expected, observation.normalized_value).ok
+    ));
   const oracleOk = oracleChecks.every(Boolean);
   const differences = normalized.filter((observation, index) => !oracleChecks[index]).map((observation) => observation.tier);
   const ok = tierParity.ok && oracleOk;
@@ -1775,8 +1989,9 @@ export function compareCaseObservations({
     actual: first.normalized_value,
     expected_relation: expectedRelation,
     actual_relation: actualRelation,
+    expected_value_relation: expected === undefined ? null : relationText(expected),
     tier_parity: tierParity,
-    oracle_ok: oracleOk,
+    oracle_ok: oracleChecks,
     oracle_differences: differences,
     differences: [...new Set([...tierParity.differences, ...differences])],
     observations: normalized,
@@ -1796,6 +2011,7 @@ export function compareCaseObservations({
 export async function executeCase(caseInput, {
   executor = executeTier,
   validate = true,
+  require_expected = false,
   validation = {},
   applicable_tiers = caseInput?.applicable_tiers || TIERS,
   normalization = caseInput?.normalization || [],
@@ -1816,24 +2032,39 @@ export async function executeCase(caseInput, {
       type_skeleton: caseInput.type_skeleton,
     }, validation);
   }
+  const carriedOracle = require_expected ? executableOracle(caseInput) : null;
+  if (carriedOracle && !carriedOracle.ok) {
+    throw new Error(carriedOracle.reason);
+  }
+  const expected = carriedOracle?.ok
+    ? clone(carriedOracle.expected_value)
+    : expectedCaseValue(caseInput);
+  const hasExpected = Object.hasOwn(caseInput, "expected_value") && expected !== undefined;
+  if (require_expected && !hasExpected) {
+    throw new Error(`reference oracle expected value is missing for ${caseInput.stable_surface_id || caseInput.case_id || "case"}`);
+  }
   const run = typeof executor === "function" ? executor : executor.execute;
   if (typeof run !== "function") throw new Error("case executor must be a function");
   const observations = [];
   for (const tier of tiers) {
-    observations.push(await run({
+    const observation = await run({
       ...executionOptions,
       ...caseInput,
       tier,
       source: caseInput.source,
       stdin,
-    }));
+    });
+    if (!observation || typeof observation !== "object") {
+      throw new Error(`tier ${tier} returned no observation`);
+    }
+    observations.push(observation);
   }
   const comparison = compareCaseObservations({
     domain: caseInput.domain,
     observations,
     applicable_tiers: tiers,
     normalization,
-    expected_value: expectedCaseValue(caseInput),
+    expected_value: expected,
     expected_relation: caseInput.expected_relation,
   });
   return {
@@ -2228,20 +2459,48 @@ function coreMarker(source) {
   return match ? `module:${match[1]}` : null;
 }
 
-function seedFromPath(path, root, conformanceRoot) {
+function seedFromPath(path, root, conformanceRoot, manifestRow = null, differentialRow = null) {
   const source = readFileSync(path, "utf8");
   const relativePath = relative(root, path).split("\\").join("/");
-  const stableSurfaceId = path.startsWith(conformanceRoot)
-    ? coreMarker(source)
-    : `fixture:${relativePath}`;
+  const sourceKind = path.startsWith(conformanceRoot) ? "conformance" : "differential";
+  const stableSurfaceId = manifestRow?.stable_id
+    || (sourceKind === "conformance" ? coreMarker(source) : `fixture:${relativePath}`);
+  const expectedOutput = differentialRow?.output
+    ? readFileSync(join(dirname(path), differentialRow.output), "utf8")
+    : undefined;
+  const seed = manifestRow?.seed || sha256(relativePath).slice("sha256:".length, "sha256:".length + 16);
   return {
     stable_surface_id: stableSurfaceId || `fixture:${relativePath}`,
-    seed: sha256(relativePath).slice("sha256:".length, "sha256:".length + 16),
+    row_id: manifestRow?.stable_id || stableSurfaceId || `fixture:${relativePath}`,
+    seed,
+    seed_id: seed,
     path: relativePath,
-    source_kind: path.startsWith(conformanceRoot) ? "conformance" : "differential",
+    source_kind: sourceKind,
     source,
-    domain: "compiler_reflection",
-    normalization: [],
+    domain: manifestRow?.domain || "compiler_reflection",
+    applicable_tiers: manifestRow ? [...(manifestRow.applicable_tiers || [])] : [...TIERS],
+    dispatcher_arms: manifestRow ? [...(manifestRow.dispatcher_arms || [])] : [],
+    observable_sink: manifestRow?.sink ? clone(manifestRow.sink) : null,
+    kind: manifestRow?.kind || null,
+    owner: manifestRow?.owner || null,
+    member: manifestRow?.member || null,
+    manifest_backed: Boolean(manifestRow),
+    manifest_status: manifestRow?.status || null,
+    normalization: [...(manifestRow?.normalization || [])].sort(),
+    ...(manifestRow?.oracle_input === undefined ? {} : { oracle_input: clone(manifestRow.oracle_input) }),
+    ...(manifestRow?.expected_value === undefined ? {} : { expected_value: clone(manifestRow.expected_value) }),
+    ...(manifestRow?.expected_relation === undefined ? {} : { expected_relation: manifestRow.expected_relation }),
+    ...(manifestRow?.expected_value_relation === undefined ? {} : { expected_value_relation: manifestRow.expected_value_relation }),
+    ...(expectedOutput === undefined ? {} : {
+      oracle_input: {
+        source: relativePath,
+        expected_output: expectedOutput,
+        relation: differentialRow.relation,
+      },
+      expected_value: expectedOutput,
+      expected_relation: differentialRow.relation,
+      expected_value_relation: relationText(expectedOutput),
+    }),
   };
 }
 
@@ -2304,24 +2563,82 @@ function differentialPaths(root, manifest) {
   }
   return manifest.map((row) => join(directory, row.source));
 }
-
-export function discoverCorpusSeeds(root = ROOT, { includeDifferential = true } = {}) {
+export function discoverCorpusSeeds(root = ROOT, {
+  includeDifferential = true,
+  manifest = null,
+} = {}) {
   const conformanceRoot = join(root, "tests/conformance/corpus");
   const differentialRoot = join(root, "tests/fuzz/sema/differential");
+  const differentialManifest = includeDifferential
+    ? readDifferentialManifest(join(differentialRoot, "manifest.tsv"))
+    : [];
+  const differentialByPath = new Map(differentialManifest.map((row) => [row.source, row]));
+  const manifestArtifact = typeof manifest === "string"
+    ? readManifestArtifact(resolve(root, manifest))
+    : manifest?.manifest || manifest;
+  if (manifestArtifact) {
+    const validation = validateManifest(manifestArtifact, { root });
+    if (!validation.ok) throw new Error(validation.errors.join("; "));
+  }
+  const manifestBySeed = new Map();
+  if (manifestArtifact) {
+    if (!Array.isArray(manifestArtifact.rows)) throw new Error("hardening manifest rows are missing");
+    for (const row of manifestArtifact.rows) {
+      if (!row?.seed) continue;
+      const seedPath = safeRelativePath(row.seed, `manifest seed for ${row.stable_id}`);
+      if (manifestBySeed.has(seedPath)) throw new Error(`duplicate manifest seed path: ${seedPath}`);
+      manifestBySeed.set(seedPath, row);
+    }
+  }
   const paths = walkJetFiles(conformanceRoot);
-  if (includeDifferential) paths.push(...differentialPaths(root, readDifferentialManifest(join(differentialRoot, "manifest.tsv"))));
+  if (includeDifferential) paths.push(...differentialPaths(root, differentialManifest));
   const seeds = [];
   const rejected = [];
+  const seenRows = new Set();
   for (const path of paths.sort((left, right) => left.localeCompare(right))) {
-    const seed = seedFromPath(path, root, conformanceRoot);
+    const relativePath = relative(root, path).split("\\").join("/");
+    const manifestRow = path.startsWith(conformanceRoot) ? manifestBySeed.get(relativePath) : null;
+    const differentialRow = differentialByPath.get(relative(path, differentialRoot).split("\\").join("/")) || null;
+    const seed = seedFromPath(path, root, conformanceRoot, manifestRow, differentialRow);
     try {
       if (seed.source_kind === "conformance" && !coreMarker(seed.source)) {
         throw new Error("conformance seed is missing its core-conformance stable ID");
       }
+      if (manifestArtifact && seed.source_kind === "conformance" && !manifestRow) {
+        throw new Error("conformance seed is not listed in the hardening manifest");
+      }
+      if (manifestRow && seenRows.has(manifestRow.stable_id)) {
+        throw new Error(`manifest row has duplicate seed source: ${manifestRow.stable_id}`);
+      }
+      if (manifestRow) seenRows.add(manifestRow.stable_id);
+      if (manifestRow && manifestRow.status !== "covered") {
+        throw new Error(`manifest row is not executable: ${manifestRow.status}`);
+      }
+      if (manifestRow && seed.applicable_tiers.length === 0) {
+        throw new Error("manifest-backed seed has no applicable tiers");
+      }
       const details = validateMutationCase({ source: seed.source, normalization: seed.normalization });
       seeds.push({ ...seed, skeleton: details.skeleton, observer_fingerprint: details.observer_fingerprint });
     } catch (error) {
-      rejected.push({ path: seed.path, reason: error.message });
+      rejected.push({
+        path: seed.path,
+        stable_surface_id: seed.stable_surface_id,
+        row_id: seed.row_id,
+        seed: seed.seed,
+        reason: error.message,
+      });
+    }
+  }
+  if (manifestArtifact) {
+    for (const [seedPath, row] of manifestBySeed) {
+      if (seenRows.has(row.stable_id)) continue;
+      rejected.push({
+        path: seedPath,
+        stable_surface_id: row.stable_id,
+        row_id: row.stable_id,
+        seed: row.seed,
+        reason: "manifest seed source is missing",
+      });
     }
   }
   return { seeds, rejected };

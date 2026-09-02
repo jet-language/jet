@@ -246,7 +246,8 @@ pub const TYPE_ORDERING: &str = "Ordering";
 pub const TRAIT_IO_READER: &str = "Reader";
 /// D-NETIO-CONTRACT2=B: nominal byte-stream write contract in `core.term`.
 pub const TRAIT_IO_WRITER: &str = "Writer";
-/// D-DBDRIVER1=A: backend-neutral parameterized SQL driver contract in `core.db`.
+/// D-DBDRIVER1=A / D-TYPEDSQL-SINK1=A: backend-neutral typed-SQL driver
+/// contract in `core.db`.
 pub const TRAIT_DRIVER: &str = "Driver";
 /// D-ONCE-HASH1=B / D-FMT-INTERP3=B: interpolation selectors are a format-choice surface, not
 /// applied rules. This table is their one vocabulary home; the parser and

@@ -21,7 +21,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{ImportDecl, ImportKind, InlineVersion, Program};
-use crate::SHA256::{sha256_hex, tree_hash};
+use crate::SHA256::{sha256_hex, try_tree_hash, TreeHashError};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -86,14 +86,16 @@ pub enum Unresolved {
     UnknownPackage,
     /// `name` is known locally, but no version satisfies the selector.
     NoMatch,
+    /// A matching source exists, but its contents cannot be hashed safely.
+    InvalidTree(TreeHashError),
 }
 
 /// Resolve one inline dep against the script's local `.jet/inline-deps/`
-/// cache, then (if set) `JET_INLINE_DEPS_FIXTURES`. Pure directory lookup —
-/// no network, no code execution, exactly like reading an already-realized
-/// hangar entry. A registry dependency is not silently substituted for this
-/// local source cache; it must be lifted into a manifest and fetched through
-/// the package workflow first.
+/// cache, then (if set) `JET_INLINE_DEPS_FIXTURES`. It hashes the selected
+/// source only after pure directory lookup; no network or code execution is
+/// involved, exactly like reading an already-realized hangar entry. A registry
+/// dependency is not silently substituted for this local source cache; it must
+/// be lifted into a manifest and fetched through the package workflow first.
 pub fn resolve(dep: &InlineDep, script_dir: &Path) -> Result<Resolved, Unresolved> {
     let mut roots = vec![script_dir.join(".jet").join("inline-deps")];
     if let Ok(fixtures) = std::env::var("JET_INLINE_DEPS_FIXTURES") {
@@ -107,9 +109,10 @@ pub fn resolve(dep: &InlineDep, script_dir: &Path) -> Result<Resolved, Unresolve
         };
         saw_package = true;
         if let Some((version, dir)) = best_match(&dep.selector, &candidates) {
-            // `tree_hash` already returns a `sha256-<hex>`-prefixed string —
-            // the same shape `LockedPackage::content_hash`/`IndexEntry` use.
-            let content_hash = tree_hash(&dir);
+            // `try_tree_hash` returns the same `sha256-<hex>`-prefixed string
+            // as `LockedPackage::content_hash`/`IndexEntry`, while preserving
+            // any hostile-tree failure for the caller.
+            let content_hash = try_tree_hash(&dir).map_err(Unresolved::InvalidTree)?;
             return Ok(Resolved {
                 name: dep.name.clone(),
                 selector: dep.selector.clone(),
@@ -175,8 +178,8 @@ fn version_key(v: &str) -> (u64, u64, u64) {
 // ──────────────────────────────────────────────
 
 /// E1253 (D-JPK-SCRIPTDEP1=A): an inline `use pkg#version;` ref that can't be
-/// resolved — unknown package, unreachable, or no version satisfies the
-/// selector.
+/// resolved — unknown package, unreachable or unsafe source tree, or no version
+/// satisfies the selector.
 pub fn e1253(dep: &InlineDep, reason: &Unresolved) -> Diagnostic {
     let (why, fix) = match reason {
         Unresolved::UnknownPackage => (
@@ -196,6 +199,16 @@ pub fn e1253(dep: &InlineDep, reason: &Unresolved) -> Diagnostic {
             ),
             format!(
                 "commit a matching version under `.jet/inline-deps/{}/`, or loosen the selector to one you have.",
+                dep.name
+            ),
+        ),
+        Unresolved::InvalidTree(error) => (
+            format!(
+                "the local source for `{}` cannot be hashed safely: {error}.",
+                dep.name
+            ),
+            format!(
+                "remove the hostile or oversized entry from `.jet/inline-deps/{}/`, then try again.",
                 dep.name
             ),
         ),
@@ -260,5 +273,71 @@ mod tests {
         let (v, _) = best_match("1.4.0", &cands).unwrap();
         assert_eq!(v, "1.4.0");
         assert!(best_match("9.9", &cands).is_none());
+    }
+    fn temp_root(tag: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "jet-script-deps-{tag}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
+
+    fn dep(name: &str) -> InlineDep {
+        InlineDep {
+            name: name.to_string(),
+            selector: "1.0.0".to_string(),
+            span: Span::new(0, 0),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_rejects_recursive_symlink_as_structured_failure() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_root("symlink");
+        let package = root.join(".jet/inline-deps/hostile/1.0.0");
+        std::fs::create_dir_all(package.join("src")).unwrap();
+        std::fs::write(package.join("src/value.jet"), b"stable\n").unwrap();
+        symlink(".", package.join("src/loop")).unwrap();
+
+        let dependency = dep("hostile");
+        let result = resolve(&dependency, &root);
+        let error = result.unwrap_err();
+        assert!(matches!(
+            &error,
+            Unresolved::InvalidTree(TreeHashError::Symlink(path))
+                if path.ends_with("src/loop")
+        ));
+        let diagnostic = e1253(&dependency, &error);
+        assert_eq!(diagnostic.code, "E1253");
+        assert!(diagnostic.why.contains("symlink"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolve_rejects_oversized_recursive_source_as_structured_failure() {
+        let root = temp_root("depth");
+        let package = root.join(".jet/inline-deps/hostile/1.0.0");
+        std::fs::create_dir_all(&package).unwrap();
+        let mut current = package.clone();
+        for index in 0..=(crate::SHA256::MAX_TREE_DEPTH + 1) {
+            current.push(format!("d{index}"));
+            std::fs::create_dir(&current).unwrap();
+        }
+        std::fs::write(current.join("payload.jet"), b"stable\n").unwrap();
+
+        let result = resolve(&dep("hostile"), &root);
+        assert!(matches!(
+            result,
+            Err(Unresolved::InvalidTree(TreeHashError::TooLarge { limit, .. }))
+                if limit == crate::SHA256::MAX_TREE_DEPTH as u64
+        ));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

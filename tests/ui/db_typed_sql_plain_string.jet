@@ -1,0 +1,11 @@
+use core.db as db
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped :: conn.with_policy(policy, "owner")
+    sql :: "SELECT 1"
+    _rows :: scoped.query(sql) ?? panic("query")
+    // The suggested SQL spelling must parse in the same snapshot.
+    _safe :: SQL{"SELECT 1"}
+}

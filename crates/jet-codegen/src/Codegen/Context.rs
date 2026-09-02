@@ -94,6 +94,7 @@ pub(crate) struct CoverageBranch {
 pub(crate) struct ExternFn {
     pub(crate) wrapper: String,
     pub(crate) c_abi: bool,
+    pub(crate) component: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -620,10 +621,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
         "RaylibSound" => Some("RaylibSound"),
-        // D-TYPEDTEXT1=D: `SQL`/`HTML` — this table's `.is_some()` is only a
-        // "known core value type" gate for the TIR subset check; the actual Rust
-        // spelling for these two comes from the earlier explicit `rust_type` arms
-        // (`(String, Vec<String>)` / `String`), not this placeholder.
+        // D-TYPEDSQL-SINK1=A: `SQL` is a checked `(String, Vec<DBValue>)`
+        // carrier. It remains a known core value type for subset gating; the
+        // explicit Rust spelling comes from the `rust_type` arm below.
         "SQL" => Some("SQL"),
         "HTML" => Some("HTML"),
         "Sh" => Some("Sh"),
@@ -2200,10 +2200,10 @@ impl Cx {
             Type::Named(name) if name == "ParseError" && !self.type_names.contains(name) => {
                 "String".to_string()
             }
-            // D-TYPEDTEXT1=D: `SQL` is a checked (template, bound params) pair — the
-            // params never re-enter the template text. `HTML` is already the fully
-            // escaped text, so it's just a `String` underneath.
-            Type::Named(name) if name == "SQL" => "(String, Vec<String>)".to_string(),
+            // D-TYPEDSQL-SINK1=A: `SQL` carries checked template text and its
+            // ordered `DBValue` bindings together. `HTML` is already the fully
+            // escaped text, so it is just a `String` underneath.
+            Type::Named(name) if name == "SQL" => format!("{}jet_std::SQL", self.root_prefix),
             Type::Named(name) if name == "HTML" => "String".to_string(),
             Type::Named(name) if name == "Sh" => "Vec<String>".to_string(),
             // D-DEFER1: ScopeGuard is generic over F (the closure type); emit `_`
@@ -3135,12 +3135,19 @@ pub(crate) fn rust_return_type(cx: &Cx, ty: &Type) -> String {
 }
 
 pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
-    let extern_funcs = extern_func_map(&prog.items);
+    let extern_funcs = extern_func_map(&prog.items, None);
     build_cx_items(&prog.items, src, file, None, &extern_funcs)
 }
 
-fn extern_func_map(items: &[Item]) -> HashMap<String, ExternFn> {
-    fn collect(items: &[Item], map: &mut HashMap<String, ExternFn>) {
+fn extern_func_map(
+    items: &[Item],
+    owner: Option<&str>,
+) -> HashMap<String, ExternFn> {
+    fn collect(
+        items: &[Item],
+        owner: Option<&str>,
+        map: &mut HashMap<String, ExternFn>,
+    ) {
         for item in items {
             if let Item::ExternRust(block) = item {
                 for ef in &block.functions {
@@ -3149,16 +3156,34 @@ fn extern_func_map(items: &[Item]) -> HashMap<String, ExternFn> {
                         ExternFn {
                             wrapper: format!("jet_ffi_{}", ef.name),
                             c_abi: false,
+                            component: None,
                         },
                     );
                 }
             } else if let Item::Func(func) = item {
-                if func.inline_foreign.is_some() {
+                if crate::Sema::guest_import_function_signature(func).is_some()
+                    && crate::Sema::guest_import_bridge_compatible(func)
+                {
+                    let wrapper = owner
+                        .map(|owner| {
+                            crate::Sema::guest_import_wrapper_name(owner, &func.name)
+                        })
+                        .unwrap_or_else(|| format!("jet_ffi_{}", func.name));
+                    map.insert(
+                        func.name.clone(),
+                        ExternFn {
+                            wrapper,
+                            c_abi: true,
+                            component: None,
+                        },
+                    );
+                } else if func.inline_foreign.is_some() {
                     map.insert(
                         func.name.clone(),
                         ExternFn {
                             wrapper: format!("jet_ffi_{}", func.name),
                             c_abi: false,
+                            component: None,
                         },
                     );
                 }
@@ -3173,18 +3198,19 @@ fn extern_func_map(items: &[Item]) -> HashMap<String, ExternFn> {
                         ExternFn {
                             wrapper: format!("jet_ffi_{}", function.name),
                             c_abi: true,
+                            component: Some(module.lib.clone()),
                         },
                     );
                 }
             } else if let Item::CodeModule(module) = item {
                 if let Some(body) = &module.body {
-                    collect(body, map);
+                    collect(body, owner, map);
                 }
             }
         }
     }
     let mut map = HashMap::new();
-    collect(items, &mut map);
+    collect(items, owner, &mut map);
     map
 }
 
@@ -3243,7 +3269,7 @@ fn foreign_undo_map(items: &[Item]) -> HashMap<String, String> {
 pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, ExternFn> {
     let mut map = HashMap::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let module_funcs = extern_func_map(&module.items);
+        let module_funcs = extern_func_map(&module.items, Some(&module.alias));
         for (name, wrapper) in module_funcs {
             map.insert(name.clone(), wrapper.clone());
             map.insert(format!("{}::{name}", mangle(&module.alias)), wrapper);
@@ -3261,6 +3287,7 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Ext
                             ExternFn {
                                 wrapper: String::new(),
                                 c_abi: false,
+                                component: None,
                             },
                         );
                     }

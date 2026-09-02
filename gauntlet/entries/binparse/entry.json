@@ -11,6 +11,18 @@
     "fixtureGen": {"script": "fixtures/gen.py", "out": "records.bin"},
     "expected": "expected.out"
   },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    }
+  },
   "authoring": {
     "jet": {"author": "luna-max", "turns": 11, "retries": 9, "diagnosticsHit": ["E0956: `a non-Int used as a number` isn't supported by the current evaluator yet", "E3010: `value doesn't fit in U8`", "E1803: application authority is undecided for `Env`", "rustc E0425: cannot find function `jet_fmt_decimal` in this scope", "Error: cannot read input", "timeout after 30s on canonical default-tier run"], "notes": "Uses native Reader f64 loads and selector-backed Fixed/Hex formatting. The current Jet source is 30 LOC versus 67 seed LOC (-37); default `jet run` on the canonical fixture exceeded 30s. AOT canonical passed and produced expected.out."},
     "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0599: no method named `try_into` found for slice `[u8]` in the current scope"], "notes": "Build requires `rustc --edition 2021 -O`; the checked-in source uses TryInto's 2021 prelude."},

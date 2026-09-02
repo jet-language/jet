@@ -488,7 +488,7 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::PluginCallInt => "PluginCallInt",
         THandleOp::PluginCallBool => "PluginCallBool",
         THandleOp::PluginCallText => "PluginCallText",
-        THandleOp::ReaderOver => "ReaderOver",
+        THandleOp::ReaderOver { .. } => "ReaderOver",
         THandleOp::ReaderReadU8 => "ReaderReadU8",
         THandleOp::ReaderReadI8 => "ReaderReadI8",
         THandleOp::ReaderReadU16Le => "ReaderReadU16Le",
@@ -513,6 +513,7 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::ReaderTake => "ReaderTake",
         THandleOp::ReaderRemaining => "ReaderRemaining",
         THandleOp::ReaderAtEnd => "ReaderAtEnd",
+        THandleOp::UiBackendMethod { method } => return format!("UiBackend:{method}"),
         _ => "",
     };
     name.to_string()
@@ -897,6 +898,12 @@ fn datatree_scalar_result(recv: &CtValue, variant: &str, name: &str) -> CtValue 
                 CtValue::Int(value) => {
                     Some(CtValue::Float(crate::AST::CtFloat::f64(*value as f64)))
                 }
+                CtValue::BigInt(value) => value
+                    .to_string_rep()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .map(|value| CtValue::Float(crate::AST::CtFloat::f64(value))),
                 _ => None,
             })
             .or_else(|| match datatree_payload(recv, "Number") {
@@ -1891,7 +1898,7 @@ pub(super) fn eval_handle_with_type_and_sink(
         THandleOp::ModOnTick => Err(unsupported("handle `ModOnTick`", span)),
         // D-SHIFT1: `binary.Reader` / `text.Cursor` marshal to the shared
         // `jet_foundation::StreamCursor` kernel AOT splices into its prelude.
-        THandleOp::ReaderOver
+        THandleOp::ReaderOver { .. }
         | THandleOp::ReaderReadU8
         | THandleOp::ReaderReadI8
         | THandleOp::ReaderReadU16Le

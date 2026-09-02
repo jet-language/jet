@@ -42,7 +42,7 @@ fn run() {
 }
 
 #[test]
-fn db_checked_sql_params_feed_parameterized_execute() {
+fn db_checked_sql_execute_uses_typed_sql() {
     assert!(common::have_rustc(), "DB query_one proof requires rustc");
     let dir = std::env::temp_dir().join(format!("jet_corelib_db_sql_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -58,23 +58,24 @@ fn run() {
     policy :: db.policy("person", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "owner")
     created :: db.migrate(scoped, "person-v1", [
-        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"}
     ]) ?? panic("migrate")
     skipped :: db.migrate(scoped, "person-v1", [
-        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"}
     ]) ?? panic("migrate again")
     id :: 7
     name :: "Ada"
     insert :: SQL{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
-    _inserted :: scoped.execute(insert.template(), db.params(insert)) ?? panic("insert")
+    _inserted :: scoped.execute(insert) ?? panic("insert")
     failed :: db.transaction(scoped, "bad batch", [
-        "INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)",
-        "INSERT INTO missing_table VALUES (1)"
+        SQL{"INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)"},
+        SQL{"INSERT INTO missing_table VALUES (1)"}
     ]) ?? 0
-    row :: scoped.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(7)]) ?? panic("query")
+    row :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
     found :: row ?? panic("missing")
-    missing :: scoped.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(99)]) ?? panic("missing query")
-    count :: scoped.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
+    missing_id :: 99
+    missing :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {missing_id}"}) ?? panic("missing query")
+    count :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
     counted :: count ?? panic("missing count")
     print(created)
     print(skipped)
@@ -105,9 +106,9 @@ fn core_db_implements_driver_trait() {
 use core.db as db
 
 fn count_people<T: Driver>(&conn: T) Int !DBError {
-    row :: conn.query_one("SELECT COUNT(*) AS n FROM person", [])
+    row :: conn.query_one(SQL{"SELECT COUNT(*) AS n FROM person"})
     found :: row ?? panic("missing")
-    missing :: conn.query_one("SELECT id, name FROM person WHERE id = ?", [DBValue.Int(99)])
+    missing :: conn.query_one(SQL{"SELECT id, name FROM person WHERE id = 99"})
     if missing == .None { print("absent") } else { panic("unexpected row") }
     return .Ok(db.row_int(found, "n") ?? 0)
 }
@@ -117,11 +118,10 @@ fn run() {
     policy :: db.policy("person", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "owner")
     _ :: db.migrate(scoped, "person-v1", [
-        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"}
     ]) ?? panic("create")
     _ :: scoped.execute(
-        "INSERT INTO person (id, name) VALUES (?, ?)",
-        [DBValue.Int(1), DBValue.Text("Ada")]
+        SQL{"INSERT INTO person (id, name) VALUES (1, 'Ada')"}
     ) ?? panic("insert")
     n :: count_people(&scoped) ?? panic("count")
     print(n)
@@ -165,6 +165,11 @@ fn core_db_query_one_first_row_matches_all_execution_tiers() {
     );
     let dir = common::unique_tmp("jet_corelib_db_query_one_parity");
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"db-query-one-parity\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let src = r#"
 use core.db as db
 
@@ -173,15 +178,13 @@ fn run() {
     policy :: db.policy("person", "true") ?? panic("policy")
     scoped := conn.with_policy(policy, "owner")
     _ :: db.migrate(scoped, "person-v1", [
-        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"}
     ]) ?? panic("create")
     _ :: scoped.execute(
-        "INSERT INTO person (id, name) VALUES (?, ?)",
-        [DBValue.Int(7), DBValue.Text("Ada")]
+        SQL{"INSERT INTO person (id, name) VALUES (7, 'Ada')"}
     ) ?? panic("insert")
     present :: scoped.query_one(
-        "SELECT id, name FROM person WHERE id = ?",
-        [DBValue.Int(7)]
+        SQL{"SELECT id, name FROM person WHERE id = 7"}
     ) ?? panic("present query")
     if present == {
         .Val(_) -> {
@@ -190,8 +193,7 @@ fn run() {
         .None -> { panic("present row absent") }
     }
     absent :: scoped.query_one(
-        "SELECT id, name FROM person WHERE id = ?",
-        [DBValue.Int(99)]
+        SQL{"SELECT id, name FROM person WHERE id = 99"}
     ) ?? panic("absent query")
     if absent == .None { print("absent") } else { panic("absent row present") }
     _closed :: scoped.close()

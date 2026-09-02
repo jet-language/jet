@@ -60,6 +60,21 @@
         sentry_kernel::jet_sentry_quarantine_owner(owner);
     }
 
+    fn jet_sentry_runtime_stop(fault: sentry_kernel::JetSentryFault) -> ! {
+        super::jet_sentry_runtime_stop(
+            fault.code,
+            &fault.file,
+            fault.line,
+            &fault.gate,
+            &fault.operation,
+            &fault.obligation,
+            fault.obligation_status.as_str(),
+            fault.foreign_component.as_deref(),
+            fault.foreign_fenced,
+            &fault.detail,
+        )
+    }
+
     fn jet_sentry_check<T>(ptr: *const T, operation: &str, obligation: &str) {
         let Some(fault) = sentry_kernel::jet_sentry_check(
             ptr as usize,
@@ -70,60 +85,87 @@
         ) else {
             return;
         };
-        super::jet_sentry_runtime_stop(
-            fault.code,
-            &fault.file,
-            fault.line,
-            &fault.gate,
-            &fault.operation,
-            &fault.obligation,
-            &fault.detail,
-        );
+        jet_sentry_runtime_stop(fault);
     }
 
-    fn jet_sentry_check_foreign<T>(ptr: *const T, operation: &str, obligation: &str) {
-        let Some(fault) = sentry_kernel::jet_sentry_check_foreign(
+    fn jet_sentry_check_foreign<T>(
+        ptr: *const T,
+        operation: &str,
+        obligation: &str,
+        component: &str,
+    ) {
+        let Some(fault) = sentry_kernel::jet_sentry_check_foreign_with_component(
             ptr as usize,
             std::mem::size_of::<T>(),
             std::mem::align_of::<T>(),
             operation,
             obligation,
+            component,
         ) else {
             return;
         };
-        super::jet_sentry_runtime_stop(
-            fault.code,
-            &fault.file,
-            fault.line,
-            &fault.gate,
-            &fault.operation,
-            &fault.obligation,
-            &fault.detail,
-        );
+        jet_sentry_runtime_stop(fault);
+    }
+
+    fn jet_sentry_check_foreign_strict<T>(
+        ptr: *const T,
+        operation: &str,
+        obligation: &str,
+        component: &str,
+    ) {
+        let Some(fault) = sentry_kernel::jet_sentry_check_foreign_strict(
+            ptr as usize,
+            std::mem::size_of::<T>(),
+            std::mem::align_of::<T>(),
+            operation,
+            obligation,
+            component,
+        ) else {
+            return;
+        };
+        jet_sentry_runtime_stop(fault);
     }
 
     /// Validate an exclusive Jet value before a foreign call. Foreign-owned
     /// storage is valid input even when Jet did not register its allocation;
     /// tracked storage still gets the shared liveness, range, and alignment
     /// witness.
-    pub fn jet_sentry_foreign_ref<T>(ptr: &mut T) -> &mut T {
-        jet_sentry_check_foreign(ptr as *const T, "ffi_write", "ffi_contract");
+    pub fn jet_sentry_foreign_ref<'a, T>(ptr: &'a mut T, component: &str) -> &'a mut T {
+        jet_sentry_check_foreign(ptr as *const T, "ffi_write", "ffi_contract", component);
         ptr
     }
 
     /// Validate a raw pointer before a foreign call. Raw pointers retain the
     /// strict provenance rule used by Jet memory operations.
-    pub fn jet_sentry_foreign_ptr<T>(ptr: *mut T) -> *mut T {
-        jet_sentry_check(ptr.cast_const(), "ffi_ptr", "ffi_contract");
+    pub fn jet_sentry_foreign_ptr<T>(ptr: *mut T, component: &str) -> *mut T {
+        jet_sentry_check_foreign_strict(
+            ptr.cast_const(),
+            "ffi_ptr",
+            "ffi_contract",
+            component,
+        );
         ptr
     }
 
     /// Validate both the pointer slot and the pointee of an exclusive raw
     /// pointer argument. The slot may be ordinary foreign-visible storage,
     /// while the pointee must retain Jet's strict raw-pointer provenance.
-    pub fn jet_sentry_foreign_ptr_ref<T>(ptr: &mut *mut T) -> &mut *mut T {
-        jet_sentry_check_foreign(ptr as *const *mut T, "ffi_write", "ffi_contract");
-        jet_sentry_check((*ptr).cast_const(), "ffi_ptr", "ffi_contract");
+    pub fn jet_sentry_foreign_ptr_ref<'a, T>(
+        ptr: &'a mut *mut T,
+        component: &str,
+    ) -> &'a mut *mut T {
+        jet_sentry_check_foreign(
+            ptr as *const *mut T,
+            "ffi_write",
+            "ffi_contract",
+            component,
+        );
+        jet_sentry_check_foreign_strict(
+            (*ptr).cast_const(),
+            "ffi_ptr",
+            "ffi_contract",
+            component,
+        );
         ptr
     }
 

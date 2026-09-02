@@ -52,6 +52,18 @@
       ]
     }
   },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    }
+  },
   "authoring": {
     "jet": {
       "author": "luna-max",
@@ -68,7 +80,7 @@
         "rustc E0308: generated Body equal/encode returned Result where plain values were expected",
         "E0164: compound assignment can't target an indexed slot"
       ],
-      "notes": "Current source uses named tuple body records plus canonical Vec3 dot/length/splat and collection iteration/writeback surfaces. It reads the declared step argument from process.argv().get(1), with 50000 as the no-argument fallback. The earlier typed-CLI/user-struct and F64x4 experiments remain historical diagnostics; AOT, default-run, interpreter parity, byte output, instruction, and performance proof remain pending the integrated harness pass."
+      "notes": "Current source uses #CLI Args{steps: Int}, explicit F64x4 coordinates and velocities, fixed-width groups for all ten pair interactions, and vector reductions for energy. It offsets solar momentum with F64x4.splat and prints nine-decimal initial and final energies. The current source still lacks an integrated harness proof for AOT, default-run, interpreter output, and strict expert-peer performance."
     },
     "rust": {
       "author": "luna-max",
@@ -133,7 +145,7 @@
         "cycle-1 jet run main.jet -- 50000 timed out after approximately 180 seconds after emitting only -0.169075164",
         "timeout exit 124: final unrolled jet run main.jet -- 50000 exceeded 180 seconds after emitting only -0.169075164"
       ],
-      "notes": "AOT attempt 1 used a #Inline(Always) scalar kick helper, built cleanly, matched expected.out, and measured 0.004341s median. Generated Rust retained hot-path JetOutcome/trace wrapping around each kick, so attempt 2 directly unrolled all ten scalar pair updates; it built cleanly, matched expected.out, and measured 0.003358s median versus 0.002801s for beginner C (31 canonical runs each). No #Unsafe region helped: Jet exposes neither portable SIMD vectors nor floating-point SIMD intrinsics/inline assembly. Default jet run emitted the correct initial energy but did not finish N=50000 within approximately 180 seconds; AOT is proven canonical."
+      "notes": "Current source is the D-SIMD3 F64x4 implementation: body coordinates and velocities stay in lanes, ten pair interactions are grouped into fixed-width batches, and scalar roots feed vector force updates. Earlier scalar attempts and measurements are historical provenance only; they do not establish this source's output or performance. Fresh integrated AOT, default-run, interpreter, and strict global peer-win measurements remain open."
     }
   }
 }

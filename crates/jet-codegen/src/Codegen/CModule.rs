@@ -97,6 +97,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
         let report_file = escape_rust_str(&cx.file);
         let report_fn = escape_rust_str(&ef.name);
         let report_src = escape_rust_str(report_src);
+        let component = escape_rust_str(&cm.lib);
         let ffi_stop = |message: &str| {
             format!(
                 "{root}jet_runtime_stop_with_context(\"E3014\", {file}, {line}, {fn_name}, {src}, {message})",
@@ -126,14 +127,16 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
                     "jet_sentry_foreign_ref"
                 };
                 boundary_lines.push(format!(
-                    "    let _ = {root}jet_mem::{check}(a{i});",
+                    "    let _ = {root}jet_mem::{check}(a{i}, {component});",
                     root = cx.root_prefix,
+                    component = component,
                 ));
             }
             if raw_pointer && p.convention != AccessConvention::Write {
                 call_args.push(format!(
-                    "{root}jet_mem::jet_sentry_foreign_ptr(a{i})",
+                    "{root}jet_mem::jet_sentry_foreign_ptr(a{i}, {component})",
                     root = cx.root_prefix,
+                    component = component,
                 ));
                 continue;
             }

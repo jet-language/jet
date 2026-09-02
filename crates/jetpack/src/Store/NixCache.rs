@@ -131,6 +131,9 @@ pub(crate) struct AdmittedNixObject {
     pub hangar_digest: String,
     pub direct_reference_digests: Vec<String>,
     pub upstream_proof_sha256: String,
+    pub nar_hash: String,
+    pub size: u64,
+    pub compression: String,
 }
 
 #[derive(Debug, Clone)]
@@ -642,6 +645,9 @@ impl<'a> NixAdmission<'a> {
                     hangar_digest: object.hangar_digest.clone(),
                     direct_reference_digests: object.direct_reference_digests.clone(),
                     upstream_proof_sha256: object.proof.clone(),
+                    nar_hash: object.nar_hash.clone(),
+                    size: object.unpacked_bytes,
+                    compression: object.compression.clone(),
                 },
             );
         }
@@ -867,6 +873,8 @@ impl<'a> NixAdmission<'a> {
             download_bytes: body.count,
             unpacked_bytes: info.info.nar_size,
             proof,
+            nar_hash: expected_nar_hash,
+            compression: info.info.compression.as_str().to_string(),
         })
     }
 
@@ -960,7 +968,9 @@ impl<'a> NixAdmission<'a> {
                 ("nix.references".into(), object.references.join(",")),
                 ("nix.closure.receipt".into(), closure_receipt.0.clone()),
                 ("nix.proof".into(), object.proof.clone()),
+                ("nix.nar-hash".into(), object.nar_hash.clone()),
                 ("nix.nar-size".into(), object.unpacked_bytes.to_string()),
+                ("nix.compression".into(), object.compression.clone()),
             ]);
             facts.insert("nix.output.out".into(), object.store_path.clone());
             let producer_bytes = super::canonical_producer(
@@ -1059,6 +1069,9 @@ struct FetchedObject {
     download_bytes: u64,
     unpacked_bytes: u64,
     proof: String,
+    nar_hash: String,
+    compression: String,
+
 }
 
 #[derive(Debug, Clone)]
@@ -1472,6 +1485,29 @@ fn existing_object(
                 .collect()
         })
         .unwrap_or_default();
+    let Some(nar_hash) = producer
+        .facts
+        .get("nix.nar-hash")
+        .filter(|value| !value.is_empty())
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    let Some(compression) = producer
+        .facts
+        .get("nix.compression")
+        .filter(|value| !value.is_empty())
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    let Some(unpacked_bytes) = producer
+        .facts
+        .get("nix.nar-size")
+        .and_then(|value| value.parse::<u64>().ok())
+    else {
+        return Ok(None);
+    };
     if producer.facts.get("nix.proof").is_none_or(String::is_empty)
         || references
             .iter()
@@ -1488,12 +1524,10 @@ fn existing_object(
         references,
         direct_reference_digests: entry.references.clone(),
         download_bytes: 0,
-        unpacked_bytes: producer
-            .facts
-            .get("nix.nar-size")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or_else(|| super::dir_size(output)),
+        unpacked_bytes,
         proof: producer.facts.get("nix.proof").cloned().unwrap_or_default(),
+        nar_hash,
+        compression,
     }))
 }
 

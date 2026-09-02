@@ -65,10 +65,10 @@ mod typed_text_kernel {
 }
 
 pub use AmbientRuntime::{
-    ambient_hooks, try_core_call as try_ambient_core_call,
+    ambient_hooks, package_read_root, record_package_input, try_core_call as try_ambient_core_call,
     try_core_call_typed as try_ambient_core_call_typed, try_core_call_typed_with_sink,
     try_extern_call as try_ambient_extern_call, try_handle as try_ambient_handle, with_ambient,
-    package_read_root, record_package_input, with_package_read_context,
+    with_package_read_context,
 };
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
 pub use EventLite::{
@@ -91,8 +91,8 @@ pub use Interpreter::{
     REPL_FUEL_BUDGET,
 };
 pub use Methods::{
-    apply_core_call, apply_core_call_with_type, apply_data_line_call, apply_impure_core_call,
-    apply_impure_core_call_with_type, apply_repl_authorized_core_call,
+    apply_core_call, apply_core_call_with_type, apply_core_pure_call, apply_data_line_call,
+    apply_impure_core_call, apply_impure_core_call_with_type, apply_repl_authorized_core_call,
     apply_repl_authorized_core_call_with_type, display_core_pure_value,
     eval_regex_replace_all_with,
 };
@@ -268,18 +268,17 @@ pub use Reflect::{
     build_attribution_info, build_dimension_info, build_distinct_type_info,
     build_distinct_type_info_with_path, build_effect_info, build_enum_layout_info,
     build_enum_layout_info_with_engine, build_function_type_info, build_maturity_info,
-    build_movedness_info, build_program_info, build_program_info_with_index, build_range_info,
-    build_registered_fact_info, build_registered_fact_infos, build_sendability_info,
-    build_state_infos, build_state_infos_with_graph, build_state_ref, build_state_refs,
-    build_struct_layout_info,
+    build_movedness_info, build_origin_info, build_origin_option, build_program_info,
+    build_program_info_with_index, build_range_info, build_registered_fact_info,
+    build_registered_fact_infos, build_sendability_info, build_state_infos,
+    build_state_infos_with_graph, build_state_ref, build_state_refs, build_struct_layout_info,
     build_struct_layout_info_with_engine, build_struct_type_info, build_struct_type_info_with_path,
     build_struct_type_info_with_path_and_vocabulary,
     build_struct_type_info_with_path_and_vocabulary_and_engine, build_struct_type_info_with_states,
-    build_origin_info, build_origin_option, build_unit_scale_provenance_info,
-    build_view_provenance_info,
-    program_reflection_identity, reflect_type_value, reflect_type_value_with_target,
-    reflect_type_value_with_target_and_graph, reflect_type_value_with_target_and_graph_and_facts,
-    reflected_fact_field, registered_fact_value, ProgramIndexView, ProgramSemanticFacts,
+    build_unit_scale_provenance_info, build_view_provenance_info, program_reflection_identity,
+    reflect_type_value, reflect_type_value_with_target, reflect_type_value_with_target_and_graph,
+    reflect_type_value_with_target_and_graph_and_facts, reflected_fact_field,
+    registered_fact_value, ProgramIndexView, ProgramSemanticFacts,
 };
 
 static REPL_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -448,9 +447,8 @@ pub fn run_build_entry_with_policy(
     };
     let mut frame = HashMap::new();
     frame.insert(build.params[0].name.clone(), context.clone());
-    let (call_result, package_inputs) = with_package_read_context(base_dir, || {
-        interp.call_func("build", build, frame)
-    });
+    let (call_result, package_inputs) =
+        with_package_read_context(base_dir, || interp.call_func("build", build, frame));
     interp.embed_inputs.extend(package_inputs);
     let returned = match call_result {
         Ok(value) => value,
@@ -808,12 +806,9 @@ fn fold_build_facts(
 ) -> crate::AST::Expr {
     let mut closed = init.clone();
     closed.for_each_expr_mut(|expr| {
-        let Some(value) = Reflect::fact_read_value_with_registry(
-            expr,
-            fact_items,
-            build_facts,
-            fact_registry,
-        ) else {
+        let Some(value) =
+            Reflect::fact_read_value_with_registry(expr, fact_items, build_facts, fact_registry)
+        else {
             return;
         };
         let span = expr.span();
@@ -849,6 +844,22 @@ fn build_fact_expr(value: &CtValue, span: crate::Diagnostics::Span) -> Option<cr
             args: Vec::new(),
             leading_dot: false,
             span,
+        },
+        // Keep the carrier's present side as an AST optional literal so
+        // template interpolation and the comptime evaluator see one typed
+        // value instead of an unresolved `@fact` name.
+        CtValue::Present(value) => crate::AST::Expr::Present(
+            Box::new(build_fact_expr(value, span)?),
+            span,
+        ),
+        // A bare `Absent` expression has no element type until ordinary sema
+        // supplies an expected option. Preserve the reflected clean report in
+        // a typed comptime carrier instead; this also keeps nested option facts
+        // and unprefixed local bindings on their canonical path.
+        CtValue::Failed(crate::AST::CtReport::Clean(_)) => crate::AST::Expr::ComptimeName {
+            name: String::new(),
+            span,
+            value: Some(value.clone()),
         },
         _ => return None,
     })
@@ -901,6 +912,7 @@ pub fn evaluate_with_imports_opts(
         TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
             expr: init,
             funcs,
+            binding_types: &HashMap::new(),
             error_conversions: &[],
             methods: empty_methods(),
             extern_names,
@@ -1008,28 +1020,29 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
     let mut embed_inputs = Vec::new();
     let (value, package_inputs) = with_package_read_context(base_dir, || {
         TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
-        expr: init,
-        funcs,
-        error_conversions: &[],
-        methods,
-        extern_names,
-        base_dir,
-        globals,
-        core_imports,
-        gates,
-        initial_impure_depth,
-        structs,
-        computed_fields: empty_computed(),
-        distinct_ranges,
-        distinct_bases,
-        unit_families,
-        fuel: FUEL_BUDGET,
-        sink: None,
-        repl_mode: false,
-        repl_grants: &[],
-        repl_authorizer: None,
-        embed_inputs: Some(&mut embed_inputs),
-        mutated,
+            expr: init,
+            funcs,
+            binding_types: &HashMap::new(),
+            error_conversions: &[],
+            methods,
+            extern_names,
+            base_dir,
+            globals,
+            core_imports,
+            gates,
+            initial_impure_depth,
+            structs,
+            computed_fields: empty_computed(),
+            distinct_ranges,
+            distinct_bases,
+            unit_families,
+            fuel: FUEL_BUDGET,
+            sink: None,
+            repl_mode: false,
+            repl_grants: &[],
+            repl_authorizer: None,
+            embed_inputs: Some(&mut embed_inputs),
+            mutated,
         })
     });
     embed_inputs.extend(package_inputs);
@@ -1517,6 +1530,7 @@ pub fn run_block_with_imports(
         TirBridge::eval_block(&mut TirBridge::BlockEvalRequest {
             stmts,
             funcs: &refs,
+            binding_types: &HashMap::new(),
             error_conversions: &[],
             methods: empty_methods(),
             extern_names,
@@ -1646,6 +1660,140 @@ pub fn evaluate_owned_with_imports_opts_collecting(
         core_imports,
         gates,
         initial_impure_depth,
+        mutated,
+    )
+}
+fn is_serde_codec_trait(trait_name: Option<&str>) -> bool {
+    matches!(
+        trait_name,
+        Some(crate::Generics::ENCODE | crate::Generics::DECODE)
+    )
+}
+
+fn insert_serde_codec_ref<'a>(
+    funcs: &mut HashMap<String, &'a Func>,
+    owner: &str,
+    method: &'a Func,
+    generated: bool,
+) {
+    let key = format!("{owner}::{}", method.name);
+    if generated {
+        funcs.entry(key).or_insert(method);
+    } else {
+        funcs.insert(key, method);
+    }
+}
+
+/// Add one source method to the evaluator's item context. Serde methods enter
+/// both lookup tables: the AST evaluator resolves them by receiver, while the
+/// TIR bridge uses the owner-qualified key to preserve the trait ABI.
+fn insert_item_method_ref<'a>(
+    funcs: &mut HashMap<String, &'a Func>,
+    methods: &mut HashMap<(String, String), &'a Func>,
+    owner: &str,
+    trait_name: Option<&str>,
+    method: &'a Func,
+    generated: bool,
+) {
+    let method_key = (owner.to_string(), method.name.clone());
+    if is_serde_codec_trait(trait_name) {
+        insert_serde_codec_ref(funcs, owner, method, generated);
+        if generated {
+            methods.entry(method_key).or_insert(method);
+        } else {
+            methods.insert(method_key, method);
+        }
+    } else {
+        methods.insert(method_key, method);
+    }
+}
+
+/// Owned-function evaluator with the current module's nominal and method
+/// context. Ordinary binding folding used to pass empty maps, which made a
+/// `json.to_string` fold structural values instead of running explicit
+/// `Encode` implementations.
+pub fn evaluate_owned_with_imports_opts_collecting_items<'a>(
+    init: &crate::AST::Expr,
+    funcs: &'a HashMap<String, Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    gates: jet_foundation::Policy::GateSet,
+    initial_impure_depth: usize,
+    items: &'a [crate::AST::Item],
+    mutated: Option<&mut HashMap<String, CtValue>>,
+) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+    let mut refs: HashMap<String, &Func> =
+        funcs.iter().map(|(name, function)| (name.clone(), function)).collect();
+    let mut structs = HashMap::new();
+    let mut methods = HashMap::new();
+    for item in items {
+        match item {
+            crate::AST::Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    insert_item_method_ref(
+                        &mut refs,
+                        &mut methods,
+                        &implementation.type_name,
+                        implementation.trait_name.as_deref(),
+                        method,
+                        implementation.is_generated_serde || method.compiler_generated,
+                    );
+                }
+            }
+            crate::AST::Item::Struct(definition) => {
+                structs.insert(definition.name.clone(), definition);
+                for method in &definition.methods {
+                    methods.insert((definition.name.clone(), method.name.clone()), method);
+                }
+                for block in &definition.trait_impls {
+                    for method in &block.methods {
+                        insert_item_method_ref(
+                            &mut refs,
+                            &mut methods,
+                            &definition.name,
+                            Some(block.trait_name.as_str()),
+                            method,
+                            block.compiler_generated || method.compiler_generated,
+                        );
+                    }
+                }
+            }
+            crate::AST::Item::Enum(definition) => {
+                for method in &definition.methods {
+                    methods.insert((definition.name.clone(), method.name.clone()), method);
+                }
+                for block in &definition.trait_impls {
+                    for method in &block.methods {
+                        insert_item_method_ref(
+                            &mut refs,
+                            &mut methods,
+                            &definition.name,
+                            Some(block.trait_name.as_str()),
+                            method,
+                            block.compiler_generated || method.compiler_generated,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    evaluate_with_imports_opts_collecting_structs_and_methods(
+        init,
+        &refs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        gates,
+        initial_impure_depth,
+        &structs,
+        &methods,
+        empty_distinct(),
+        empty_distinct_bases(),
+        &[],
         mutated,
     )
 }
@@ -2412,10 +2560,7 @@ pub fn evaluate_checked_text_check<'a>(
         type_args: Vec::new(),
         args: vec![crate::AST::CallArg {
             convention: crate::AST::AccessConvention::Read,
-            expr: crate::AST::Expr::Str(
-                vec![crate::AST::StrPart::Lit(body)],
-                span,
-            ),
+            expr: crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(body)], span),
             span,
             flags: crate::AST::CallArgFlags::default(),
             label: None,

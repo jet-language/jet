@@ -11,6 +11,7 @@ use crate::Codegen::TIR::emit::helpers::root_path;
 use crate::Codegen::TIR::emit::expressions::{is_compute_view_mut, is_float_view, is_view};
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_pattern;
+use crate::Codegen::TIR::emit_tir_orfallback_rhs;
 use crate::Codegen::TIR::emit_tir_place;
 use crate::Codegen::TIR::tir_range_guard;
 use crate::Codegen::TIR::ScopeMemberKind;
@@ -23,8 +24,7 @@ use crate::Codegen::TIR::{
     TBuiltinOp, TExpr, TExprKind, TOrFallback, TOutcomeFastBuffer, TOutcomeFastPath,
     TReaderFixedWidth,
 };
-use crate::AST::BinOp;
-use crate::AST::Type;
+use crate::AST::{BinOp, Type, UnOp};
 
 /// Every caller has already routed the Prelude-carried operators (`^`, `/%`,
 /// and the floored `%`) through `prelude_compound_call`, so a `None` from
@@ -746,7 +746,7 @@ fn map_update_shape<'a>(
     Some((root, *op, default, rhs))
 }
 
-fn string_bytes_init_source(init: &TExpr) -> Option<&TLocal> {
+fn string_bytes_init_source(init: &TExpr) -> Option<(&TLocal, &TOrFallback)> {
     let TExprKind::OrFallback { value, fallback } = &init.kind else {
         return None;
     };
@@ -765,7 +765,7 @@ fn string_bytes_init_source(init: &TExpr) -> Option<&TLocal> {
         return None;
     }
     match &recv.kind {
-        TExprKind::Local(local) => Some(local),
+        TExprKind::Local(local) => Some((local, fallback)),
         _ => None,
     }
 }
@@ -807,11 +807,14 @@ fn next_non_marker_stmt(stmts: &[TStmt], index: usize) -> Option<usize> {
 /// Find a dead decoded string immediately consumed by the generic map update.
 /// The source local carries the lowering proof that no sibling reads the String
 /// after this statement; the TIR shape check below supplies the map/key proof.
-fn string_bytes_map_fusion(stmts: &[TStmt], index: usize) -> Option<(usize, &TLocal)> {
+fn string_bytes_map_fusion(
+    stmts: &[TStmt],
+    index: usize,
+) -> Option<(usize, &TLocal, &TOrFallback)> {
     let TStmt::Let { name, init, .. } = stmts.get(index)? else {
         return None;
     };
-    let source = string_bytes_init_source(init)?;
+    let (source, fallback) = string_bytes_init_source(init)?;
     let next = next_non_marker_stmt(stmts, index)?;
     let TStmt::IndexAssign {
         base,
@@ -840,14 +843,825 @@ fn string_bytes_map_fusion(stmts: &[TStmt], index: usize) -> Option<(usize, &TLo
     if **key_ty != Type::String {
         return None;
     }
+    let Some(root) = map_root_local(base) else {
+        return None;
+    };
+    if same_local(source, &root) {
+        return None;
+    }
     let (_, _, default, delta) = map_update_shape(base, key, value)?;
     if map_update_expr_mentions_local(default, &key_local.rust_name())
         || map_update_expr_mentions_local(delta, &key_local.rust_name())
     {
         return None;
     }
-    Some((next, source))
+    Some((next, source, fallback))
 }
+
+fn string_count_expr_safe(expr: &TExpr, root: &TLocal) -> bool {
+    match &expr.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(..)
+        | TExprKind::BoolLit(..)
+        | TExprKind::CharLit(..)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::Uninit
+        | TExprKind::CtLit(..)
+        | TExprKind::ConstRef(..)
+        | TExprKind::Absent => true,
+        TExprKind::Local(local) => !same_local(local, root),
+        TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
+            crate::Codegen::TIR::TStrPart::Lit(_) => true,
+            crate::Codegen::TIR::TStrPart::Interp(value, _) => {
+                string_count_expr_safe(value, root)
+            }
+        }),
+        TExprKind::Binary { lhs, rhs, .. } => {
+            string_count_expr_safe(lhs, root) && string_count_expr_safe(rhs, root)
+        }
+        TExprKind::Unary { operand, .. }
+        | TExprKind::Clone(operand)
+        | TExprKind::ExplicitCopy(operand)
+        | TExprKind::MaterializeView(operand)
+        | TExprKind::Present(operand)
+        | TExprKind::Ok(operand)
+        | TExprKind::Err(operand)
+        | TExprKind::DistinctRaw(operand)
+        | TExprKind::Print(operand)
+        | TExprKind::Drop(operand)
+        | TExprKind::Close(operand)
+        | TExprKind::ResourceNew(operand)
+        | TExprKind::Deref(operand)
+        | TExprKind::RawOf(operand) => string_count_expr_safe(operand, root),
+        TExprKind::OrFallback { value, fallback } => {
+            string_count_expr_safe(value, root)
+                && match fallback {
+                    TOrFallback::Value(value) | TOrFallback::Return(Some(value)) => {
+                        string_count_expr_safe(value, root)
+                    }
+                    TOrFallback::Return(None)
+                    | TOrFallback::Break
+                    | TOrFallback::Continue
+                    | TOrFallback::BreakLabel(_)
+                    | TOrFallback::ContinueLabel(_) => true,
+                    TOrFallback::Panic { msg, .. } => string_count_expr_safe(msg, root),
+                }
+        }
+        TExprKind::BuiltinMethod { recv, args, .. } => {
+            string_count_expr_safe(recv, root)
+                && args.iter().all(|arg| string_count_expr_safe(arg, root))
+        }
+        TExprKind::Index { base, index, .. } => {
+            string_count_expr_safe(base, root) && string_count_expr_safe(index, root)
+        }
+        TExprKind::MapLit(entries) => entries.iter().all(|(key, value)| {
+            string_count_expr_safe(key, root) && string_count_expr_safe(value, root)
+        }),
+        TExprKind::ListLit(items) => {
+            items.iter().all(|item| string_count_expr_safe(item, root))
+        }
+        TExprKind::TupleLit { fields, .. } => fields
+            .iter()
+            .all(|(_, value)| string_count_expr_safe(value, root)),
+        TExprKind::CoreCall { args, .. } => {
+            args.iter().all(|arg| string_count_expr_safe(arg, root))
+        }
+        _ => false,
+    }
+}
+
+fn string_count_cond_safe(cond: &TIfCond, root: &TLocal) -> bool {
+    match cond {
+        TIfCond::Plain(expr) | TIfCond::IsNone { subj: expr } => {
+            string_count_expr_safe(expr, root)
+        }
+        TIfCond::And { left, right } => {
+            string_count_cond_safe(left, root) && string_count_cond_safe(right, root)
+        }
+        TIfCond::Matches { subj, .. } => string_count_expr_safe(subj, root),
+        TIfCond::WithPrelude { prelude, cond } => {
+            let (safe, found) = string_count_stmts(prelude, root);
+            safe && !found && string_count_cond_safe(cond, root)
+        }
+        TIfCond::IfLet { .. } => false,
+    }
+}
+
+fn int_literal_is(expr: &TExpr, expected: i64) -> bool {
+    matches!(&expr.kind, TExprKind::IntLit(value, _) if *value == expected)
+}
+
+/// Admit only a loop whose sole access to a uniquely-owned String:Int map is
+/// the common strict-byte-key `count += 1` update. The hash builder remains an
+/// implementation detail; the map is restored to canonical key order at the
+/// loop boundary.
+fn string_count_stmts(stmts: &[TStmt], root: &TLocal) -> (bool, bool) {
+    let mut found = false;
+    let mut index = 0;
+    while index < stmts.len() {
+        if let Some((next, _, _)) = string_bytes_map_fusion(stmts, index) {
+            let TStmt::IndexAssign {
+                base,
+                index: key,
+                value,
+                ..
+            } = &stmts[next]
+            else {
+                return (false, found);
+            };
+            let Some((candidate, op, default, delta)) = map_update_shape(base, key, value) else {
+                return (false, found);
+            };
+            if !same_local(&candidate, root)
+                || op != BinOp::Add
+                || !int_literal_is(default, 0)
+                || !int_literal_is(delta, 1)
+            {
+                return (false, found);
+            }
+            found = true;
+            index = next + 1;
+            continue;
+        }
+
+        let safe = match &stmts[index] {
+            TStmt::SourceSpan(_)
+            | TStmt::LineMarker(_)
+            | TStmt::Break(_)
+            | TStmt::Continue(_) => true,
+            TStmt::Let {
+                name,
+                init,
+                gc_promotion,
+                gc_transferred,
+                ..
+            } => {
+                mangle(name) != root.rust_name()
+                    && gc_promotion.is_none()
+                    && !*gc_transferred
+                    && string_count_expr_safe(init, root)
+            }
+            TStmt::ExprStmt(expr) => string_count_expr_safe(expr, root),
+            TStmt::Assign { place, value, .. } => {
+                let place_safe = match place {
+                    TPlace::Local(local) => !same_local(local, root),
+                    TPlace::Expr(expr) => string_count_expr_safe(expr, root),
+                };
+                place_safe && string_count_expr_safe(value, root)
+            }
+            TStmt::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                let (then_safe, then_found) = string_count_stmts(then_body, root);
+                let (else_safe, else_found) = else_body
+                    .as_deref()
+                    .map_or((true, false), |body| string_count_stmts(body, root));
+                found |= then_found || else_found;
+                string_count_cond_safe(cond, root) && then_safe && else_safe
+            }
+            _ => false,
+        };
+        if !safe {
+            return (false, found);
+        }
+        index += 1;
+    }
+    (true, found)
+}
+#[derive(Clone)]
+struct AsciiWhitespaceCount<'a> {
+    map_root: TLocal,
+    op: BinOp,
+    default: &'a TExpr,
+    delta: &'a TExpr,
+    fallback: &'a TOrFallback,
+    total: &'a TStmt,
+}
+
+struct AsciiWhitespaceScanPlan<'a> {
+    source: &'a TExpr,
+    space: &'a TExpr,
+    ws_start: &'a TExpr,
+    ws_end: &'a TExpr,
+    loop_count: AsciiWhitespaceCount<'a>,
+    final_count: AsciiWhitespaceCount<'a>,
+}
+
+fn ascii_scan_u8_type(ty: &Type) -> bool {
+    matches!(
+        ty.without_user_tags(),
+        Type::IntN {
+            signed: false,
+            bits: 8
+        }
+    )
+}
+
+fn ascii_scan_bytes_type(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::List(elem) | Type::FixedList { elem, .. } => ascii_scan_u8_type(elem),
+        _ => false,
+    }
+}
+
+fn ascii_scan_token_unique_before(stmts: &[TStmt], root: &TLocal) -> bool {
+    let mut unique = false;
+    for stmt in stmts {
+        if let TStmt::Let {
+            name,
+            kw,
+            init,
+            gc_promotion,
+            gc_transferred,
+            ..
+        } = stmt
+        {
+            if mangle(name) == root.rust_name() {
+                unique = *kw == "let mut"
+                    && gc_promotion.is_none()
+                    && !*gc_transferred
+                    && ascii_scan_u8_list_init(init);
+                continue;
+            }
+        }
+        if unique && !ascii_scan_stmt_safe(stmt, root) {
+            unique = false;
+        }
+    }
+    unique
+}
+
+fn ascii_scan_u8_list_init(init: &TExpr) -> bool {
+    ascii_scan_bytes_type(&init.ty)
+        && matches!(&init.kind, TExprKind::ListLit(items) if items.is_empty())
+}
+
+fn ascii_scan_sole_non_marker(stmts: &[TStmt]) -> Option<&TStmt> {
+    let mut iter = stmts
+        .iter()
+        .filter(|stmt| !matches!(stmt, TStmt::SourceSpan(_) | TStmt::LineMarker(_)));
+    let stmt = iter.next()?;
+    iter.next().is_none().then_some(stmt)
+}
+
+fn ascii_scan_token_nonempty_cond(cond: &TIfCond, token: &TLocal) -> bool {
+    let TIfCond::Plain(expr) = cond else {
+        return false;
+    };
+    let TExprKind::Unary {
+        op: UnOp::Not,
+        operand,
+    } = &expr.kind
+    else {
+        return false;
+    };
+    let TExprKind::BuiltinMethod {
+        recv,
+        op: TBuiltinOp::IsEmpty,
+        args,
+    } = &operand.kind
+    else {
+        return false;
+    };
+    args.is_empty()
+        && matches!(&recv.kind, TExprKind::Local(local) if same_local(local, token))
+        && ascii_scan_bytes_type(&recv.ty)
+}
+
+fn ascii_scan_push_body(stmts: &[TStmt]) -> Option<(TLocal, TLocal)> {
+    let TStmt::ExprStmt(expr) = ascii_scan_sole_non_marker(stmts)? else {
+        return None;
+    };
+    let TExprKind::BuiltinMethod {
+        recv,
+        op: TBuiltinOp::Push,
+        args,
+    } = &expr.kind
+    else {
+        return None;
+    };
+    let [arg] = args.as_slice() else {
+        return None;
+    };
+    let TExprKind::Local(token) = &recv.kind else {
+        return None;
+    };
+    let TExprKind::Local(loop_var) = &arg.kind else {
+        return None;
+    };
+    if !token.mutable
+        || token.deref
+        || token.is_persistent()
+        || !ascii_scan_bytes_type(&recv.ty)
+        || !ascii_scan_u8_type(&arg.ty)
+        || loop_var.deref
+        || loop_var.is_persistent()
+    {
+        return None;
+    }
+    Some((token.clone(), loop_var.clone()))
+}
+
+fn ascii_scan_bound<'a>(
+    expr: &'a TExpr,
+    loop_var: &TLocal,
+) -> Option<&'a TExpr> {
+    if !ascii_scan_u8_type(&expr.ty) {
+        return None;
+    }
+    match &expr.kind {
+        TExprKind::Local(local)
+            if !local.deref
+                && !local.mutable
+                && !local.is_persistent()
+                && !same_local(local, loop_var) =>
+        {
+            Some(expr)
+        }
+        TExprKind::IntLit(..) | TExprKind::ConstRef(..) => Some(expr),
+        _ => None,
+    }
+}
+
+fn ascii_scan_comparison<'a>(
+    expr: &'a TExpr,
+    op: BinOp,
+    loop_var: &TLocal,
+) -> Option<&'a TExpr> {
+    let TExprKind::Binary {
+        op: actual,
+        lhs,
+        rhs,
+        ..
+    } = &expr.kind
+    else {
+        return None;
+    };
+    if *actual != op
+        || !matches!(&lhs.kind, TExprKind::Local(local) if same_local(local, loop_var))
+    {
+        return None;
+    }
+    ascii_scan_bound(rhs, loop_var)
+}
+
+fn ascii_scan_whitespace_cond<'a>(
+    cond: &'a TIfCond,
+    loop_var: &TLocal,
+) -> Option<(&'a TExpr, &'a TExpr, &'a TExpr)> {
+    let TIfCond::Plain(expr) = cond else {
+        return None;
+    };
+    let TExprKind::Binary {
+        op: BinOp::Or,
+        lhs: space_test,
+        rhs: range_test,
+        ..
+    } = &expr.kind
+    else {
+        return None;
+    };
+    let space = ascii_scan_comparison(space_test, BinOp::Eq, loop_var)?;
+    let TExprKind::Binary {
+        op: BinOp::And,
+        lhs: lower_test,
+        rhs: upper_test,
+        ..
+    } = &range_test.kind
+    else {
+        return None;
+    };
+    let ws_start = ascii_scan_comparison(lower_test, BinOp::Ge, loop_var)?;
+    let ws_end = ascii_scan_comparison(upper_test, BinOp::Le, loop_var)?;
+    Some((space, ws_start, ws_end))
+}
+
+fn ascii_scan_fallback_safe(fallback: &TOrFallback, token: &TLocal) -> bool {
+    matches!(
+        fallback,
+        TOrFallback::Panic { msg, .. } if ascii_scan_expr_safe(msg, token)
+    )
+}
+
+fn ascii_scan_expr_safe(expr: &TExpr, root: &TLocal) -> bool {
+    match &expr.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(..)
+        | TExprKind::BoolLit(..)
+        | TExprKind::CharLit(..)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::Uninit
+        | TExprKind::CtLit(..)
+        | TExprKind::ConstRef(..)
+        | TExprKind::Absent => true,
+        TExprKind::Local(local) => !local.deref && !same_local(local, root),
+        TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
+            crate::Codegen::TIR::TStrPart::Lit(_) => true,
+            crate::Codegen::TIR::TStrPart::Interp(value, _) => ascii_scan_expr_safe(value, root),
+        }),
+        TExprKind::Binary { lhs, rhs, .. } => {
+            ascii_scan_expr_safe(lhs, root) && ascii_scan_expr_safe(rhs, root)
+        }
+        TExprKind::Unary { operand, .. }
+        | TExprKind::Clone(operand)
+        | TExprKind::ExplicitCopy(operand)
+        | TExprKind::MaterializeView(operand)
+        | TExprKind::Present(operand)
+        | TExprKind::Ok(operand)
+        | TExprKind::Err(operand)
+        | TExprKind::DistinctRaw(operand)
+        | TExprKind::Print(operand)
+        | TExprKind::Drop(operand)
+        | TExprKind::Close(operand)
+        | TExprKind::ResourceNew(operand)
+        | TExprKind::Deref(operand)
+        | TExprKind::RawOf(operand) => ascii_scan_expr_safe(operand, root),
+        TExprKind::OrFallback { value, fallback } => {
+            ascii_scan_expr_safe(value, root)
+                && match fallback {
+                    TOrFallback::Value(value) | TOrFallback::Return(Some(value)) => {
+                        ascii_scan_expr_safe(value, root)
+                    }
+                    TOrFallback::Panic { msg, .. } => ascii_scan_expr_safe(msg, root),
+                    TOrFallback::Return(None)
+                    | TOrFallback::Break
+                    | TOrFallback::Continue
+                    | TOrFallback::BreakLabel(_)
+                    | TOrFallback::ContinueLabel(_) => true,
+                }
+        }
+        TExprKind::Field { recv, .. } => ascii_scan_expr_safe(recv, root),
+        TExprKind::BuiltinMethod { recv, args, .. } => {
+            ascii_scan_expr_safe(recv, root)
+                && args.iter().all(|arg| ascii_scan_expr_safe(arg, root))
+        }
+        TExprKind::Index { base, index, .. } => {
+            ascii_scan_expr_safe(base, root) && ascii_scan_expr_safe(index, root)
+        }
+        TExprKind::MapLit(entries) => entries.iter().all(|(key, value)| {
+            ascii_scan_expr_safe(key, root) && ascii_scan_expr_safe(value, root)
+        }),
+        TExprKind::ListLit(items) => items.iter().all(|item| ascii_scan_expr_safe(item, root)),
+        TExprKind::TupleLit { fields, .. } => fields
+            .iter()
+            .all(|(_, value)| ascii_scan_expr_safe(value, root)),
+        // A callback cannot safely carry an arbitrary call, and an unknown
+        // callee can observe or retain the accumulator through ambient state.
+        TExprKind::Call { .. } | TExprKind::CoreCall { .. } => false,
+        _ => false,
+    }
+}
+
+fn ascii_scan_cond_safe(cond: &TIfCond, root: &TLocal) -> bool {
+    match cond {
+        TIfCond::Plain(expr) | TIfCond::IsNone { subj: expr } => {
+            ascii_scan_expr_safe(expr, root)
+        }
+        TIfCond::And { left, right } => {
+            ascii_scan_cond_safe(left, root) && ascii_scan_cond_safe(right, root)
+        }
+        TIfCond::Matches { subj, .. } => ascii_scan_expr_safe(subj, root),
+        TIfCond::WithPrelude { prelude, cond } => {
+            prelude.iter().all(|stmt| ascii_scan_stmt_safe(stmt, root))
+                && ascii_scan_cond_safe(cond, root)
+        }
+        TIfCond::IfLet { .. } => false,
+    }
+}
+
+fn ascii_scan_stmt_safe(stmt: &TStmt, root: &TLocal) -> bool {
+    match stmt {
+        TStmt::SourceSpan(_) | TStmt::LineMarker(_) => true,
+        TStmt::Let {
+            name,
+            init,
+            gc_promotion,
+            gc_transferred,
+            ..
+        } => {
+            mangle(name) != root.rust_name()
+                && gc_promotion.is_none()
+                && !*gc_transferred
+                && ascii_scan_expr_safe(init, root)
+        }
+        TStmt::ExprStmt(expr) => ascii_scan_expr_safe(expr, root),
+        TStmt::Assign { place, value, .. } => {
+            let place_safe = match place {
+                TPlace::Local(local) => {
+                    !local.deref && !same_local(local, root)
+                }
+                TPlace::Expr(expr) => ascii_scan_expr_safe(expr, root),
+            };
+            place_safe && ascii_scan_expr_safe(value, root)
+        }
+        TStmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            ascii_scan_cond_safe(cond, root)
+                && then_body.iter().all(|stmt| ascii_scan_stmt_safe(stmt, root))
+                && else_body.as_ref().map_or(true, |body| {
+                    body.iter().all(|stmt| ascii_scan_stmt_safe(stmt, root))
+                })
+        }
+        TStmt::ForIn {
+            var,
+            var2,
+            source,
+            collection,
+            step,
+            body,
+            ..
+        } => {
+            mangle(var) != root.rust_name()
+                && var2
+                    .as_ref()
+                    .is_none_or(|var| mangle(var) != root.rust_name())
+                && ascii_scan_expr_safe(source, root)
+                && ascii_scan_expr_safe(collection, root)
+                && step
+                    .as_ref()
+                    .is_none_or(|step| ascii_scan_expr_safe(step, root))
+                && body.iter().all(|stmt| ascii_scan_stmt_safe(stmt, root))
+        }
+        TStmt::Return(Some(value)) => ascii_scan_expr_safe(value, root),
+        TStmt::Return(None) => true,
+        TStmt::Inline(stmts) => stmts.iter().all(|stmt| ascii_scan_stmt_safe(stmt, root)),
+        _ => false,
+    }
+}
+
+fn ascii_scan_total_increment(stmt: &TStmt) -> Option<&TLocal> {
+    let TStmt::Assign {
+        place: TPlace::Local(local),
+        op,
+        value,
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    let increments_one = match op {
+        Some(BinOp::Add) => int_literal_is(value, 1),
+        None => matches!(
+            &value.kind,
+            TExprKind::Binary {
+                op: BinOp::Add,
+                lhs,
+                rhs,
+                ..
+            } if matches!(&lhs.kind, TExprKind::Local(candidate) if same_local(candidate, local))
+                && int_literal_is(rhs, 1)
+        ),
+        _ => false,
+    };
+    increments_one.then_some(local)
+}
+
+fn ascii_scan_count_body<'a>(
+    stmts: &'a [TStmt],
+    token: &TLocal,
+    require_clear: bool,
+) -> Option<AsciiWhitespaceCount<'a>> {
+    let mut iter = stmts
+        .iter()
+        .filter(|stmt| !matches!(stmt, TStmt::SourceSpan(_) | TStmt::LineMarker(_)));
+    let TStmt::Let {
+        name,
+        init,
+        gc_promotion,
+        gc_transferred,
+        ..
+    } = iter.next()?
+    else {
+        return None;
+    };
+    if gc_promotion.is_some() || *gc_transferred || !matches!(init.ty, Type::String) {
+        return None;
+    }
+    let (source, fallback) = string_bytes_init_source(init)?;
+    if !same_local(source, token) || !ascii_scan_fallback_safe(fallback, token) {
+        return None;
+    }
+
+    let TStmt::IndexAssign {
+        base,
+        index: key,
+        is_map: true,
+        value,
+        ..
+    } = iter.next()?
+    else {
+        return None;
+    };
+    let TExprKind::Local(key_local) = &key.kind else {
+        return None;
+    };
+    if key_local.deref
+        || key_local.rust_name() != mangle(name)
+        || !key_local
+            .string_bytes_source
+            .as_deref()
+            .is_some_and(|candidate| same_local(candidate, token))
+    {
+        return None;
+    }
+    let Some((map_root, op, default, delta)) = map_update_shape(base, key, value) else {
+        return None;
+    };
+    let Type::Map {
+        key: map_key,
+        value: map_value,
+        ..
+    } = base.ty.without_user_tags()
+    else {
+        return None;
+    };
+    if **map_key != Type::String || **map_value != Type::Int {
+        return None;
+    }
+    if op != BinOp::Add || !int_literal_is(default, 0) || !int_literal_is(delta, 1) {
+        return None;
+    }
+
+    let total = iter.next()?;
+    let total_local = ascii_scan_total_increment(total)?;
+    if !total_local.mutable
+        || total_local.deref
+        || total_local.is_persistent()
+        || same_local(total_local, token)
+        || same_local(total_local, &map_root)
+    {
+        return None;
+    }
+
+    if require_clear {
+        let TStmt::ExprStmt(clear) = iter.next()? else {
+            return None;
+        };
+        let TExprKind::BuiltinMethod {
+            recv,
+            op: TBuiltinOp::Clear,
+            args,
+        } = &clear.kind
+        else {
+            return None;
+        };
+        if !args.is_empty()
+            || !matches!(&recv.kind, TExprKind::Local(local) if same_local(local, token))
+        {
+            return None;
+        }
+    }
+    if iter.next().is_some() {
+        return None;
+    }
+    Some(AsciiWhitespaceCount {
+        map_root,
+        op,
+        default,
+        delta,
+        fallback,
+        total,
+    })
+}
+
+fn ascii_scan_same_total(left: &TStmt, right: &TStmt, _map_root: &TLocal) -> bool {
+    let (Some(left_local), Some(right_local)) = (
+        ascii_scan_total_increment(left),
+        ascii_scan_total_increment(right),
+    ) else {
+        return false;
+    };
+    same_local(left_local, right_local)
+}
+
+fn ascii_whitespace_scan_plan<'a>(
+    stmts: &'a [TStmt],
+    index: usize,
+    unique_map_root: Option<&TLocal>,
+) -> Option<(usize, AsciiWhitespaceScanPlan<'a>)> {
+    let TStmt::ForIn {
+        label,
+        var2,
+        source,
+        collection,
+        step,
+        method_kind,
+        columnar,
+        by_value: _,
+        body,
+        ..
+    } = stmts.get(index)?
+    else {
+        return None;
+    };
+    if label.is_some()
+        || var2.is_some()
+        || step.is_some()
+        || method_kind.is_some()
+        || *columnar
+    {
+        return None;
+    }
+    let TExprKind::Local(source_local) = &source.kind else {
+        return None;
+    };
+    let TExprKind::Local(collection_local) = &collection.kind else {
+        return None;
+    };
+    if !same_local(source_local, collection_local)
+        || source_local.deref
+        || source_local.mutable
+        || source_local.is_persistent()
+        || !ascii_scan_bytes_type(&source.ty)
+        || !ascii_scan_bytes_type(&collection.ty)
+    {
+        return None;
+    }
+
+    let TStmt::If {
+        cond: delimiter_cond,
+        then_body: delimiter_body,
+        else_body: Some(push_body),
+        else_is_elseif: false,
+    } = ascii_scan_sole_non_marker(body)?
+    else {
+        return None;
+    };
+    let (token, loop_var) = ascii_scan_push_body(push_body)?;
+    let (space, ws_start, ws_end) = ascii_scan_whitespace_cond(delimiter_cond, &loop_var)?;
+    let TStmt::If {
+        cond: token_cond,
+        then_body: count_body,
+        else_body: None,
+        else_is_elseif: false,
+    } = ascii_scan_sole_non_marker(delimiter_body)?
+    else {
+        return None;
+    };
+    if same_local(source_local, &token)
+        || !ascii_scan_token_nonempty_cond(token_cond, &token)
+        || !ascii_scan_token_unique_before(&stmts[..index], &token)
+    {
+        return None;
+    }
+    let loop_count = ascii_scan_count_body(count_body, &token, true)?;
+    let proven_map = unique_map_root?;
+    if !same_local(proven_map, &loop_count.map_root)
+        || same_local(&loop_count.map_root, &token)
+        || same_local(&loop_count.map_root, source_local)
+        || map_hoist_root(source, collection, None, body, Some(proven_map))
+            .is_none_or(|root| !same_local(&root, &loop_count.map_root))
+    {
+        return None;
+    }
+
+    let flush_index = next_non_marker_stmt(stmts, index)?;
+    let TStmt::If {
+        cond: final_cond,
+        then_body: final_body,
+        else_body: None,
+        else_is_elseif: false,
+    } = &stmts[flush_index]
+    else {
+        return None;
+    };
+    if !ascii_scan_token_nonempty_cond(final_cond, &token) {
+        return None;
+    }
+    let final_count = ascii_scan_count_body(final_body, &token, false)?;
+    if !same_local(&loop_count.map_root, &final_count.map_root)
+        || loop_count.op != final_count.op
+        || !same_pure_expr(loop_count.default, final_count.default, &loop_count.map_root)
+        || !same_pure_expr(loop_count.delta, final_count.delta, &loop_count.map_root)
+        || !ascii_scan_same_total(loop_count.total, final_count.total, &loop_count.map_root)
+        || !stmts[flush_index + 1..]
+            .iter()
+            .all(|stmt| ascii_scan_stmt_safe(stmt, &token))
+    {
+        return None;
+    }
+    Some((
+        flush_index,
+        AsciiWhitespaceScanPlan {
+            source,
+            space,
+            ws_start,
+            ws_end,
+            loop_count,
+            final_count,
+        },
+    ))
+}
+
 
 
 /// A split callback cannot carry a Jet `return`, `break`, `next`, or deferred
@@ -1477,7 +2291,7 @@ fn emit_tir_stmts_inline(
             TStmt::LineMarker(line) => source_line = *line as u32,
             _ => {}
         }
-        if let Some((next, bytes_source)) = string_bytes_map_fusion(stmts, index) {
+        if let Some((next, bytes_source, fallback)) = string_bytes_map_fusion(stmts, index) {
             // Keep source markers between the removed binding and the fused
             // assignment. They remain useful to the debugger and do not alter
             // the generated execution shape.
@@ -1509,7 +2323,7 @@ fn emit_tir_stmts_inline(
                 active_cleanups,
                 None,
                 None,
-                Some((bytes_source, error_line)),
+                Some((bytes_source, error_line, fallback)),
             );
             index = next + 1;
             continue;
@@ -1525,6 +2339,13 @@ fn emit_tir_stmts_inline(
                 .filter(|root| list_root_unique_before(&stmts[..index], root)),
             _ => None,
         };
+        if let Some((flush_index, plan)) =
+            ascii_whitespace_scan_plan(stmts, index, unique_map_root.as_ref())
+        {
+            emit_ascii_whitespace_scan(&plan, cx, out, indent, active_cleanups);
+            index = flush_index + 1;
+            continue;
+        }
         emit_tir_stmt_with_collection_proof(
             s,
             cx,
@@ -1653,12 +2474,7 @@ fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize
     }
 }
 
-fn emit_expr_with_cleanups(
-    e: &crate::Codegen::TIR::TExpr,
-    cx: &Cx,
-    cleanups: &[ActiveCleanup],
-) -> String {
-    let rendered = emit_tir_expr(e, cx);
+fn materialize_cleanup_markers(rendered: String, cleanups: &[ActiveCleanup]) -> String {
     if !rendered.contains(crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER) {
         return rendered;
     }
@@ -1673,6 +2489,97 @@ fn emit_expr_with_cleanups(
     }
     rendered.replace(crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER, &cleanup)
 }
+
+fn emit_expr_with_cleanups(
+    e: &crate::Codegen::TIR::TExpr,
+    cx: &Cx,
+    cleanups: &[ActiveCleanup],
+) -> String {
+    materialize_cleanup_markers(emit_tir_expr(e, cx), cleanups)
+}
+fn emit_ascii_whitespace_scan(
+    plan: &AsciiWhitespaceScanPlan<'_>,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_deferred_closes: &mut Vec<ActiveCleanup>,
+) {
+    let pad = "    ".repeat(indent);
+    let body_pad = "    ".repeat(indent + 2);
+    let source = emit_expr_with_cleanups(plan.source, cx, active_deferred_closes);
+    let space = emit_expr_with_cleanups(plan.space, cx, active_deferred_closes);
+    let ws_start = emit_expr_with_cleanups(plan.ws_start, cx, active_deferred_closes);
+    let ws_end = emit_expr_with_cleanups(plan.ws_end, cx, active_deferred_closes);
+    let map_name = plan.loop_count.map_root.rust_name();
+    let item = mangle_generated("ascii_token");
+    let is_final = mangle_generated("ascii_final");
+    let map_update = root_path(cx, "jet_map_update_string_bytes");
+    let builder = root_path(cx, "JetStringCountBuilder");
+    let make_mut = root_path(cx, "jet_map_make_mut");
+    let scanner = root_path(cx, "jet_bytes_ascii_whitespace_for_each");
+    let helper_name = match plan.loop_count.op {
+        BinOp::Add => "add",
+        BinOp::Sub => "sub",
+        BinOp::Mul => "mul",
+        _ => unreachable!("ASCII count scan only admits integer add/sub/mul"),
+    };
+    let helper = format!("{}jet_std::jet_int_{helper_name}_hot!", cx.root_prefix);
+    let old = mangle_generated("map_old");
+    let default = emit_expr_with_cleanups(
+        plan.loop_count.default,
+        cx,
+        active_deferred_closes,
+    );
+    let delta = emit_expr_with_cleanups(plan.loop_count.delta, cx, active_deferred_closes);
+    let loop_fallback = materialize_cleanup_markers(
+        emit_tir_orfallback_rhs(plan.loop_count.fallback, cx),
+        active_deferred_closes,
+    );
+    let final_fallback = materialize_cleanup_markers(
+        emit_tir_orfallback_rhs(plan.final_count.fallback, cx),
+        active_deferred_closes,
+    );
+
+    out.push_str(&format!(
+        "{pad}{{ let mut {map_name} = {builder}::with_source_capacity({make_mut}(&mut ({map_name})), ({source}).len());\n"
+    ));
+    out.push_str(&format!(
+        "{pad}    {scanner}(&({source}), ({space}), ({ws_start}), ({ws_end}), |{item}, {is_final}| {{\n"
+    ));
+    emit_scalar_loop_barrier(cx, out, indent + 2, None);
+    out.push_str(&format!(
+        "{body_pad}if let Err(()) = {map_update}(&mut ({map_name}), ({item}), |{old}| {{ {helper}({old}.cloned().unwrap_or_else(|| {default}), {delta}) }}) {{\n"
+    ));
+    out.push_str(&format!(
+        "{body_pad}    if {is_final} {{ {final_fallback} }} else {{ {loop_fallback} }}\n"
+    ));
+    out.push_str(&format!("{body_pad}}}\n"));
+    out.push_str(&format!("{body_pad}if {is_final} {{\n"));
+    emit_tir_stmt_with_collection_proof(
+        plan.final_count.total,
+        cx,
+        out,
+        indent + 3,
+        active_deferred_closes,
+        None,
+        None,
+        None,
+    );
+    out.push_str(&format!("{body_pad}}} else {{\n"));
+    emit_tir_stmt_with_collection_proof(
+        plan.loop_count.total,
+        cx,
+        out,
+        indent + 3,
+        active_deferred_closes,
+        None,
+        None,
+        None,
+    );
+    out.push_str(&format!("{body_pad}}}\n"));
+    out.push_str(&format!("{pad}    }});\n{pad}}}\n"));
+}
+
 
 fn coverage_branch_id(cx: &Cx) -> Option<String> {
     cx.coverage.then(|| cx.register_coverage_branch())
@@ -2002,7 +2909,7 @@ fn emit_contract_scope(
     pre: &[crate::Codegen::TIR::TContract],
     body: &[TStmt],
     post: &[crate::Codegen::TIR::TContract],
-    ret: &Option<Type>,
+    result: &crate::Codegen::TIR::TContractResult,
     cx: &Cx,
     out: &mut String,
     indent: usize,
@@ -2015,21 +2922,38 @@ fn emit_contract_scope(
         emit_tir_stmts_nested(body, cx, out, indent, active_deferred_closes);
         return;
     }
-    let ret_ty = ret
-        .clone()
-        .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()));
-    let ret_annot = crate::Codegen::rust_return_type(cx, &ret_ty);
+    let ret_annot = crate::Codegen::rust_return_type(cx, &result.carrier_ty);
     let pad = "    ".repeat(indent);
-    out.push_str(&jet_format!(
-        "{pad}let {jet_prefix}result = (|| -> {ret_annot} {{\n",
-        ret_annot = ret_annot,
-    ));
+    let carrier = result.carrier_local.rust_name();
+    out.push_str(&format!("{pad}let {carrier} = (|| -> {ret_annot} {{\n"));
     emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
     out.push_str(&format!("{pad}}})();\n"));
-    for contract in post {
-        emit_contract_check(contract, cx, out, indent);
+    match result.mode {
+        crate::Codegen::TIR::TContractResultMode::Direct => {
+            for contract in post {
+                emit_contract_check(contract, cx, out, indent);
+            }
+            out.push_str(&format!("{pad}{carrier}\n"));
+        }
+        crate::Codegen::TIR::TContractResultMode::ResultPayload
+        | crate::Codegen::TIR::TContractResultMode::OptionPayload => {
+            let binding = result.binding_local.rust_name();
+            let failure = crate::Codegen::mangle_generated("result_error");
+            let arm_pad = "    ".repeat(indent + 1);
+            out.push_str(&format!("{pad}match {carrier} {{\n"));
+            out.push_str(&format!("{arm_pad}Ok({binding}) => {{\n"));
+            for contract in post {
+                emit_contract_check(contract, cx, out, indent + 2);
+            }
+            out.push_str(&format!(
+                "{}Ok({binding})\n",
+                "    ".repeat(indent + 2)
+            ));
+            out.push_str(&format!("{arm_pad}}}\n"));
+            out.push_str(&format!("{arm_pad}Err({failure}) => Err({failure}),\n"));
+            out.push_str(&format!("{pad}}}\n"));
+        }
     }
-    out.push_str(&jet_format!("{pad}{jet_prefix}result\n"));
 }
 
 fn emit_tir_stmt(
@@ -2059,7 +2983,7 @@ fn emit_tir_stmt_with_collection_proof(
     active_deferred_closes: &mut Vec<ActiveCleanup>,
     unique_map_root: Option<&TLocal>,
     unique_list_root: Option<&TLocal>,
-    _string_bytes_source: Option<(&TLocal, u32)>,
+    _string_bytes_source: Option<(&TLocal, u32, &TOrFallback)>,
 ) {
     let pad = "    ".repeat(indent);
     match s {
@@ -2070,13 +2994,13 @@ fn emit_tir_stmt_with_collection_proof(
             pre,
             body,
             post,
-            ret,
+            result,
         } => {
             emit_contract_scope(
                 pre,
                 body,
                 post,
-                ret,
+                result,
                 cx,
                 out,
                 indent,
@@ -2899,8 +3823,8 @@ fn emit_tir_stmt_with_collection_proof(
             out.push_str(&format!("{}}}\n", pad));
         }
         // c109 Phase 4: an all-range scalar switch. Mirrors `emit_mixed_switch`
-        // (Statement.rs): a wrapping block binds `__jet_switch_subject` (unused here,
-        // emitted for parity), then an `if/else if … else` chain of range tests.
+        // (Statement.rs): a wrapping block binds `__jet_switch_subject`, then an
+        // `if/else if … else` chain of range tests reads that one subject.
         TStmt::RangeSwitch {
             subject,
             arms,
@@ -2917,7 +3841,9 @@ fn emit_tir_stmt_with_collection_proof(
             for (i, (lo, hi, body)) in arms.iter().enumerate() {
                 let kw = if i == 0 { "if" } else { "} else if" };
                 let (condition, _) = coverage_condition(
-                    format!("({} >= {} && {} <= {})", subject_str, lo, subject_str, hi),
+                    jet_format!(
+                        "(*{jet_prefix}switch_subject >= {lo} && *{jet_prefix}switch_subject <= {hi})"
+                    ),
                     cx,
                 );
                 out.push_str(&format!("{}{} {} {{\n", inner_pad, kw, condition));
@@ -2953,7 +3879,29 @@ fn emit_tir_stmt_with_collection_proof(
             };
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             if *is_map {
-                if let Some((_, op, default, delta)) = map_update_shape(base, index, value) {
+                if let Some((bytes_source, _, fallback)) = _string_bytes_source {
+                    let (_, op, default, delta) = map_update_shape(base, index, value)
+                        .expect("string-bytes fusion must retain its map update shape");
+                    let default = emit_expr_with_cleanups(default, cx, active_deferred_closes);
+                    let delta = emit_expr_with_cleanups(delta, cx, active_deferred_closes);
+                    let helper_name = match op {
+                        BinOp::Add => "add",
+                        BinOp::Sub => "sub",
+                        BinOp::Mul => "mul",
+                        _ => unreachable!("map update shape only admits integer add/sub/mul"),
+                    };
+                    let helper = format!("{}jet_std::jet_int_{helper_name}_hot!", cx.root_prefix);
+                    let old = mangle_generated("map_old");
+                    let map_update = root_path(cx, "jet_map_update_string_bytes");
+                    let bytes = format!("&({})", bytes_source.rust_place());
+                    let fallback = materialize_cleanup_markers(
+                        emit_tir_orfallback_rhs(fallback, cx),
+                        active_deferred_closes,
+                    );
+                    out.push_str(&format!(
+                        "{pad}{{ if let Err(()) = {map_update}(&mut ({b}), {bytes}, |{old}| {{ {helper}({old}.cloned().unwrap_or_else(|| {default}), {delta}) }}) {{ {fallback} }} }}\n"
+                    ));
+                } else if let Some((_, op, default, delta)) = map_update_shape(base, index, value) {
                     let default = emit_expr_with_cleanups(default, cx, active_deferred_closes);
                     let delta = emit_expr_with_cleanups(delta, cx, active_deferred_closes);
                     let helper_name = match op {
@@ -3158,6 +4106,10 @@ fn emit_tir_stmt_with_collection_proof(
             };
             let map_hoist =
                 map_hoist_root(source, collection, step.as_ref(), body, unique_map_root);
+            let string_count_hoist = map_hoist.as_ref().is_some_and(|root| {
+                let (safe, found) = string_count_stmts(body, root);
+                safe && found
+            });
             let list_hoist =
                 list_hoist_root(source, collection, step.as_ref(), body, unique_list_root);
             let collection_hoist = map_hoist
@@ -3166,10 +4118,17 @@ fn emit_tir_stmt_with_collection_proof(
             if let Some((is_map, root)) = &collection_hoist {
                 let name = root.rust_name();
                 if *is_map {
-                    out.push_str(&format!(
-                        "{pad}{{ let mut {name} = {make_mut}(&mut ({name}));\n",
-                        make_mut = root_path(cx, "jet_map_make_mut"),
-                    ));
+                    let make_mut = root_path(cx, "jet_map_make_mut");
+                    if string_count_hoist {
+                        let builder = root_path(cx, "JetStringCountBuilder");
+                        out.push_str(&format!(
+                            "{pad}{{ let mut {name} = {builder}::new({make_mut}(&mut ({name})));\n",
+                        ));
+                    } else {
+                        out.push_str(&format!(
+                            "{pad}{{ let mut {name} = {make_mut}(&mut ({name}));\n",
+                        ));
+                    }
                 } else {
                     out.push_str(&format!("{pad}{{ let mut {name} = &mut *({name});\n",));
                 }

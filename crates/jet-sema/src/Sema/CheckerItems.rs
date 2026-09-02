@@ -3262,9 +3262,13 @@ impl<'a> Checker<'a> {
         // behavior.
         let use_subject_cache = preserve_result_carrier && !self.compiler_generated;
         let subject_key = subject.span().start;
-        let cached_subject_ty = use_subject_cache
+        let cached_subject = use_subject_cache
             .then(|| self.result_handler_subject_types.get(&subject_key).cloned())
             .flatten();
+        if let Some((_, typed_subject)) = &cached_subject {
+            **subject = typed_subject.clone();
+        }
+        let cached_subject_ty = cached_subject.as_ref().map(|(ty, _)| ty.clone());
         if preserve_result_carrier && cached_subject_ty.is_none() {
             self.failure_auto_depth += 1;
         }
@@ -3288,7 +3292,8 @@ impl<'a> Checker<'a> {
             };
             if use_subject_cache {
                 if let Some(ty) = inferred.clone() {
-                    self.result_handler_subject_types.insert(subject_key, ty);
+                    self.result_handler_subject_types
+                        .insert(subject_key, (ty, (**subject).clone()));
                 }
             }
             inferred

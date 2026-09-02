@@ -14,6 +14,22 @@ impl<'a> Checker<'a> {
         lam: &mut Lambda,
         expected: Option<&Type>,
     ) -> Option<Type> {
+        // A lambda returned from a fallible function is checked against the
+        // function-valued success slot, not against the outer Result carrier.
+        // Keep the outer shape visible long enough to distinguish this case
+        // from an ordinary callback that may infer its own failure carrier.
+        let expected_result_callable = matches!(
+            expected,
+            Some(Type::Result { ok, .. }) if matches!(ok.as_ref(), Type::Fn { .. })
+        );
+        let expected = match expected {
+            Some(Type::Result { ok, .. })
+                if matches!(ok.as_ref(), Type::Fn { .. }) =>
+            {
+                Some(ok.as_ref())
+            }
+            _ => expected,
+        };
         let collecting_loop = lam.meta.collecting_loop;
         let result_loop = lam.meta.result_loop;
         let inline_loop = collecting_loop || result_loop;
@@ -147,6 +163,7 @@ impl<'a> Checker<'a> {
         // operation can project the carrier (for example collection map/filter)
         // or must reject the widened callback type.
         let infer_failure_carrier = expected_callable
+            && !expected_result_callable
             && lam.result_type.is_none()
             && lam.error_type.is_none();
 
@@ -982,30 +999,68 @@ impl<'a> Checker<'a> {
         let ret_ty = if let Some(inferred) = &inferred_fallible_ret {
             if let (Some(expected), Some(actual)) = (&effective_ret, &body_ret) {
                 if !lambda_body_matches_return(expected, actual) {
-                    self.diags.push(Diagnostic::error(
-                        "E0113",
-                        format!(
-                            "this lambda should return {}, not {}",
-                            expected.show(),
-                            actual.show()
+                    let span = match &lam.body {
+                        LambdaBody::Expr(expression) => expression.span(),
+                        LambdaBody::Block(_) => lam.span,
+                    };
+                    let diagnostic = match actual {
+                        Type::Result { err, .. } if !matches!(expected, Type::Result { .. }) => {
+                            Diagnostic::error(
+                                "E0403",
+                                "this fallible call only works inside a function that returns a fallible result"
+                                    .to_string(),
+                                "ordinary fallible calls propagate their failure automatically to the caller"
+                                    .to_string(),
+                                format!(
+                                    "declare `{}` in the return type before `->`, or handle the result with `??`",
+                                    err.name()
+                                ),
+                                Some(span),
+                            )
+                        }
+                        _ => Diagnostic::error(
+                            "E0113",
+                            format!(
+                                "this lambda should return {}, not {}",
+                                expected.show(),
+                                actual.show()
+                            ),
+                            "the lambda's return type must match what's expected here".to_string(),
+                            type_fix_hint(expected, actual),
+                            Some(lam.span),
                         ),
-                        "the lambda's return type must match what's expected here".to_string(),
-                        type_fix_hint(expected, actual),
-                        Some(lam.span),
-                    ));
+                    };
+                    self.diags.push(diagnostic);
                 }
             }
             Some(inferred.clone())
         } else if let Some(er) = &effective_ret {
             if let Some(br) = &body_ret {
                 if !lambda_body_matches_return(er, br) {
-                    self.diags.push(Diagnostic::error(
-                        "E0113",
-                        format!("this lambda should return {}, not {}", er.show(), br.show()),
-                        "the lambda's return type must match what's expected here".to_string(),
-                        type_fix_hint(er, br),
-                        Some(lam.span),
-                    ));
+                    let diagnostic = match br {
+                        Type::Result { err, .. } if !matches!(er, Type::Result { .. }) => {
+                            Diagnostic::error(
+                                "E0403",
+                                "this fallible call only works inside a function that returns a fallible result"
+                                    .to_string(),
+                                "ordinary fallible calls propagate their failure automatically to the caller"
+                                    .to_string(),
+                                format!(
+                                    "declare `{}` in the return type before `->`, or handle the result with `??`",
+                                    err.name()
+                                ),
+                                Some(lam.span),
+                            )
+                        }
+                        _ => Diagnostic::error(
+                            "E0113",
+                            format!("this lambda should return {}, not {}", er.show(), br.show()),
+                            "the lambda's return type must match what's expected here".to_string(),
+                            type_fix_hint(er, br),
+                            Some(lam.span),
+                        ),
+                    };
+                    self.diags.push(diagnostic);
                 }
             }
             Some(er.clone())

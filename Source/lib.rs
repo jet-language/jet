@@ -132,23 +132,32 @@ pub mod Store;
 use std::collections::BTreeMap;
 use Diagnostics::Diagnostic;
 
-fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-    // D-FRONTENDAPI1=A: install the one read-only Core compiler callback for
-    // every compiler entry point. Build uses the same ambient seam, so a
-    // `comptime` binding and `fn build` cannot observe different APIs.
-    jet_driver::run_compiler_work(|| {
-        Comptime::with_ambient(Some(Compiler::eval_core_call_with_type), None, None, work)
+/// Run compiler work on the canonical worker with the compiler Core callback
+/// installed. Both the public frontend helpers and lower Driver adapters use
+/// this seam, so direct checks and build preparation cannot lose the
+/// `core.compiler` package-view bridge.
+#[doc(hidden)]
+pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+    // Nested compiler entry points already have this callback installed. Do
+    // not reinstall it: `Comptime::with_ambient` clears its temporary hooks
+    // rather than restoring the caller's hooks when the body returns.
+    if Comptime::ambient_hooks()
+        .0
+        .is_some_and(|hook| {
+            hook as *const () == Compiler::eval_core_call_with_type as *const ()
+        })
+    {
+        return jet_driver::run_compiler_work(work);
+    }
+    Comptime::with_ambient(Some(Compiler::eval_core_call_with_type), None, None, || {
+        jet_driver::run_compiler_work(work)
     })
 }
 
-/// Run a compiler-facing test or tooling operation on the canonical worker.
-///
-/// Coverage and other integration probes use the same worker boundary when
-/// they call lower seams directly. Ambient compiler callbacks are installed
-/// by the full frontend entry points, not by this raw worker adapter.
+/// Run full frontend work on the canonical compiler stack.
 #[doc(hidden)]
-pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
-    jet_driver::run_compiler_work(work)
+pub fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+    run_compiler_work(work)
 }
 
 /// Run the full front end on source text. All lex errors (then all parse
@@ -309,9 +318,9 @@ fn compile_bundle_path(
     )
 }
 
-/// Like `compile_with_path` but with `--freestanding` mode (E2-M15).
-/// Rejects OS-dependent std APIs (E3301) and emits `panic = "abort"` hint.
-pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+/// Like `compile_with_path` but for a selected no-OS target (E2-M15).
+/// Rejects OS-dependent std APIs (E3301) and emits a `panic = "abort"` hint.
+pub fn compile_no_os(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts(
         file,
         Sema::CompileMode::Run,
@@ -322,14 +331,14 @@ pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>
     )
 }
 
-pub fn compile_freestanding_with_gates(
+pub fn compile_no_os_with_gates(
     file: &str,
     gates: Policy::GateSet,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts(file, Sema::CompileMode::Run, true, gates, false, None)
 }
 
-pub fn compile_freestanding_with_gates_and_settings(
+pub fn compile_no_os_with_gates_and_settings(
     file: &str,
     gates: Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
@@ -341,6 +350,23 @@ pub fn compile_freestanding_with_gates_and_settings(
         gates,
         false,
         None,
+        setting_overrides,
+    )
+}
+pub fn compile_no_os_with_profile_and_gates_and_settings(
+    file: &str,
+    gates: Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_with_profile_and_settings(
+        file,
+        Sema::CompileMode::Run,
+        true,
+        gates,
+        false,
+        None,
+        profile,
         setting_overrides,
     )
 }
@@ -368,6 +394,23 @@ pub fn compile_with_gates_and_settings(
         setting_overrides,
     )
 }
+pub fn compile_with_gates_and_profile_and_settings(
+    file: &str,
+    gates: Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_with_profile_and_settings(
+        file,
+        Sema::CompileMode::Run,
+        false,
+        gates,
+        false,
+        None,
+        profile,
+        setting_overrides,
+    )
+}
 
 /// D-BUILDENTRY1: native `jet build` path. No root `fn build` keeps existing
 /// zero-config pipeline; selected root entry evaluates and executes first.
@@ -390,7 +433,7 @@ pub fn compile_programmable_build(
 pub fn compile_programmable_build_opts(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -400,7 +443,7 @@ pub fn compile_programmable_build_opts(
     compile_programmable_build_opts_with_builder(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -413,7 +456,7 @@ pub fn compile_programmable_build_opts(
 pub fn compile_programmable_build_opts_with_builder(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -424,7 +467,7 @@ pub fn compile_programmable_build_opts_with_builder(
     compile_programmable_build_opts_with_builder_and_profile(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -438,7 +481,7 @@ pub fn compile_programmable_build_opts_with_builder(
 pub fn compile_programmable_build_opts_with_builder_and_profile(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -450,7 +493,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile(
     compile_programmable_build_opts_with_builder_and_profile_and_settings(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -466,7 +509,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile(
 pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -480,7 +523,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
     compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -498,7 +541,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
 pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -514,7 +557,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
     compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_with_entry(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -533,7 +576,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
 pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_with_entry(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -550,7 +593,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
     compile_programmable_build_opts_inner(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -566,6 +609,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         entry_fn,
         false,
         false,
+        None,
     )
     .map(|output| output.compile)
 }
@@ -575,7 +619,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
 pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -591,7 +635,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
     compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen_and_entry(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -610,7 +654,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
 pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen_and_entry(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -627,7 +671,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
     compile_programmable_build_opts_inner(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -643,6 +687,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         entry_fn,
         true,
         false,
+        None,
     )
     .map(|output| output.compile)
 }
@@ -654,7 +699,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
 pub fn compile_programmable_build_emit_generated_opts(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -664,7 +709,7 @@ pub fn compile_programmable_build_emit_generated_opts(
     compile_programmable_build_emit_generated_opts_with_builder(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -677,7 +722,7 @@ pub fn compile_programmable_build_emit_generated_opts(
 pub fn compile_programmable_build_emit_generated_opts_with_builder(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -688,7 +733,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder(
     compile_programmable_build_emit_generated_opts_with_builder_and_profile(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -702,7 +747,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder(
 pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -714,7 +759,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile(
     compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -730,7 +775,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile(
 pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -744,7 +789,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
     compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -762,7 +807,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
 pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -778,7 +823,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
     compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped_with_entry(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -797,7 +842,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
 pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped_with_entry(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -814,7 +859,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
     compile_programmable_build_opts_inner(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -830,6 +875,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
         entry_fn,
         false,
         false,
+        None,
     )
     .map(|output| output.compile)
 }
@@ -928,6 +974,79 @@ pub fn prepare_programmable_build_front_end_scoped_with_entry(
     })
 }
 
+/// Prepare a programmable build from an authority-selected source snapshot.
+/// The loader consumes the overlay and does not reopen `file`.
+pub fn prepare_programmable_build_front_end_scoped_with_entry_with_overlay(
+    file: &str,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    package_scope: bool,
+    build_override: bool,
+    entry_fn: Option<&str>,
+    source_path: &std::path::Path,
+    source: &str,
+) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    let inputs = Driver::FrontEndInputs {
+        file: file.to_string(),
+        profile: profile.to_string(),
+        setting_overrides: setting_overrides.clone(),
+        locked,
+        web_target,
+        plugin_target,
+        cross_target: cross_target.map(str::to_string),
+        package_scope,
+        build_override,
+        entry_fn: entry_fn.map(str::to_string),
+    };
+    with_compiler_stack(|| {
+        let mut prepared =
+            Driver::prepare_build_front_end_with_overlay(inputs, source_path, source)?;
+        let program = Compiler::program_info_value(prepared.bundle(), prepared.effect_facts());
+        prepared.set_program_value(program);
+        Ok(prepared)
+    })
+}
+
+/// Prepare a programmable build from one immutable authority-selected source
+/// closure. Entry, imports, and package build sources use these bytes.
+pub fn prepare_programmable_build_front_end_scoped_with_entry_with_source_closure(
+    file: &str,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    package_scope: bool,
+    build_override: bool,
+    entry_fn: Option<&str>,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    let inputs = Driver::FrontEndInputs {
+        file: file.to_string(),
+        profile: profile.to_string(),
+        setting_overrides: setting_overrides.clone(),
+        locked,
+        web_target,
+        plugin_target,
+        cross_target: cross_target.map(str::to_string),
+        package_scope,
+        build_override,
+        entry_fn: entry_fn.map(str::to_string),
+    };
+    with_compiler_stack(|| {
+        let mut prepared =
+            Driver::prepare_build_front_end_with_source_closure(inputs, source_closure)?;
+        let program = Compiler::program_info_value(prepared.bundle(), prepared.effect_facts());
+        prepared.set_program_value(program);
+        Ok(prepared)
+    })
+}
+
 fn file_selects_programmable_build(file: &str) -> bool {
     let source = match std::fs::read_to_string(file) {
         Ok(source) => source,
@@ -935,7 +1054,7 @@ fn file_selects_programmable_build(file: &str) -> bool {
     };
     let project_root = std::path::Path::new(file)
         .parent()
-        .and_then(Loader::find_manifest_root);
+        .and_then(|directory| Loader::find_package_root_checked(directory).ok().flatten());
     Driver::selects_build_entry(&source, project_root.as_deref())
 }
 
@@ -975,7 +1094,7 @@ pub fn check_programmable_build_for_tier(
                 inspect_only: false,
                 emit_generated: false,
                 locked: false,
-                freestanding: false,
+                no_os: false,
                 web_target: false,
                 plugin_target: false,
                 cross_target: None,
@@ -1027,6 +1146,7 @@ pub fn check_project_build_for_tier(
         entry_fn,
         false,
         true,
+        None,
     )?;
     Ok(Some(output))
 }
@@ -1036,7 +1156,7 @@ pub fn check_project_build_for_tier(
 pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -1055,7 +1175,7 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
     compile_programmable_build_opts_inner(
         file,
         grants,
-        freestanding,
+        no_os,
         gates,
         locked,
         web_target,
@@ -1071,13 +1191,60 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
         entry_fn,
         without_codegen,
         false,
+        None,
+    )
+}
+/// Compile a programmable build from an authority-selected source snapshot.
+/// The source overlay is retained through build evaluation and runtime
+/// compilation; the entry pathname is never reopened.
+pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_with_overlay(
+    file: &str,
+    grants: &[String],
+    no_os: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    emit_generated: bool,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
+    entry_fn: Option<&str>,
+    without_codegen: bool,
+    source_path: &std::path::Path,
+    source: &str,
+) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_inner(
+        file,
+        grants,
+        no_os,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        emit_generated,
+        remote_builder,
+        profile,
+        setting_overrides,
+        prepared,
+        package_scope,
+        build_override,
+        entry_fn,
+        without_codegen,
+        false,
+        Some((source_path, source)),
     )
 }
 
 fn compile_programmable_build_opts_inner(
     file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -1093,6 +1260,7 @@ fn compile_programmable_build_opts_inner(
     entry_fn: Option<&str>,
     without_codegen: bool,
     project_check: bool,
+    overlay: Option<(&std::path::Path, &str)>,
 ) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
@@ -1116,7 +1284,7 @@ fn compile_programmable_build_opts_inner(
             return compile_workspace_build_opts(
                 file,
                 grants,
-                freestanding,
+                no_os,
                 gates,
                 locked,
                 web_target,
@@ -1134,18 +1302,35 @@ fn compile_programmable_build_opts_inner(
         }
         let mut prepared = prepared;
         if prepared.is_none() {
-            prepared = Some(prepare_programmable_build_front_end_scoped_with_entry(
-                file,
-                locked,
-                web_target,
-                plugin_target,
-                cross_target,
-                profile,
-                setting_overrides,
-                package_scope,
-                build_override,
-                entry_fn,
-            )?);
+            prepared = Some(match overlay {
+                Some((source_path, source)) =>
+                    prepare_programmable_build_front_end_scoped_with_entry_with_overlay(
+                        file,
+                        locked,
+                        web_target,
+                        plugin_target,
+                        cross_target,
+                        profile,
+                        setting_overrides,
+                        package_scope,
+                        build_override,
+                        entry_fn,
+                        source_path,
+                        source,
+                    )?,
+                None => prepare_programmable_build_front_end_scoped_with_entry(
+                    file,
+                    locked,
+                    web_target,
+                    plugin_target,
+                    cross_target,
+                    profile,
+                    setting_overrides,
+                    package_scope,
+                    build_override,
+                    entry_fn,
+                )?,
+            });
         }
         let grants = resolve_build_grants(file, grants)?;
         let grants = grants
@@ -1160,7 +1345,7 @@ fn compile_programmable_build_opts_inner(
             inspect_only: false,
             emit_generated,
             locked,
-            freestanding,
+            no_os,
             web_target,
             plugin_target,
             cross_target: cross_target.map(str::to_string),
@@ -1171,7 +1356,9 @@ fn compile_programmable_build_opts_inner(
             build_override,
             entry_fn: entry_fn.map(str::to_string),
         };
-        let output = if project_check {
+        let output = if let Some((source_path, source)) = overlay {
+            Driver::compile_bundle_path_build_with_overlay(file, source_path, source, options)?
+        } else if project_check {
             Driver::compile_bundle_path_build_with_front_end_for_project_check(
                 file, options, prepared,
             )?
@@ -1196,7 +1383,7 @@ fn compile_programmable_build_opts_inner(
 fn compile_workspace_build_opts(
     _file: &str,
     grants: &[String],
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     locked: bool,
     web_target: bool,
@@ -1284,7 +1471,7 @@ fn compile_workspace_build_opts(
                 inspect_only: false,
                 emit_generated: false,
                 locked,
-                freestanding,
+                no_os,
                 web_target,
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
@@ -1372,7 +1559,7 @@ fn compile_workspace_build_opts(
             inspect_only: false,
             emit_generated: false,
             locked,
-            freestanding,
+            no_os,
             web_target,
             plugin_target,
             cross_target: cross_target.map(str::to_string),
@@ -1481,10 +1668,10 @@ fn workspace_build_root_diagnostic(
     workspace_path: &std::path::Path,
     diagnostic: &Diagnostic,
 ) -> Diagnostic {
-    // Workspace policy parsing already owns the registered E3503 wording.
-    // Preserve it instead of replacing the diagnostic with a path-shaped
-    // variant that loses the build-authority contract.
-    if matches!(diagnostic.code.as_str(), "E3503" | "E1221") {
+    // Workspace policy parsing owns the detail, while this boundary adds the
+    // checked source path and the canonical E3503 contract. Package-manifest
+    // parse failures keep their own identity.
+    if diagnostic.code == "E1221" {
         return diagnostic.clone();
     }
     Diagnostic::error(
@@ -1887,8 +2074,8 @@ fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>>
         .to_path_buf();
     let workspace_root = Loader::find_workspace_root_checked(&directory)
         .map_err(|diagnostic| vec![workspace_build_root_diagnostic(&directory, &diagnostic)])?;
-    let package_root =
-        Loader::find_manifest_root_checked(&directory).map_err(|diagnostic| vec![diagnostic])?;
+    let package_root = Loader::find_package_root_checked(&directory)
+        .map_err(|diagnostic| vec![diagnostic])?;
     Ok(match (workspace_root, package_root) {
         (Some(workspace), Some(package)) if Loader::is_physically_within(&workspace, &package) => {
             package
@@ -1974,16 +2161,18 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
         }
     }
     if let Some(dir) = package_root.as_deref() {
-        let resolver = jet_driver::Authority::AuthorityResolver::open(dir)
-            .map_err(|error| vec![error.diagnostic()])?;
-        let member = resolver
-            .checked_member(std::path::Path::new("."))
-            .map_err(package_policy_diagnostic)?;
-        let package = resolver
-            .complete_checked_package(member)
-            .map_err(package_policy_diagnostic)?;
-        package_name = Some(package.facts.name.clone());
-        for effect in package.facts.build_allow {
+        let package = Loader::package_facts_for_root(dir)?
+            .ok_or_else(|| {
+                vec![Diagnostic::error(
+                    "E3503",
+                    format!("package facts in `{}` are missing", dir.display()),
+                    "the selected package root has no checked Package declaration".to_string(),
+                    "restore the package declaration before running build code".to_string(),
+                    None,
+                )]
+            })?;
+        package_name = Some(package.name.clone());
+        for effect in package.build_allow {
             if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
                 allowed.insert(capability.flag().to_string());
             }
@@ -2057,22 +2246,6 @@ fn load_workspace_build_policy(
     }
 }
 
-fn package_policy_diagnostic(error: jet_driver::Authority::AuthorityError) -> Vec<Diagnostic> {
-    match error {
-        jet_driver::Authority::AuthorityError::Invalid { path, detail }
-            if detail.contains("build") || detail.contains("effect") =>
-        {
-            vec![Diagnostic::error(
-                "E1221",
-                format!("invalid build policy in `{}`", path.display()),
-                detail,
-                "use `build: { allow: #(FS, Exec) }` with a valid effect tuple".to_string(),
-                None,
-            )]
-        }
-        other => vec![other.diagnostic()],
-    }
-}
 
 fn production_build_policy() -> Comptime::Build::BuildPolicy {
     let ci = std::env::var("CI").ok().is_some_and(|value| {
@@ -2091,7 +2264,7 @@ fn production_build_policy() -> Comptime::Build::BuildPolicy {
 fn compile_bundle_path_opts(
     file: &str,
     mode: Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     web_target: bool,
     cross_target: Option<&str>,
@@ -2099,7 +2272,7 @@ fn compile_bundle_path_opts(
     compile_bundle_path_opts_with_settings(
         file,
         mode,
-        freestanding,
+        no_os,
         gates,
         web_target,
         cross_target,
@@ -2110,7 +2283,7 @@ fn compile_bundle_path_opts(
 fn compile_bundle_path_opts_with_settings(
     file: &str,
     mode: Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     web_target: bool,
     cross_target: Option<&str>,
@@ -2120,11 +2293,34 @@ fn compile_bundle_path_opts_with_settings(
         Driver::compile_bundle_path_opts_with_profile_and_settings(
             file,
             mode,
-            freestanding,
+            no_os,
             gates,
             web_target,
             cross_target,
             "dev",
+            setting_overrides,
+        )
+    })
+}
+fn compile_bundle_path_opts_with_profile_and_settings(
+    file: &str,
+    mode: Sema::CompileMode,
+    no_os: bool,
+    gates: Policy::GateSet,
+    web_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_opts_with_profile_and_settings(
+            file,
+            mode,
+            no_os,
+            gates,
+            web_target,
+            cross_target,
+            profile,
             setting_overrides,
         )
     })
@@ -2147,6 +2343,15 @@ pub fn compile_web_with_gates_and_settings(
     gates: Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_web_with_gates_and_profile_and_settings(file, gates, "dev", setting_overrides)
+}
+
+pub fn compile_web_with_gates_and_profile_and_settings(
+    file: &str,
+    gates: Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         if file_selects_programmable_build(file) {
             compile_programmable_build_opts_with_builder_and_profile_and_settings(
@@ -2159,21 +2364,62 @@ pub fn compile_web_with_gates_and_settings(
                 false,
                 None,
                 None,
-                "dev",
+                profile,
                 setting_overrides,
                 None,
             )
         } else {
-            compile_bundle_path_opts_with_settings(
+            compile_bundle_path_opts_with_profile_and_settings(
                 file,
                 Sema::CompileMode::Run,
                 false,
                 gates,
                 true,
                 None,
+                profile,
                 setting_overrides,
             )
         }
+    })
+}
+/// Compile a browser WebAssembly artifact through the selected typed target
+/// machine. The machine's provider facts are validated before web codegen and
+/// are folded into the artifact dossier.
+pub fn compile_web_with_target_machine(
+    file: &str,
+    machine: &TargetMachine::TargetMachine,
+) -> Result<
+    CompileOutput,
+    Driver::TargetMachineCompileError,
+> {
+    compile_web_with_target_machine_and_profile_and_settings(
+        file,
+        machine,
+        Policy::GateSet::default(),
+        "dev",
+        false,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_web_with_target_machine_and_profile_and_settings(
+    file: &str,
+    machine: &TargetMachine::TargetMachine,
+    gates: Policy::GateSet,
+    profile: &str,
+    locked: bool,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Driver::TargetMachineCompileError> {
+    with_compiler_stack(|| {
+        Driver::compile_bundle_path_with_target_machine_and_profile_and_settings(
+            file,
+            Sema::CompileMode::Run,
+            machine,
+            gates,
+            profile,
+            locked,
+            setting_overrides,
+        )
     })
 }
 
@@ -2196,12 +2442,22 @@ pub fn compile_plugin_with_gates_and_settings(
     gates: Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_plugin_with_gates_and_profile_and_settings(file, gates, "dev", setting_overrides)
+}
+
+pub fn compile_plugin_with_gates_and_profile_and_settings(
+    file: &str,
+    gates: Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_opts_plugin_with_gates_and_settings(
+        Driver::compile_bundle_path_opts_plugin_with_gates_and_profile_and_settings(
             file,
             Sema::CompileMode::Check,
             gates,
             Some(Syntax::TARGET_SANDBOX),
+            profile,
             setting_overrides,
         )
     })
@@ -2253,13 +2509,32 @@ pub fn compile_library_with_gates_and_settings(
     locked: bool,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_library_with_gates_and_profile_and_settings(
+        file,
+        output,
+        gates,
+        locked,
+        "dev",
+        setting_overrides,
+    )
+}
+
+pub fn compile_library_with_gates_and_profile_and_settings(
+    file: &str,
+    output: Option<&str>,
+    gates: Policy::GateSet,
+    locked: bool,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_opts_library_with_gates_and_settings(
+        Driver::compile_bundle_path_opts_library_with_gates_and_profile_and_settings(
             file,
             Sema::CompileMode::Check,
             gates,
             output,
             locked,
+            profile,
             setting_overrides,
         )
     })
@@ -2308,7 +2583,7 @@ pub fn compile_with_output(file: &str, output: &str) -> Result<CompileOutput, Ve
 pub fn compile_output_with_options(
     file: &str,
     output: &str,
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
@@ -2317,7 +2592,7 @@ pub fn compile_output_with_options(
     compile_output_with_options_and_settings(
         file,
         output,
-        freestanding,
+        no_os,
         gates,
         web_target,
         plugin_target,
@@ -2329,22 +2604,47 @@ pub fn compile_output_with_options(
 pub fn compile_output_with_options_and_settings(
     file: &str,
     output: &str,
-    freestanding: bool,
+    no_os: bool,
     gates: Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
     cross_target: Option<&str>,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_output_with_options_and_profile_and_settings(
+        file,
+        output,
+        no_os,
+        gates,
+        web_target,
+        plugin_target,
+        cross_target,
+        "dev",
+        setting_overrides,
+    )
+}
+
+pub fn compile_output_with_options_and_profile_and_settings(
+    file: &str,
+    output: &str,
+    no_os: bool,
+    gates: Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_output_opts_with_settings(
+        Driver::compile_bundle_path_output_opts_with_profile_and_settings(
             file,
             output,
-            freestanding,
+            no_os,
             gates,
             web_target,
             plugin_target,
             cross_target,
+            profile,
             setting_overrides,
         )
     })
@@ -2380,6 +2680,21 @@ pub fn resolve_c_links_for_target(
     })
 }
 
+pub fn resolve_c_links_for_target_with_source_closure(
+    file: &str,
+    target: Option<&str>,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<Vec<String>, Vec<Diagnostic>> {
+    let overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    with_compiler_stack(|| {
+        let bundle = Loader::load_entry_with_overlays(file, &overlays, false)?;
+        resolve_c_links_for_bundle(&bundle, target)
+    })
+}
+
 /// The same C-link resolution over a program the caller already loaded.
 ///
 /// #2083: a build resolves its link flags from the one front end it ran
@@ -2393,11 +2708,23 @@ pub fn resolve_c_links_for_bundle(
     if !bundle.cffi.links_c() {
         return Ok(Vec::new());
     }
+    let entry = bundle
+        .modules
+        .get(bundle.entry)
+        .map(|module| module.path.as_path());
     match target {
-        Some(target) => {
-            crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)
-        }
-        None => crate::CFFI::rustc_link_args(&bundle.cffi, &bundle.project_root),
+        Some(target) => crate::CFFI::rustc_link_args_for_target_with_entry(
+            &bundle.cffi,
+            &bundle.project_root,
+            target,
+            entry,
+        ),
+        None => crate::CFFI::rustc_link_args_for_target_with_entry(
+            &bundle.cffi,
+            &bundle.project_root,
+            &crate::FFI::host_target(),
+            entry,
+        ),
     }
 }
 

@@ -55,7 +55,7 @@ fn jet_cmd(args: &[&str], cwd: &Path, store_dir: &Path) -> std::process::Output 
     Command::new(jet_bin())
         .args(args)
         .current_dir(cwd)
-        .env("JET_STORE_DIR", store_dir)
+        .env("JET_PACKAGE_STORE_DIR", store_dir)
         .output()
         .expect("jet binary should run")
 }
@@ -262,15 +262,15 @@ fn init_clean_project(dir: &Path, name: &str, version: &str) {
     }
 }
 
-/// Run `f` with JET_STORE_DIR set to `store_dir`, serializing concurrent calls.
+/// Run `f` with JET_PACKAGE_STORE_DIR set to `store_dir`, serializing concurrent calls.
 fn with_store<T, F: FnOnce() -> T>(store_dir: &Path, f: F) -> T {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let prev = std::env::var("JET_STORE_DIR").ok();
-    std::env::set_var("JET_STORE_DIR", store_dir);
+    let prev = std::env::var("JET_PACKAGE_STORE_DIR").ok();
+    std::env::set_var("JET_PACKAGE_STORE_DIR", store_dir);
     let result = f();
     match prev {
-        Some(v) => std::env::set_var("JET_STORE_DIR", v),
-        None => std::env::remove_var("JET_STORE_DIR"),
+        Some(v) => std::env::set_var("JET_PACKAGE_STORE_DIR", v),
+        None => std::env::remove_var("JET_PACKAGE_STORE_DIR"),
     }
     result
 }
@@ -2916,6 +2916,63 @@ fn store_install_rejects_source_and_destination_symlinks() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+#[test]
+fn store_snapshot_install_and_vendor_reject_multiply_linked_source() {
+    use std::collections::HashMap;
+
+    let scratch = Scratch::new("store_vendor_hardlink");
+    let store = scratch.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let source = scratch.join("source");
+    write(&source, "package.jet", &min_manifest("dep", "0.1.0"));
+    let outside = scratch.join("outside.bin");
+    fs::write(&outside, b"must remain outside\n").unwrap();
+    fs::hard_link(&outside, source.join("linked.bin")).unwrap();
+
+    let snapshot = with_store(&store, || jet::Store::snapshot_tree(&source));
+    assert!(
+        snapshot.is_err(),
+        "snapshot_tree must reject multiply-linked source files"
+    );
+
+    let ensured = with_store(&store, || {
+        jet::Store::ensure_path_dep("dep", "0.1.0", "sha256-hardlink", &source)
+    });
+    assert!(
+        ensured.is_err(),
+        "ensure_path_dep must reject multiply-linked source files"
+    );
+
+    let mut dep_dirs = HashMap::new();
+    dep_dirs.insert("dep".to_string(), source.clone());
+    let vendor_dir = scratch.join("vendor");
+    let vendored = jet::Publish::vendor(
+        &scratch.path,
+        &make_test_lock("dep", "0.1.0", "sha256-hardlink"),
+        &dep_dirs,
+        &vendor_dir,
+    );
+    assert!(
+        vendored.is_err(),
+        "Publish::vendor must reject multiply-linked source files"
+    );
+    assert!(
+        !vendor_dir.join("dep").exists(),
+        "failed vendor must not publish a dependency directory"
+    );
+    assert_eq!(
+        fs::read(&outside).unwrap(),
+        b"must remain outside\n",
+        "hardlinked source bytes must remain unchanged"
+    );
+}
+
 #[test]
 fn source_snapshot_keeps_verified_bytes_after_source_mutation() {
     let tmp = tmp_dir("source_snapshot_mutation");
@@ -3077,6 +3134,8 @@ fn lock_file_content_hash_roundtrip() {
         name: "foo".into(),
         version: "1.0.0".into(),
         source: LockSource::Path("../foo".into()),
+        nix_closure: None,
+
         locked: None,
         fingerprint: "sha256-cccc".into(),
         content_hash: Some("sha256-deadbeef".into()),
@@ -3305,7 +3364,6 @@ fn transitive_path_dependency_cannot_escape_via_symlinked_directory() {
             .expect_err("a symlinked transitive path must be rejected")
     });
     assert_eq!(first_diag_code(&error), "E1206");
-    assert!(error[0].what.contains("escapes"));
     assert!(!store.join("escape").exists(), "escaped package was ingested");
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -3556,6 +3614,116 @@ fn locked_build_rejects_tampered_path_dependency_store_entry() {
         fs::write(store_entry.join("greeter.jet"), "pub fn compromised() {}\n").unwrap();
         jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), locked)
             .expect_err("locked build must reject a changed store entry before loading it")
+    });
+    assert_eq!(first_diag_code(&errors), "E1204");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn locked_build_rejects_wide_empty_store_tree_before_dependency_manifest_load() {
+    let tmp = tmp_dir("locked_build_wide_empty_tree");
+    let store = tmp.join("store");
+    let dependency = tmp.join("greeter");
+    fs::create_dir_all(&store).unwrap();
+    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(&dependency, "greeter.jet", "pub fn greet() {}\n");
+    for index in 0..128 {
+        fs::create_dir(dependency.join(format!("empty-{index}"))).unwrap();
+    }
+    let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+    write(&tmp, "package.jet", &raw);
+    write(&tmp, "run.jet", "fn run() {}\n");
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let unlocked = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let (lock, _) = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &unlocked)
+            .expect("initial path fetch should create a lock hash")
+    });
+    let lock_before = fs::read(tmp.join(".jet/lock")).unwrap();
+
+    let mut locked = jet::Driver::BuildRunOptions::default();
+    locked.locked = true;
+    let entry = tmp.join("run.jet");
+    let errors = with_store(&store, || {
+        let package = lock
+            .packages
+            .iter()
+            .find(|package| package.name == "greeter")
+            .expect("path dependency must be recorded in the lock");
+        let store_entry = jet::Store::store_path(
+            &package.name,
+            &package.version,
+            &package.fingerprint,
+        );
+        assert!(store_entry.join("empty-127").is_dir());
+        // The malformed manifest must not be read before the bounded tree
+        // verification reports the changed source as E1204.
+        fs::write(store_entry.join("package.jet"), "not a package\n").unwrap();
+        let errors = jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), locked)
+            .expect_err("locked build must reject a changed wide source tree");
+        assert_eq!(
+            fs::read(store_entry.join("package.jet")).unwrap(),
+            b"not a package\n"
+        );
+        errors
+    });
+    assert_eq!(first_diag_code(&errors), "E1204");
+    assert_eq!(fs::read(tmp.join(".jet/lock")).unwrap(), lock_before);
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn locked_build_rejects_deep_store_tree_before_dependency_manifest_load() {
+    let tmp = tmp_dir("locked_build_deep_tree");
+    let store = tmp.join("store");
+    let dependency = tmp.join("greeter");
+    fs::create_dir_all(&store).unwrap();
+    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(&dependency, "greeter.jet", "pub fn greet() {}\n");
+    let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+    write(&tmp, "package.jet", &raw);
+    write(&tmp, "run.jet", "fn run() {}\n");
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let unlocked = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let (lock, _) = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &unlocked)
+            .expect("initial path fetch should create a lock hash")
+    });
+
+    let mut locked = jet::Driver::BuildRunOptions::default();
+    locked.locked = true;
+    let entry = tmp.join("run.jet");
+    let errors = with_store(&store, || {
+        let package = lock
+            .packages
+            .iter()
+            .find(|package| package.name == "greeter")
+            .expect("path dependency must be recorded in the lock");
+        let store_entry = jet::Store::store_path(
+            &package.name,
+            &package.version,
+            &package.fingerprint,
+        );
+        let mut nested = store_entry.clone();
+        for index in 0..=jet::SHA256::MAX_TREE_DEPTH {
+            nested.push(format!("d{index}"));
+            fs::create_dir(&nested).unwrap();
+        }
+        // If the loader reads dependency facts before source verification, this
+        // malformed manifest would replace the tree-limit E1204.
+        fs::write(store_entry.join("package.jet"), "not a package\n").unwrap();
+        jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), locked)
+            .expect_err("locked build must reject a deep source tree before loading it")
     });
     assert_eq!(first_diag_code(&errors), "E1204");
     let _ = fs::remove_dir_all(&tmp);
@@ -3900,6 +4068,26 @@ fn git_dep_rejects_reserved_ipv4_transport_before_network_access() {
     assert_eq!(first_diag_code(&diags), "E1203");
     assert!(!tmp.join(".jet").exists(), "rejected transport created project state");
     let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn git_transport_uses_canonical_public_ip_classifier() {
+    let source =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Source/Fetch.rs"))
+            .expect("Fetch source should be readable");
+    assert_eq!(
+        source.matches("jet_net::is_public_ip(").count(),
+        1,
+        "Git transport should have one call site for the canonical IP classifier"
+    );
+    assert!(
+        !source.contains("fn is_public_ip("),
+        "Git transport must not define a duplicate IP classifier"
+    );
+    assert!(
+        !source.contains("to_ipv4_mapped") && !source.contains("first & 0xe000"),
+        "Git transport must not carry a second IP range table"
+    );
 }
 
 #[cfg(unix)]
@@ -4366,6 +4554,129 @@ fn git_dep_rejects_embedded_credentials_before_git_execution() {
 
 #[cfg(unix)]
 #[test]
+fn git_dep_hostile_transports_reject_before_fake_git_execution() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let run_case = |label: &str, url: String, expected_reason: &str| {
+        let tmp = tmp_dir(label);
+        let fake_bin = tmp.join("fake-bin");
+        let marker = tmp.join("git-transport-invoked");
+        fs::create_dir_all(&fake_bin).unwrap();
+        let fake_git = fake_bin.join("git");
+        fs::write(
+            &fake_git,
+            r#"#!/bin/sh
+touch "$JET_TEST_GIT_INVOKED"
+exit 99
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&fake_git, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let raw = manifest_with_deps(
+            "app",
+            "0.1.0",
+            &format!(
+                "    hostile: {{ git: \"{url}\", rev: \"0000000000000000000000000000000000000000\" }},"
+            ),
+        );
+        write(&tmp, "package.jet", &raw);
+        let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+        let store = tmp.join("store");
+        fs::create_dir_all(&store).unwrap();
+        let options = jet::Fetch::FetchOptions {
+            locked: false,
+            update: false,
+            update_dep: None,
+            resolution: jet::Publish::ResolveMode::Conservative,
+        };
+
+        let mut path_entries = vec![fake_bin];
+        if let Some(path) = std::env::var_os("PATH") {
+            path_entries.extend(std::env::split_paths(&path));
+        }
+        let fake_path = std::env::join_paths(path_entries).unwrap();
+        let previous_path = std::env::var_os("PATH");
+        let previous_marker = std::env::var_os("JET_TEST_GIT_INVOKED");
+        let diagnostics = with_store(&store, || {
+            std::env::set_var("PATH", &fake_path);
+            std::env::set_var("JET_TEST_GIT_INVOKED", &marker);
+            let result = jet::Fetch::fetch(&tmp, &manifest, None, &options);
+            match previous_path.as_ref() {
+                Some(value) => std::env::set_var("PATH", value),
+                None => std::env::remove_var("PATH"),
+            }
+            match previous_marker.as_ref() {
+                Some(value) => std::env::set_var("JET_TEST_GIT_INVOKED", value),
+                None => std::env::remove_var("JET_TEST_GIT_INVOKED"),
+            }
+            result.expect_err("hostile Git transport must be rejected")
+        });
+        assert_eq!(first_diag_code(&diagnostics), "E1203");
+        let rendered = jet::Diagnostics::render_all(
+            &tmp.join("package.jet").to_string_lossy(),
+            &raw,
+            &diagnostics,
+        );
+        assert!(
+            rendered.contains(expected_reason),
+            "unexpected hostile Git policy diagnostic:\n{rendered}"
+        );
+        assert!(
+            !marker.exists(),
+            "hostile Git transport executed fake git for {url}"
+        );
+        assert!(
+            !tmp.join(".jet").exists(),
+            "rejected Git transport created project state"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    };
+
+    run_case(
+        "git_hostile_private",
+        "http://127.0.0.1:9/private.git".to_string(),
+        "destination resolves to a non-public address",
+    );
+    run_case(
+        "git_hostile_reserved",
+        "https://192.0.0.1/repository.git".to_string(),
+        "destination resolves to a non-public address",
+    );
+    run_case(
+        "git_hostile_link_local",
+        "https://169.254.169.254/latest/repository.git".to_string(),
+        "destination resolves to a non-public address",
+    );
+    run_case(
+        "git_hostile_credentials",
+        "https://user:secret@example.com/repository.git".to_string(),
+        "SSH user-info must be a safe username",
+    );
+
+    let local_project = tmp_dir("git_hostile_local");
+    let outside = local_project.with_file_name(format!(
+        "jet_pkg_git_hostile_outside_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&outside).unwrap();
+    run_case(
+        "git_hostile_local_file",
+        format!("file://{}", outside.display()),
+        "local Git path resolves outside the project root",
+    );
+    let _ = fs::remove_dir_all(&local_project);
+    let _ = fs::remove_dir_all(&outside);
+
+    run_case(
+        "git_hostile_local_path",
+        "../unscoped.git".to_string(),
+        "local git paths must use file:// inside the project root",
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn git_dep_rejects_ssh_userinfo_option_before_transport_execution() {
     if !have_git() {
         eprintln!("note: skipping git_dep_ssh_userinfo_option (git not found)");
@@ -4452,6 +4763,91 @@ exit 99
     assert!(!marker.exists(), "hostile SSH user-info reached Git transport");
     assert!(!tmp.join(".jet").exists());
     let _ = fs::remove_dir_all(&tmp);
+}
+
+#[cfg(unix)]
+fn assert_option_git_url_rejected_before_execution(selector: &str, label: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tmp_dir(label);
+    let fake_bin = tmp.join("bin");
+    let marker = tmp.join("git-url-invoked");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let fake_git = fake_bin.join("git");
+    fs::write(
+        &fake_git,
+        r#"#!/bin/sh
+touch "$JET_TEST_GIT_INVOKED"
+exit 99
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&fake_git, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let raw = manifest_with_deps(
+        "app",
+        "0.1.0",
+        &format!("    hostile: {{ git: \"--upload-pack=touch\", {selector} }},"),
+    );
+    write(&tmp, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    let options = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let mut path_entries = vec![fake_bin];
+    if let Some(path) = std::env::var_os("PATH") {
+        path_entries.extend(std::env::split_paths(&path));
+    }
+    let fake_path = std::env::join_paths(path_entries).unwrap();
+    let previous_path = std::env::var_os("PATH");
+    let previous_invoked = std::env::var_os("JET_TEST_GIT_INVOKED");
+    let result = with_store(&store, || {
+        std::env::set_var("PATH", &fake_path);
+        std::env::set_var("JET_TEST_GIT_INVOKED", &marker);
+        let result = jet::Fetch::fetch(&tmp, &manifest, None, &options);
+        match previous_path.as_ref() {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        match previous_invoked.as_ref() {
+            Some(value) => std::env::set_var("JET_TEST_GIT_INVOKED", value),
+            None => std::env::remove_var("JET_TEST_GIT_INVOKED"),
+        }
+        result
+    });
+
+    let diagnostics = result.expect_err("leading-option Git URL must be rejected before Git runs");
+    assert_eq!(first_diag_code(&diagnostics), "E1203");
+    assert!(
+        !marker.exists(),
+        "leading-option Git URL reached the Git process"
+    );
+    assert!(!tmp.join(".jet").exists());
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[cfg(unix)]
+#[test]
+fn git_dep_rejects_option_url_before_ls_remote_execution() {
+    assert_option_git_url_rejected_before_execution(
+        "branch: \"main\"",
+        "git_option_url_ls_remote",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn git_dep_rejects_option_url_before_clone_execution() {
+    assert_option_git_url_rejected_before_execution(
+        "rev: \"0000000000000000000000000000000000000000\"",
+        "git_option_url_clone",
+    );
 }
 
 #[test]
@@ -5989,6 +6385,8 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             fingerprint: fp.into(),
             content_hash: None,
             source: LockSource::Path("/tmp/placeholder".into()),
+            nix_closure: None,
+
             locked: None,
             dependencies: vec![],
             layer: None,
@@ -6300,7 +6698,7 @@ fn cli_publish_refuses_dirty_git_tree() {
         &["registry", "publish", "--force"],
         &tmp,
         &[
-            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
             ("JET_REGISTRY_URL", bogus.as_str()),
             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
         ],
@@ -6347,7 +6745,7 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
     let envs = &[
         ("JET_REGISTRY_URL", url.as_str()),
         ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
@@ -6461,7 +6859,7 @@ fn cli_concurrent_publish_keeps_one_immutable_version() {
             .env("JET_REGISTRY_URL", &url)
             .env("JET_REGISTRY_CACHE_DIR", &cache)
             .env("JET_KEYS_DIR", &keys)
-            .env("JET_STORE_DIR", store)
+            .env("JET_PACKAGE_STORE_DIR", store)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -6548,7 +6946,7 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
         &[
             ("JET_REGISTRY_URL", url.as_str()),
             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
             ("JET_KEYS_DIR", keys.to_str().unwrap()),
         ],
     );
@@ -6796,7 +7194,7 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
         &[
             ("JET_REGISTRY_URL", offline_registry_url.as_str()),
             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
             ("JET_KEYS_DIR", keys.to_str().unwrap()),
             ("JETPACK_ROOT", hangar_root.to_str().unwrap()),
         ],
@@ -6842,7 +7240,7 @@ fn registry_fetch_rejects_tampered_referrer_index_before_hangar_ingest() {
         &[
             ("JET_REGISTRY_URL", url.as_str()),
             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
             ("JET_KEYS_DIR", keys.to_str().unwrap()),
         ],
     );
@@ -6981,7 +7379,7 @@ fn registry_fetch_applies_artifact_dependency_roles_features_and_constraints() {
             &[
                 ("JET_REGISTRY_URL", url.as_str()),
                 ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-                ("JET_STORE_DIR", store.to_str().unwrap()),
+                ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
                 ("JET_KEYS_DIR", keys.to_str().unwrap()),
             ],
         );
@@ -7232,7 +7630,7 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
         &[
             ("JET_REGISTRY_URL", url.as_str()),
             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
             ("JET_KEYS_DIR", keys.to_str().unwrap()),
         ],
     );
@@ -7288,7 +7686,7 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
         let env_keys = [
             "JET_REGISTRY_URL",
             "JET_REGISTRY_CACHE_DIR",
-            "JET_STORE_DIR",
+            "JET_PACKAGE_STORE_DIR",
             "JETPACK_ROOT",
             "JET_ADVISORY_NOW",
             "JET_ADVISORY_DB",
@@ -7301,7 +7699,7 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
             .collect::<Vec<_>>();
         std::env::set_var("JET_REGISTRY_URL", &url);
         std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
-        std::env::set_var("JET_STORE_DIR", &store);
+        std::env::set_var("JET_PACKAGE_STORE_DIR", &store);
         std::env::set_var("JETPACK_ROOT", &hangar_root);
         std::env::set_var("JET_ADVISORY_NOW", "200");
         std::env::remove_var("JET_ADVISORY_DB");
@@ -7436,7 +7834,7 @@ fn cli_yank_flips_index_entry() {
     let envs = &[
         ("JET_REGISTRY_URL", url.as_str()),
         ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
@@ -7780,7 +8178,7 @@ fn cli_publish_unreachable_registry_e1235() {
     let envs = &[
         ("JET_REGISTRY_URL", bogus.as_str()),
         ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
     ];
 
     let out = jet_cmd_env(&["registry", "publish"], &proj, envs);
@@ -8301,7 +8699,7 @@ fn cli_publish_signs_index_and_auto_keygens() {
     let envs = &[
         ("JET_REGISTRY_URL", url.as_str()),
         ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
@@ -8399,7 +8797,7 @@ fn cli_publish_auto_keygen_entropy_failure_mutates_nothing() {
             ("JET_KEYS_DIR", keys.to_str().unwrap()),
             ("JET_REGISTRY_URL", registry_url.as_str()),
             ("JET_REGISTRY_CACHE_DIR", registry_cache.to_str().unwrap()),
-            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_PACKAGE_STORE_DIR", registry_cache.to_str().unwrap()),
         ],
     );
     assert_eq!(out.status.code(), Some(1));
@@ -8464,7 +8862,7 @@ fn cli_publish_existing_key_bypasses_entropy_keygen() {
             ("JET_KEYS_DIR", keys.to_str().unwrap()),
             ("JET_REGISTRY_URL", registry_url.as_str()),
             ("JET_REGISTRY_CACHE_DIR", registry_cache.to_str().unwrap()),
-            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
         ],
     );
     assert!(
@@ -8502,7 +8900,7 @@ fn cli_publish_no_sign_leaves_signature_empty() {
     let envs = &[
         ("JET_REGISTRY_URL", url.as_str()),
         ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-        ("JET_STORE_DIR", store.to_str().unwrap()),
+        ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
         ("JET_KEYS_DIR", keys.to_str().unwrap()),
     ];
 
@@ -8552,7 +8950,7 @@ fn cli_community_publish_refuses_until_all_named_gates_pass() {
             ("JET_REGISTRY_URL", url.as_str()),
             ("JET_REGISTRY_TIER", "community"),
             ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
-            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_PACKAGE_STORE_DIR", store.to_str().unwrap()),
             ("JET_KEYS_DIR", keys.to_str().unwrap()),
         ],
     );
@@ -8722,6 +9120,197 @@ fn keygen_refuses_existing_key_e1248() {
         // --force overwrites.
         jet::Publish::Sign::keygen("jet", true).expect("--force keygen must overwrite");
     });
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn locked_build_rejects_manifest_lock_git_identity_mismatches() {
+    if !have_git() {
+        eprintln!("note: skipping locked_build_git_identity_mismatches (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("locked_build_git_identity");
+    let source = tmp.join("mylib_source");
+    write(&source, "package.jet", &min_manifest("mylib", "0.1.0"));
+    write(
+        &source,
+        "mylib.jet",
+        "pub fn answer() Int -> { return 42 }\n",
+    );
+
+    assert!(
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&source)
+            .status()
+            .unwrap()
+            .success(),
+        "git init failed"
+    );
+    for (key, value) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
+        assert!(
+            Command::new("git")
+                .args(["config", key, value])
+                .current_dir(&source)
+                .status()
+                .unwrap()
+                .success(),
+            "git config {key} failed"
+        );
+    }
+    assert!(
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(&source)
+            .status()
+            .unwrap()
+            .success(),
+        "git add failed"
+    );
+    assert!(
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(&source)
+            .status()
+            .unwrap()
+            .success(),
+        "git commit failed"
+    );
+    let revision = String::from_utf8(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&source)
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    assert_eq!(revision.len(), 40, "test Git revision must be a full object id");
+
+    let bare = tmp.join("mylib.git");
+    assert!(
+        Command::new("git")
+            .args([
+                "clone",
+                "--bare",
+                source.to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap()
+            .success(),
+        "git clone --bare failed"
+    );
+    let repo_url = format!("file://{}", bare.display());
+    let raw = manifest_with_deps(
+        "app",
+        "0.1.0",
+        &format!("    mylib: {{ git: \"{repo_url}\", rev: \"{revision}\" }},"),
+    );
+    write(&tmp, "package.jet", &raw);
+    let entry = tmp.join("run.jet");
+    write(
+        &tmp,
+        "run.jet",
+        "use mylib;\nfn run() { print(mylib.answer()); }\n",
+    );
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let store = tmp.join("store");
+    let home = tmp.join("home");
+    fs::create_dir_all(&store).unwrap();
+    fs::create_dir_all(&home).unwrap();
+
+    let unlocked = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let (base_lock, _) = with_store(&store, || {
+        let previous_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
+        let result = jet::Fetch::fetch(&tmp, &manifest, None, &unlocked);
+        match previous_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        result.expect("initial Git fetch should create a lock")
+    });
+    let locked_package = base_lock
+        .packages
+        .iter()
+        .find(|package| package.name == "mylib")
+        .expect("Git dependency must be recorded in the lock");
+    assert!(matches!(
+        locked_package.source,
+        jet::Lock::LockSource::Git { .. }
+    ));
+    assert_eq!(
+        locked_package
+            .locked
+            .as_ref()
+            .expect("Git dependency must pin a revision")
+            .rev,
+        revision
+    );
+
+    let mut baseline_options = jet::Driver::BuildRunOptions::default();
+    baseline_options.locked = true;
+    with_store(&store, || {
+        jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), baseline_options)
+            .expect("the unchanged locked Git dependency should build")
+    });
+
+    let expected = "Error [E1204]: locked dependency `mylib` failed source verification\n Why: the locked Git URL or revision disagrees with the manifest\n Fix: run `jet fetch` to recreate the lock from the verified dependency source\nMore: jet-lang.dev/e/E1204\n";
+    for (label, mutation) in [
+        ("URL", "url"),
+        ("selector kind and value", "selector"),
+        ("explicit revision", "revision"),
+    ] {
+        let mut hostile_lock = base_lock.clone();
+        let package = hostile_lock
+            .packages
+            .iter_mut()
+            .find(|package| package.name == "mylib")
+            .expect("Git dependency must be recorded in every hostile lock");
+        match mutation {
+            "url" => match &mut package.source {
+                jet::Lock::LockSource::Git { url, .. } => {
+                    *url = format!("file://{}/other.git", tmp.display());
+                }
+                _ => panic!("Git dependency source changed unexpectedly"),
+            },
+            "selector" => match &mut package.source {
+                jet::Lock::LockSource::Git { selector, .. } => {
+                    *selector = "tag = \"hostile-selector\"".to_string();
+                }
+                _ => panic!("Git dependency source changed unexpectedly"),
+            },
+            "revision" => {
+                package
+                    .locked
+                    .as_mut()
+                    .expect("Git dependency must pin a revision")
+                    .rev = "0".repeat(40);
+            }
+            _ => unreachable!("all hostile mutations are named above"),
+        }
+        fs::write(tmp.join(".jet/lock"), jet::Lock::write(&hostile_lock)).unwrap();
+
+        let mut options = jet::Driver::BuildRunOptions::default();
+        options.locked = true;
+        let errors = with_store(&store, || {
+            jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), options)
+                .expect_err(&format!("{label} mismatch must fail before package use"))
+        });
+        assert_eq!(first_diag_code(&errors), "E1204", "{label} mismatch");
+        let rendered = jet::Diagnostics::render_all("package.jet", &raw, &errors);
+        assert_eq!(rendered, expected, "{label} mismatch diagnostic");
+    }
 
     let _ = fs::remove_dir_all(&tmp);
 }

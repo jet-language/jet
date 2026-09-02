@@ -4,10 +4,10 @@
 //! contribution to that Package. Both are plain data: parsing is structural,
 //! composition is deterministic, and realization stays in `jetpack`.
 //!
-//! This is the **only** reader of `package.jet` (D-CONF-PLANE1, ratified
-//! 2026-08-06): the compile path (`jet-driver`), tooling, and Canvas all
-//! parse through `PackageFacts::parse`/`load`. There is no second,
-//! legacy-vocabulary parser — `deps:`/`packages:`/`build:`/
+//! This is the **only** reader of canonical Package carriers
+//! (D-CONF-PLANE1, ratified 2026-08-06): the compile path (`jet-driver`),
+//! tooling, and Canvas all parse through `PackageFacts::parse`/`load`. There
+//! is no second, legacy-vocabulary parser — `deps:`/`packages:`/`build:`
 //! `authority:`/`policy:` block grammar lives in `Blocks`.
 
 pub mod Blocks;
@@ -16,9 +16,11 @@ mod Discovery;
 mod Edit;
 
 pub use Blocks::{
-    build_entry_source, dep_display, dep_display_redacted, parse_policy_document, AuthorityHolds,
-    BuildOptimize, BuildPanic, BuildProfileDef, DepSource, ImportBoundary, PackageEntry,
-    PackageKind, ProvenanceRequirement, ProviderAuthority, Target, TrustDecision, TrustPolicy,
+    build_entry_source, dep_display, dep_display_redacted, extract_inline_package,
+    mask_inline_package_source, parse_policy_document, AuthorityHolds, InlinePackageBlock,
+    InlinePackageError, BuildOptimize, BuildPanic, BuildProfileDef, DepSource, ImportBoundary,
+    PackageEntry, PackageKind, ProvenanceRequirement, ProviderAuthority, Target, TrustDecision,
+    TrustPolicy,
 };
 pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
@@ -480,6 +482,26 @@ pub enum PackageParseError {
     },
 }
 
+/// D-ECO-INLINEPACKAGE1=A: structural carrier failures and canonical Package
+/// field failures share one parse result without introducing another field
+/// grammar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InlinePackageParseError {
+    Structure(Blocks::InlinePackageError),
+    Fields(PackageParseError),
+}
+
+impl fmt::Display for InlinePackageParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Structure(error) => error.fmt(f),
+            Self::Fields(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for InlinePackageParseError {}
+
 impl fmt::Display for PackageParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -629,6 +651,22 @@ impl PackageFacts {
             .validate_defaults()
             .map_err(|error| PackageParseError::Composition(error.to_string()))?;
         Ok(facts)
+    }
+
+    /// Parse one contextual leading `package { … }` carrier with the same
+    /// canonical Package field parser used by `package.jet`.
+    pub fn parse_inline(
+        text: &str,
+        origin: impl Into<String>,
+    ) -> Result<Option<(Self, Blocks::InlinePackageBlock)>, InlinePackageParseError> {
+        let Some(block) = Blocks::extract_inline_package(text)
+            .map_err(InlinePackageParseError::Structure)?
+        else {
+            return Ok(None);
+        };
+        let facts = Self::parse(block.body(text), origin)
+            .map_err(InlinePackageParseError::Fields)?;
+        Ok(Some((facts, block)))
     }
 
     /// Parse the root's own declarations without validating references that
@@ -923,21 +961,29 @@ impl PackageFacts {
                 .map_err(|error| format!("{}: {error}", self.origin))?;
             return self.resolve_run_entry_checked(&fresh);
         }
-        match resolver.checked_file(Path::new(crate::Syntax::DEFAULT_ENTRY_FILE)) {
-            Ok(file) => {
-                resolver
-                    .revalidate_file(&file)
-                    .map_err(|error| format!("{}: {error}", self.origin))?;
-                return Ok(Some(CheckedPackageEntry {
-                    file,
-                    callable: crate::Syntax::DEFAULT_ENTRY_FILE
-                        .strip_suffix(".jet")
-                        .unwrap_or(crate::Syntax::DEFAULT_ENTRY_FILE)
-                        .to_string(),
-                }));
+        let canonical_run_name = crate::Syntax::DEFAULT_ENTRY_FILE
+            .strip_suffix(".jet")
+            .unwrap_or(crate::Syntax::DEFAULT_ENTRY_FILE);
+        for relative in [
+            PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
+            PathBuf::from("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
+        ] {
+            match resolver.checked_file(&relative) {
+                Ok(file) => {
+                    resolver
+                        .revalidate_file(&file)
+                        .map_err(|error| format!("{}: {error}", self.origin))?;
+                    return Ok(Some(CheckedPackageEntry {
+                        file,
+                        callable: canonical_run_name.to_string(),
+                    }));
+                }
+                // `run` is the canonical entry selector. A missing canonical
+                // file is a closed negative result; never reinterpret it as
+                // an arbitrary source-file search.
+                Err(error) if error.is_missing() => {}
+                Err(error) => return Err(format!("{}: {error}", self.origin)),
             }
-            Err(error) if error.is_missing() => {}
-            Err(error) => return Err(format!("{}: {error}", self.origin)),
         }
         let main = match resolver.checked_file(Path::new(crate::Syntax::LEGACY_ENTRY_FILE)) {
             Ok(file) => Some(file),
@@ -981,6 +1027,7 @@ impl PackageFacts {
         }
         Ok(None)
     }
+ 
 
     /// Resolve the package's optional `fn build` from the same checked source
     /// tree used by Output entry discovery. The package has one build
@@ -1134,20 +1181,26 @@ impl PackageFacts {
             .strip_suffix(".jet")
             .unwrap_or(crate::Syntax::DEFAULT_ENTRY_FILE);
         if parts.len() == 1 && parts[0] == canonical_run_name {
-            match resolver.checked_file(Path::new(crate::Syntax::DEFAULT_ENTRY_FILE)) {
-                Ok(file) => {
-                    resolver.revalidate_file(&file)?;
-                    return Ok(Some(CheckedPackageEntry {
-                        file,
-                        callable: canonical_run_name.to_string(),
-                    }));
+            for relative in [
+                PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
+                PathBuf::from("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
+            ] {
+                match resolver.checked_file(&relative) {
+                    Ok(file) => {
+                        resolver.revalidate_file(&file)?;
+                        return Ok(Some(CheckedPackageEntry {
+                            file,
+                            callable: canonical_run_name.to_string(),
+                        }));
+                    }
+                    // `run` is the canonical entry selector. A missing
+                    // canonical candidate is a closed negative result; never
+                    // reinterpret it as an arbitrary source-file search.
+                    Err(error) if error.is_missing() => {}
+                    Err(error) => return Err(error),
                 }
-                // `run` is the canonical entry selector. A missing canonical
-                // file is a closed negative result; never reinterpret it as
-                // an arbitrary source-file search.
-                Err(error) if error.is_missing() => return Ok(None),
-                Err(error) => return Err(error),
             }
+            return Ok(None);
         }
         if parts.len() == 1 {
             let matches =
@@ -1742,6 +1795,199 @@ pub fn rewrite_retired_targets(text: &str) -> (String, usize) {
     }
     (rewritten, spans.len())
 }
+/// Rewrite public provider references in typed dependency maps before parsing.
+///
+/// The Package model rejects retired public `@nixpkgs` input so normal source
+/// formatting cannot safely serve as the migration path. Restrict this edit to
+/// direct `deps:` values; arbitrary strings and nested metadata stay byte-stable.
+fn rewrite_retired_dependency_refs(text: &str) -> (String, usize) {
+    let (tokens, lex_diags) = Lexer::lex(text);
+    if !lex_diags.is_empty() {
+        return (text.to_string(), 0);
+    }
+    let tokens: Vec<&Lexer::Token> = tokens
+        .iter()
+        .filter(|token| {
+            !Lexer::is_comment(&token.kind) && !matches!(token.kind, Lexer::TokKind::Eof)
+        })
+        .collect();
+    let mut edits = Vec::new();
+    for index in 0..tokens.len() {
+        if !matches!(&tokens[index].kind, Lexer::TokKind::Ident(name) if name == "deps")
+            || !matches!(
+                tokens.get(index + 1).map(|token| &token.kind),
+                Some(Lexer::TokKind::Colon)
+            )
+        {
+            continue;
+        }
+        let mut open = index + 2;
+        if matches!(
+            tokens.get(open).map(|token| &token.kind),
+            Some(Lexer::TokKind::Dot)
+        ) {
+            open += 1;
+        }
+        if !matches!(
+            tokens.get(open).map(|token| &token.kind),
+            Some(Lexer::TokKind::LBrace)
+        ) {
+            continue;
+        }
+        let Some(close) = matching_typed_record_brace(&tokens, open) else {
+            continue;
+        };
+        collect_dependency_ref_edits(text, &tokens, open, close, &mut edits);
+    }
+    edits.sort_by_key(|(range, _)| range.start);
+    if edits.is_empty() {
+        return (text.to_string(), 0);
+    }
+    let count = edits.len();
+    let mut rewritten = text.to_string();
+    for (range, replacement) in edits.into_iter().rev() {
+        rewritten.replace_range(range, &replacement);
+    }
+    (rewritten, count)
+}
+
+fn matching_typed_record_brace(tokens: &[&Lexer::Token], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for index in open..tokens.len() {
+        match tokens[index].kind {
+            Lexer::TokKind::LBrace => depth += 1,
+            Lexer::TokKind::RBrace => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn collect_dependency_ref_edits(
+    text: &str,
+    tokens: &[&Lexer::Token],
+    open: usize,
+    close: usize,
+    edits: &mut Vec<(Range<usize>, String)>,
+) {
+    let mut depth = 0i32;
+    let mut value_start = None;
+    let mut index = open + 1;
+    while index < close {
+        if depth == 0 {
+            if value_start.is_some()
+                && dependency_field_boundary(text, tokens, index, value_start.unwrap())
+            {
+                rewrite_dependency_value(text, tokens, value_start.take().unwrap(), index, edits);
+            }
+            if value_start.is_none() && matches!(tokens[index].kind, Lexer::TokKind::Colon) {
+                value_start = Some(index + 1);
+            } else if matches!(tokens[index].kind, Lexer::TokKind::Comma) {
+                if let Some(start) = value_start.take() {
+                    rewrite_dependency_value(text, tokens, start, index, edits);
+                }
+            }
+        }
+        match tokens[index].kind {
+            Lexer::TokKind::LBrace | Lexer::TokKind::LBracket | Lexer::TokKind::LParen => {
+                depth += 1
+            }
+            Lexer::TokKind::RBrace | Lexer::TokKind::RBracket | Lexer::TokKind::RParen => {
+                depth -= 1
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    if let Some(start) = value_start {
+        rewrite_dependency_value(text, tokens, start, close, edits);
+    }
+}
+
+fn dependency_field_boundary(
+    text: &str,
+    tokens: &[&Lexer::Token],
+    index: usize,
+    value_start: usize,
+) -> bool {
+    if index <= value_start
+        || !matches!(&tokens[index].kind, Lexer::TokKind::Ident(_))
+        || !matches!(
+            tokens.get(index + 1).map(|token| &token.kind),
+            Some(Lexer::TokKind::Colon)
+        )
+    {
+        return false;
+    }
+    let Some(previous) = tokens.get(index - 1) else {
+        return false;
+    };
+    text.get(previous.span.end..tokens[index].span.start)
+        .is_some_and(|gap| gap.chars().any(char::is_whitespace))
+}
+
+fn rewrite_dependency_value(
+    text: &str,
+    tokens: &[&Lexer::Token],
+    start: usize,
+    end: usize,
+    edits: &mut Vec<(Range<usize>, String)>,
+) {
+    if start >= end {
+        return;
+    }
+    let first = tokens[start];
+    let last = tokens[end - 1];
+    let range = first.span.start..last.span.end;
+    let raw = &text[range.clone()];
+    if let Lexer::TokKind::Str(parts) = &first.kind {
+        if start + 1 != end {
+            return;
+        }
+        let [Lexer::StrTokPart::Lit(value)] = parts.as_slice() else {
+            return;
+        };
+        let replacement = crate::RefSpec::migrate_public_ref(value).canonical;
+        if replacement == *value {
+            return;
+        }
+        let literal = &text[first.span.start..first.span.end];
+        let Some(replacement) = migrated_string_literal(literal, value, &replacement) else {
+            return;
+        };
+        edits.push((first.span.start..first.span.end, replacement));
+    } else {
+        let replacement = crate::RefSpec::migrate_public_ref(raw).canonical;
+        if replacement != raw {
+            edits.push((range, replacement));
+        }
+    }
+}
+
+fn migrated_string_literal(literal: &str, value: &str, replacement: &str) -> Option<String> {
+    let (opening, closing) = if literal.starts_with("\"\"\"") && literal.ends_with("\"\"\"") {
+        (3, 3)
+    } else if literal.starts_with('"') && literal.ends_with('"') {
+        (1, 1)
+    } else {
+        return None;
+    };
+    let body_end = literal.len().checked_sub(closing)?;
+    (literal.get(opening..body_end) == Some(value)).then(|| {
+        format!(
+            "{}{}{}",
+            &literal[..opening],
+            replacement,
+            &literal[body_end..]
+        )
+    })
+}
+
 
 /// Rewrite the retired `.{ … }` record head while preserving strings and comments.
 ///
@@ -1788,6 +2034,7 @@ fn retired_record_head_spans(text: &str) -> Vec<Range<usize>> {
 pub fn format_source(text: &str, origin: impl Into<String>) -> Result<String, String> {
     let origin = origin.into();
     let (canonical_text, _) = rewrite_retired_targets(text);
+    let (canonical_text, _) = rewrite_retired_dependency_refs(&canonical_text);
     let (canonical_text, _) = rewrite_retired_record_heads(&canonical_text);
     let text = canonical_text.as_str();
     let stripped = strip_comments(text);
@@ -3502,6 +3749,9 @@ fn parse_sources(files: &[CheckedFile]) -> Option<Vec<ParsedSource>> {
         .iter()
         .map(|file| {
             let source = file.text().ok()?;
+            let source = crate::Package::mask_inline_package_source(&source)
+                .ok()?
+                .0;
             let (tokens, lex_diags) = crate::Lexer::lex(&source);
             if !lex_diags.is_empty() {
                 return None;
@@ -3792,7 +4042,8 @@ fn top_level_function_lines(source: &str, wanted: &str) -> Vec<usize> {
 /// report the source diagnostic instead of silently treating the file as
 /// ordinary code.
 fn real_build_entry_lines(source: &str, candidates: &[usize]) -> Option<Vec<usize>> {
-    let (tokens, lex_diags) = Lexer::lex(source);
+    let source = crate::Package::mask_inline_package_source(source).ok()?.0;
+    let (tokens, lex_diags) = Lexer::lex(&source);
     if !lex_diags.is_empty() {
         return None;
     }
@@ -3802,7 +4053,7 @@ fn real_build_entry_lines(source: &str, candidates: &[usize]) -> Option<Vec<usiz
         .iter()
         .filter_map(|item| match item {
             crate::AST::Item::Func(func) if Sema::is_build_entry(func) => {
-                Some(source_line_at(source, func.span.start))
+                Some(source_line_at(&source, func.span.start))
             }
             _ => None,
         })
@@ -4388,5 +4639,24 @@ outputs: { app: .Executable{ entry: run } }"#,
         assert!(error.contains("package.jet"));
         assert!(error.contains("no unique source entry"));
         std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn inline_package_reuses_canonical_package_fields() {
+        let source = r#"package {
+name: "inline-demo"
+version: "1.2.3"
+}
+fn run() {}
+"#;
+        let Some((facts, block)) = PackageFacts::parse_inline(source, "run.jet").unwrap() else {
+            panic!("leading inline Package should be found");
+        };
+        let file_facts =
+            PackageFacts::parse("name: \"inline-demo\"\nversion: \"1.2.3\"\n", "package.jet")
+                .unwrap();
+        assert_eq!(facts.semantic_digest(), file_facts.semantic_digest());
+        assert_eq!(facts.name, "inline-demo");
+        assert_eq!(facts.version.as_deref(), Some("1.2.3"));
+        assert_eq!(block.body(source).trim_start(), "name: \"inline-demo\"");
     }
 }

@@ -11,7 +11,7 @@
 mod common;
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use jet::AST::{Expr, Item, MarkerDecl, StrPart};
 use jet_foundation::Facts;
@@ -61,30 +61,6 @@ fn every_registry_row_is_one_written_declaration() {
 /// rejection is demonstrated or where ratified decision history records them.
 #[test]
 fn retired_marker_declaration_forms_are_confined_to_fixtures_and_history() {
-    fn visit(path: &Path, files: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(path) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let name = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default();
-                if matches!(
-                    name,
-                    ".git" | ".claude" | ".opencode" | "node_modules" | "target"
-                ) {
-                    continue;
-                }
-                visit(&path, files);
-            } else if path.is_file() {
-                files.push(path);
-            }
-        }
-    }
-
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let allowed = [
         "docs/spec/syntax-decisions.md",
@@ -95,27 +71,74 @@ fn retired_marker_declaration_forms_are_confined_to_fixtures_and_history() {
     let on_clause = [" ", "on", " ", "["].concat();
     let second_list = [")", "("].concat();
     let checked_text_node = ["checked", "_text_head_decl"].concat();
-    let mut files = Vec::new();
-    visit(root, &mut files);
+    let frozen_parity = root.join("dogfood/tower/tests/parity/fixtures");
+    let mut pending = vec![root.to_path_buf()];
     let mut offenders = Vec::new();
-    for path in files {
-        let relative = path
-            .strip_prefix(root)
-            .expect("walked under the repository root")
-            .to_string_lossy()
-            .replace('\\', "/");
-        if allowed.contains(&relative.as_str()) {
-            continue;
-        }
-        let Ok(source) = std::fs::read_to_string(&path) else {
+
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
             continue;
         };
-        for (line_number, line) in source.lines().enumerate() {
-            if (line.contains(&marker_word)
-                && (line.contains(&on_clause) || line.contains(&second_list)))
-                || line.contains(&checked_text_node)
-            {
-                offenders.push(format!("{relative}:{}: {line}", line_number + 1));
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.starts_with(&frozen_parity) {
+                continue;
+            }
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.file_type().is_dir() {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                if matches!(
+                    name,
+                    ".git"
+                        | ".claude"
+                        | ".opencode"
+                        | ".tmp"
+                        | ".jet"
+                        | ".tower"
+                        | ".agent-worktrees"
+                        | "jit-aot-parity-report"
+                        | "node_modules"
+                        | "target"
+                        | "build"
+                        | ".cache"
+                        | "cache"
+                        | "dist"
+                        | "result"
+                ) || name.starts_with("target-")
+                    || name.starts_with("build-")
+                    || name.starts_with("result-")
+                {
+                    continue;
+                }
+                pending.push(path);
+                continue;
+            }
+            if !metadata.file_type().is_file() {
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root)
+                .expect("walked under the repository root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if allowed.contains(&relative.as_str()) {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for (line_number, line) in source.lines().enumerate() {
+                if (line.contains(&marker_word)
+                    && (line.contains(&on_clause) || line.contains(&second_list)))
+                    || line.contains(&checked_text_node)
+                {
+                    offenders.push(format!("{relative}:{}: {line}", line_number + 1));
+                }
             }
         }
     }
@@ -646,6 +669,228 @@ fn run() {}
             .all(|diagnostic| diagnostic.code == "E0927"),
         "the rule must surface its registered diagnostic directly: {diagnostics:?}"
     );
+}
+
+/// D-STRUCT-PLANE1 / I9: the A01 scheduler registration shape must remain
+/// repeatable in one compiler process. Exact duplicate facts remain a
+/// registered user diagnostic, while distinct effective identities stay
+/// separate.
+#[test]
+fn repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic() {
+    const A01_SOURCE: &str = r#"
+use core.files as files
+use core.process as process
+use core.text as text
+
+struct Field {
+    key: String
+    value: String
+}
+
+struct Section {
+    name: String
+    inherits: String
+    fields: [Field]
+}
+
+fn quoted(value: String) String -> {
+    trimmed :: value.trim()
+    pieces :: text.splitn(~trimmed, "\"", 3)
+    if pieces.len() != 3 -> panic("expected quoted value")
+    pieces.get(1) ?? panic("expected quoted value")
+}
+
+fn run() {
+    path :: process.argv().get(1) ?? panic("missing path")
+    source :: files.read(path) ?? panic("read failed")
+    sections := [Section]{}
+    current := -1
+
+    loop line in source.lines() {
+        trimmed :: line.trim()
+        if line.trim().is_empty() -> next
+
+        opening :: text.splitn(~trimmed, "[", 2)
+        if opening.len() == 2 {
+            rest :: opening.get(1) ?? panic("malformed section")
+            closing :: text.splitn(rest, "]", 2)
+            if closing.len() == 2 && (closing.get(1) ?? "x").is_empty() {
+                name :: closing.get(0) ?? panic("malformed section")
+                sections.push(Section{name: name, inherits: "", fields: [Field]{}})
+                current = sections.len() - 1
+                next
+            }
+        }
+
+        if current < 0 -> panic("field before section")
+        pair :: text.splitn(~trimmed, "=", 2)
+        if pair.len() != 2 -> panic("malformed field")
+        key :: (pair.get(0) ?? "").trim()
+        if key.is_empty() -> panic("empty field")
+        value :: quoted(pair.get(1) ?? "")
+        if key == "inherits" {
+            if sections[current].inherits != "" -> panic("duplicate field inherits in section {sections[current].name}")
+            sections[current].inherits = value
+            next
+        }
+        loop field in sections[current].fields {
+            if field.key == key -> panic("duplicate field {key} in section {sections[current].name}")
+        }
+        sections[current].fields.push(Field{key: ~key, value: value})
+    }
+
+    loop section in sections {
+        resolved := [Field]{}
+        if section.inherits != "" {
+            base_index := -1
+            loop i in 0..<sections.len() {
+                if sections[i].name == section.inherits {
+                    base_index = i
+                    break
+                }
+            }
+            if base_index < 0 -> panic("missing inherited section {section.inherits}")
+            loop field in sections[base_index].fields {
+                resolved.push(Field{key: field.key, value: field.value})
+            }
+        }
+        loop field in section.fields {
+            found := false
+            loop i in 0..<resolved.len() {
+                if resolved[i].key == field.key {
+                    resolved[i].value = field.value
+                    found = true
+                    break
+                }
+            }
+            if !found -> resolved.push(Field{key: field.key, value: field.value})
+        }
+        loop field in resolved {
+            print("{section.name}.{field.key}={field.value}")
+        }
+    }
+}
+"#;
+
+    let assert_no_ice = |source: &str, label: &str| {
+        let outcome = std::panic::catch_unwind(|| jet::compile(source))
+            .unwrap_or_else(|_| panic!("{label} must not panic"));
+        if let Err(diagnostics) = outcome {
+            assert!(
+                !diagnostics.is_empty()
+                    && diagnostics
+                        .iter()
+                        .all(|diagnostic| Registry::diagnostic(&diagnostic.code).is_some()),
+                "{label} returned an unregistered diagnostic: {diagnostics:?}"
+            );
+        }
+    };
+
+    for attempt in 0..10 {
+        assert_no_ice(A01_SOURCE, &format!("A01 scheduler attempt {attempt}"));
+    }
+
+    for identity in ["Scheduler", "Target.Scheduler"] {
+        let registrations = Registry::rows()
+            .iter()
+            .filter(|row| row.name == identity)
+            .count();
+        assert_eq!(
+            registrations, 1,
+            "scheduler identity `{identity}` must have one registry row"
+        );
+    }
+    assert!(
+        Registry::law_violations().is_empty(),
+        "scheduler registry rows must satisfy the one-row law: {:?}",
+        Registry::law_violations()
+    );
+
+    const DISTINCT_SOURCE: &str = r#"
+fact Scheduler(@name: "Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider], @decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fn run() {}
+"#;
+    let distinct_outcome = std::panic::catch_unwind(|| jet::compile(DISTINCT_SOURCE))
+        .expect("distinct scheduler identities must not panic");
+    assert!(
+        distinct_outcome.is_ok(),
+        "distinct Scheduler and Target.Scheduler facts must remain separate: {distinct_outcome:?}"
+    );
+
+    const DUPLICATE_SOURCE: &str = r#"
+fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fn run() {}
+"#;
+    let duplicate_shape = |source: &str, label: &str| {
+        let outcome = std::panic::catch_unwind(|| jet::compile(source))
+            .unwrap_or_else(|_| panic!("{label} must not panic"));
+        let diagnostics = outcome.expect_err("{label} must be rejected");
+        let duplicate = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0105")
+            .unwrap_or_else(|| panic!("{label} must retain E0105: {diagnostics:?}"));
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| Registry::diagnostic(&diagnostic.code).is_some()),
+            "{label} must use registered diagnostics: {diagnostics:?}"
+        );
+        (
+            duplicate.what.clone(),
+            duplicate.why.clone(),
+            duplicate.fix.clone(),
+            duplicate.span,
+            duplicate.detail.clone(),
+        )
+    };
+    let mut duplicate_baseline = None;
+    for attempt in 0..10 {
+        let shape = duplicate_shape(
+            DUPLICATE_SOURCE,
+            &format!("exact duplicate fact attempt {attempt}"),
+        );
+        if let Some(expected) = &duplicate_baseline {
+            assert_eq!(
+                &shape, expected,
+                "exact duplicate fact diagnostic must be deterministic"
+            );
+        } else {
+            duplicate_baseline = Some(shape);
+        }
+    }
+
+    const ALIASED_DUPLICATE_SOURCE: &str = r#"
+fact Scheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fn run() {}
+"#;
+    duplicate_shape(
+        ALIASED_DUPLICATE_SOURCE,
+        "facts with one effective Target.Scheduler identity",
+    );
+
+    const CONFLICT_SOURCE: &str = r#"
+fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fact TargetScheduler(@name: "Target.Scheduler", @holds: .Value, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")
+fn run() {}
+"#;
+    let mut conflict_baseline = None;
+    for attempt in 0..10 {
+        let shape = duplicate_shape(
+            CONFLICT_SOURCE,
+            &format!("conflicting fact attempt {attempt}"),
+        );
+        if let Some(expected) = &conflict_baseline {
+            assert_eq!(
+                &shape, expected,
+                "conflicting fact diagnostic must be deterministic"
+            );
+        } else {
+            conflict_baseline = Some(shape);
+        }
+    }
 }
 
 /// Rust files under the compiler, scanned for a second copy of the declaration

@@ -996,11 +996,14 @@ fn jet_sentry_runtime_stop(
     gate: &str,
     operation: &str,
     obligation: &str,
+    obligation_status: &str,
+    foreign_component: Option<&str>,
+    foreign_fenced: Option<bool>,
     detail: &str,
 ) -> ! {
     jet_test_record_stop(code);
     jet_proof_record(2, 1, code, detail, file, line);
-    let report = jet_render_runtime_sentry(
+    let report = jet_render_runtime_sentry_with_context(
         match code {
             "R0801" => "R0801",
             "R0802" => "R0802",
@@ -1013,6 +1016,9 @@ fn jet_sentry_runtime_stop(
         operation,
         obligation,
         detail,
+        obligation_status,
+        foreign_component,
+        foreign_fenced,
     );
     if jet_runtime_should_unwind() {
         jet_stream_record_failure_report(report.rendered.clone());
@@ -1821,31 +1827,220 @@ where
     }
 }
 
-/// Update a text-keyed map from a borrowed UTF-8 byte span. Strict decoding is
-/// performed before the lookup, so this is equivalent to
-/// `String.from_bytes(bytes)` followed by the ordinary string-key update, but
-/// an existing key does not allocate a temporary `String`. The map owns a key
-/// only on the vacant-entry path.
+trait JetStringBytesMap<V> {
+    fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
+    where
+        F: FnOnce(Option<&V>) -> V;
+}
+
+impl<V> JetStringBytesMap<V> for std::collections::BTreeMap<String, V> {
+    #[inline(always)]
+    fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
+    where
+        F: FnOnce(Option<&V>) -> V,
+    {
+        let key = std::str::from_utf8(bytes).map_err(|_| ())?;
+        if let Some(existing) = self.get_mut(key) {
+            let next = f(Some(&*existing));
+            *existing = next;
+        } else {
+            self.insert(key.to_owned(), f(None));
+        }
+        Ok(())
+    }
+}
+
+impl<V: Clone> JetStringBytesMap<V> for JetMap<String, V> {
+    #[inline(always)]
+    fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
+    where
+        F: FnOnce(Option<&V>) -> V,
+    {
+        std::sync::Arc::make_mut(&mut self.0).update_bytes(bytes, f)
+    }
+}
+
+impl<V, M: JetStringBytesMap<V> + ?Sized> JetStringBytesMap<V> for &mut M {
+    #[inline(always)]
+    fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
+    where
+        F: FnOnce(Option<&V>) -> V,
+    {
+        (**self).update_bytes(bytes, f)
+    }
+}
+
+/// The count loop has already proved that its map owns the only backing
+/// allocation. Use a fixed, non-cryptographic hasher only inside that sealed
+/// region; the map is not an input-facing general-purpose hash table.
+#[derive(Clone, Default)]
+struct JetStringCountHasher {
+    hash: u64,
+}
+
+impl JetStringCountHasher {
+    #[inline(always)]
+    fn add(&mut self, value: u64) {
+        self.hash = self
+            .hash
+            .wrapping_add(value)
+            .wrapping_mul(0xf1357aea2e62a9c5);
+    }
+}
+
+impl std::hash::Hasher for JetStringCountHasher {
+    #[inline(always)]
+    fn finish(&self) -> u64 {
+        self.hash.rotate_left(26)
+    }
+
+    #[inline(always)]
+    fn write(&mut self, bytes: &[u8]) {
+        let mut value = bytes.len() as u64;
+        for &byte in bytes {
+            value = value.rotate_left(5) ^ u64::from(byte);
+        }
+        self.add(value);
+    }
+
+    #[inline(always)]
+    fn write_u8(&mut self, value: u8) {
+        self.add(u64::from(value));
+    }
+
+    #[inline(always)]
+    fn write_u64(&mut self, value: u64) {
+        self.add(value);
+    }
+}
+
+type JetStringCountBuildHasher = std::hash::BuildHasherDefault<JetStringCountHasher>;
+
+/// A fresh, uniquely-owned ordered String:Int map can count through a hash
+/// table while a loop has no other access to the map. Keys stay as validated
+/// UTF-8 bytes during the loop; Drop restores the canonical sorted
+/// representation before the map is visible again.
+struct JetStringCountBuilder<'a> {
+    target: &'a mut std::collections::BTreeMap<String, i64>,
+    short_counts: std::collections::HashMap<u64, i64, JetStringCountBuildHasher>,
+    long_counts: std::collections::HashMap<Vec<u8>, i64, JetStringCountBuildHasher>,
+}
+
+impl<'a> JetStringCountBuilder<'a> {
+    #[inline(always)]
+    fn short_key(bytes: &[u8]) -> Option<u64> {
+        if bytes.len() > 7 {
+            return None;
+        }
+        if bytes.len() == 6 {
+            return Some(
+                (6u64 << 56)
+                    | u64::from(bytes[0])
+                    | (u64::from(bytes[1]) << 8)
+                    | (u64::from(bytes[2]) << 16)
+                    | (u64::from(bytes[3]) << 24)
+                    | (u64::from(bytes[4]) << 32)
+                    | (u64::from(bytes[5]) << 40),
+            );
+        }
+        let mut key = (bytes.len() as u64) << 56;
+        for (index, byte) in bytes.iter().enumerate() {
+            key |= u64::from(*byte) << (index * 8);
+        }
+        Some(key)
+    }
+
+    fn short_string(key: u64) -> String {
+        let len = (key >> 56) as usize;
+        let bytes = (0..len)
+            .map(|index| ((key >> (index * 8)) & 0xff) as u8)
+            .collect();
+        String::from_utf8(bytes).expect("JetStringCountBuilder stores only valid UTF-8 keys")
+    }
+
+    fn new(target: &'a mut std::collections::BTreeMap<String, i64>) -> Self {
+        Self::with_source_capacity(target, 0)
+    }
+
+    fn with_source_capacity(
+        target: &'a mut std::collections::BTreeMap<String, i64>,
+        source_bytes: usize,
+    ) -> Self {
+        let estimated_distinct = (source_bytes / 64).min(16_384);
+        let mut short_counts = std::collections::HashMap::with_capacity_and_hasher(
+            estimated_distinct,
+            JetStringCountBuildHasher::default(),
+        );
+        let mut long_counts = std::collections::HashMap::default();
+        for (key, value) in std::mem::take(target) {
+            let bytes = key.into_bytes();
+            if let Some(short) = Self::short_key(&bytes) {
+                short_counts.insert(short, value);
+            } else {
+                long_counts.insert(bytes, value);
+            }
+        }
+        Self {
+            target,
+            short_counts,
+            long_counts,
+        }
+    }
+}
+
+impl JetStringBytesMap<i64> for JetStringCountBuilder<'_> {
+    #[inline(always)]
+    fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
+    where
+        F: FnOnce(Option<&i64>) -> i64,
+    {
+        if let Some(key) = Self::short_key(bytes) {
+            if let Some(existing) = self.short_counts.get_mut(&key) {
+                *existing = f(Some(&*existing));
+            } else {
+                std::str::from_utf8(bytes).map_err(|_| ())?;
+                self.short_counts.insert(key, f(None));
+            }
+        } else if let Some(existing) = self.long_counts.get_mut(bytes) {
+            *existing = f(Some(&*existing));
+        } else {
+            std::str::from_utf8(bytes).map_err(|_| ())?;
+            self.long_counts.insert(bytes.to_owned(), f(None));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for JetStringCountBuilder<'_> {
+    fn drop(&mut self) {
+        self.target.extend(
+            std::mem::take(&mut self.short_counts)
+                .into_iter()
+                .map(|(key, value)| (Self::short_string(key), value)),
+        );
+        self.target.extend(
+            std::mem::take(&mut self.long_counts)
+                .into_iter()
+                .map(|(bytes, value)| {
+                    (
+                        String::from_utf8(bytes)
+                            .expect("JetStringCountBuilder stores only valid UTF-8 keys"),
+                        value,
+                    )
+                }),
+        );
+    }
+}
+
+/// Update a text-keyed map from a borrowed UTF-8 byte span. Strict decoding
+/// happens before lookup; existing keys need no temporary String.
 #[inline(always)]
-fn jet_map_update_string_bytes<V, F>(
-    m: &mut std::collections::BTreeMap<String, V>,
-    bytes: &[u8],
-    f: F,
-) -> Result<(), ()>
+fn jet_map_update_string_bytes<M, V, F>(m: &mut M, bytes: &[u8], f: F) -> Result<(), ()>
 where
+    M: JetStringBytesMap<V>,
     F: FnOnce(Option<&V>) -> V,
 {
-    let key = std::str::from_utf8(bytes).map_err(|_| ())?;
-    if let Some(existing) = m.get_mut(key) {
-        let next = {
-            let existing = &*existing;
-            f(Some(existing))
-        };
-        *existing = next;
-    } else {
-        m.insert(key.to_owned(), f(None));
-    }
-    Ok(())
+    m.update_bytes(bytes, f)
 }
 
 // BTreeMap has no stable fallible reservation API. Keep this representation
@@ -1974,6 +2169,16 @@ fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32
     }
 }
 
+fn jet_list_insert<T>(xs: &mut Vec<T>, index: i64, value: T, file: &str, line: u32) {
+    match jet_list_insert_kernel(xs, index, value) {
+        Ok(()) => {}
+        Err(error) => {
+            let message = error.message();
+            jet_runtime_stop(error.code(), file, line, &message);
+        }
+    }
+}
+
 // D-LISTREMOVE1/F (criterion c6 on #1481): PriorityQueue.remove reuses List's
 // exact value/slot selector shape. `BinaryHeap` has no native indexed or
 // value-search removal, so both forms round-trip through an owned `Vec` —
@@ -2001,6 +2206,23 @@ fn jet_priority_queue_remove_slot<T: Ord>(
 
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
     jet_list_count_kernel(xs, value)
+}
+fn jet_list_count_where<T, F>(xs: &[T], predicate: F) -> i64
+where
+    F: FnMut(&T) -> bool,
+{
+    jet_list_count_where_kernel(xs, predicate)
+}
+
+fn jet_list_update_first<T, F>(
+    xs: &mut Vec<T>,
+    predicate: F,
+    replacement: T,
+) -> bool
+where
+    F: FnMut(&T) -> bool,
+{
+    jet_list_update_first_kernel(xs, predicate, replacement)
 }
 
 fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {
@@ -2088,13 +2310,14 @@ where
         f(&x);
     }
 }
-fn jet_list_each_ref<T, F>(xs: &Vec<T>, mut f: F)
+fn jet_list_each_ref<T, F, E>(xs: &Vec<T>, mut f: F) -> JetOutcome<(), E>
 where
-    F: FnMut(&T),
+    F: FnMut(&T) -> JetOutcome<(), E>,
 {
     for x in xs.iter() {
-        f(x);
+        f(x)?;
     }
+    Ok(())
 }
 fn jet_list_each_mut<T, F, I>(xs: I, mut f: F)
 where

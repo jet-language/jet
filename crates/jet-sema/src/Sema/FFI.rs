@@ -357,12 +357,12 @@ pub fn e3202(ty: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// E3301 — an OS-dependent std API was called in a `--freestanding` build.
+/// E3301 — an OS-dependent std API was called on a selected no-OS target.
 pub fn e3301(api: &str, hint: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3301",
-        format!("`{}` is not available in a freestanding build.", api),
-        "`--freestanding` targets have no OS; only `core`-level APIs are available.".to_string(),
+        format!("`{}` is not available on a no-OS target.", api),
+        "No-OS targets have no OS; only `core`-level APIs are available.".to_string(),
         hint.to_string(),
         Some(span),
     )
@@ -383,15 +383,15 @@ pub fn e3302(triple: &str) -> Diagnostic {
     )
 }
 
-/// E3303 — freestanding build needs an allocator but none is configured.
+/// E3303 — a no-OS target reaches allocation without an allocator fact.
 pub fn e3303(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3303",
-        "This freestanding program allocates memory but has no global allocator configured."
+        "This no-OS program allocates memory but has no allocator fact."
             .to_string(),
-        "`--freestanding` builds cannot use the OS heap; a custom allocator is required."
+        "No-OS targets do not provide an implicit system heap."
             .to_string(),
-        "Add `use core.mem;` and configure an arena or fixed allocator with `mem.set_allocator(…)`."
+        "Select a typed allocator provider, or use heap-free Core operations."
             .to_string(),
         Some(span),
     )

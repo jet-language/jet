@@ -543,6 +543,45 @@ fn run() {
 }
 
 #[test]
+fn regex_find_all_counts_chain_preserves_receiver_result() {
+    let lowered = lower_after_sema(
+        r#"fn run(text: String) {
+    counts :: Regex{"[A-Za-z]+"}.find_all(text).counts()
+}
+"#,
+        "run",
+    );
+    let init = lowered
+        .body
+        .iter()
+        .find_map(|stmt| match stmt {
+            TStmt::Let { name, init, .. } if name == "counts" => Some(init),
+            _ => None,
+        })
+        .expect("counts binding should lower as a let");
+    fn strip_ownership(expr: &TExpr) -> &TExpr {
+        match &expr.kind {
+            TExprKind::Clone(inner)
+            | TExprKind::ExplicitCopy(inner)
+            | TExprKind::MaterializeView(inner) => strip_ownership(inner),
+            _ => expr,
+        }
+    }
+    match &strip_ownership(init).kind {
+        TExprKind::BuiltinMethod {
+            op: TBuiltinOp::Counts,
+            ..
+        } => {}
+        TExprKind::BuiltinMethod { .. } => panic!("counts chain lowered to another builtin"),
+        TExprKind::MethodCall { .. } => panic!("counts chain remained a user method call"),
+        TExprKind::CoreCall { .. } => panic!("counts chain lowered to a core call"),
+        TExprKind::Call { .. } => panic!("counts chain lowered to a plain call"),
+        TExprKind::InlineBlock(_) => panic!("counts chain lowered inside an inline block"),
+        _ => panic!("counts chain lowered to an unrelated expression"),
+    }
+}
+
+#[test]
 fn refined_collection_results_have_exact_tir_types() {
     let src = "\
 fn run() {
@@ -2731,6 +2770,82 @@ fn lower_and_emit_after_sema(src: &str, fn_name: &str) -> (TFunc, String) {
 }
 
 #[test]
+fn a02_nested_empty_list_argument_keeps_element_type() {
+    let source = r#"
+fn run() {
+    section_keys := [[String]]{}
+    section_keys.push([String]{})
+}
+"#;
+    let (_, generated) = lower_and_emit_after_sema(source, "run");
+    assert!(
+        generated.contains("push(Vec::<String>::new())"),
+        "nested empty list lost its contextual element type: {generated}"
+    );
+    assert!(
+        !generated.contains("push(Vec::<i64>::new())"),
+        "nested empty list fell back to Int: {generated}"
+    );
+}
+
+#[test]
+fn a06_parallel_empty_list_argument_keeps_element_type() {
+    let source = r#"
+fn run() {
+    section_values := [[String]]{}
+    section_values.push([String]{})
+}
+"#;
+    let (_, generated) = lower_and_emit_after_sema(source, "run");
+    assert!(
+        generated.contains("push(Vec::<String>::new())"),
+        "parallel empty list lost its contextual element type: {generated}"
+    );
+    assert!(
+        !generated.contains("push(Vec::<i64>::new())"),
+        "parallel empty list fell back to Int: {generated}"
+    );
+}
+
+#[test]
+fn a07_builtin_push_copies_a_reused_place() {
+    let source = r#"
+fn run() {
+    name := "section"
+    sections := [String]{}
+    sections.push(name)
+    print(name)
+}
+"#;
+    let (_, generated) = lower_and_emit_after_sema(source, "run");
+    assert!(
+        generated.contains("push((__jet_name).clone())"),
+        "builtin push moved a value that Jet keeps usable: {generated}"
+    );
+}
+
+#[test]
+fn a08_empty_or_fallback_keeps_payload_element_type() {
+    let source = r#"
+fn run() {
+    groups := [[String]]{}
+    values :: groups.get(0) ?? [String]{}
+    print(values.len())
+}
+"#;
+    let (_, generated) = lower_and_emit_after_sema(source, "run");
+    assert!(
+        generated.contains("Vec::<String>::new()"),
+        "empty fallback lost its payload element type: {generated}"
+    );
+    assert!(
+        !generated.contains("Vec::<i64>::new()"),
+        "empty fallback fell back to Int: {generated}"
+    );
+}
+
+
+#[test]
 fn reader_fixed_width_capability_table_covers_all_reads() {
     let cases = [
         (THandleOp::ReaderReadU8, TReaderFixedWidth::U8),
@@ -2774,7 +2889,7 @@ fn reader_fixed_width_capability_table_covers_all_reads() {
 #[test]
 fn reader_region_uses_bounds_and_direct_slice_for_unused_index() {
     let source = r#"
-fn run() {
+fn run() Int !Err -> {
     data :: [U8]{1, 2, 3}
     reader :: Reader.over(data)
     total := Int{0}
@@ -2784,6 +2899,7 @@ fn run() {
         total += Int.from_u8(byte)
     }
     print(total)
+    return Ok(total)
 }
 "#;
     let (_, generated) = lower_and_emit_after_sema(source, "run");
@@ -2850,7 +2966,7 @@ fn run() {
 #[test]
 fn reader_region_supports_all_fixed_width_reader_capabilities() {
     let source = r#"
-fn run() {
+fn run() Int !Err -> {
     data :: [U8]{0}
     reader :: Reader.over(data)
     loop _ in 0..<1 {
@@ -2907,6 +3023,7 @@ fn run() {
     loop _ in 0..<1 {
         f64_be_value :: reader.read_f64_be() ?? return Err("short reader")
     }
+    return Ok(0)
 }
 "#;
     let (_, generated) = lower_and_emit_after_sema(source, "run");
@@ -3040,6 +3157,25 @@ fn auto(values: [Float#4]) [Float#4] -> {
     assert!(
         generated.contains("backend=prelude-runtime-dispatch"),
         "the emitted artifact must identify the actual native lowering"
+    );
+}
+
+#[test]
+fn d_simd3_f64x4_lane_scale_stays_in_native_carrier() {
+    let source = r#"
+fn scale(value: F64x4, factor: Float) F64x4 -> {
+    return value * F64x4.splat(factor * value[0])
+}
+"#;
+    let (_, generated) = lower_and_emit_after_sema(source, "scale");
+    assert!(
+        generated.contains("jet_math_F64x4_mul_lane_scale::<0>"),
+        "lane-scaled products must use the resident native carrier"
+    );
+    assert!(
+        !generated.contains("jet_math_F64x4_lane_const")
+            && !generated.contains("jet_math_F64x4_splat"),
+        "the optimized shape must not cross through scalar extraction and re-splat"
     );
 }
 
@@ -3273,6 +3409,14 @@ fn d_simd3_native_prelude_has_float_kernels_and_f64x4_value_path() {
         prelude.contains("fn jet_simd_f32_binary_slice")
             && prelude.contains("fn jet_simd_f64_binary_slice"),
         "resident float carriers must use the shared native-capable slice kernels"
+    );
+    assert!(
+        prelude.contains("jet_simd_f64x4_mul_lane_scale_native"),
+        "native F64x4 lane scaling must stay in the shared Prelude"
+    );
+    assert!(
+        linalg.contains("jet_math_F64x4_mul_lane_scale"),
+        "AOT lane scaling must marshal through the shared math wrapper"
     );
 }
 

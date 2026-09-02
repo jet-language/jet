@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -12,6 +13,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { canonicalJson, reproContentDigest } from "../scripts/agent/hardening-repro.mjs";
 
 const RIG = resolve("scripts/agent/hardening-rig.mjs");
 const BASE = join(homedir(), ".cache/jet-test-scratch");
@@ -89,7 +91,12 @@ appendFileSync(process.env.JET_HARDENING_FAKE_TOWER_LOG, payload + "\\n");
 appendFileSync(process.env.JET_HARDENING_FAKE_TOWER_ARGS, process.argv.slice(2).join(" ") + "\\n");
 process.stdout.write(JSON.stringify({ id: "fake-hardening-card", num: 1, action: "added" }));
 `);
-  return { ...fx, tower, towerLog, towerArgsLog };
+  return {
+    ...fx,
+    tower,
+    towerLog,
+    towerArgsLog,
+  };
 }
 
 function runCycle(fx, simulate = null, extraEnv = {}) {
@@ -98,10 +105,12 @@ function runCycle(fx, simulate = null, extraEnv = {}) {
   const result = spawnSync(process.execPath, args, {
     cwd: resolve("."),
     encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
     env: {
       ...process.env,
       HOME: fx.home,
       JET_HARDENING_ROOT: fx.root,
+      JET_HARDENING_MANIFEST: fx.manifest || "",
       JET_HARDENING_CACHE: fx.cache,
       JET_HARDENING_SCRATCH: fx.scratch,
       JET_HARDENING_JET_ENV: join(fx.bin, "jet-env"),
@@ -142,12 +151,22 @@ test("bounded hardening cycle refuses unsafe starts and cleans every exit", () =
     const first = runCycle(main);
     assert.equal(first.process.status, 0);
     assert.equal(first.record.status, "PASS", JSON.stringify(first.record.refusal));
+    assert.equal(first.record.composition.ok, true);
+    assert.equal(first.record.composition.denominator, "EMPTY");
     assert.equal(first.record.build.exit, 0);
     assert.equal(first.record.proof.exit, 0);
     assert.equal(first.record.config.suite_concurrency, 2);
     assert.equal(first.record.config.cargo_build_jobs, 4);
     assert.equal(first.record.config.target_cap_gib, 80);
     assertCleaned(main, first.record);
+    const configPayload = Object.fromEntries(Object.entries(first.record.config).filter(([key]) => key !== "config_sha256"));
+    const configDigest = createHash("sha256").update(canonicalJson(configPayload)).digest("hex");
+    assert.equal(first.record.config.config_sha256, configDigest);
+    assert.equal(Object.hasOwn(first.record.config, "hash"), false);
+    assert.equal(first.record.content_digest, reproContentDigest(first.record));
+    assert.match(first.record.content_digest, /^sha256:[0-9a-f]{64}$/);
+    assert.ok(first.record.resources_before && first.record.resources_after);
+    assert.ok(Array.isArray(first.record.preflight));
 
     const second = runCycle(main);
     assert.equal(second.record.status, "PASS");
@@ -169,6 +188,8 @@ test("bounded hardening cycle refuses unsafe starts and cleans every exit", () =
     try {
       const outcome = runCycle(fx, simulation);
       assert.equal(outcome.process.status, 0, simulation);
+      assert.ok(outcome.record.preflight.length > 0, simulation);
+      assert.ok(outcome.record.exclusions.some((entry) => entry.kind === "refused"), simulation);
       assert.equal(outcome.record.status, "SKIPPED", simulation);
       assert.ok(outcome.record.refusal.reason, simulation);
       assertCleaned(fx, outcome.record);
@@ -201,7 +222,7 @@ test("bounded hardening cycle refuses unsafe starts and cleans every exit", () =
   }
 });
 
-test("layer-1 findings are bounded, deterministic, cleaned, and written only through Tower CLI", () => {
+test("layer-1 refuses countable cases without a validated manifest identity", () => {
   const fx = layerOneFixture();
   const env = {
     JET_HARDENING_TEST_MODE: "0",
@@ -215,28 +236,28 @@ test("layer-1 findings are bounded, deterministic, cleaned, and written only thr
     JET_HARDENING_ORACLE_TIMEOUT_MS: "5000",
   };
   try {
-    const first = runCycle(fx, null, env);
-    assert.equal(first.process.status, 1);
-    assert.equal(first.record.status, "RED");
-    assert.equal(first.record.oracle.status, "FINDINGS");
-    assert.equal(first.record.oracle.attempted, 5);
-    assert.equal(first.record.oracle.valid_case_count, 5);
-    assert.equal(first.record.oracle.finding_payloads.length, 5);
-    assert.equal(first.record.tower.actions.length, 5);
-    assert.ok(first.record.tower.actions.every((action) => action.status === "WRITTEN"));
-    assertCleaned(fx, first.record);
-    const firstBundles = first.record.oracle.serialized_bundles;
+    const outcome = runCycle(fx, null, env);
+    assert.equal(outcome.process.status, 0);
+    assert.equal(outcome.record.status, "SKIPPED");
+    assert.equal(outcome.record.oracle, null);
+    assert.match(outcome.record.refusal.reason, /hardening manifest artifact is missing|manifest digest is missing or invalid/);
+    assert.ok(outcome.record.exclusions.some((entry) => entry.kind === "refused"));
+    assertCleaned(fx, outcome.record);
+    assert.equal(existsSync(fx.towerLog), false);
+  } finally {
 
-    const second = runCycle(fx, null, env);
-    assert.equal(second.record.status, "RED");
-    assert.equal(second.record.oracle.serialized_bundles, firstBundles);
-    assert.equal(readFileSync(fx.towerLog, "utf8").trim().split("\n").length, 10);
-    const towerArgs = readFileSync(fx.towerArgsLog, "utf8").trim().split("\n");
-    assert.equal(towerArgs.length, 10);
-    assert.ok(towerArgs.every((args) => args.includes("card add --stdin --json --by hardening-rig")));
-    assert.ok(towerArgs.every((args) => !args.includes("--force")));
-    assertCleaned(fx, second.record);
-    assert.equal(existsSync(join(fx.root, ".tower")), false);
+    rmSync(fx.home, { recursive: true, force: true });
+  }
+});
+test("enabled optional layers fail closed when their denominator is unavailable", () => {
+  const fx = fixture();
+  try {
+    const outcome = runCycle(fx, null, { JET_HARDENING_PROPERTY: "1" });
+    assert.equal(outcome.process.status, 1);
+    assert.equal(outcome.record.status, "RED");
+    assert.equal(outcome.record.composition.ok, false);
+    assert.match(outcome.record.composition.errors.join("; "), /property layer is disabled while enabled/);
+    assertCleaned(fx, outcome.record);
   } finally {
     rmSync(fx.home, { recursive: true, force: true });
   }

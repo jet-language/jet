@@ -17,8 +17,16 @@
   },
   "non_applicable": {
     "node": {
+      "basis": "workload_surface",
       "reason": "The workload contract requires a browser/Wasm widget path; a direct Node kernel would not exercise the required browser bridge.",
       "evidence": "spec.behavior requires Jet and Rust Wasm execution, while the declared js incumbent is the direct JavaScript comparison. A generic Node adapter would be a renamed duplicate of js, not an equivalent browser rail."
+    }
+  },
+  "metric_applicability": {
+    "js": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript widget rail runs through the host Node interpreter and has no entry-local compile phase.", "evidence": "The harness invokes node runner.mjs directly for the declared JS widget rail and produces no JS binary artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript widget rail runs through the host Node interpreter and has no entry-local compile phase.", "evidence": "The harness invokes node runner.mjs directly for the declared JS widget rail and produces no JS binary artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript widget rail has no entry-local executable artifact.", "evidence": "The harness run command is node runner.mjs; no binary is built or measured."}
     }
   },
   "authoring": {

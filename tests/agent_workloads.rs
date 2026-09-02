@@ -7,10 +7,29 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
+static JET_WORKLOAD_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+fn jet_workload_lock() -> MutexGuard<'static, ()> {
+    JET_WORKLOAD_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn jet_workload_guard(command: &Command) -> Option<MutexGuard<'static, ()>> {
+    if command.get_program() == Path::new(env!("CARGO_BIN_EXE_jet")).as_os_str() {
+        Some(jet_workload_lock())
+    } else {
+        None
+    }
+}
+
 const HEADER: &str = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards";
+const COMPILED_RECEIPT_HEADER: &str = "version\ttask_id\tlanguage\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tenvironment\tmachine\ttool_version\tcommand\tpeer_commit\texit_code\thostile_exit_code\tpeer_launcher_path\tpeer_launcher_version\tpeer_launcher_sha256\tauthority";
+const PEER_LAUNCH_CONTRACT: &str = "compiled-workload-peer-isolation-v1";
 const DOMAIN_CONTRACT_HEADER: &str =
     "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring";
 const BASELINE_HEADER: &str =
@@ -720,6 +739,11 @@ fn pinned_adapter_versions() -> BTreeMap<&'static str, String> {
 }
 
 fn run_bounded(mut command: Command, label: &str, deadline: Duration) -> BoundedOutput {
+    // A Jet invocation may own a rustc child and a shared runtime-cache lease.
+    // Keep those resource-heavy launches serial within this test binary so
+    // libtest's default parallelism cannot turn a healthy cold build into a
+    // deadline failure.
+    let _jet_guard = jet_workload_guard(&command);
     let capture = Scratch::new("jet_agent_process_output");
     let stdout_path = capture.path.join("stdout");
     let stderr_path = capture.path.join("stderr");
@@ -863,6 +887,14 @@ fn command_version(program: &Path, arg: &str, label: &str) -> String {
         .to_string()
 }
 
+fn write_agent_workload_package(scratch: &Path) {
+    fs::write(
+        scratch.join("package.jet"),
+        "name: \"agent-workload\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FS, IO, Mem.Alloc, Net, Time] } }\n",
+    )
+    .unwrap();
+}
+
 fn adapter_command(
     adapter: &'static str,
     source: &Path,
@@ -873,8 +905,14 @@ fn adapter_command(
 ) -> Command {
     let mut command = match adapter {
         "jet" => {
+            write_agent_workload_package(scratch);
+            let local_source = scratch.join(source.file_name().unwrap());
+            fs::copy(source, &local_source).unwrap();
             let mut cmd = Command::new(jet_cli);
-            cmd.args(["run", "--release"]).arg(source).arg("--");
+            cmd.args(["run", "--release"])
+                .arg(local_source)
+                .arg("--")
+                .env("JET_RECEIPT_BYPASS", "1");
             cmd
         }
         "bash" => {
@@ -912,7 +950,12 @@ fn jet_tier_command(
     tier_args: &[&str],
 ) -> Command {
     let mut command = Command::new(jet_cli);
-    command.args(["run"]).args(tier_args).arg(source).arg("--");
+    command
+        .args(["run"])
+        .args(tier_args)
+        .arg(source)
+        .arg("--")
+        .env("JET_RECEIPT_BYPASS", "1");
     command
         .arg(input)
         .env("JET_CORPUS_JET", jet_cli)
@@ -1544,12 +1587,79 @@ fn compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
     for row in &manifest {
         assert_eq!(row[0], "1");
         assert_eq!(row[11], "#1414");
-        assert_eq!(row[12], "#1414");
+        assert_eq!(row[12], "#2414");
         validate_corpus_relative_path(&row[5]).unwrap();
         validate_corpus_relative_path(&row[6]).unwrap();
-        assert!(compiled_workload_root().join(&row[5]).is_file());
-        assert!(compiled_workload_root().join(&row[6]).is_file());
+        let input = compiled_workload_root().join(&row[5]);
+        let expected = compiled_workload_root().join(&row[6]);
+        if row[1] == "systems-file-index" {
+            assert!(input.is_dir(), "systems input must be a directory");
+        } else {
+            assert!(input.is_file(), "{task_id} input must be a file", task_id = row[1]);
+        }
+        assert!(expected.is_file(), "{} expected output must be a file", row[1]);
     }
+    let systems = manifest
+        .iter()
+        .find(|row| row[1] == "systems-file-index")
+        .expect("systems task must stay declared");
+    assert_eq!(systems[5], "fixtures/systems-file-index/input");
+    assert_eq!(
+        systems[7],
+        "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled"
+    );
+    for (task_id, authority) in [
+        (
+            "service-json-http",
+            "argv=input-root;cwd=scratch;host=ambient;network=loopback-only;external-write=disabled",
+        ),
+        (
+            "cli-archive-filter",
+            "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled",
+        ),
+    ] {
+        let row = manifest
+            .iter()
+            .find(|row| row[1] == task_id)
+            .unwrap_or_else(|| panic!("{task_id} manifest row missing"));
+        assert_eq!(row[7], authority);
+    }
+    let adapters = read_compiled_workload_tsv(
+        "adapter_ledger.tsv",
+        "version\ttask_id\tjet_source\tjet_hostile\tpeer_source\tpeer_hostile\tpeer_commit",
+        7,
+    );
+    assert_eq!(adapters.len(), manifest.len());
+    assert_eq!(
+        adapters
+            .iter()
+            .map(|row| row[1].as_str())
+            .collect::<BTreeSet<_>>(),
+        task_ids
+    );
+    for row in &adapters {
+        assert_eq!(row[0], "1");
+        validate_corpus_relative_path(&row[2]).unwrap();
+        validate_corpus_relative_path(&row[3]).unwrap();
+        validate_corpus_relative_path(&row[4]).unwrap();
+        validate_corpus_relative_path(&row[5]).unwrap();
+        for path in &row[2..6] {
+            let path = compiled_workload_root().join(path);
+            assert!(
+                path.is_file() || path.is_dir(),
+                "adapter path is missing: {}",
+                path.display()
+            );
+        }
+        assert_eq!(row[3], row[5], "hostile path drifted between adapters");
+        assert_eq!(row[6].len(), 40);
+    }
+    let systems_adapter = adapters
+        .iter()
+        .find(|row| row[1] == "systems-file-index")
+        .expect("systems adapter must stay declared");
+    assert_eq!(systems_adapter[3], "fixtures/systems-file-index/hostile");
+    assert_eq!(systems_adapter[5], "fixtures/systems-file-index/hostile");
 
     let peers = read_compiled_workload_tsv(
         "peer_ledger.tsv",
@@ -1564,16 +1674,79 @@ fn compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
     assert_eq!(
         selected
             .iter()
+            .map(|row| row[3].as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["cxx", "domain", "go", "rust", "zig"])
+    );
+    assert!(
+        peers.iter().any(|row| row[2] == "candidate" && row[3] == "cxx"),
+        "C++ must remain represented in the declared peer ledger"
+    );
+    assert_eq!(
+        selected
+            .iter()
             .map(|row| row[1].as_str())
             .collect::<BTreeSet<_>>(),
         task_ids
     );
+    for adapter in &adapters {
+        let peer = selected
+            .iter()
+            .find(|row| row[1] == adapter[1])
+            .unwrap_or_else(|| panic!("{} selected peer missing", adapter[1]));
+        assert_eq!(adapter[6], peer[6], "peer revision drifted from adapter ledger");
+    }
+    for (task_id, language, program, source, source_url, revision, dependency_rule) in [
+        (
+            "systems-file-index",
+            "rust",
+            "local systems file-index equivalent",
+            "adapters/peer/systems-file-index.rs",
+            "https://github.com/jet-language/jet",
+            "8b9933668f7f7d3c1a62182ff865f68989b41209",
+            "repository source only;no network",
+        ),
+        (
+            "service-json-http",
+            "go",
+            "local JSON HTTP service equivalent",
+            "adapters/peer/service-json-http.go",
+            "https://github.com/jet-language/jet",
+            "8b9933668f7f7d3c1a62182ff865f68989b41209",
+            "repository source only;loopback only",
+        ),
+        (
+            "cli-archive-filter",
+            "cxx",
+            "local archive filter equivalent",
+            "adapters/peer/cli-archive-filter.cpp",
+            "https://github.com/jet-language/jet",
+            "8b9933668f7f7d3c1a62182ff865f68989b41209",
+            "repository source only;no network",
+        ),
+    ] {
+        let peer = selected
+            .iter()
+            .find(|row| row[1] == task_id)
+            .unwrap_or_else(|| panic!("{task_id} selected peer missing"));
+        assert_eq!(peer[3], language);
+        assert_eq!(peer[4], program);
+        assert_eq!(peer[5], source_url);
+        assert_eq!(peer[6], revision);
+        assert_eq!(peer[9], dependency_rule);
+        let adapter = adapters
+            .iter()
+            .find(|row| row[1] == task_id)
+            .unwrap_or_else(|| panic!("{task_id} adapter missing"));
+        assert_eq!(adapter[4], source);
+        assert_eq!(adapter[6], peer[6]);
+    }
     let selected_cross_platform = selected
         .iter()
         .find(|row| row[1] == "cross-platform-notes")
         .expect("cross-platform task needs a selected peer");
     assert_eq!(selected_cross_platform[3], "domain");
-    assert_eq!(selected_cross_platform[4], "TypeScript/ECMAScript browser notes task");
+    assert_eq!(selected_cross_platform[4], "ECMAScript browser notes task adapter");
     assert_eq!(selected_cross_platform[11], "linux,macos,windows,web");
     assert!(
         selected_cross_platform[11]
@@ -1588,6 +1761,7 @@ fn compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
         assert!(row[7..12].iter().all(|field| !field.is_empty()));
         assert!(row[12].starts_with('#'));
     }
+    assert!(peers.iter().all(|row| row[12] == "#1414"));
 
     let metrics = read_compiled_workload_tsv(
         "metric_contract.tsv",
@@ -1610,18 +1784,113 @@ fn compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
             "unsafe_burden",
         ])
     );
+
     assert!(metrics
         .iter()
         .all(|row| {
             row[0] == "1" && !row[2].is_empty() && row[3] == "lower" && row[4] == "fail"
         }));
+    let domains = read_compiled_workload_tsv("domain_contract.tsv", DOMAIN_CONTRACT_HEADER, 6);
+    assert!(domains.iter().all(|row| {
+        row[0] == "1"
+            && task_ids.contains(row[1].as_str())
+            && !row[2].is_empty()
+            && !row[3].is_empty()
+            && !row[4].is_empty()
+            && row[5].starts_with("#1414:")
+    }));
+    assert_eq!(domains.len(), manifest.len());
+    let systems_domain = domains
+        .iter()
+        .find(|row| row[1] == "systems-file-index")
+        .expect("systems domain contract missing");
+    assert_eq!(
+        systems_domain[2],
+        "jet=Core:files,crypto;rust=rust-stdlib;cxx=libstdc++;go=stdlib-os-path-filepath;swift=Foundation;zig=std;domain=POSIX filesystem indexing"
+    );
+    let service_domain = domains
+        .iter()
+        .find(|row| row[1] == "service-json-http")
+        .expect("service domain contract missing");
+    assert_eq!(
+        service_domain[2],
+        "jet=Core:files,http.client,http.server,net,time;rust=tokio+hyper;cxx=boost-beast;go=stdlib-net-http;swift=swift-nio;zig=std-http;domain=bounded JSON HTTP service"
+    );
+    let archive_domain = domains
+        .iter()
+        .find(|row| row[1] == "cli-archive-filter")
+        .expect("archive domain contract missing");
+    assert_eq!(
+        archive_domain[2],
+        "jet=Core:archive,files;rust=std+tar;cxx=c++20-stdlib;go=archive-tar;swift=Foundation;zig=std-tar;domain=POSIX ustar extraction"
+    );
+    assert!(!archive_domain[2].contains("libarchive"));
+    let toolchains = read_compiled_workload_tsv(
+        "toolchain_contract.tsv",
+        "version\tlanguage\tcommand\tversion_prefix",
+        4,
+    );
+    assert_eq!(toolchains.len(), 6);
+    assert_eq!(
+        toolchains
+            .iter()
+            .map(|row| format!("{}|{}|{}", row[1], row[2], row[3]))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "jet|jet|Jet 1.0.0".to_string(),
+            "rust|rustc|rustc 1.97.1".to_string(),
+            "go|go|go version go1.26.5".to_string(),
+            "cxx|clang++|clang version 21.1.8".to_string(),
+            "zig|zig|zig 0.16.0".to_string(),
+            "domain|node|node v22.23.2".to_string(),
+        ])
+    );
+    let receipt_fields = COMPILED_RECEIPT_HEADER.split('\t').collect::<Vec<_>>();
+    assert_eq!(receipt_fields.len(), 20, "compiled receipts must remain 20 columns");
+    assert_eq!(
+        &receipt_fields[16..],
+        [
+            "peer_launcher_path",
+            "peer_launcher_version",
+            "peer_launcher_sha256",
+            "authority",
+        ]
+    );
+    assert_eq!(PEER_LAUNCH_CONTRACT, "compiled-workload-peer-isolation-v1");
 
     let tiers = read_compiled_workload_tsv(
         "tier_matrix.tsv",
-        "version\ttask_id\tplatform\ttarget\ttier\trequirement\trationale",
-        7,
+        "version\ttask_id\tplatform\ttarget\ttier\trequirement\tavailability\tavailability_reason\trationale",
+        9,
     );
     assert_eq!(tiers.len(), 39);
+    assert_eq!(
+        tiers
+            .iter()
+            .map(|row| format!("{}|{}", row[6], row[7]))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "local|host-toolchain".to_string(),
+            "local|host-runtime".to_string(),
+            "local|browser-runtime".to_string(),
+            "external|host-platform".to_string(),
+            "external|cross-toolchain".to_string(),
+            "excluded|freestanding-profile".to_string(),
+        ])
+    );
+    let aarch64_rows = tiers
+        .iter()
+        .filter(|row| row[2] == "cross-target" && row[3] == "aarch64-unknown-linux-gnu")
+        .collect::<Vec<_>>();
+    assert_eq!(aarch64_rows.len(), 5);
+    assert!(aarch64_rows
+        .iter()
+        .all(|row| row[5] == "required" && row[6] == "external" && row[7] == "cross-toolchain"));
+    let web_row = tiers
+        .iter()
+        .find(|row| row[2] == "cross-target" && row[3] == "web")
+        .expect("cross-target web tier must stay declared");
+    assert_eq!(&web_row[5..8], ["required", "local", "browser-runtime"]);
     let hosted_targets = [
         ("systems-file-index", "aarch64-unknown-linux-gnu"),
         ("service-json-http", "aarch64-unknown-linux-gnu"),
@@ -1662,30 +1931,66 @@ fn compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
         .iter()
         .filter(|row| row[1] == "embedded-sensor-ring")
         .collect::<Vec<_>>();
-    assert_eq!(embedded.len(), 5, "embedded rows must stay visible");
-    assert!(embedded.iter().all(|row| {
-        row[5] == "excluded" && row[6].contains("#2046") && row[6].contains("#2300")
-    }));
+    assert_eq!(embedded.len(), 9, "embedded rows must stay visible");
+    let embedded_excluded = embedded
+        .iter()
+        .filter(|row| row[5] == "excluded")
+        .collect::<Vec<_>>();
+    assert_eq!(embedded_excluded.len(), 5);
+    assert!(embedded_excluded
+        .iter()
+        .all(|row| {
+            row[6] == "excluded"
+                && row[7] == "freestanding-profile"
+                && row[8].contains("#2046")
+                && row[8].contains("#2300")
+        }));
+    assert_eq!(
+        embedded
+            .iter()
+            .filter(|row| row[5] == "required")
+            .map(|row| format!("{}|{}|{}", row[2], row[3], row[4]))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "linux|x86_64-unknown-linux-gnu|aot".to_string(),
+            "macos|x86_64-apple-darwin|aot".to_string(),
+            "windows|x86_64-pc-windows-msvc|aot".to_string(),
+            "linux|x86_64-unknown-linux-gnu|jit".to_string(),
+        ])
+    );
 
     let canaries = read_compiled_workload_tsv(
         "canaries.tsv",
         "version\tcanary\tmutation\trequired_failure",
         4,
     );
-    assert_eq!(canaries.len(), 7, "all seven removal canaries must stay present");
+    assert_eq!(canaries.len(), 20, "all declared removal canaries must stay present");
     assert_eq!(
         canaries
             .iter()
             .map(|row| row[1].as_str())
             .collect::<BTreeSet<_>>(),
         BTreeSet::from([
+            "comparison-dependency-drift",
+            "comparison-toolchain-drift",
+            "statistics-drift",
+            "receipt-input-drift",
+            "missing-samples",
+            "missing-statistics",
+            "missing-receipt",
+            "missing-tier-receipt",
             "missing-outcome",
-            "unowned-loss",
+            "unrelated-live-owner",
             "missing-metric",
             "missing-tier",
             "changed-input",
-            "unreviewed",
+            "embedded-review-claim",
             "stale-candidate",
+            "unowned-metric-loss",
+            "required-tier-loss",
+            "toolchain-drift",
+            "missing-peer-coverage",
+            "candidate-peer-loss",
         ])
     );
     assert!(canaries
@@ -1868,6 +2173,8 @@ fn structured_data_database_http_production_paths_handle_success_and_hostile_inp
             "#1167 production path",
             PROCESS_DEADLINE,
         );
+        fs::remove_file(scratch.path.join("package.jet")).unwrap();
+        fs::remove_file(scratch.path.join(source.file_name().unwrap())).unwrap();
 
         assert!(!bounded.timed_out, "{} timed out", task.id);
         assert!(!bounded.limit_exceeded, "{} hit output limit", task.id);
@@ -1922,10 +2229,17 @@ fn delimited_workload_adapters_match_aot_default_run_and_interpreter() {
         .unwrap();
         for (tier, tier_args) in tiers {
             let scratch = Scratch::new("jet_delimited_tier");
+            fs::write(
+                scratch.path.join("package.jet"),
+                "name: \"delimited-workload-adapters\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [Browser, DB, Exec, FS, IO, Mem.Alloc, Net] } }\n",
+            )
+            .unwrap();
+            let tier_source = scratch.path.join(source.file_name().unwrap());
+            fs::copy(&source, &tier_source).unwrap();
             let run = run_bounded(
                 jet_tier_command(
                     &jet_cli,
-                    &source,
+                    &tier_source,
                     &input,
                     &scratch.path,
                     task_id,
@@ -1934,6 +2248,8 @@ fn delimited_workload_adapters_match_aot_default_run_and_interpreter() {
                 tier,
                 PROCESS_DEADLINE,
             );
+            fs::remove_file(scratch.path.join("package.jet")).unwrap();
+            fs::remove_file(&tier_source).unwrap();
             assert!(!run.timed_out, "{task_id} {tier} tier timed out");
             assert!(!run.limit_exceeded, "{task_id} {tier} tier hit output limit");
             assert_eq!(
@@ -2159,25 +2475,24 @@ fn production_process_limits_authority_and_descendant_cleanup() {
 
     let source = r#"use core.process as process
 
-fn run() {
-    limited :: process.cmd(["printf", "12345"])
+fn limit_blocked() Bool -> {
+    process.cmd(["printf", "12345"])
         .stdout(.Capture)
         .stderr(.Capture)
         .output_limit(3)
-        .run()
-    if limited == {
-        .Ok(_) -> print("limit=leaked")
-        .Err(_) -> print("limit=blocked")
-        else -> {}
-    }
+        .run() ?? return true
+    return false
+}
 
+fn authority_refused() Bool -> {
     policy :: Authority.from_rights(["Net:example.com"])
-    planned :: process.cmd(["printf", "authority"]).under(policy).plan()
-    if planned == {
-        .Ok(_) -> print("authority=planned")
-        .Err(_) -> print("authority=refused")
-        else -> {}
-    }
+    process.cmd(["printf", "authority"]).under(policy).plan() ?? return true
+    return false
+}
+
+fn run() {
+    if limit_blocked() -> print("limit=blocked") else -> print("limit=leaked")
+    if authority_refused() -> print("authority=refused") else -> print("authority=planned")
 
     child :: process.cmd(["sh", "-c", "sleep 30 & child=$!; echo $child > child.pid; wait"])
         .stdout(.Capture)
@@ -2197,6 +2512,7 @@ fn run() {
         });
         let source_path = scratch.path.join("process_policy.jet");
         fs::write(&source_path, source).unwrap();
+        write_agent_workload_package(&scratch.path);
         let output = run_lens(&source_path, release, &scratch);
         assert_eq!(
             output.stdout,
@@ -2363,6 +2679,10 @@ fn equivalent_adapters_complete_declared_tasks() {
                 adapter,
                 PROCESS_DEADLINE,
             );
+            if adapter == "jet" {
+                fs::remove_file(scratch.path.join("package.jet")).unwrap();
+                fs::remove_file(scratch.path.join(source.file_name().unwrap())).unwrap();
+            }
             assert!(!cold.timed_out, "{} {adapter} cold run timed out", task.id);
             assert!(!warm.timed_out, "{} {adapter} warm run timed out", task.id);
             assert!(

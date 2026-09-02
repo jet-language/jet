@@ -1,7 +1,7 @@
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Captures::stmt_refs_name;
 use crate::Sema::Checker;
-use crate::Sema::Diagnostics::block_definitely_returns;
+use crate::Sema::Diagnostics::{block_definitely_exits, block_definitely_returns};
 use crate::Syntax;
 use crate::AST::{AccessConvention, BinOp, Expr, LValue, Stmt, StrPart, Type};
 impl<'a> Checker<'a> {
@@ -94,6 +94,9 @@ impl<'a> Checker<'a> {
             self.pop_scope();
         }
     }
+    fn tail_has_authored_semicolon(&self, span: Span) -> bool {
+        find_authored_semicolon(self.source, span.end).is_some()
+    }
 
     fn check_value_tail(&mut self, stmt: &mut Stmt, expected: &Type) {
         if !self.flow.reachable {
@@ -175,16 +178,28 @@ impl<'a> Checker<'a> {
         self.expected_type = saved_expected;
     }
 
-    fn tail_has_authored_semicolon(&self, span: Span) -> bool {
-        find_authored_semicolon(self.source, span.end).is_some()
-    }
-
     fn is_diverging_tail(expr: &Expr) -> bool {
-        matches!(expr.without_parens(), Expr::Todo { .. })
-            || matches!(
-                expr.without_parens(),
-                Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
-            )
+        fn branch_diverges(body: &[Stmt], value: &Expr) -> bool {
+            block_definitely_exits(body) || is_diverging_expr(value)
+        }
+        fn is_diverging_expr(expr: &Expr) -> bool {
+            match expr.without_parens() {
+                Expr::Todo { .. } => true,
+                Expr::Call(call) => call.name == Syntax::BUILTIN_PANIC,
+                Expr::If {
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                    ..
+                } => {
+                    branch_diverges(then_body, then_value)
+                        && branch_diverges(else_body, else_value)
+                }
+                _ => false,
+            }
+        }
+        is_diverging_expr(expr)
     }
 
     /// L0514 / D-BRANCH-LINT1: adjacent classic guards over one stable

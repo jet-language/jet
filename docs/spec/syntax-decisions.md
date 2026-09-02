@@ -1275,13 +1275,16 @@ read, and the literal text might not match), so an `if == {}` table needs an
 holes with no literal text between them is E0147 (add an anchor, or type
 them so the boundary is unambiguous); a hole-free string in pattern position
 is plain text equality, not a pattern (I8). **D-TYPEDTEXT1 — Typed text** *(amended by D-UNIFYLIT1=A)*: a typed-literal
-head `SQL{"…"}` / `HTML{"…"}` elaborates to that checked value — each
-`{hole}` becomes a bound parameter (SQL) or an HTML-escaped insertion
-(HTML); a runtime `String` reaching the position directly is E0149.
-`SQL.raw("…")`/`HTML.raw("…")` is the sole audited escape. Implemented for
-typed-literal heads (and annotated bindings that still use a typed head);
-`.template()`/`.params()` (SQL) and `.text()` (HTML) read the checked value
-back. Bare `"…"` never elaborates into these types.
+head `SQL{"…"}` / `HTML{"…"}` elaborates to that checked value. Each SQL
+`{hole}` becomes an ordered `DBValue` binding carried with the template.
+An ordinary HTML hole is escaped, while a hole already typed as `HTML`
+composes directly without a second escape. A runtime `String` reaching a
+database sink directly is E0149.
+`SQL.raw("…")` is the sole audited unchecked SQL-text escape; `HTML.raw("…")`
+is the corresponding HTML escape. Implemented for typed-literal heads (and
+annotated bindings that still use a typed head); `.template()`/`.params()`
+(SQL) and `.text()` (HTML) read the checked value back. Bare `"…"` never
+elaborates into these types.
 **D-TYPEDTEXT2 — Typed text amendment** *(amended by D-UNIFYLIT1=A)*:
 hole-free bodies also elaborate under a typed head; the former `sql"…"` /
 `html"…"` prefixes are retired — use `SQL{"…"}` / `HTML{"…"}`.
@@ -2493,9 +2496,9 @@ exits — deadline first, then cancel.
 erased in codegen. Assert or restrict via `-[Net, DB]>` on a signature and
 `#Abilities(Net) { … }` regions.
 
-**D-SHAPE8=A — Effect rows outside the arrow** *(ratified 2026-07-14,
-owner-amended by D-ARROW-CONTROL1 on 2026-07-26 and D-ARROW-UNIFY1 on
-2026-08-20; card #543)*: every explicit function effect row uses exactly
+**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
+owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*: every explicit
+function effect row uses exactly
 `-[Effects]>` in declarations, trait methods, function values, and callback
 types. `-[]>` explicitly bounds the row empty. Open rows stay inside the
 brackets (`-[Log, ..E]>`). The older
@@ -4115,12 +4118,12 @@ overlapping gzip rows of D-DEP-ARCHIVE1/D-CODECS1.
 **Numerics & data**: `core.linalg` ring package — `Vec2/3/4`, `Mat3/Mat4`,
 `.dot()`/`.cross()`/`.matmul()` as aliases over a generic `Vec<N>`/
 `Matrix<M,N>` substrate (const-generic substrate tracked by #293) (D-MATHLIB1,
-D-LINALG1). `core.db`: backend-neutral `Driver` trait, parameterized-only
-API, SQLite first; explicit `.begin/.commit/.rollback` distinct from
-`#Transact` (D-DBDRIVER1). D-DBMIGRATE1 ships the hybrid database floor:
-checked `SQL` literals feed `db.params(sql)`, rows stay inspectable maps with
-typed `db.row_*` reads, and `db.transaction`/`db.migrate` provide rollback and
-checksum-recorded migration helpers over the same parameterized path. `core.http`: client+server submodules; client
+`core.db`: backend-neutral `Driver` trait, one typed `SQL` carrier for every
+sink, SQLite first; explicit `.begin/.commit/.rollback` distinct from
+`#Transact` (D-DBDRIVER1). D-DBMIGRATE1 runs ordered `[SQL]` statements and
+records their template text and bindings in the migration checksum. Rows stay
+inspectable maps with typed `db.row_*` reads, and `db.transaction`/`db.migrate`
+provide rollback over the same policy-bound SQL path. `core.http`: client+server submodules; client
 supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
 plain `fn(req: Request) Response` on a `mux` (`mux.get("/users/:id", handler)`,
 `req.params["id"]`, `Server.serve(addr, mux)`) with HTTPS enabled by the named
@@ -6300,6 +6303,17 @@ Package; no wrapper binding is required. `pkg.jet`, `env.jet`, `workspace.jet`,
 and JetOS `config.jet` fold into it through one teaching diagnostic and one
 migration epoch; a leading `_` disables a discovered `.jet` file.
 
+**D-ECO-INLINEPACKAGE1=A — one optional leading inline `Package` carrier**
+*(ratified 2026-08-30, card #2409)*: a single Jet entry file may begin with
+`package { … }`. The carrier is structural context only; its exact body bytes
+are passed to the canonical `PackageFacts` parser, so `package.jet` and inline
+source have one Package model, one field grammar, and one validation path. Only
+whitespace, comments, or the byte-zero `#!/...` launch header may precede it. An
+inline carrier after another top-level declaration, a duplicate carrier, an
+unbalanced carrier, or a carrier beside `package.jet` is rejected with E1360,
+E1361, E1362, or E1363. The word `package` remains contextual rather than a
+lexer keyword, so `pub(package)` keeps its existing visibility meaning.
+
 **D-ECO-SPLITPOLICY1=A — `jet split` extracts and moves closed facts**
 *(ratified 2026-07-15)*: splitting inline Package facts creates the equivalent
 Config, previews its binding before writes, and records enough provenance for
@@ -7710,7 +7724,7 @@ finite-source finding form above. This section records the other outcomes.
 - **D-CHOOSE-TEST1=A** — the statement gives the subject, its expected shape,
   and the route for a miss. The route must leave the surrounding flow, so the
   bound names are safe afterward. A test with no route binds nothing. This
-  retires S74's unbuilt pattern-left refutable binding; no pattern-left parser
+  retires S74's pattern-left refutable binding; no pattern-left parser
   path exists.
 - **D-CHOOSE-HEADS1=A** — the table proofs check multi-head coverage and
   overlap: E0307 reports a hole, and the unreachable-arm lint reports a

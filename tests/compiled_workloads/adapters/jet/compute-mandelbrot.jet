@@ -1,5 +1,5 @@
-// #1414 compute workload: fixed 16k coordinates with a reproducible stride.
-// The integer recurrence is the checksum oracle used by every adapter.
+// #1414 compute workload: direct binary64 Mandelbrot escape-time checksum.
+// The peer uses the same window, update order, stride, and iteration count.
 use core.files as fs
 
 #CLI
@@ -7,37 +7,241 @@ struct WorkloadArgs {
     input: String
 }
 
-fn run(args: WorkloadArgs) {
-    input :: args.input
-    raw :: fs.read(input) ?? panic("read input")
-    if raw.contains("nope") || raw.contains("stride=0") {
-        print("reject=invalid-number")
-        print("samples=0")
-        print("checksum=0")
+fn reject_case(label: String, named: Bool) {
+    if named -> print("case={label}")
+    print("reject=invalid-number")
+    print("samples=0")
+    print("checksum=0")
+}
+
+fn escape_count(cx: Float, cy: Float, maximum: Int) Int -> {
+    zx := Float{0.0}
+    zy := Float{0.0}
+    loop i in 0..<maximum {
+        zx_squared :: zx * zx
+        zy_squared :: zy * zy
+        difference :: zx_squared - zy_squared
+        next_x :: difference + cx
+        product :: zx * zy
+        doubled :: product * Float{2.0}
+        next_y :: doubled + cy
+        zx = next_x
+        zy = next_y
+        magnitude_x :: zx * zx
+        magnitude_y :: zy * zy
+        magnitude_squared :: magnitude_x + magnitude_y
+        if magnitude_squared > 4.0f -> return i + 1
+    }
+    return maximum
+}
+
+fn emit_case(
+    label: String,
+    named: Bool,
+    width: Int,
+    height: Int,
+    stride: Int,
+    iterations: Int,
+    parse_failed: Bool,
+    width_seen: Bool,
+    height_seen: Bool,
+    stride_seen: Bool,
+    iterations_seen: Bool
+) {
+    if parse_failed || !width_seen || !height_seen || !stride_seen || !iterations_seen {
+        reject_case(label, named)
         return
     }
+    if width <= 0 || width > 16_000 || height <= 0 || height > 16_000 || stride <= 0 || stride > 16_000 || iterations <= 0 || iterations > 64 {
+        reject_case(label, named)
+        return
+    }
+    samples_x :: (width + stride - 1) /% stride
+    samples_y :: (height + stride - 1) /% stride
+    if samples_x <= 0 || samples_y <= 0 || samples_x > 25_000_000 /% samples_y {
+        reject_case(label, named)
+        return
+    }
+    expected_samples :: samples_x * samples_y
+    samples := 0
+    checksum := 0
+    loop y in 0..<height, stride {
+        cy_ratio :: Float.from_int(y) / Float.from_int(height)
+        cy :: cy_ratio * Float{2.0} - Float{1.0}
+        loop x in 0..<width, stride {
+            cx_ratio :: Float.from_int(x) / Float.from_int(width)
+            cx :: cx_ratio * Float{3.5} - Float{2.5}
+            count :: escape_count(cx, cy, iterations)
+            checksum = (checksum + count) % 1_000_000_007
+            samples += 1
+        }
+    }
+    if samples != expected_samples {
+        reject_case(label, named)
+        return
+    }
+    if named -> print("case={label}")
+    print("samples={samples}")
+    print("checksum={checksum}")
+}
+
+fn run_single(raw: String) {
     width := 0
     height := 0
     stride := 0
     iterations := 0
+    width_seen := false
+    height_seen := false
+    stride_seen := false
+    iterations_seen := false
+    parse_failed := false
     loop line in raw.lines() {
+        trimmed :: line.trim()
+        if trimmed == "" -> next
         fields :: line.split("=").to_list()
-        if fields.len() != 2 -> next
-        value :: Int.parse(fields[1]) ?? panic("invalid number")
-        if fields[0] == "width" -> width = value
-        if fields[0] == "height" -> height = value
-        if fields[0] == "stride" -> stride = value
-        if fields[0] == "iterations" -> iterations = value
-    }
-    samples := 0
-    checksum := 0
-    loop y in 0..height, stride {
-        loop x in 0..width, stride {
-            value := (x * 31 + y * 17 + iterations) % 1000003
-            checksum = (checksum + value) % 1000000007
-            samples += 1
+        if fields.len() != 2 {
+            parse_failed = true
+            next
+        }
+        key :: fields[0].trim()
+        value :: Int.parse(fields[1].trim()) ?? {
+            parse_failed = true
+            next
+        }
+        if key == "width" {
+            if width_seen -> parse_failed = true
+            width_seen = true
+            width = value
+        } else if key == "height" {
+            if height_seen -> parse_failed = true
+            height_seen = true
+            height = value
+        } else if key == "stride" {
+            if stride_seen -> parse_failed = true
+            stride_seen = true
+            stride = value
+        } else if key == "iterations" {
+            if iterations_seen -> parse_failed = true
+            iterations_seen = true
+            iterations = value
+        } else {
+            parse_failed = true
         }
     }
-    print("samples={samples}")
-    print("checksum={checksum}")
+    emit_case(
+        "",
+        false,
+        width,
+        height,
+        stride,
+        iterations,
+        parse_failed,
+        width_seen,
+        height_seen,
+        stride_seen,
+        iterations_seen
+    )
+}
+
+fn run_batch(raw: String) {
+    width := 0
+    height := 0
+    stride := 0
+    iterations := 0
+    width_seen := false
+    height_seen := false
+    stride_seen := false
+    iterations_seen := false
+    parse_failed := false
+    active := false
+    label := ""
+    loop line in raw.lines() {
+        trimmed :: line.trim()
+        if trimmed == "" || trimmed.starts_with("#") -> next
+        fields :: trimmed.split("=").to_list()
+        if fields.len() != 2 {
+            parse_failed = true
+            next
+        }
+        key :: fields[0].trim()
+        if key == "case" {
+            if active {
+                emit_case(
+                    label,
+                    true,
+                    width,
+                    height,
+                    stride,
+                    iterations,
+                    parse_failed,
+                    width_seen,
+                    height_seen,
+                    stride_seen,
+                    iterations_seen
+                )
+            }
+            label = fields[1].trim()
+            width = 0
+            height = 0
+            stride = 0
+            iterations = 0
+            width_seen = false
+            height_seen = false
+            stride_seen = false
+            iterations_seen = false
+            parse_failed = label == ""
+            active = true
+            next
+        }
+        if !active {
+            parse_failed = true
+            next
+        }
+        value :: Int.parse(fields[1].trim()) ?? {
+            parse_failed = true
+            next
+        }
+        if key == "width" {
+            if width_seen -> parse_failed = true
+            width_seen = true
+            width = value
+        } else if key == "height" {
+            if height_seen -> parse_failed = true
+            height_seen = true
+            height = value
+        } else if key == "stride" {
+            if stride_seen -> parse_failed = true
+            stride_seen = true
+            stride = value
+        } else if key == "iterations" {
+            if iterations_seen -> parse_failed = true
+            iterations_seen = true
+            iterations = value
+        } else {
+            parse_failed = true
+        }
+    }
+    if active {
+        emit_case(
+            label,
+            true,
+            width,
+            height,
+            stride,
+            iterations,
+            parse_failed,
+            width_seen,
+            height_seen,
+            stride_seen,
+            iterations_seen
+        )
+    } else {
+        reject_case("batch", true)
+    }
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    raw :: fs.read(input) ?? panic("read input")
+    if raw.contains("case=") -> run_batch(raw) else -> run_single(raw)
 }

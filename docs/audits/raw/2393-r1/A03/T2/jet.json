@@ -95,171 +95,6 @@
       "argv": [
         "/etc/profiles/per-user/nate/bin/jet",
         "check",
-        "T4.jet"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:20:24.313Z",
-      "ended_at": "2026-08-31T21:20:24.524Z",
-      "wall_seconds": 0.21068523200042547,
-      "time_to_first_stdout_seconds": 0.20055179600045084,
-      "peak_rss_kb": 52984,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "check: passed (source=T4.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=95, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=2)\nproof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)\nproof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)\nproof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)\nproof: output=not-applicable tier lowering [not applicable] explicit-file checks keep semantic scope and do not promise project tier lowering (diagnostic=E2392)\n",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T4.jet:23:9\n    |\n 23 |         if key == \"name\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0520] (display_migration): `JSONError` has no `Display` impl — bare `{}` will require one soon\n  --> T4.jet:38:1\n    |\n 38 | \n    | ^\n Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`\n Fix: add `impl JSONError.Display { fn display(self) String -> { … } }`\nMore: jet-lang.dev/e/L0520\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T4.jet:21:9\n    |\n 21 |         key :: fields.get(0) ?? panic(\"invalid report field\")\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T4.jet:22:9\n    |\n 22 |         value :: fields.get(1) ?? panic(\"invalid report field\")\n    |         ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T4.jet:26:26\n    |\n 26 |             count = json.decode(value)\n    |                          ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\n5 problems found\nrun `jet explain L0507` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T4.jet",
-        "--",
-        "report.tsv"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:20:24.524Z",
-      "ended_at": "2026-08-31T21:20:24.754Z",
-      "wall_seconds": 0.22988167699985207,
-      "time_to_first_stdout_seconds": null,
-      "peak_rss_kb": 103592,
-      "exit_status": 1,
-      "timed_out": false,
-      "stdout": "",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T4.jet:23:9\n    |\n 23 |         if key == \"name\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0520] (display_migration): `JSONError` has no `Display` impl — bare `{}` will require one soon\n  --> T4.jet:38:1\n    |\n 38 | \n    | ^\n Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`\n Fix: add `impl JSONError.Display { fn display(self) String -> { … } }`\nMore: jet-lang.dev/e/L0520\n\n2 problems found\nrun `jet explain L0507` to learn more\nError [E0956]: `JSON lenient decode coercion audit effects` isn't supported by the current evaluator yet\n  --> T4.jet:17:19\n    |\n 17 |     count := json.decode(\"0\")\n    |                   ^^^^^^\n Why: the canonical TIR evaluator doesn't cover this construct yet\n Fix: use a simpler form, or use `jet build` for the full evaluator\nMore: jet-lang.dev/e/E0956\n\n1 problem found\nrun `jet explain E0956` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "--release",
-        "T4.jet",
-        "--",
-        "report.tsv"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:20:24.754Z",
-      "ended_at": "2026-08-31T21:20:46.718Z",
-      "wall_seconds": 21.96369975700043,
-      "time_to_first_stdout_seconds": 21.958365974000657,
-      "peak_rss_kb": 224988,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T4.jet:23:9\n    |\n 23 |         if key == \"name\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0520] (display_migration): `JSONError` has no `Display` impl — bare `{}` will require one soon\n  --> T4.jet:38:1\n    |\n 38 | \n    | ^\n Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`\n Fix: add `impl JSONError.Display { fn display(self) String -> { … } }`\nMore: jet-lang.dev/e/L0520\n\n2 problems found\nrun `jet explain L0507` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "build",
-        "T4.jet"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:20:46.718Z",
-      "ended_at": "2026-08-31T21:21:16.752Z",
-      "wall_seconds": 30.034337445000187,
-      "time_to_first_stdout_seconds": null,
-      "peak_rss_kb": 54252,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "",
-      "stderr": "  jet  Reading    T4.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T4.jet:23:9\n    |\n 23 |         if key == \"name\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0520] (display_migration): `JSONError` has no `Display` impl — bare `{}` will require one soon\n  --> T4.jet:38:1\n    |\n 38 | \n    | ^\n Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`\n Fix: add `impl JSONError.Display { fn display(self) String -> { … } }`\nMore: jet-lang.dev/e/L0520\n\n2 problems found\nrun `jet explain L0507` to learn more\nrequired effects: Exec, FS, IO, Panic; granted effects: Exec, FS, IO, Mem.Alloc; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T4 in 29.9s ✓\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "check",
-        "T3.jet"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:21:16.752Z",
-      "ended_at": "2026-08-31T21:21:16.979Z",
-      "wall_seconds": 0.22663988199923188,
-      "time_to_first_stdout_seconds": 0.2056827129991725,
-      "peak_rss_kb": 54624,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "check: passed (source=T3.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=89, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=2)\nproof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)\nproof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)\nproof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)\nproof: output=not-applicable tier lowering [not applicable] explicit-file checks keep semantic scope and do not promise project tier lowering (diagnostic=E2392)\n",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:17:9\n    |\n 17 |         kind :: fields.get(0) ?? panic(\"malformed journal record\")\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:18:9\n    |\n 18 |         key :: fields.get(1) ?? panic(\"malformed journal record\")\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:19:9\n    |\n 19 |         value :: fields.get(2) ?? panic(\"malformed journal record\")\n    |         ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:25:13\n    |\n 25 |             if active[i] && keys[i] == key {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:55:9\n    |\n 55 |         if active[i] {\n    |         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:56:13\n    |\n 56 |             print(\"{keys[i]}={values[i]}\")\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n8 problems found\nrun `jet explain L0507` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T3.jet",
-        "--",
-        "journal.log"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:21:16.979Z",
-      "ended_at": "2026-08-31T21:21:17.223Z",
-      "wall_seconds": 0.24421048900019376,
-      "time_to_first_stdout_seconds": 0.23826700500026346,
-      "peak_rss_kb": 97428,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "beta=2\ngamma=3\n",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T3.jet",
-        "--",
-        "journal-failure.log"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:21:17.223Z",
-      "ended_at": "2026-08-31T21:21:17.441Z",
-      "wall_seconds": 0.21777854899968951,
-      "time_to_first_stdout_seconds": null,
-      "peak_rss_kb": 88472,
-      "exit_status": 70,
-      "timed_out": false,
-      "stdout": "",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\nStop [E3001]: `panic: unknown record kind rename` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> T3.jet:50 in run\n     |\n50 |             panic(\"unknown record kind {kind}\")\n     |             ^^^^^\nlocals: found = true\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "--release",
-        "T3.jet",
-        "--",
-        "journal.log"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:21:17.441Z",
-      "ended_at": "2026-08-31T21:21:46.168Z",
-      "wall_seconds": 28.72662249200046,
-      "time_to_first_stdout_seconds": 28.720942189000546,
-      "peak_rss_kb": 223284,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "beta=2\ngamma=3\n",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "build",
-        "T3.jet"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:21:46.167Z",
-      "ended_at": "2026-08-31T21:22:07.630Z",
-      "wall_seconds": 21.46267563899979,
-      "time_to_first_stdout_seconds": null,
-      "peak_rss_kb": 52376,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "",
-      "stderr": "  jet  Reading    T3.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T3 in 21.3s ✓\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "check",
         "T2.jet"
       ],
       "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
@@ -395,98 +230,6 @@
       "timed_out": false,
       "stdout": "",
       "stderr": "  jet  Reading    T2.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T2.jet:14:5\n    |\n 14 |     if command_name == \"list\" || command_name == \"ls\" {\n    |     ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T2.jet:31:9\n    |\n 31 |         if token == \"--json\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T2.jet:55:5\n    |\n 55 |     if command.operation == \"list\" {\n    |     ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n3 problems found\nrun `jet explain L0507` to learn more\nrequired effects: Exec, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T2 in 21.2s ✓\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "check",
-        "T1.jet"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:22:52.213Z",
-      "ended_at": "2026-08-31T21:22:52.474Z",
-      "wall_seconds": 0.2609017770001665,
-      "time_to_first_stdout_seconds": 0.2510032869996503,
-      "peak_rss_kb": 52624,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "check: passed (source=T1.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=140, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=2)\nproof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)\nproof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)\nproof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)\nproof: output=not-applicable tier lowering [not applicable] explicit-file checks keep semantic scope and do not promise project tier lowering (diagnostic=E2392)\n",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:25:13\n    |\n 25 |             title :: header.get(0) ?? panic(\"invalid section header\")\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:27:13\n    |\n 27 |             section_name :: name_parts.get(1) ?? panic(\"invalid section header\")\n    |             ^^^^^^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:35:13\n    |\n 35 |             current = sections.len() - 1\n    |             ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:41:13\n    |\n 41 |             key :: (pair.get(0) ?? panic(\"invalid field\")).trim()\n    |             ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:42:13\n    |\n 42 |             raw_value :: pair.get(1) ?? panic(\"invalid field\")\n    |             ^^^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:44:13\n    |\n 44 |             value :: quoted.get(1) ?? panic(\"invalid quoted value\")\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:52:17\n    |\n 52 |                 loop i in 0..<sections[current].keys.len() {\n    |                 ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:53:21\n    |\n 53 |                     if sections[current].keys[i] == key {\n    |                     ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:58:21\n    |\n 58 |                     panic(\"duplicate field {key} in section {sections[current].name}\")\n    |                     ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:60:40\n    |\n 60 |                 sections[current].keys.push(key)\n    |                                        ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:61:42\n    |\n 61 |                 sections[current].values.push(value)\n    |                                          ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:69:9\n    |\n 69 |         inherit_name :: sections[section_index].inherit\n    |         ^^^^^^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:73:17\n    |\n 73 |                 if sections[candidate].name == inherit_name {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:80:13\n    |\n 80 |             if !sections[base_index].inherit.is_empty() {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:83:13\n    |\n 83 |             loop i in 0..<sections[base_index].keys.len() {\n    |             ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:84:31\n    |\n 84 |                 resolved_keys.push(sections[base_index].keys[i])\n    |                               ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:85:33\n    |\n 85 |                 resolved_values.push(sections[base_index].values[i])\n    |                                 ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:88:9\n    |\n 88 |         loop i in 0..<sections[section_index].keys.len() {\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:89:13\n    |\n 89 |             key :: sections[section_index].keys[i]\n    |             ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:90:13\n    |\n 90 |             value :: sections[section_index].values[i]\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:93:17\n    |\n 93 |                 if resolved_keys[j] == key {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:104:13\n    |\n104 |             print(\"{sections[section_index].name}.{resolved_keys[i]}={resolved_values[i]}\")\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n24 problems found\nrun `jet explain L0507` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T1.jet",
-        "--",
-        "records.cfg"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:22:52.474Z",
-      "ended_at": "2026-08-31T21:22:52.813Z",
-      "wall_seconds": 0.3391624159999192,
-      "time_to_first_stdout_seconds": 0.33227112600021064,
-      "peak_rss_kb": 105612,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T1.jet",
-        "--",
-        "records-failure.cfg"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:22:52.813Z",
-      "ended_at": "2026-08-31T21:22:53.162Z",
-      "wall_seconds": 0.3492066529998556,
-      "time_to_first_stdout_seconds": null,
-      "peak_rss_kb": 104764,
-      "exit_status": 70,
-      "timed_out": false,
-      "stdout": "",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\nStop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> T1.jet:58 in run\n     |\n58 |                     panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                     ^^^^^\nlocals: current = 0, duplicate = true\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "--release",
-        "T1.jet",
-        "--",
-        "records.cfg"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:22:53.162Z",
-      "ended_at": "2026-08-31T21:23:15.045Z",
-      "wall_seconds": 21.882660373999737,
-      "time_to_first_stdout_seconds": 21.876978116999382,
-      "peak_rss_kb": 230072,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\n"
-    },
-    {
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "build",
-        "T1.jet"
-      ],
-      "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A03",
-      "started_at": "2026-08-31T21:23:15.044Z",
-      "ended_at": "2026-08-31T21:23:43.015Z",
-      "wall_seconds": 27.970553301000038,
-      "time_to_first_stdout_seconds": null,
-      "peak_rss_kb": 52592,
-      "exit_status": 0,
-      "timed_out": false,
-      "stdout": "",
-      "stderr": "  jet  Reading    T1.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T1 in 27.9s ✓\n"
     }
   ],
   "task_outcome": {
@@ -516,7 +259,7 @@
     "tooling_docs": 3,
     "reason": "Tooling/docs is lowest: checks and required success/failure runs passed, but the runner also observed a native/optimized compiler ICE for scratch-source execution."
   },
-  "rating_response_raw": "{\"T1\":{\"reading\":5,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":3,\"reason\":\"Tooling/docs is lowest: checks and default fixture runs passed, but the runner also observed a native/optimized compiler ICE for scratch-source execution.\"},\"T2\":{\"reading\":5,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":3,\"reason\":\"Tooling/docs is lowest: checks and required success/failure runs passed, but the runner also observed a native/optimized compiler ICE for scratch-source execution.\"},\"T3\":{\"reading\":5,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling_docs\":3,\"reason\":\"Tooling/docs is lowest: checks and required success/failure runs passed, but the runner also observed a native/optimized compiler ICE for scratch-source execution.\"},\"T4\":{\"reading\":5,\"writing\":3,\"reasoning\":3,\"creating\":4,\"modifying\":3,\"diagnostics\":3,\"tooling_docs\":3,\"reason\":\"Writing, reasoning, modifying, diagnostics, and tooling/docs are lowest together: the source needed three correction passes and the runner observed a native/optimized compiler ICE, although check and the required default success run passed.\"}}",
+  "rating_response_raw": "{\"ratings\":{\"T1\":{\"reading\":5,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling/docs\":3,\"reason\":\"Tooling/docs is lowest: checks and default fixture runs passed, but the runner also observed a native/optimized compiler ICE for scratch-source execution.\"},\"T2\":{\"reading\":5,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling/docs\":3,\"reason\":\"Tooling/docs is lowest: checks and required success/failure runs passed, but the runner also observed a native/optimized compiler ICE for scratch-source execution.\"},\"T3\":{\"reading\":5,\"writing\":4,\"reasoning\":4,\"creating\":4,\"modifying\":4,\"diagnostics\":4,\"tooling/docs\":3,\"reason\":\"Tooling/docs is lowest: checks and required success/failure runs passed, but the runner also observed a native/optimized compiler ICE for scratch-source execution.\"},\"T4\":{\"reading\":5,\"writing\":3,\"reasoning\":3,\"creating\":4,\"modifying\":3,\"diagnostics\":3,\"tooling/docs\":3,\"reason\":\"Writing, reasoning, modifying, diagnostics, and tooling/docs are lowest together: the source needed three correction passes and the runner observed a native/optimized compiler ICE, although check and the required default success run passed.\"}}}",
   "rating_response_ref": ".tmp/2393-r1/runs/A03-jet.rating.agent.json",
   "rating_session": {
     "adapter": "omp-task-follow-up",
@@ -530,222 +273,6 @@
   "diagnostics": [
     {
       "step": 1,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "check",
-        "T4.jet"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0520",
-        "L0520",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L0507"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T4.jet:23:9\n    |\n 23 |         if key == \"name\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0520] (display_migration): `JSONError` has no `Display` impl — bare `{}` will require one soon\n  --> T4.jet:38:1\n    |\n 38 | \n    | ^\n Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`\n Fix: add `impl JSONError.Display { fn display(self) String -> { … } }`\nMore: jet-lang.dev/e/L0520\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T4.jet:21:9\n    |\n 21 |         key :: fields.get(0) ?? panic(\"invalid report field\")\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T4.jet:22:9\n    |\n 22 |         value :: fields.get(1) ?? panic(\"invalid report field\")\n    |         ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T4.jet:26:26\n    |\n 26 |             count = json.decode(value)\n    |                          ^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\n5 problems found\nrun `jet explain L0507` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 2,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T4.jet",
-        "--",
-        "report.tsv"
-      ],
-      "exit_status": 1,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0520",
-        "L0520",
-        "L0507",
-        "E0956",
-        "E0956",
-        "E0956"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T4.jet:23:9\n    |\n 23 |         if key == \"name\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0520] (display_migration): `JSONError` has no `Display` impl — bare `{}` will require one soon\n  --> T4.jet:38:1\n    |\n 38 | \n    | ^\n Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`\n Fix: add `impl JSONError.Display { fn display(self) String -> { … } }`\nMore: jet-lang.dev/e/L0520\n\n2 problems found\nrun `jet explain L0507` to learn more\nError [E0956]: `JSON lenient decode coercion audit effects` isn't supported by the current evaluator yet\n  --> T4.jet:17:19\n    |\n 17 |     count := json.decode(\"0\")\n    |                   ^^^^^^\n Why: the canonical TIR evaluator doesn't cover this construct yet\n Fix: use a simpler form, or use `jet build` for the full evaluator\nMore: jet-lang.dev/e/E0956\n\n1 problem found\nrun `jet explain E0956` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 3,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "--release",
-        "T4.jet",
-        "--",
-        "report.tsv"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0520",
-        "L0520",
-        "L0507"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T4.jet:23:9\n    |\n 23 |         if key == \"name\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0520] (display_migration): `JSONError` has no `Display` impl — bare `{}` will require one soon\n  --> T4.jet:38:1\n    |\n 38 | \n    | ^\n Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`\n Fix: add `impl JSONError.Display { fn display(self) String -> { … } }`\nMore: jet-lang.dev/e/L0520\n\n2 problems found\nrun `jet explain L0507` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 4,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "build",
-        "T4.jet"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0520",
-        "L0520",
-        "L0507"
-      ],
-      "stderr": "  jet  Reading    T4.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T4.jet:23:9\n    |\n 23 |         if key == \"name\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0520] (display_migration): `JSONError` has no `Display` impl — bare `{}` will require one soon\n  --> T4.jet:38:1\n    |\n 38 | \n    | ^\n Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`\n Fix: add `impl JSONError.Display { fn display(self) String -> { … } }`\nMore: jet-lang.dev/e/L0520\n\n2 problems found\nrun `jet explain L0507` to learn more\nrequired effects: Exec, FS, IO, Panic; granted effects: Exec, FS, IO, Mem.Alloc; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T4 in 29.9s ✓\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 5,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "check",
-        "T3.jet"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L0507"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:17:9\n    |\n 17 |         kind :: fields.get(0) ?? panic(\"malformed journal record\")\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:18:9\n    |\n 18 |         key :: fields.get(1) ?? panic(\"malformed journal record\")\n    |         ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T3.jet:19:9\n    |\n 19 |         value :: fields.get(2) ?? panic(\"malformed journal record\")\n    |         ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:25:13\n    |\n 25 |             if active[i] && keys[i] == key {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:55:9\n    |\n 55 |         if active[i] {\n    |         ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T3.jet:56:13\n    |\n 56 |             print(\"{keys[i]}={values[i]}\")\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n8 problems found\nrun `jet explain L0507` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 6,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T3.jet",
-        "--",
-        "journal.log"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 7,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T3.jet",
-        "--",
-        "journal-failure.log"
-      ],
-      "exit_status": 70,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "E3001",
-        "E3001",
-        "E3001"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\nStop [E3001]: `panic: unknown record kind rename` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> T3.jet:50 in run\n     |\n50 |             panic(\"unknown record kind {kind}\")\n     |             ^^^^^\nlocals: found = true\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n",
-      "seeded_cause": true,
-      "first_diagnostic_names_seeded_cause": true,
-      "resolved": true
-    },
-    {
-      "step": 8,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "--release",
-        "T3.jet",
-        "--",
-        "journal.log"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 9,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "build",
-        "T3.jet"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507"
-      ],
-      "stderr": "  jet  Reading    T3.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:27:17\n    |\n 27 |                 if kind == \"put\" {\n    |                 ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T3.jet:37:9\n    |\n 37 |         if kind == \"put\" {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T3 in 21.3s ✓\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 10,
       "argv": [
         "/etc/profiles/per-user/nate/bin/jet",
         "check",
@@ -775,7 +302,7 @@
       "resolved": false
     },
     {
-      "step": 11,
+      "step": 2,
       "argv": [
         "/etc/profiles/per-user/nate/bin/jet",
         "run",
@@ -801,7 +328,7 @@
       "resolved": false
     },
     {
-      "step": 12,
+      "step": 3,
       "argv": [
         "/etc/profiles/per-user/nate/bin/jet",
         "run",
@@ -828,7 +355,7 @@
       "resolved": false
     },
     {
-      "step": 13,
+      "step": 4,
       "argv": [
         "/etc/profiles/per-user/nate/bin/jet",
         "run",
@@ -854,7 +381,7 @@
       "resolved": false
     },
     {
-      "step": 14,
+      "step": 5,
       "argv": [
         "/etc/profiles/per-user/nate/bin/jet",
         "run",
@@ -882,7 +409,7 @@
       "resolved": true
     },
     {
-      "step": 15,
+      "step": 6,
       "argv": [
         "/etc/profiles/per-user/nate/bin/jet",
         "run",
@@ -909,7 +436,7 @@
       "resolved": false
     },
     {
-      "step": 16,
+      "step": 7,
       "argv": [
         "/etc/profiles/per-user/nate/bin/jet",
         "build",
@@ -929,165 +456,21 @@
       "seeded_cause": false,
       "first_diagnostic_names_seeded_cause": false,
       "resolved": false
-    },
-    {
-      "step": 17,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "check",
-        "T1.jet"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L2510",
-        "L0507"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:25:13\n    |\n 25 |             title :: header.get(0) ?? panic(\"invalid section header\")\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:27:13\n    |\n 27 |             section_name :: name_parts.get(1) ?? panic(\"invalid section header\")\n    |             ^^^^^^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): an exact Int operation may spill to bigint repeats inside a loop.\n  --> T1.jet:35:13\n    |\n 35 |             current = sections.len() - 1\n    |             ^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: bound the operands so the result stays on the packed Int rail, or accept exact bigint cost\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:41:13\n    |\n 41 |             key :: (pair.get(0) ?? panic(\"invalid field\")).trim()\n    |             ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:42:13\n    |\n 42 |             raw_value :: pair.get(1) ?? panic(\"invalid field\")\n    |             ^^^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): constructing an Outcome carrier repeats inside a loop.\n  --> T1.jet:44:13\n    |\n 44 |             value :: quoted.get(1) ?? panic(\"invalid quoted value\")\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: consume the outcome through an immediate fast path when one exists\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:52:17\n    |\n 52 |                 loop i in 0..<sections[current].keys.len() {\n    |                 ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:53:21\n    |\n 53 |                     if sections[current].keys[i] == key {\n    |                     ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:58:21\n    |\n 58 |                     panic(\"duplicate field {key} in section {sections[current].name}\")\n    |                     ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:60:40\n    |\n 60 |                 sections[current].keys.push(key)\n    |                                        ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:61:42\n    |\n 61 |                 sections[current].values.push(value)\n    |                                          ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:69:9\n    |\n 69 |         inherit_name :: sections[section_index].inherit\n    |         ^^^^^^^^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:73:17\n    |\n 73 |                 if sections[candidate].name == inherit_name {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:80:13\n    |\n 80 |             if !sections[base_index].inherit.is_empty() {\n    |             ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:83:13\n    |\n 83 |             loop i in 0..<sections[base_index].keys.len() {\n    |             ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:84:31\n    |\n 84 |                 resolved_keys.push(sections[base_index].keys[i])\n    |                               ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:85:33\n    |\n 85 |                 resolved_values.push(sections[base_index].values[i])\n    |                                 ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:88:9\n    |\n 88 |         loop i in 0..<sections[section_index].keys.len() {\n    |         ^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:89:13\n    |\n 89 |             key :: sections[section_index].keys[i]\n    |             ^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:90:13\n    |\n 90 |             value :: sections[section_index].values[i]\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:93:17\n    |\n 93 |                 if resolved_keys[j] == key {\n    |                 ^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\nWarning [L2510] (hidden_cost_in_loop): using a generic collection representation repeats inside a loop.\n  --> T1.jet:104:13\n    |\n104 |             print(\"{sections[section_index].name}.{resolved_keys[i]}={resolved_values[i]}\")\n    |             ^^^^^\n Why: A repeated copy or representation fallback can make a growing value's cost super-linear.\n Fix: provide the collection shape proof that selects the direct representation\nMore: jet-lang.dev/e/L2510\n\n24 problems found\nrun `jet explain L0507` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 18,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T1.jet",
-        "--",
-        "records.cfg"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 19,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "T1.jet",
-        "--",
-        "records-failure.cfg"
-      ],
-      "exit_status": 70,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "E3001",
-        "E3001",
-        "E3001"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\nStop [E3001]: `panic: duplicate field name in section base` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.\n  --> T1.jet:58 in run\n     |\n58 |                     panic(\"duplicate field {key} in section {sections[current].name}\")\n     |                     ^^^^^\nlocals: current = 0, duplicate = true\n Why: the program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).\n Fix: fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.\nMore: jet-lang.dev/e/E3001\n",
-      "seeded_cause": true,
-      "first_diagnostic_names_seeded_cause": true,
-      "resolved": true
-    },
-    {
-      "step": 20,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "run",
-        "--release",
-        "T1.jet",
-        "--",
-        "records.cfg"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507"
-      ],
-      "stderr": "Warning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
-    },
-    {
-      "step": 21,
-      "argv": [
-        "/etc/profiles/per-user/nate/bin/jet",
-        "build",
-        "T1.jet"
-      ],
-      "exit_status": 0,
-      "codes": [
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507",
-        "L0507"
-      ],
-      "stderr": "  jet  Reading    T1.jet\n  jet  Checking   program and build plan\n  jet  Generating native code\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:48:13\n    |\n 48 |             if key == \"inherits\" {\n    |             ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\nWarning [L0507] (branch_arm_table): prefer an ordered arm table for this branch\n  --> T1.jet:23:9\n    |\n 23 |         if line.contains(\"[\") {\n    |         ^^\n Why: one ordered arm table is Jet's normal form for multi-line and chained choices\n Fix: write `if { condition -> body else -> body }`\nMore: jet-lang.dev/e/L0507\n\n2 problems found\nrun `jet explain L0507` to learn more\nrequired effects: Exec, FS, IO, Mem.Alloc, Panic; granted effects: Exec, FS, IO, Mem.Alloc; denied effects: none; authority: package.jet authority.holds\n  jet  Building   backend artifacts\n  jet  Verifying  build budgets\n  jet  Built build/T1 in 27.9s ✓\n",
-      "seeded_cause": false,
-      "first_diagnostic_names_seeded_cause": false,
-      "resolved": false
     }
   ],
   "diagnostic_policy": {
     "first_diagnostic_names_seeded_cause": "true only for the seeded duplicate/unknown/rename fixture failures; false for warnings, ICEs, and other tool failures",
     "unregistered_codes_are_not_relabelled": true
   },
-  "status_detail": "Source and command evidence persisted despite a task-agent transport failure after measurement."
+  "status_detail": "Source and command evidence persisted despite a task-agent transport failure after measurement.",
+  "rating_prompt": "Rate this arm for this task from 1 to 5. Use only the work you observed. Explain the lowest rating that applies.",
+  "rating_category_wording": [
+    "reading",
+    "writing",
+    "reasoning",
+    "creating",
+    "modifying",
+    "diagnostics",
+    "tooling/docs"
+  ]
 }

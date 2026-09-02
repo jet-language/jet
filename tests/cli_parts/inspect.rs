@@ -479,7 +479,11 @@ fn run() {}
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         if hardened {
-            assert!(!output.status.success(), "hardened test missed stale pointer: {stderr}");
+            assert_eq!(
+                output.status.code(),
+                Some(1),
+                "hardened test must report a failed suite: {stderr}"
+            );
             let report = format!("{stdout}{stderr}");
             for marker in [
                 "Runtime fault [R0802]",
@@ -490,6 +494,10 @@ fn run() {}
             ] {
                 assert!(report.contains(marker), "hardened test report missing `{marker}`: {report}");
             }
+            assert!(
+                !report.contains("panicked at") && !report.contains("RUST_BACKTRACE"),
+                "hardened test leaked Rust panic voice: {report}"
+            );
         } else {
             assert!(
                 output.status.success(),
@@ -515,9 +523,10 @@ fn safe_release_profiles_emit_no_sentry_runtime_overhead() {
         .unwrap();
         fs::write(dir.join("main.jet"), "fn run() { print(7) }\n").unwrap();
         let path = dir.join("main.jet");
+        let src = fs::read_to_string(&path).unwrap();
         let shown = path.to_string_lossy();
         let output = jet::compile_with_target_and_gates_and_profile(
-            "",
+            &src,
             &shown,
             jet::Policy::GateSet::default(),
             None,
@@ -525,15 +534,15 @@ fn safe_release_profiles_emit_no_sentry_runtime_overhead() {
         )
         .unwrap_or_else(|diags| panic!("safe profile rejected: {diags:?}"));
         assert!(
-            !output.rust.contains("jet_mem::jet_sentry_set_hardened("),
-            "safe {tag} output carries sentry machinery:\n{}",
+            !output.rust.contains("jet_mem::jet_sentry_"),
+            "safe {tag} output carries sentry runtime machinery:\n{}",
             output.rust
         );
     }
 }
 
 #[test]
-fn inspect_guarantees_is_honest_for_single_file_and_freestanding() {
+fn inspect_guarantees_is_honest_for_single_file_and_no_os() {
     let dir = isolated_cwd("inspect_guarantees_single_file");
     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
 
@@ -558,25 +567,25 @@ fn inspect_guarantees_is_honest_for_single_file_and_freestanding() {
     );
     check_snapshot("inspect_guarantees_single_file.txt", &single);
 
-    let freestanding = Command::new(jet())
-        .args(["inspect", "guarantees", "--freestanding", "main.jet"])
+    let no_os = Command::new(jet())
+        .args(["inspect", "guarantees", "--target=wasm.no-os", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
     assert_eq!(
-        freestanding.status.code(),
+        no_os.status.code(),
         Some(0),
         "{}",
-        String::from_utf8_lossy(&freestanding.stderr)
+        String::from_utf8_lossy(&no_os.stderr)
     );
-    let freestanding = String::from_utf8(freestanding.stdout).unwrap();
+    let no_os = String::from_utf8(no_os.stdout).unwrap();
     assert!(
-        freestanding.contains("target: freestanding")
-            && freestanding.contains("prover + audit only"),
-        "{freestanding}"
+        no_os.contains("target: no-OS")
+            && no_os.contains("prover + audit only"),
+        "{no_os}"
     );
-    check_snapshot("inspect_guarantees_freestanding.txt", &freestanding);
+    check_snapshot("inspect_guarantees_no_os.txt", &no_os);
 }
 
 #[test]

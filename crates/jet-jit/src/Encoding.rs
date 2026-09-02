@@ -415,6 +415,20 @@ fn result_err_fields(errors: Vec<json_rt::FieldError>) -> i64 {
     })
 }
 
+fn result_err_json(error: json_rt::JSONError) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let message = rt.heap.alloc_string(error.message);
+        let record = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(record, 0, error.line);
+        let _ = rt.heap.record_set_string(record, 1, message);
+        rt.results.push(super::JitResultValue {
+            ok: false,
+            bits: record as u64,
+        });
+        rt.results.len() as i64
+    })
+}
+
 fn result_errors(result: i64) -> Option<Vec<json_rt::FieldError>> {
     Concurrency::with_runtime_mut(|rt| {
         let value = result
@@ -985,21 +999,27 @@ fn jet_jit_uuid_v7(clock: i64) -> i64 {
 fn jet_jit_json_parse(text: i64) -> i64 {
     match json_rt::parse_datatree(&clone_string(text)) {
         Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
-        Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
+        Err(error) => result_err_json(error),
     }
 }
 
+/// Ordered JSON parsing is the front half of typed `json.decode`. Its failure
+/// must already use the decoder's `[FieldError]` list carrier; the dynamic
+/// `json.parse` path above keeps the richer `JSONError` record.
 fn jet_jit_json_parse_ordered(text: i64) -> i64 {
     match json_rt::parse_datatree_typed_ordered(&clone_string(text)) {
         Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
-        Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
+        Err(error) => result_err_decode(
+            "",
+            &format!("invalid JSON (line {}): {}", error.line, error.message),
+        ),
     }
 }
 
 fn jet_jit_json_decode(text: i64) -> i64 {
     match json_rt::decode_lenient(&clone_string(text)) {
         Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
-        Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
+        Err(error) => result_err_json(error),
     }
 }
 
@@ -1853,6 +1873,20 @@ fn jet_jit_datatree_text(tree: i64) -> i64 {
     let Some(tree) = read_datatree(tree) else {
         return result_err_decode("", "invalid DataTree");
     };
+    match tree.text() {
+        Ok(value) => {
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
+            result_ok(sid as u64)
+        }
+        Err(errors) => result_err_fields(errors),
+    }
+}
+
+/// `__jet_Decode for String`, distinct from strict `DataTree.text()`.
+fn jet_jit_datatree_decode_string(tree: i64) -> i64 {
+    let Some(tree) = read_datatree(tree) else {
+        return result_err_decode("", "invalid DataTree");
+    };
     match json_rt::decode_string(&tree) {
         Ok(value) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
@@ -1899,7 +1933,10 @@ fn jet_jit_datatree_equal_unordered(left: i64, right: i64) -> i64 {
 fn jet_jit_toml_parse(text: i64) -> i64 {
     match json_rt::toml::parse_to_tree(&clone_string(text)) {
         Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
-        Err(e) => result_err_msg(&format!("invalid TOML (line {}): {}", e.line, e.message)),
+        Err(error) => result_err_json(json_rt::JSONError {
+            line: error.line as i64,
+            message: error.message,
+        }),
     }
 }
 
@@ -1913,7 +1950,10 @@ fn jet_jit_toml_to_string(tree: i64) -> i64 {
 fn jet_jit_yaml_parse(text: i64) -> i64 {
     match yaml_rt::yaml::parse_to_tree(&clone_string(text)) {
         Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
-        Err(e) => result_err_msg(&format!("invalid YAML (line {}): {}", e.line, e.message)),
+        Err(e) => result_err_json(json_rt::JSONError {
+            line: e.line as i64,
+            message: e.message,
+        }),
     }
 }
 
@@ -2331,6 +2371,7 @@ host_fns! {
     datatree_at: "jet_jit_datatree_at" => jet_jit_datatree_at: sig_binary;
     datatree_int: "jet_jit_datatree_int" => jet_jit_datatree_int: sig_unary;
     datatree_decode_int: "jet_jit_datatree_decode_int" => jet_jit_datatree_decode_int: sig_unary;
+    datatree_decode_string: "jet_jit_datatree_decode_string" => jet_jit_datatree_decode_string: sig_unary;
     datatree_decode_char: "jet_jit_datatree_decode_char" => jet_jit_datatree_decode_char: sig_unary;
     decode_int_range: "jet_jit_decode_int_range" => jet_jit_decode_int_range: sig_quaternary;
     decode_inline_range: "jet_jit_decode_inline_range" => jet_jit_decode_inline_range: sig_ternary;

@@ -1497,7 +1497,6 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--token", help: "With notebook: Require this bearer token for clients" },
     // E2-M16 flags.
     FlagSpec { long: "--pure", help: "With eval: Reject code with side effects" },
-    FlagSpec { long: "--freestanding", help: "With build/run: Target a system without an operating system" },
     FlagSpec { long: "--offline", help: "With cc/c++: Reuse only cached signed toolchain data" },
     FlagSpec { long: "--fixtures", help: "With cc/c++ tests: Use an explicit fixture bundle" },
     FlagSpec { long: "--project-root", help: "With cc/c++: Scope source paths to a project directory" },

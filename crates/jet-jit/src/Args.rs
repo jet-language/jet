@@ -248,10 +248,27 @@ mod runtime {
     }
 
     pub(super) fn jet_jit_args_parse_or_exit(h: i64, argv: i64) -> i64 {
-        push_parsed(jet_args_parse_or_exit(
-            &take_spec(h),
-            &list_of_strings(argv),
-        ))
+        let spec = take_spec(h);
+        let argv = list_of_strings(argv);
+        match jet_args_parse(&spec, &argv) {
+            Ok(parsed) if jet_parsed_flag(&parsed, &"help".to_string()) => {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.stdout.push_str(&spec.help());
+                    rt.stdout.push('\n');
+                    rt.set_explicit_exit(0);
+                });
+                0
+            }
+            Ok(parsed) => push_parsed(parsed),
+            Err(message) => {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.stderr.push_str(&message);
+                    rt.stderr.push('\n');
+                    rt.set_explicit_exit(2);
+                });
+                0
+            }
+        }
     }
 
     pub(super) fn jet_jit_parsed_flag(h: i64, name: i64) -> i8 {

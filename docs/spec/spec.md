@@ -1179,7 +1179,9 @@ long multi-clause loop headers wrap only after their canonical semicolons.
 `//` and `/* … */` comments are preserved and re-attached by source span. Real
 parse errors still block fmt. The typed `package.jet`/Config formatter is a
 separate closed-record path: when it sees comments, it fails closed until it
-owns their placement rather than reporting the source as clean unchanged.
+owns their placement rather than reporting the source as clean unchanged. A
+leading inline `package { … }` carrier is preserved byte-for-byte, including
+its exact source spans; only the ordinary Jet source after it is formatted.
 
 Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 `tests/ui/*.fixed.jet` (`tests/fmt.rs`).
@@ -3632,7 +3634,7 @@ Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
 
 **Restrictions:**
 - E3401: `live { … }` is impure — rejected in a `fn … -[]>`.
-- E3301: rejected in `--freestanding` builds (no OS terminal device).
+- E3301: rejected for selected no-OS targets (no OS terminal device).
 - REPL: rejected in interactive mode.
 
 **Platform FFI:** I6-compliant; uses inline `extern "C"` (POSIX termios) and
@@ -3839,6 +3841,42 @@ wedged by later manifest evolution (the Go `go.mod` contract):
 Guarantee: **every past and future `jet` can read the identity block of any
 `package.jet`.** New manifest features may only *add* fields/blocks the identity
 reader ignores; the three identity fields keep this exact `key: value` shape.
+### Inline Package carrier (D-ECO-INLINEPACKAGE1=A, Tower #2409)
+
+A single entry `.jet` file may carry its Package context in one optional leading
+block:
+
+```jet
+package {
+    name: "inline-demo"
+    version: "0.1.0"
+}
+
+pub(package) fn helper() => String {
+    return "same package"
+}
+
+fn run() {
+    print(helper())
+}
+```
+
+The block is structural context, not a second Package grammar. The loader
+extracts its exact body bytes and source spans, then passes that body to the
+same canonical `PackageFacts` parser used for `package.jet`. The ordinary Jet
+parser, formatter, and LSP mask only the block's bytes, preserving offsets for
+diagnostics and semantic features; they do not reimplement Package fields.
+`package` remains contextual, so `pub(package)` keeps its existing
+package-scoped visibility meaning.
+
+Only one inline block may appear, and it must precede every other top-level
+declaration. The byte-zero `#!/...` launch header is file metadata and may
+precede the carrier. A malformed or unbalanced block is E1362, a non-leading
+block is E1360, and a duplicate is E1361. An inline block and a project
+`package.jet` cannot coexist; that conflict is E1363. A file with an inline
+block is otherwise a normal single-file package context and does not create a
+synthetic manifest file.
+
 
 ### Manifest import boundaries (D-STRUCT-EDGE1)
 
@@ -4623,6 +4661,38 @@ and `source_map` are compile-time-only and preserve source, spans, diagnostics,
 semantic facts, and generated-line mappings. `jet inspect compiler` mirrors
 these operations in deterministic JSON with `schema_version: 1` and
 `api_version: 1`; runtime calls are E0956.
+
+The package-model calls have a separate v1 contract. Every view carries
+`schema_version: 1` (`PACKAGE_MODEL_SCHEMA_VERSION`):
+
+| Operation | Value | Composition and ordering |
+| --- | --- | --- |
+| `manifest()` | `CompilerManifest`: `schema_version`, `file`, optional `jet`, `edition`, `description`, `license`, `repository`, `layer`, `target`, and lists `dependencies`, `packages`, `outputs`, `build_profiles` | Uncomposed `package.jet`; dependency and output map keys are sorted, while package-target and build-profile declarations keep model order. |
+| `package()` | `CompilerPackage` with the same fields and optionality as `CompilerManifest` | Composed package facts after the declared Config files pass authority and model validation; it adds no `name` or `version` field. |
+| `lock()` | `CompilerLock`: `schema_version`, `file`, `version`, `root_dependencies`, and `packages` | Lock model order. Each `CompilerLockedPackage` has required `name`, `version`, `source_kind`, `fingerprint`, `dependencies`, and optional `source`, `revision`, `content_hash`, `layer`, and `inferred_layer`. |
+| `profiles()` | `CompilerProfileSet`: `schema_version`, `file`, and `profiles` | Profile and collision keys are sorted. `CompilerProfile` keeps declaration-order `extends`, `packages`, and `sources`; a collision is `CompilerKeyValue { key, value }`. |
+
+The nested list records are also fixed: `CompilerDependency` has required
+`name` and `source`; `CompilerPackageTarget` has required `name` and
+`targets`; `CompilerPackageOutput` has required `name` and `kind` plus
+optional `entry`; and `CompilerBuildProfile` has required `name`, `optimize`,
+`debug_info`, and `small` plus optional `panic`. Optional source fields are
+`Option<String>`. Empty collections remain empty lists. Git sources redact
+credentials, URL queries, and fragments. The views intentionally never repeat
+current-package identity, which remains `@build.package.name` and
+`@build.package.version`.
+
+Each operation is a compile-time `Result`. A failed read carries
+`PackageReadError { code, message, file, cause }` in the Rust facade and
+`CompilerPackageError` with the same fields in the Jet value. Malformed,
+missing, changed, and escaping files fail with their logical file and cause;
+the cause preserves its typed diagnostic code and actionability without
+absolute authority paths or secret material. Reads are restricted to the
+pinned package root. They do not become empty views.
+Every manifest, Config, lock, or profile file consumed by a view is recorded
+as a relative hashed build input and contributes to the cache key. The model
+does not retain field-level source positions, so the API does not fabricate
+positions. Runtime calls remain E0956.
 
 The selected target source/dependency closure plus generated modules becomes a
 fresh runtime bundle. Native, cross, web, sandbox, and freestanding lowering all

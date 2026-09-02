@@ -1443,7 +1443,7 @@ impl<'a> Parser<'a> {
                             "`#ABI` only applies to C declarations".to_string(),
                             "ordinary Jet functions do not select a native C calling convention"
                                 .to_string(),
-                            "move the function into a `#Extern module c.<library> { … }` declaration or remove `#ABI`"
+                            "move the function into a `#Import module c.<library> { … }` declaration or remove `#ABI`"
                                 .to_string(),
                             Some(marker.span),
                         ));

@@ -190,6 +190,8 @@ pub(crate) fn eval_comptime_items(
     consts: &mut HashMap<String, Type>,
     base_dir: &std::path::Path,
     diags: &mut Vec<Diagnostic>,
+    module_idx: usize,
+    name_ledger: &mut NameLedger,
     // D-META-EFFECT1: module alias → Core path so the interpreter can evaluate
     // effect-approved Core calls (e.g. `@value :: math.sqrt(4.0)`).
     core_imports: &HashMap<String, String>,
@@ -212,6 +214,49 @@ pub(crate) fn eval_comptime_items(
         let mut eval_items = items.to_vec();
         let mut ignored_early_serde_diags = Vec::new();
         super::Serde::expand_builtin_serde_items(&mut eval_items, &mut ignored_early_serde_diags);
+        let mut explicit_codecs = eval_items
+            .iter()
+            .filter_map(|item| {
+                let Item::Impl(implementation) = item else {
+                    return None;
+                };
+                (!implementation.is_generated_serde
+                    && matches!(
+                        implementation.trait_name.as_deref(),
+                        Some(crate::Generics::ENCODE | crate::Generics::DECODE)
+                    ))
+                .then(|| {
+                    (
+                        implementation.type_name.clone(),
+                        implementation.trait_name.clone(),
+                    )
+                })
+            })
+            .collect::<std::collections::HashSet<_>>();
+        for item in &eval_items {
+            let blocks = match item {
+                Item::Struct(definition) => &definition.trait_impls,
+                Item::Enum(definition) => &definition.trait_impls,
+                _ => continue,
+            };
+            for block in blocks {
+                if !block.compiler_generated
+                    && matches!(
+                        block.trait_name.as_str(),
+                        crate::Generics::ENCODE | crate::Generics::DECODE
+                    )
+                {
+                    explicit_codecs.insert((
+                        match item {
+                            Item::Struct(definition) => definition.name.clone(),
+                            Item::Enum(definition) => definition.name.clone(),
+                            _ => unreachable!("matched struct or enum above"),
+                        },
+                        Some(block.trait_name.clone()),
+                    ));
+                }
+            }
+        }
         let mut funcs: HashMap<String, &Func> = HashMap::new();
         let mut methods: HashMap<(String, String), &Func> = HashMap::new();
         let mut distinct_ranges = HashMap::new();
@@ -225,20 +270,33 @@ pub(crate) fn eval_comptime_items(
                     funcs.insert(f.name.clone(), f);
                 }
                 Item::Impl(implementation) => {
+                    if implementation.is_generated_serde
+                        && explicit_codecs.contains(&(
+                            implementation.type_name.clone(),
+                            implementation.trait_name.clone(),
+                        ))
+                    {
+                        continue;
+                    }
                     for method in &implementation.methods {
+                        let method_key =
+                            (implementation.type_name.clone(), method.name.clone());
                         if matches!(
                             implementation.trait_name.as_deref(),
                             Some(crate::Generics::ENCODE | crate::Generics::DECODE)
                         ) {
-                            funcs.insert(
-                                format!("{}::{}", implementation.type_name, method.name),
-                                method,
-                            );
+                            let key =
+                                format!("{}::{}", implementation.type_name, method.name);
+                            if implementation.is_generated_serde || method.compiler_generated {
+                                funcs.entry(key).or_insert(method);
+                                methods.entry(method_key).or_insert(method);
+                            } else {
+                                funcs.insert(key, method);
+                                methods.insert(method_key, method);
+                            }
+                        } else {
+                            methods.insert(method_key, method);
                         }
-                        methods.insert(
-                            (implementation.type_name.clone(), method.name.clone()),
-                            method,
-                        );
                     }
                 }
                 Item::Struct(s) => {
@@ -246,10 +304,50 @@ pub(crate) fn eval_comptime_items(
                     for method in &s.methods {
                         methods.insert((s.name.clone(), method.name.clone()), method);
                     }
+                    for block in &s.trait_impls {
+                        for method in &block.methods {
+                            let method_key = (s.name.clone(), method.name.clone());
+                            if matches!(
+                                block.trait_name.as_str(),
+                                crate::Generics::ENCODE | crate::Generics::DECODE
+                            ) {
+                                let key = format!("{}::{}", s.name, method.name);
+                                if block.compiler_generated || method.compiler_generated {
+                                    funcs.entry(key).or_insert(method);
+                                    methods.entry(method_key).or_insert(method);
+                                } else {
+                                    funcs.insert(key, method);
+                                    methods.insert(method_key, method);
+                                }
+                            } else {
+                                methods.insert(method_key, method);
+                            }
+                        }
+                    }
                 }
                 Item::Enum(e) => {
                     for method in &e.methods {
                         methods.insert((e.name.clone(), method.name.clone()), method);
+                    }
+                    for block in &e.trait_impls {
+                        for method in &block.methods {
+                            let method_key = (e.name.clone(), method.name.clone());
+                            if matches!(
+                                block.trait_name.as_str(),
+                                crate::Generics::ENCODE | crate::Generics::DECODE
+                            ) {
+                                let key = format!("{}::{}", e.name, method.name);
+                                if block.compiler_generated || method.compiler_generated {
+                                    funcs.entry(key).or_insert(method);
+                                    methods.entry(method_key).or_insert(method);
+                                } else {
+                                    funcs.insert(key, method);
+                                    methods.insert(method_key, method);
+                                }
+                            } else {
+                                methods.insert(method_key, method);
+                            }
+                        }
                     }
                 }
                 Item::Distinct(definition) => {
@@ -293,6 +391,7 @@ pub(crate) fn eval_comptime_items(
                 let ty = known_ty.unwrap_or_else(|| value.jet_type());
                 consts.insert(name.clone(), ty.clone());
                 globals.insert(name, value.clone());
+
                 if let Item::Const(c) = &mut items[index] {
                     c.ty = Some(ty);
                     c.ct = Some(value);
@@ -321,6 +420,31 @@ pub(crate) fn eval_comptime_items(
                     crate::AST::rewrite_core_item_call(expr, item);
                 }
             });
+            // D-APILABEL1: this pass runs before ordinary sema has inferred the
+            // binding, so apply table-defined Core defaults to the evaluation
+            // clone first. The same binder then supplies the fixed arguments
+            // that AOT and the resident tiers receive after inference.
+            eval_value.for_each_expr_mut(|expr| {
+                let call_span = expr.span();
+                let Expr::MethodCall {
+                    receiver,
+                    method,
+                    args,
+                    ..
+                } = expr
+                else {
+                    return;
+                };
+                let Expr::Ident(alias, _) = receiver.as_ref() else {
+                    return;
+                };
+                let Some(module) = core_imports.get(alias) else {
+                    return;
+                };
+                crate::Sema::CheckerCoreLib::apply_core_call_defaults(
+                    module, method, args, call_span,
+                );
+            });
             match crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
                 &eval_value,
                 &funcs,
@@ -341,6 +465,14 @@ pub(crate) fn eval_comptime_items(
                 fact_registry,
             ) {
                 Ok((v, inputs)) => {
+                    crate::Sema::record_comptime_import_alias_uses(
+                        name_ledger,
+                        module_idx,
+                        &eval_value,
+                        core_imports,
+                        &globals,
+                    );
+
                     // `v.jet_type()` reads the element type off the value's
                     // first element. For a fixed-return-type builtin whose
                     // result is empty, prefer its known static return type.

@@ -2611,9 +2611,15 @@ fn project_entry(root: &Path) -> PathBuf {
     crate::find_project_entry(root)
 }
 fn package_name(root: &Path) -> String {
+    let entry = project_entry(root);
+    match jet::Loader::package_facts_for_entry(&entry) {
+        Ok(Some(facts)) => return facts.name,
+        Ok(None) => {}
+        Err(_) => return "package".into(),
+    }
     jet::Package::PackageFacts::load(root)
         .and_then(Result::ok)
-        .map(|m| m.name)
+        .map(|facts| facts.name)
         .unwrap_or_else(|| "package".into())
 }
 trait BudgetSource {

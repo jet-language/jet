@@ -7,8 +7,10 @@ fn run() {
     source :: Path.from(root).join("source.txt")
     destination :: Path.from(root).join("destination.txt")
     files.write(source, "fixture") ?? panic("seed")
-    result :: files.hard_link(source, destination)
-    print(result)
+    print((() -> {
+        files.hard_link(source, destination)
+        true
+    })())
     text :: files.read(destination) ?? panic("read")
     assert((text == "fixture"))
     files.remove_all(root) ?? panic("cleanup")

@@ -195,6 +195,203 @@ fn doctor_failure_is_l2101_snapshot() {
     check_snapshot("doctor_l2101.txt", &stdout[start..]);
 }
 
+#[cfg(unix)]
+fn fake_rustc_fixture(tag: &str, target_list_action: &str) -> (PathBuf, PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = isolated_cwd(tag);
+    let bin = dir.join("bin");
+    let sysroot = dir.join("sysroot");
+    fs::create_dir_all(&bin).unwrap();
+    let rustc = bin.join("rustc");
+    let script = format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+    printf '%s\n' 'rustc 1.97.1'
+    exit 0
+fi
+if [ "$1" = "--print" ] && [ "$2" = "target-list" ]; then
+    {target_list_action}
+fi
+if [ "$1" = "--print" ] && [ "$2" = "sysroot" ]; then
+    printf '%s\n' "$JET_FAKE_SYSROOT"
+    exit 0
+fi
+printf '%s\n' 'rustc-probe-sentinel' >&2
+exit 79
+"#
+    );
+    fs::write(&rustc, script).unwrap();
+    let mut permissions = fs::metadata(&rustc).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&rustc, permissions).unwrap();
+    (dir, bin, sysroot)
+}
+
+#[cfg(unix)]
+fn run_doctor_target(
+    dir: &std::path::Path,
+    bin: &std::path::Path,
+    sysroot: &std::path::Path,
+    target_args: &[&str],
+) -> std::process::Output {
+    Command::new(jet())
+        .args(["self", "doctor"])
+        .args(target_args)
+        .current_dir(dir)
+        .env("PATH", bin)
+        .env("HOME", dir)
+        .env("JET_FAKE_SYSROOT", sysroot)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_web_alias_requires_wasm_std_component() {
+    let (dir, bin, sysroot) = fake_rustc_fixture(
+        "doctor_web_missing_std",
+        "printf '%s\\n' 'wasm32-unknown-unknown'; exit 0",
+    );
+    let out = run_doctor_target(&dir, &bin, &sysroot, &["--target=web"]);
+    assert_eq!(out.status.code(), Some(1));
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        report.contains("web: target-specific standard-library component is missing or empty"),
+        "web doctor must prove the underlying wasm std component:\n{report}"
+    );
+    assert!(
+        !report.contains("everything looks good."),
+        "missing web std must not be a false-green doctor result:\n{report}"
+    );
+
+    fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
+    let build = Command::new(jet())
+        .args(["build", "main.jet", "--target=web"])
+        .current_dir(&dir)
+        .env("PATH", &bin)
+        .env("HOME", &dir)
+        .env("JET_FAKE_SYSROOT", &sysroot)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let build_report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    assert_eq!(build.status.code(), Some(1));
+    assert!(
+        build_report.contains("E3302"),
+        "compile admission must reject the same missing web component:\n{build_report}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_rejects_empty_target_component_directory() {
+    let (dir, bin, sysroot) = fake_rustc_fixture(
+        "doctor_web_empty_std",
+        "printf '%s\\n' 'wasm32-unknown-unknown'; exit 0",
+    );
+    fs::create_dir_all(
+        sysroot
+            .join("lib")
+            .join("rustlib")
+            .join("wasm32-unknown-unknown")
+            .join("lib"),
+    )
+    .unwrap();
+    let out = run_doctor_target(&dir, &bin, &sysroot, &["--target=web"]);
+    assert_eq!(out.status.code(), Some(1));
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        report.contains("web: target-specific standard-library component is missing or empty"),
+        "an empty target lib directory must not pass:\n{report}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_target_probe_failure_is_problem_not_note() {
+    let (dir, bin, sysroot) = fake_rustc_fixture(
+        "doctor_web_probe_failure",
+        "printf '%s\\n' 'rustc-probe-sentinel' >&2; exit 73",
+    );
+    let out = run_doctor_target(&dir, &bin, &sysroot, &["--target=web"]);
+    assert_eq!(out.status.code(), Some(1));
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        report.contains("web: could not run the rustc target metadata probe"),
+        "a failed target probe must be a Doctor problem:\n{report}"
+    );
+    assert!(
+        !report.contains("[note] web:"),
+        "a failed target probe must not be downgraded to a note:\n{report}"
+    );
+    assert!(
+        !report.contains("rustc-probe-sentinel"),
+        "failed probe stderr must remain hidden:\n{report}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compile_target_probe_failure_is_e3302_without_rustc_stderr() {
+    let (dir, bin, sysroot) = fake_rustc_fixture(
+        "compile_target_probe_failure",
+        "printf '%s\\n' 'rustc-probe-sentinel' >&2; exit 73",
+    );
+    fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();
+    let out = Command::new(jet())
+        .args(["build", "main.jet", "--target=web"])
+        .current_dir(&dir)
+        .env("PATH", &bin)
+        .env("HOME", &dir)
+        .env("JET_FAKE_SYSROOT", &sysroot)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(report.contains("E3302"), "probe failure must use E3302:\n{report}");
+    assert!(
+        !report.contains("rustc-probe-sentinel"),
+        "rustc probe stderr must remain hidden:\n{report}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_accepts_spaced_target_form() {
+    let (dir, bin, sysroot) = fake_rustc_fixture(
+        "doctor_web_spaced_target",
+        "printf '%s\\n' 'wasm32-unknown-unknown'; exit 0",
+    );
+    let target_lib = sysroot
+        .join("lib")
+        .join("rustlib")
+        .join("wasm32-unknown-unknown")
+        .join("lib");
+    fs::create_dir_all(&target_lib).unwrap();
+    fs::write(target_lib.join("libstd.rlib"), b"std").unwrap();
+    let out = run_doctor_target(&dir, &bin, &sysroot, &["--target", "web"]);
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        report.contains("web: Jet web backend target"),
+        "spaced --target form must reach Doctor's web target check:\n{report}"
+    );
+    assert!(
+        report.contains("wasm32-unknown-unknown/lib"),
+        "Doctor must report the proven underlying wasm component:\n{report}"
+    );
+}
+
 #[test]
 fn fetch_without_git_is_e1203_snapshot() {
     let dir = isolated_cwd("fetch_no_git");
@@ -1340,6 +1537,52 @@ fn perl_bind_does_not_execute_compile_time_code() {
         String::from_utf8_lossy(&bind.stderr)
     );
     assert!(!dir.join("compile-time-marker").exists());
+}
+
+#[test]
+fn perl_bind_does_not_execute_use_imports() {
+    if Command::new("perl").arg("-v").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("perl_bind_use_import");
+    let script = dir.join("use_import.pl");
+    let module = dir.join("Hostile.pm");
+    let marker = dir.join("use-import-marker");
+    fs::write(
+        &module,
+        r#"package Hostile;
+BEGIN {
+    open my $file, '>', $ENV{PERL_BIND_USE_MARKER} or die $!;
+    print $file "executed\n";
+}
+1;
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &script,
+        "use Hostile;\nsub Safe { return $_[0]; }\n1;\n",
+    )
+    .unwrap();
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "perl"])
+        .arg(&script)
+        .args(["--pkg", "use_import"])
+        .current_dir(&dir)
+        .env("PERL5LIB", &dir)
+        .env("PERL_BIND_USE_MARKER", &marker)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "Perl bind with a use import failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    assert!(
+        !marker.exists(),
+        "Perl use import executed compile-time code"
+    );
 }
 
 #[test]

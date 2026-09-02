@@ -69,6 +69,8 @@ const HTTP_UPLOAD_CHUNK: usize = 64 * 1024;
 const HTTP_UPLOAD_REPLAY_CAP: usize = 1024 * 1024 * 1024;
 const HTTP_RESPONSE_BODY_LIMIT: usize = 64 * 1024 * 1024;
 const HTTP_RESPONSE_READ_CHUNK_LIMIT: usize = 64 * 1024;
+const HTTP_H2_FRAME_OVERHEAD: usize = 9;
+const HTTP_H2_QUEUE_FRAME_LIMIT: usize = 4096;
 
 /// Private, typed transport failures. Generated code exhaustively projects these
 /// to the public closed HTTPError without carrying backend prose across the seam.
@@ -657,7 +659,7 @@ pub fn jet_http_client_send_with_impl(
         None => (handle.policy.redirect_limit, false),
     };
     let (headers, body) =
-        prepare_request_parts(headers_flat, body, cookies_flat, form_flat, multipart_flat);
+        prepare_request_parts(headers_flat, body, cookies_flat, form_flat, multipart_flat)?;
     let configured_proxy = proxy
         .or(handle.policy.proxy.as_deref())
         .or((!handle.policy.use_environment_proxy).then_some(""));
@@ -1180,13 +1182,14 @@ struct H2Connection {
     io: HTTPStream,
     next_stream: u32,
     decoder: HpackDecoder,
-    pending: VecDeque<H2Frame>,
     connection_send_window: i64,
     initial_send_window: i64,
     stream_send_windows: HashMap<u32, i64>,
     max_frame: usize,
     streams: HashMap<u32, VecDeque<H2Frame>>,
     active_streams: std::collections::HashSet<u32>,
+    queued_frame_bytes: usize,
+    queued_frame_count: usize,
 }
 
 impl H2Connection {
@@ -1199,14 +1202,77 @@ impl H2Connection {
             io,
             next_stream: 1,
             decoder: HpackDecoder::new(),
-            pending: VecDeque::new(),
             connection_send_window: 65_535,
             initial_send_window: 65_535,
             stream_send_windows: HashMap::new(),
             max_frame: 16_384,
             streams: HashMap::new(),
             active_streams: std::collections::HashSet::new(),
+            queued_frame_bytes: 0,
+            queued_frame_count: 0,
         })
+    }
+
+    fn release_queued_frame(&mut self, frame: &H2Frame) {
+        self.queued_frame_bytes = self
+            .queued_frame_bytes
+            .saturating_sub(HTTP_H2_FRAME_OVERHEAD.saturating_add(frame.payload.len()));
+        self.queued_frame_count = self.queued_frame_count.saturating_sub(1);
+    }
+
+    fn enqueue_frame(
+        &mut self,
+        frame: H2Frame,
+        transition_stream: Option<u32>,
+    ) -> Result<(), JetHTTPBridgeError> {
+        if frame.stream == 0
+            || (!self.active_streams.contains(&frame.stream)
+                && transition_stream != Some(frame.stream))
+        {
+            return Err(JetHTTPBridgeError::Protocol);
+        }
+        let charge = HTTP_H2_FRAME_OVERHEAD
+            .checked_add(frame.payload.len())
+            .ok_or(JetHTTPBridgeError::Protocol)?;
+        let queued = self
+            .queued_frame_bytes
+            .checked_add(charge)
+            .filter(|bytes| *bytes <= HTTP_RESPONSE_BODY_LIMIT)
+            .ok_or(JetHTTPBridgeError::Protocol)?;
+        if self.queued_frame_count >= HTTP_H2_QUEUE_FRAME_LIMIT {
+            return Err(JetHTTPBridgeError::Protocol);
+        }
+        self.queued_frame_bytes = queued;
+        self.queued_frame_count += 1;
+        self.streams.entry(frame.stream).or_default().push_back(frame);
+        Ok(())
+    }
+
+    fn dequeue_frame(&mut self, stream: u32) -> Option<H2Frame> {
+        let frame = self
+            .streams
+            .get_mut(&stream)
+            .and_then(VecDeque::pop_front);
+        if let Some(frame) = &frame {
+            self.release_queued_frame(frame);
+        }
+        if self
+            .streams
+            .get(&stream)
+            .is_some_and(|frames| frames.is_empty())
+        {
+            self.streams.remove(&stream);
+        }
+        frame
+    }
+
+    fn release_stream(&mut self, stream: u32) {
+        self.active_streams.remove(&stream);
+        if let Some(mut frames) = self.streams.remove(&stream) {
+            while let Some(frame) = frames.pop_front() {
+                self.release_queued_frame(&frame);
+            }
+        }
     }
 
     fn control(&mut self, frame: &H2Frame) -> Result<bool, JetHTTPBridgeError> {
@@ -1302,14 +1368,7 @@ impl H2Connection {
             if self.control(&frame)? {
                 continue;
             }
-            if frame.stream == 0 {
-                self.pending.push_back(frame);
-            } else {
-                self.streams
-                    .entry(frame.stream)
-                    .or_default()
-                    .push_back(frame);
-            }
+            self.enqueue_frame(frame, None)?;
         }
     }
 
@@ -1352,7 +1411,7 @@ impl H2Connection {
                 {
                     let frame = h2_read_frame(&mut self.io)?;
                     if !self.control(&frame)? {
-                        self.pending.push_back(frame);
+                        self.enqueue_frame(frame, Some(stream))?;
                     }
                 }
                 if pending.is_empty() && !finished {
@@ -1402,12 +1461,7 @@ impl H2Connection {
         stream: u32,
     ) -> Result<Option<(i64, Vec<(String, String)>, bool)>, JetHTTPBridgeError> {
         loop {
-            let frame = match self
-                .streams
-                .get_mut(&stream)
-                .and_then(VecDeque::pop_front)
-                .or_else(|| self.pending.pop_front())
-            {
+            let frame = match self.dequeue_frame(stream) {
                 Some(frame) => frame,
                 None => match h2_read_frame(&mut self.io) {
                     Ok(frame) => frame,
@@ -1419,19 +1473,15 @@ impl H2Connection {
                 continue;
             }
             if frame.stream != stream {
-                self.streams
-                    .entry(frame.stream)
-                    .or_default()
-                    .push_back(frame);
+                self.enqueue_frame(frame, None)?;
                 continue;
             }
             if frame.kind == 3 {
-                self.active_streams.remove(&stream);
+                self.release_stream(stream);
                 return Err(JetHTTPBridgeError::Protocol);
             }
             if frame.kind != 1 {
-                self.pending.push_back(frame);
-                continue;
+                return Err(JetHTTPBridgeError::Protocol);
             }
             let (block, end) = h2_header_block(&mut self.io, frame)?;
             let decoded = self.decoder.decode(&block)?;
@@ -2164,9 +2214,9 @@ pub fn jet_http_client_send_stream_impl(
     let explicit_redirect_limit = redirects.is_some();
     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
     let (headers, form_body) = if has_user_body {
-        prepare_request_parts(headers_flat, None, cookies_flat, &[], &[])
+        prepare_request_parts(headers_flat, None, cookies_flat, &[], &[])?
     } else {
-        prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat)
+        prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat)?
     };
     let stream_len = if has_user_body {
         body_len.and_then(|value| usize::try_from(value).ok())
@@ -2254,9 +2304,9 @@ pub fn jet_http_client_send_with_stream_impl(
         None => (handle.policy.redirect_limit, false),
     };
     let (headers, form_body) = if has_user_body {
-        prepare_request_parts(headers_flat, None, cookies_flat, &[], &[])
+        prepare_request_parts(headers_flat, None, cookies_flat, &[], &[])?
     } else {
-        prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat)
+        prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat)?
     };
     let stream_len = if has_user_body {
         body_len.and_then(|value| usize::try_from(value).ok())
@@ -2355,7 +2405,7 @@ pub fn jet_http_client_send_impl(
     let explicit_redirect_limit = redirects.is_some();
     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
     let (headers, body) =
-        prepare_request_parts(headers_flat, body, cookies_flat, form_flat, multipart_flat);
+        prepare_request_parts(headers_flat, body, cookies_flat, form_flat, multipart_flat)?;
     send_following_redirects(
         default_client_pool().clone(),
         0,
@@ -2387,13 +2437,63 @@ pub fn jet_http_client_send_impl(
     )
 }
 
+const HTTP_FORBIDDEN_REQUEST_HEADERS: &[&str] = &[
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "proxy-connection",
+    "keep-alive",
+    "te",
+    "trailer",
+    "upgrade",
+    "proxy-authenticate",
+    "proxy-authorization",
+];
+
+fn validate_request_header(name: &str, value: &str) -> Result<(), JetHTTPBridgeError> {
+    if name.is_empty()
+        || !name.bytes().all(http_token_byte)
+        || !value.bytes().all(http_field_value_byte)
+    {
+        return Err(JetHTTPBridgeError::InvalidHeader);
+    }
+    if HTTP_FORBIDDEN_REQUEST_HEADERS
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    {
+        return Err(JetHTTPBridgeError::InvalidFraming);
+    }
+    Ok(())
+}
+
+fn validate_request_headers(headers_flat: &[String]) -> Result<(), JetHTTPBridgeError> {
+    if headers_flat.len() % 2 != 0 {
+        return Err(JetHTTPBridgeError::InvalidHeader);
+    }
+    for pair in headers_flat.chunks_exact(2) {
+        validate_request_header(&pair[0], &pair[1])?;
+    }
+    Ok(())
+}
+
+fn validate_request_header_pairs(
+    headers: &[(String, String)],
+) -> Result<(), JetHTTPBridgeError> {
+    for (name, value) in headers {
+        validate_request_header(name, value)?;
+    }
+    Ok(())
+}
+
 fn prepare_request_parts(
     headers_flat: &[String],
     body: Option<&[u8]>,
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> (Vec<(String, String)>, Option<Vec<u8>>) {
+) -> Result<(Vec<(String, String)>, Option<Vec<u8>>), JetHTTPBridgeError> {
+    validate_request_headers(headers_flat)?;
     let mut headers = coalesce_request_headers(headers_flat);
     if !cookies_flat.is_empty() {
         let cookie = cookies_flat
@@ -2421,7 +2521,8 @@ fn prepare_request_parts(
     } else {
         None
     };
-    (headers, body)
+    validate_request_header_pairs(&headers)?;
+    Ok((headers, body))
 }
 
 fn send_following_redirects(
@@ -3064,19 +3165,7 @@ fn send_once_upload(
     if method.is_empty() || !method.bytes().all(http_token_byte) {
         return Err(JetHTTPBridgeError::InvalidHeader);
     }
-    for (name, value) in headers {
-        if name.is_empty()
-            || !name.bytes().all(http_token_byte)
-            || !value.bytes().all(http_field_value_byte)
-        {
-            return Err(JetHTTPBridgeError::InvalidHeader);
-        }
-        if name.eq_ignore_ascii_case("content-length")
-            || name.eq_ignore_ascii_case("transfer-encoding")
-        {
-            return Err(JetHTTPBridgeError::InvalidFraming);
-        }
-    }
+    validate_request_header_pairs(headers)?;
     let proxy_key = proxy.map(|proxy| format!("{}://{}:{}", proxy.scheme, proxy.host, proxy.port));
     let base_key = PoolKey {
         namespace,
@@ -3810,7 +3899,7 @@ impl H2BodyReader {
     fn release_stream(&self) {
         if let Some(session) = &self.connection {
             if let Ok(mut connection) = session.try_lock() {
-                connection.active_streams.remove(&self.stream_id);
+                connection.release_stream(self.stream_id);
             }
         }
     }
@@ -3855,12 +3944,7 @@ impl H2BodyReader {
         )
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{error:?}")))?;
         loop {
-            let frame = match connection
-                .streams
-                .get_mut(&self.stream_id)
-                .and_then(VecDeque::pop_front)
-                .or_else(|| connection.pending.pop_front())
-            {
+            let frame = match connection.dequeue_frame(self.stream_id) {
                 Some(frame) => frame,
                 None => h2_read_frame(&mut connection.io).map_err(h2_reader_error)?,
             };
@@ -3869,10 +3953,8 @@ impl H2BodyReader {
             }
             if frame.stream != self.stream_id {
                 connection
-                    .streams
-                    .entry(frame.stream)
-                    .or_default()
-                    .push_back(frame);
+                    .enqueue_frame(frame, None)
+                    .map_err(h2_reader_error)?;
                 continue;
             }
             match frame.kind {
@@ -3918,7 +4000,7 @@ impl H2BodyReader {
                     self.cursor = 0;
                     self.end_after_pending = frame.flags & 1 != 0;
                     if self.pending.is_empty() && self.end_after_pending {
-                        connection.active_streams.remove(&self.stream_id);
+                        connection.release_stream(self.stream_id);
                         self.finish()?;
                     }
                     return Ok(());
@@ -3934,7 +4016,7 @@ impl H2BodyReader {
                         ));
                     }
                     if end {
-                        connection.active_streams.remove(&self.stream_id);
+                        connection.release_stream(self.stream_id);
                         self.finish()?;
                         return Ok(());
                     }
@@ -4921,15 +5003,6 @@ fn hpack_request(
     let mut has_accept_encoding = false;
     for (name, value) in headers {
         let name = name.to_ascii_lowercase();
-        if matches!(
-            name.as_str(),
-            "connection" | "proxy-connection" | "keep-alive" | "upgrade" | "transfer-encoding"
-        ) {
-            continue;
-        }
-        if name == "te" && !value.eq_ignore_ascii_case("trailers") {
-            return Err(JetHTTPBridgeError::InvalidHeader);
-        }
         has_length |= name == "content-length";
         has_accept_encoding |= name == "accept-encoding";
         hpack_literal(
@@ -4938,7 +5011,7 @@ fn hpack_request(
             value,
             matches!(
                 name.as_str(),
-                "authorization" | "proxy-authorization" | "cookie" | "set-cookie"
+                "authorization" | "cookie" | "set-cookie",
             ),
         );
     }

@@ -1636,6 +1636,10 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
             key_span: None,
             value: Box::new(json),
         }]),
+        // `Number` is the compiler-only lexical carrier used by typed JSON
+        // parsing. It is accepted in generated union decoder patterns, but
+        // has no public `DataTree.Number(...)` constructor.
+        "Number" => Some(vec![Type::String]),
         _ => None,
     }
 }

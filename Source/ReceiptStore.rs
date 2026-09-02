@@ -147,8 +147,10 @@ impl ReceiptStore {
                 ))
             }
         };
-        let key = String::from_utf8(pointer_bytes)
-            .map_err(|_| "receipt context is not UTF-8".to_string())?;
+        let key = match String::from_utf8(pointer_bytes) {
+            Ok(key) => key,
+            Err(_) => return Ok(None),
+        };
         if !is_digest(&key) {
             return Ok(None);
         }
@@ -186,15 +188,24 @@ impl ReceiptStore {
             })
         } else {
             match target_path(verb, argv, cwd) {
-            Some(target) if target.is_dir() || verb == "budget check" => {
-                input_paths_for(verb, argv, cwd)
-            }
-            _ => receipt
-                .claim
-                .inputs
-                .iter()
-                .map(|input| input.path.clone())
-                .collect(),
+                Some(target) if target.is_dir() || verb == "budget check" => {
+                    input_paths_for(verb, argv, cwd)
+                }
+                _ => {
+                    let mut paths = receipt
+                        .claim
+                        .inputs
+                        .iter()
+                        .map(|input| input.path.clone())
+                        .collect::<BTreeSet<_>>();
+                    // Keep the stored WatchGraph closure cheap to validate, but
+                    // rediscover authority paths so a newly-created workspace,
+                    // lock, or generated input cannot hide behind an old claim.
+                    if let Some(target) = target_path(verb, argv, cwd) {
+                        add_project_inputs(&target, &mut paths);
+                    }
+                    paths.into_iter().collect()
+                }
             }
         };
         let claim = match self.claim_with_identity(verb, identity, &input_paths) {
@@ -457,8 +468,8 @@ impl ReceiptStore {
 }
 
 /// Resolve a CLI invocation's source closure. Direct source files use the
-/// compiler's import graph; package-level test/budget actions use the whole
-/// package tree because their public operation reads every member.
+/// compiler's import graph; bare project checks and package-level test/budget
+/// actions use the whole package/workspace authority tree.
 pub fn input_paths_for(verb: &str, argv: &[String], cwd: &Path) -> Vec<PathBuf> {
     if verb == "check" && !has_explicit_target(verb, argv) {
         if let Some(paths) = project_check_input_paths(cwd) {
@@ -594,15 +605,61 @@ fn receipt_root(verb: &str, argv: &[String], cwd: &Path) -> PathBuf {
             } else {
                 path.parent().unwrap_or(cwd)
             };
-            crate::Loader::find_manifest_root(start).or_else(|| Some(start.to_path_buf()))
+            receipt_package_root(start).or_else(|| Some(start.to_path_buf()))
         })
         .unwrap_or_else(|| cwd.to_path_buf());
     base.join(".jet").join("receipts")
 }
 
-/// Locate the project receipt store without running the act it stores.
-pub fn receipt_root_for(verb: &str, argv: &[String], cwd: &Path) -> PathBuf {
-    receipt_root(verb, argv, cwd)
+fn receipt_package_root(start: &Path) -> Option<PathBuf> {
+    crate::Loader::find_package_root_checked(start)
+        .ok()
+        .flatten()
+}
+
+fn receipt_authority_roots(start: &Path) -> BTreeSet<PathBuf> {
+    let mut roots = BTreeSet::new();
+    if let Ok(Some(root)) = crate::Loader::find_workspace_root_checked(start) {
+        roots.insert(root);
+    }
+    if let Some(root) = receipt_package_root(start) {
+        roots.insert(root);
+    }
+
+    // Checked discovery is authoritative when it succeeds.  Keep a lexical
+    // filename fallback as an invalidation floor when an authority is newly
+    // malformed: an old receipt must not replay merely because discovery can
+    // no longer parse the changed boundary.
+    let mut package_seen = false;
+    let mut dir = if start.is_dir() {
+        start.to_path_buf()
+    } else {
+        start
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    };
+    loop {
+        let package = regular_file(&dir.join(crate::Syntax::PACKAGE_FILE))
+            || regular_file(&dir.join(crate::Syntax::PAYLOAD_FILE));
+        let workspace = regular_file(&dir.join("workspace.jet"));
+        if package && !package_seen {
+            roots.insert(dir.clone());
+            package_seen = true;
+        }
+        if workspace {
+            roots.insert(dir.clone());
+            break;
+        }
+        let Some(parent) = dir.parent() else {
+            break;
+        };
+        if parent == dir {
+            break;
+        }
+        dir = parent.to_path_buf();
+    }
+    roots
 }
 
 fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
@@ -643,7 +700,7 @@ fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
         }
     }
     let Some(candidate) = positionals.first().map(|value| cwd.join(value.as_str())) else {
-        let root = crate::Loader::find_manifest_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+        let root = receipt_package_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
         if matches!(verb, "test" | "budget check") {
             return Some(root);
         }
@@ -666,7 +723,21 @@ fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
     {
         return Some(candidate);
     }
-    None
+
+    // Match the command's extension-optional source resolution.  The CLI's
+    // resolver is binary-only, so mirror its missing-stem path here while
+    // keeping a nonexistent stem uncached.
+    let resolved = PathBuf::from(format!(
+        "{}.{}",
+        candidate.display(),
+        crate::Syntax::FILE_EXT
+    ));
+    regular_file(&resolved).then_some(resolved)
+}
+
+/// Locate the project receipt store without running the act it stores.
+pub fn receipt_root_for(verb: &str, argv: &[String], cwd: &Path) -> PathBuf {
+    receipt_root(verb, argv, cwd)
 }
 
 fn has_explicit_target(verb: &str, argv: &[String]) -> bool {
@@ -709,21 +780,7 @@ fn has_explicit_target(verb: &str, argv: &[String]) -> bool {
 }
 
 fn project_check_input_paths(cwd: &Path) -> Option<Vec<PathBuf>> {
-    let mut roots = Vec::new();
-    if let Some(root) = crate::Loader::find_workspace_root_checked(cwd)
-        .ok()
-        .flatten()
-    {
-        roots.push(root);
-    }
-    if let Some(root) = crate::Loader::find_manifest_root_checked(cwd)
-        .ok()
-        .flatten()
-    {
-        if !roots.iter().any(|candidate| candidate == &root) {
-            roots.push(root);
-        }
-    }
+    let roots = receipt_authority_roots(cwd);
     if roots.is_empty() {
         return None;
     }
@@ -788,7 +845,13 @@ fn collect_tree_inputs(root: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
         let is_source = path
             .extension()
             .is_some_and(|ext| ext == crate::Syntax::FILE_EXT)
-            || matches!(name, crate::Syntax::PACKAGE_FILE | "workspace.jet" | "lock");
+            || matches!(
+                name,
+                crate::Syntax::PACKAGE_FILE
+                    | crate::Syntax::PAYLOAD_FILE
+                    | "workspace.jet"
+                    | "lock"
+            );
         let is_generated_input = path
             .components()
             .collect::<Vec<_>>()
@@ -809,18 +872,28 @@ fn collect_tree_inputs(root: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
 
 fn add_project_inputs(entry: &Path, out: &mut BTreeSet<PathBuf>) {
     let start = entry.parent().unwrap_or_else(|| Path::new("."));
-    let Some(root) = crate::Loader::find_manifest_root(start) else {
-        return;
-    };
-    for name in [crate::Syntax::PACKAGE_FILE, "workspace.jet"] {
-        let path = root.join(name);
-        if regular_file(&path) {
-            out.insert(path);
+    let roots = receipt_authority_roots(start);
+
+    // A file-scoped check still reads its owning package/workspace authorities.
+    // Keep source reuse on WatchGraph, but fingerprint every authority input that
+    // can change the graph or the selected output without widening to unrelated
+    // source files in the enclosing workspace.
+    for root in roots {
+        for name in [
+            crate::Syntax::PACKAGE_FILE,
+            crate::Syntax::PAYLOAD_FILE,
+            "workspace.jet",
+        ] {
+            let path = root.join(name);
+            if regular_file(&path) {
+                out.insert(path);
+            }
         }
-    }
-    let lock = root.join(".jet").join("lock");
-    if regular_file(&lock) {
-        out.insert(lock);
+        let lock = root.join(crate::Syntax::UNIFIED_LOCK_FILE);
+        if regular_file(&lock) {
+            out.insert(lock);
+        }
+        collect_tree_inputs(&root.join(".jet").join("generated"), "check", out);
     }
 }
 
@@ -1303,6 +1376,28 @@ mod tests {
     }
 
     #[test]
+    fn malformed_context_pointer_is_a_cache_miss() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-receipt-malformed-context-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let store = ReceiptStore::new(&root);
+        let argv = vec!["check".to_string()];
+        let context_key = store.context_key("check", &argv).unwrap();
+        let pointer = store.context_path(&context_key);
+        fs::create_dir_all(pointer.parent().unwrap()).unwrap();
+        fs::write(&pointer, [0xff, 0xfe]).unwrap();
+
+        assert!(store
+            .lookup_context("check", &argv, &root)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn project_check_receipt_rejects_new_higher_priority_entry() {
         let project = std::env::temp_dir().join(format!(
             "jet-receipt-entry-priority-{}-{}",
@@ -1312,7 +1407,11 @@ mod tests {
         let receipt_root = project.join("receipts");
         let _ = fs::remove_dir_all(&project);
         fs::create_dir_all(project.join("src")).unwrap();
-        fs::write(project.join("package.jet"), "package {}\n").unwrap();
+        fs::write(
+            project.join("package.jet"),
+            "name: \"receipt-entry-priority\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
         fs::write(project.join("src").join("run.jet"), "fn run() {}\n").unwrap();
 
         let argv = vec!["check".to_string()];
@@ -1330,6 +1429,9 @@ mod tests {
             .unwrap()
             .iter()
             .any(|path| path.ends_with("run.jet")));
+        let current_inputs = input_paths_for("check", &argv, &project);
+        let current_claim = store.claim("check", &argv, &current_inputs).unwrap();
+        assert_ne!(claim.key, current_claim.key);
         assert!(store
             .lookup_context("check", &argv, &project)
             .unwrap()
@@ -1349,7 +1451,11 @@ mod tests {
         let _ = fs::remove_dir_all(&project);
         fs::create_dir_all(project.join("src")).unwrap();
         fs::create_dir_all(&generated).unwrap();
-        fs::write(project.join("package.jet"), "package {}\n").unwrap();
+        fs::write(
+            project.join("package.jet"),
+            "name: \"receipt-generated-input\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
         fs::write(project.join("src").join("run.jet"), "fn run() {}\n").unwrap();
         fs::write(generated.join("inputs.jet"), "generated-v1\n").unwrap();
 
@@ -1364,12 +1470,282 @@ mod tests {
         store.remember_context("check", &argv, &claim).unwrap();
 
         fs::write(generated.join("inputs.jet"), "generated-v2\n").unwrap();
+        let current_inputs = input_paths_for("check", &argv, &project);
+        let current_claim = store.claim("check", &argv, &current_inputs).unwrap();
+        assert_ne!(claim.key, current_claim.key);
         assert!(store
             .lookup_context("check", &argv, &project)
             .unwrap()
             .is_none());
         let _ = fs::remove_dir_all(project);
     }
+
+    #[test]
+    fn project_check_receipt_rejects_new_workspace_input() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-workspace-input-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let workspace = project.join("workspace.jet");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("package.jet"),
+            "name: \"receipt-workspace-input\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(project.join("src").join("run.jet"), "fn run() {}\n").unwrap();
+
+        let argv = vec!["check".to_string()];
+        let store = ReceiptStore::new(project.join("receipts"));
+        let initial_inputs = input_paths_for("check", &argv, &project);
+        assert!(!initial_inputs.iter().any(|path| path == &workspace));
+        let claim = store.claim("check", &argv, &initial_inputs).unwrap();
+        store.write(&claim, &argv, 0, b"first", b"").unwrap();
+        store.remember_context("check", &argv, &claim).unwrap();
+
+        fs::write(&workspace, "module workspace { members: [] }\n").unwrap();
+        let current_inputs = input_paths_for("check", &argv, &project);
+        assert!(current_inputs.iter().any(|path| path == &workspace));
+        let current_claim = store.claim("check", &argv, &current_inputs).unwrap();
+        assert_ne!(claim.key, current_claim.key);
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn project_check_receipt_rejects_new_lock_input() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-lock-input-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let lock = project.join(".jet").join("lock");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join("package.jet"),
+            "name: \"receipt-lock-input\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(project.join("src").join("run.jet"), "fn run() {}\n").unwrap();
+
+        let argv = vec!["check".to_string()];
+        let store = ReceiptStore::new(project.join("receipts"));
+        let initial_inputs = input_paths_for("check", &argv, &project);
+        assert!(!initial_inputs.iter().any(|path| path == &lock));
+        let claim = store.claim("check", &argv, &initial_inputs).unwrap();
+        store.write(&claim, &argv, 0, b"first", b"").unwrap();
+        store.remember_context("check", &argv, &claim).unwrap();
+
+        fs::create_dir_all(lock.parent().unwrap()).unwrap();
+        fs::write(&lock, "lock-v1\n").unwrap();
+        let current_inputs = input_paths_for("check", &argv, &project);
+        assert!(current_inputs.iter().any(|path| path == &lock));
+        let current_claim = store.claim("check", &argv, &current_inputs).unwrap();
+        assert_ne!(claim.key, current_claim.key);
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn project_check_receipt_rejects_changed_output_authority() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-output-authority-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package = project.join("package.jet");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            &package,
+            "name: \"receipt-output-authority\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(project.join("src").join("run.jet"), "fn run() {}\n").unwrap();
+
+        let argv = vec!["check".to_string()];
+        let store = ReceiptStore::new(project.join("receipts"));
+        let initial_inputs = input_paths_for("check", &argv, &project);
+        assert!(initial_inputs.iter().any(|path| path == &package));
+        let claim = store.claim("check", &argv, &initial_inputs).unwrap();
+        store.write(&claim, &argv, 0, b"first", b"").unwrap();
+        store.remember_context("check", &argv, &claim).unwrap();
+
+        fs::write(
+            &package,
+            "name: \"project-check-output\"\noutputs: { release: .Executable{ entry: run } }\n",
+        )
+        .unwrap();
+        let current_inputs = input_paths_for("check", &argv, &project);
+        let current_claim = store.claim("check", &argv, &current_inputs).unwrap();
+        assert_ne!(claim.key, current_claim.key);
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn explicit_check_receipt_rejects_new_generated_input() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-explicit-generated-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let source = project.join("src/main.jet");
+        let receipt_root = project.join("receipts");
+        let generated = project.join(".jet/generated/inputs.jet");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(
+            project.join("package.jet"),
+            "name: \"receipt-explicit-generated\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(&source, "fn run() {}\n").unwrap();
+
+        let argv = vec!["check".to_string(), source.display().to_string()];
+        let store = ReceiptStore::new(&receipt_root);
+        let initial_inputs = input_paths_for("check", &argv, &project);
+        let claim = store.claim("check", &argv, &initial_inputs).unwrap();
+        store.write(&claim, &argv, 0, b"first", b"").unwrap();
+        store.remember_context("check", &argv, &claim).unwrap();
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_some());
+
+        fs::create_dir_all(&generated).unwrap();
+        fs::write(generated.join("inputs.jet"), "generated-v1\n").unwrap();
+        let current_inputs = input_paths_for("check", &argv, &project);
+        let current_claim = store.claim("check", &argv, &current_inputs).unwrap();
+        assert_ne!(claim.key, current_claim.key);
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn project_check_receipt_rejects_new_retired_manifest_alias() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-retired-manifest-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let retired = project.join(crate::Syntax::PAYLOAD_FILE);
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join(crate::Syntax::PACKAGE_FILE),
+            "name: \"receipt-retired-manifest\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join(crate::Syntax::DEFAULT_ENTRY_FILE),
+            "fn run() {}\n",
+        )
+        .unwrap();
+
+        let argv = vec!["check".to_string()];
+        let store = ReceiptStore::new(project.join("receipts"));
+        let initial_inputs = input_paths_for("check", &argv, &project);
+        assert!(!initial_inputs.iter().any(|path| path == &retired));
+        let claim = store.claim("check", &argv, &initial_inputs).unwrap();
+        store.write(&claim, &argv, 0, b"first", b"").unwrap();
+        store.remember_context("check", &argv, &claim).unwrap();
+
+        fs::write(&retired, "name: \"retired\"\n").unwrap();
+        let current_inputs = input_paths_for("check", &argv, &project);
+        assert!(current_inputs.iter().any(|path| path == &retired));
+        let current_claim = store.claim("check", &argv, &current_inputs).unwrap();
+        assert_ne!(claim.key, current_claim.key);
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn project_check_receipt_rejects_new_malformed_workspace_authority() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-malformed-workspace-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let workspace = project.join("workspace.jet");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join(crate::Syntax::PACKAGE_FILE),
+            "name: \"receipt-malformed-workspace\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join(crate::Syntax::DEFAULT_ENTRY_FILE),
+            "fn run() {}\n",
+        )
+        .unwrap();
+
+        let argv = vec!["check".to_string()];
+        let store = ReceiptStore::new(project.join("receipts"));
+        let initial_inputs = input_paths_for("check", &argv, &project);
+        assert!(!initial_inputs.iter().any(|path| path == &workspace));
+        let claim = store.claim("check", &argv, &initial_inputs).unwrap();
+        store.write(&claim, &argv, 0, b"first", b"").unwrap();
+        store.remember_context("check", &argv, &claim).unwrap();
+
+        fs::write(&workspace, "module workspace {\n").unwrap();
+        let current_inputs = input_paths_for("check", &argv, &project);
+        assert!(current_inputs.iter().any(|path| path == &workspace));
+        let current_claim = store.claim("check", &argv, &current_inputs).unwrap();
+        assert_ne!(claim.key, current_claim.key);
+        assert!(store
+            .lookup_context("check", &argv, &project)
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn project_check_receipt_uses_inline_package_root_for_nested_cwd() {
+        let project = std::env::temp_dir().join(format!(
+            "jet-receipt-inline-package-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("src")).unwrap();
+        fs::write(
+            project.join(crate::Syntax::DEFAULT_ENTRY_FILE),
+            "package {\nname: \"receipt-inline\"\nversion: \"0.1.0\"\n}\nfn run() {}\n",
+        )
+        .unwrap();
+
+        let argv = vec!["check".to_string()];
+        assert_eq!(
+            receipt_root_for("check", &argv, &project.join("src")),
+            project.join(".jet").join("receipts")
+        );
+        let inputs = input_paths_for("check", &argv, &project.join("src"));
+        assert!(inputs
+            .iter()
+            .any(|path| path == &project.join(crate::Syntax::DEFAULT_ENTRY_FILE)));
+        let _ = fs::remove_dir_all(project);
+    }
+
 
     #[test]
     fn receipt_debug_redacts_raw_legacy_and_unrecognized_output() {

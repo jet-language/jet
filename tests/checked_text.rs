@@ -81,6 +81,19 @@ fn run() {
 
 const TIERS_STDOUT: &str = "hello [1]\nok\nbad rejected\ntrue\nfalse\ntrue\nfalse\n";
 
+const HTML_TIERS_SOURCE: &str = r#"
+fn run() {
+    name :: "<script>&"
+    fragment :: HTML{"<strong>safe</strong>"}
+    page :: HTML{"<p>{name}</p>{fragment}"}
+    print(page.text())
+    static :: HTML{"<hr>"}
+    print(static.text())
+}
+"#;
+
+const HTML_TIERS_STDOUT: &str = "<p>&lt;script&gt;&amp;</p><strong>safe</strong>\n<hr>\n";
+
 const DYNAMIC_ERROR_SOURCE: &str = r#"
 #Error
 enum PatternError { Rejected }
@@ -163,8 +176,12 @@ impl Pattern.CheckedText {
 fn run() {}
 "#;
     let diagnostics = compile(source).expect_err("missing associated Error must be rejected");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0913"));
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0907"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0913"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0907"));
 }
 
 #[test]
@@ -184,22 +201,31 @@ fn run() {
 }
 "#;
     let diagnostics = compile(source).expect_err("raw construction must require unsafe");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0387"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0387"));
 }
 
 #[test]
 fn checked_text_acceptance_matches_comptime_aot_jit_interpreter_and_web() {
-    tir_support::assert_tiers_agree(
-        "checked_text_tiers",
-        TIERS_SOURCE,
-        TIERS_STDOUT,
-    );
+    tir_support::assert_tiers_agree("checked_text_tiers", TIERS_SOURCE, TIERS_STDOUT);
     assert_checked_text_web_tier();
 }
 
 #[test]
+fn html_composition_matches_aot_jit_interpreter_and_web() {
+    tir_support::assert_tiers_agree(
+        "html_composition_tiers",
+        HTML_TIERS_SOURCE,
+        HTML_TIERS_STDOUT,
+    );
+    assert_html_web_tier();
+}
+
+#[test]
 fn dynamic_checked_text_from_keeps_the_shared_error_report() {
-    let generated = compile(DYNAMIC_ERROR_SOURCE).expect("dynamic CheckedText source should compile");
+    let generated =
+        compile(DYNAMIC_ERROR_SOURCE).expect("dynamic CheckedText source should compile");
     assert!(generated.rust.contains("pub trait CheckedText"));
     assert!(!generated.rust.contains("__jet_CheckedText"));
     assert!(!generated.rust.contains("jet_checked_text_from"));
@@ -207,8 +233,14 @@ fn dynamic_checked_text_from_keeps_the_shared_error_report() {
 
     let (jit_code, jit_out, jit_err) =
         tir_support::jit_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
-    assert_eq!(jit_code, 1, "dynamic checked text failure must escape: {jit_err}");
-    assert!(jit_out.is_empty(), "dynamic checked text failure printed stdout: {jit_out}");
+    assert_eq!(
+        jit_code, 1,
+        "dynamic checked text failure must escape: {jit_err}"
+    );
+    assert!(
+        jit_out.is_empty(),
+        "dynamic checked text failure printed stdout: {jit_out}"
+    );
     assert!(jit_err.starts_with("Error [E_PATTERN]: pattern rejected (type: PatternError)\n"));
     assert!(jit_err.contains("  cause: invalid shape\n"));
     assert!(jit_err.contains("  conversion: PatternError -> Err\n"));
@@ -242,12 +274,44 @@ fn dynamic_checked_text_from_keeps_the_shared_error_report() {
 fn assert_checked_text_web_tier() {
     let output = jet::compile_web_with_path(TIERS_SOURCE, "checked_text_web.jet")
         .expect("ordinary CheckedText source should compile for web");
-    let web = output.web.expect("ordinary CheckedText source should produce web artifacts");
+    let web = output
+        .web
+        .expect("ordinary CheckedText source should produce web artifacts");
     assert!(web.wasm_rust.contains("__jet_checked_text__Pattern__check"));
     assert!(web
         .wasm_rust
         .contains("__jet_checked_text__Pattern__encode_hole"));
+    assert_web_artifacts_run(
+        &web.js_app,
+        &web.dom_runtime,
+        &web.wasm_rust,
+        TIERS_STDOUT,
+        "checked-text-web",
+    );
+}
 
+fn assert_html_web_tier() {
+    let output = jet::compile_web_with_path(HTML_TIERS_SOURCE, "html_composition_web.jet")
+        .expect("typed HTML composition should compile for web");
+    let web = output
+        .web
+        .expect("typed HTML composition should produce web artifacts");
+    assert_web_artifacts_run(
+        &web.js_app,
+        &web.dom_runtime,
+        &web.wasm_rust,
+        HTML_TIERS_STDOUT,
+        "html-composition-web",
+    );
+}
+
+fn assert_web_artifacts_run(
+    js_app: &str,
+    dom_runtime: &str,
+    wasm_rust: &str,
+    expected_stdout: &str,
+    scratch_name: &str,
+) {
     let have_tool = |name: &str| {
         Command::new(name)
             .arg("--version")
@@ -266,14 +330,14 @@ fn assert_checked_text_web_tier() {
         .map(|output| output.status.success())
         .unwrap_or(false);
     if !have_tool("rustc") || !have_tool("node") || !have_wasm_target {
-        eprintln!("note: skipping checked-text web execution (need rustc, wasm32 target, and node)");
+        eprintln!("note: skipping web execution (need rustc, wasm32 target, and node)");
         return;
     }
 
-    let scratch = common::Scratch::new("checked-text-web");
-    fs::write(scratch.join("app.js"), &web.js_app).unwrap();
-    fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
-    fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+    let scratch = common::Scratch::new(scratch_name);
+    fs::write(scratch.join("app.js"), js_app).unwrap();
+    fs::write(scratch.join("jet_dom_runtime.js"), dom_runtime).unwrap();
+    fs::write(scratch.join("app_wasm.rs"), wasm_rust).unwrap();
     fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
 
     let wasm = Command::new("rustc")
@@ -291,10 +355,10 @@ fn assert_checked_text_web_tier() {
             "app.wasm",
         ])
         .output()
-        .expect("spawn checked-text web rustc");
+        .expect("spawn web rustc");
     assert!(
         wasm.status.success(),
-        "rustc rejected checked-text web output: {}",
+        "rustc rejected web output: {}",
         String::from_utf8_lossy(&wasm.stderr)
     );
 
@@ -302,15 +366,12 @@ fn assert_checked_text_web_tier() {
         .current_dir(&scratch.path)
         .arg("app.js")
         .output()
-        .expect("spawn checked-text web app");
+        .expect("spawn web app");
     assert!(
         node.status.success(),
-        "node rejected checked-text web output: stdout={} stderr={}",
+        "node rejected web output: stdout={} stderr={}",
         String::from_utf8_lossy(&node.stdout),
         String::from_utf8_lossy(&node.stderr)
     );
-    assert_eq!(
-        String::from_utf8_lossy(&node.stdout),
-        TIERS_STDOUT
-    );
+    assert_eq!(String::from_utf8_lossy(&node.stdout), expected_stdout);
 }

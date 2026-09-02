@@ -138,9 +138,8 @@ fn load_side(path: &Path) -> Result<ReviewSide, String> {
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let root = projection.bundle.project_root.clone();
     let mut ledger = GateLedger::collect(&projection.bundle, jet::Policy::GateSet::default());
-    crate::CmdGates::append_external_writers(&mut ledger, &root, &[]);
+    crate::CmdGates::append_external_writers(&mut ledger, &projection.bundle, &[]);
     if let Some(diagnostic) = ledger.diagnostics().first() {
         return Err(format!(
             "{}: {}",

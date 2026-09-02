@@ -330,6 +330,12 @@ impl JetShow for JetTLSVersion {
         .to_string()
     }
 }
+impl JetDisplay for JetTLSVersion {
+    fn jet_display(&self) -> String {
+        <Self as JetShow>::jet_show(self)
+    }
+}
+
 
 #[derive(Clone)]
 pub struct JetTLSClientConfig {
@@ -1055,16 +1061,46 @@ fn jet_net_unix_listener_scheduler_wait(
     listener: &JetUnixListener,
     operation: &str,
 ) -> Result<(), JetNetError> {
+    if jet_scheduler_wait_point_cancelled() {
+        return Err(JetNetError::Cancelled(jet_net_detail(
+            operation,
+            None,
+            None,
+            format!("{} cancelled", operation),
+            None,
+        )));
+    }
+    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+        return Err(jet_net_deadline_timeout(operation));
+    }
     match jet_scheduler_wait_without_unwind(|| {
         jet_scheduler_unix_listener_io_wait(&listener.scheduler, operation)
     }) {
+        JetSchedulerWait::Ready(()) if jet_scheduler_wait_point_cancelled() => {
+            Err(JetNetError::Cancelled(jet_net_detail(
+                operation,
+                None,
+                None,
+                format!("{} cancelled", operation),
+                None,
+            )))
+        }
+        JetSchedulerWait::Ready(())
+            if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) =>
+        {
+            Err(jet_net_deadline_timeout(operation))
+        }
         JetSchedulerWait::Ready(()) => Ok(()),
         JetSchedulerWait::Cancelled => Err(JetNetError::Cancelled(jet_net_detail(
             operation, None, None, format!("{} cancelled", operation), None,
         ))),
         JetSchedulerWait::Deadline(_) => Err(jet_net_deadline_timeout(operation)),
         JetSchedulerWait::Panicked(message) => Err(JetNetError::Other(jet_net_detail(
-            operation, None, None, format!("{} scheduler wait failed: {}", operation, message), None,
+            operation,
+            None,
+            None,
+            format!("{} scheduler wait failed: {}", operation, message),
+            None,
         ))),
     }
 }

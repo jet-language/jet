@@ -503,7 +503,7 @@ fn empty_stmt(span: Span) -> Stmt {
 /// never call bodies. The existing effect call-graph (`fx_edges`) only
 /// records bare-name calls (`CheckerInfer/calls.rs`), never method calls, so
 /// it can't see a caller reaching a gated `impl`'s methods either way.
-pub fn check_os_target(bundle: &ProgramBundle, freestanding: bool) -> Vec<Diagnostic> {
+pub fn check_os_target(bundle: &ProgramBundle, no_os: bool) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut gate_of_type: HashMap<String, OS> = HashMap::new();
 
@@ -533,7 +533,7 @@ pub fn check_os_target(bundle: &ProgramBundle, freestanding: bool) -> Vec<Diagno
         }
     }
 
-    check_app_capabilities(bundle, freestanding, &mut diags);
+    check_app_capabilities(bundle, no_os, &mut diags);
 
     diags
 }
@@ -541,9 +541,9 @@ pub fn check_os_target(bundle: &ProgramBundle, freestanding: bool) -> Vec<Diagno
 /// D-APP-UNIFY1=B: one App type has target-sensitive methods, but target
 /// resolution and rejection stay in sema so AOT, JIT, interpreter, and web
 /// adapters all consume the same checked call shape.
-fn check_app_capabilities(bundle: &ProgramBundle, freestanding: bool, diags: &mut Vec<Diagnostic>) {
+fn check_app_capabilities(bundle: &ProgramBundle, no_os: bool, diags: &mut Vec<Diagnostic>) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let target = super::CheckerMarkers::resolved_app_target(bundle, module_idx, freestanding);
+        let target = super::CheckerMarkers::resolved_app_target(bundle, module_idx, no_os);
         check_app_items(&module.items, target, diags);
     }
 }

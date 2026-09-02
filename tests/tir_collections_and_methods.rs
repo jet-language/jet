@@ -6,7 +6,10 @@ mod common;
 mod tir_support;
 
 use jet::Interpreter::{dev_iteration, RunOutcome};
-use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc};
+use tir_support::{
+    assert_release_error_tiers_agree, assert_release_tiers_agree, assert_tiers_agree, build_and_run,
+    compile, have_rustc,
+};
 
 #[test]
 fn generated_temporaries_do_not_collide_with_collection_locals() {
@@ -226,6 +229,28 @@ fn run() {
 }
 
 #[test]
+fn map_top_n_keeps_rank_order_and_bounds() {
+    let src = r#"
+fn run() {
+    counts := [String:Int]{}
+    counts["b"] = 2
+    counts["d"] = 1
+    counts["a"] = 2
+    counts["c"] = 3
+    loop item in counts.top_n(2) -> print("{item.key}:{item.value}")
+    print(counts.top_n(0).len())
+    print(counts.top_n(-1).len())
+    loop item in counts.top_n(10) -> print("{item.key}:{item.value}")
+}
+"#;
+    assert_tiers_agree(
+        "tir_map_top_n_bounds",
+        src,
+        "c:3\na:2\n0\n0\nc:3\na:2\nb:2\nd:1\n",
+    );
+}
+
+#[test]
 fn card_2254_variable_operands_use_shared_hot_kernels() {
     let src = r#"
 fn kernels(left: Int, right: Int, suffix: String) {
@@ -374,6 +399,246 @@ fn run() {
         "card_2254_list_alias",
         src,
         "[0, 0, 0, 0]\n[1, 2, 3, 4]\n",
+    );
+}
+
+#[test]
+fn card_2254_string_bytes_map_update_borrows_key() {
+    let src = r#"
+fn run() {
+    counts := [String:Int]{}
+    token := [U8]{97, 98}
+    key :: String.from_bytes(token) ?? panic("invalid utf8")
+    counts[key] = (counts.get(key) ?? 0) + 1
+    print(counts["ab"])
+}
+"#;
+    let rust = compile("card_2254_string_bytes_map", src);
+    assert!(
+        rust.contains("jet_map_update_string_bytes(&mut")
+            && !rust.contains("jet_map_update_string(&mut"),
+        "a strict byte-key update must borrow bytes without a temporary String:\n{rust}"
+    );
+    assert_tiers_agree("card_2254_string_bytes_map", src, "1\n");
+}
+
+#[test]
+fn card_2254_string_bytes_invalid_utf8_keeps_fallback() {
+    let src = r#"
+fn run() {
+    tokens := [[U8]]{{255}}
+    counts := [String:Int]{}
+    loop token in tokens {
+        key :: String.from_bytes(token) ?? panic("invalid utf8")
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+}
+"#;
+    let rust = compile("card_2254_string_bytes_invalid", src);
+    assert!(
+        rust.contains("JetStringCountBuilder::new")
+            && rust.contains("jet_map_update_string_bytes(&mut")
+            && rust.contains("invalid utf8"),
+        "invalid UTF-8 must stay on the strict helper's original fallback:\n{rust}"
+    );
+}
+
+#[test]
+fn card_2254_string_count_loop_uses_hash_builder_then_restores_order() {
+    let src = r#"
+fn run() {
+    tokens :: [[U8]]{{97}, {98}, {97}}
+    counts := [String:Int]{}
+    loop token in tokens {
+        key :: String.from_bytes(token) ?? panic("invalid utf8")
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+    print(counts)
+}
+"#;
+    let rust = compile("card_2254_string_count_builder", src);
+    assert!(
+        rust.contains("JetStringCountBuilder::new")
+            && rust.contains("JetStringCountBuildHasher")
+            && rust.contains("HashMap<Vec<u8>, i64, JetStringCountBuildHasher>")
+            && rust.contains("jet_map_update_string_bytes(&mut"),
+        "an isolated String:Int count loop must use byte-key hashing and restore the ordered map:\n{rust}"
+    );
+    assert_tiers_agree("card_2254_string_count_builder", src, "[a: 2, b: 1]\n");
+}
+
+#[test]
+fn card_2254_string_count_loop_rejects_visible_map_reads() {
+    let src = r#"
+fn run() {
+    tokens :: [[U8]]{{97}, {98}}
+    counts := [String:Int]{}
+    loop token in tokens {
+        key :: String.from_bytes(token) ?? panic("invalid utf8")
+        counts[key] = (counts.get(key) ?? 0) + 1
+        print(counts.len())
+    }
+}
+"#;
+    let rust = compile("card_2254_string_count_visible_read", src);
+    assert!(
+        !rust.contains("JetStringCountBuilder::new"),
+        "a map read inside the loop must retain immediate ordered-map updates:\n{rust}"
+    );
+    assert_tiers_agree("card_2254_string_count_visible_read", src, "1\n2\n");
+}
+
+#[test]
+fn card_2254_string_bytes_alias_keeps_ordinary_update() {
+    let src = r#"
+fn run() {
+    counts := [String:Int]{}
+    token := [U8]{97}
+    key :: String.from_bytes(token) ?? panic("invalid utf8")
+    alias := key
+    counts[alias] = (counts.get(alias) ?? 0) + 1
+    print(counts["a"])
+}
+"#;
+    let rust = compile("card_2254_string_bytes_alias", src);
+    assert!(
+        !rust.contains("jet_map_update_string_bytes(&mut"),
+        "an aliased decoded key must retain the ordinary update path:\n{rust}"
+    );
+    assert_tiers_agree("card_2254_string_bytes_alias", src, "1\n");
+}
+
+#[test]
+fn card_2269_ascii_whitespace_scan_borrows_tokens() {
+    let src = r#"
+fn run() {
+    input := [U8]{97, 32, 98, 10, 99}
+    counts := [String:Int]{}
+    total := 0
+    token := [U8]{}
+    space :: U8{32}
+    ascii_ws_start :: U8{9}
+    ascii_ws_end :: U8{13}
+    loop byte in input {
+        if {
+            byte == space || (byte >= ascii_ws_start && byte <= ascii_ws_end) -> {
+                if !token.is_empty() {
+                    word :: String.from_bytes(token) ?? panic("invalid utf8")
+                    counts[word] = (counts.get(word) ?? 0) + 1
+                    total += 1
+                    token.clear()
+                }
+            }
+            else -> token.push(byte)
+        }
+    }
+    if !token.is_empty() {
+        word :: String.from_bytes(token) ?? panic("invalid utf8")
+        counts[word] = (counts.get(word) ?? 0) + 1
+        total += 1
+    }
+    loop item in counts.top_n(20) -> print("{item.value} {item.key}")
+    print("distinct {counts.len()} total {total}")
+}
+"#;
+    let rust = compile("card_2269_ascii_whitespace_scan", src);
+    assert!(
+        rust.contains("jet_bytes_ascii_whitespace_for_each")
+            && rust.contains("JetStringCountBuilder::new"),
+        "a unique-owner ASCII token loop must scan borrowed slices into the count builder:\n{rust}"
+    );
+    assert_tiers_agree(
+        "card_2269_ascii_whitespace_scan",
+        src,
+        "1 a\n1 b\n1 c\ndistinct 3 total 3\n",
+    );
+}
+#[test]
+fn card_2269_wordfreq_source_uses_ascii_whitespace_scan() {
+    let src = include_str!("../gauntlet/entries/wordfreq/jet/run.jet");
+    let rust = compile("card_2269_wordfreq_source", src);
+    assert!(
+        rust.contains("jet_bytes_ascii_whitespace_for_each(&("),
+        "the wordfreq corpus shape must use the borrowed ASCII token scanner:\n{rust}"
+    );
+}
+
+
+#[test]
+fn card_2254_bounded_induction_uses_native_integer_paths() {
+    let src = r#"
+fn run() {
+    total := 0
+    loop i in 0..<10 {
+        a :: i + 1
+        b :: a * 2
+        c :: b - 1
+        total = total + c + (i /% 2) + (i % 2)
+    }
+    print(total)
+}
+"#;
+    let rust = compile("card_2254_bounded_integer_paths", src);
+    assert!(
+        rust.contains("jet_std::jet_int_add_inline!")
+            && rust.contains("jet_std::jet_int_mul_inline!")
+            && rust.contains("jet_std::jet_int_sub_inline!")
+            && rust.contains("((__jet_i) / (")
+            && rust.contains("((__jet_i) % (")
+            && !rust.contains("jet_std::jet_int_floor_div")
+            && !rust.contains("jet_std::jet_int_mod"),
+        "bounded induction must remove checked arithmetic and floor/mod helpers:\n{rust}"
+    );
+    assert_tiers_agree("card_2254_bounded_integer_paths", src, "125\n");
+}
+
+#[test]
+fn card_2254_integer_paths_reject_uncertain_negative_and_overflow() {
+    let uncertain = r#"
+fn body(limit: Int) {
+    loop i in 0..<limit {
+        print(i + 1)
+    }
+}
+fn run() {
+    body(3)
+}
+"#;
+    let uncertain_rust = compile("card_2254_uncertain_integer", uncertain);
+    assert!(
+        !uncertain_rust.contains("jet_std::jet_int_add_inline!")
+            && uncertain_rust.contains("jet_std::jet_int_add_hot!"),
+        "an uncertain loop bound must retain checked integer arithmetic:\n{uncertain_rust}"
+    );
+
+    let negative = r#"
+fn run() {
+    loop i in -5..<5 {
+        print((i /% 2))
+        print((i % 2))
+    }
+}
+"#;
+    let negative_rust = compile("card_2254_negative_floor", negative);
+    assert!(
+        negative_rust.contains("jet_std::jet_int_floor_div")
+            && negative_rust.contains("jet_std::jet_int_mod")
+            && !negative_rust.contains("((__jet_i) / (")
+            && !negative_rust.contains("((__jet_i) % ("),
+        "sign-crossing floor/mod must retain exact helpers:\n{negative_rust}"
+    );
+
+    let overflow = r#"
+fn run() {
+    max :: 4611686018427387903
+    print(max + 1)
+}
+"#;
+    let overflow_rust = compile("card_2254_integer_overflow", overflow);
+    assert!(
+        !overflow_rust.contains("jet_std::jet_int_add_inline!")
+            && overflow_rust.contains("jet_std::jet_int_add_hot!"),
+        "an affine result outside signed-63 must retain checked addition:\n{overflow_rust}"
     );
 }
 
@@ -844,6 +1109,62 @@ fn run() {
     assert_eq!(stdout, "5\ntrue\n2\n5\n5\n");
 }
 
+#[test]
+fn list_insert_bounds_have_release_tier_parity() {
+    if !have_rustc() {
+        return;
+    }
+    let valid = r#"
+fn insert_at(index: Int) [Int] -[]> {
+    values := [1, 3]
+    values.insert(index, 2)
+    return values
+}
+fn run() {
+    print(insert_at(0))
+    print(insert_at(1))
+    print(insert_at(2))
+}
+"#;
+    assert_release_tiers_agree(
+        "tir_list_insert_valid",
+        valid,
+        "[2, 1, 3]\n[1, 2, 3]\n[1, 3, 2]\n",
+    );
+
+    let negative = r#"
+fn insert_at(index: Int) [Int] -[]> {
+    values := [1, 3]
+    values.insert(index, 2)
+    return values
+}
+fn run() {
+    print(insert_at(-1))
+}
+"#;
+    assert_release_error_tiers_agree(
+        "tir_list_insert_negative",
+        negative,
+        "the list has 2 items, so position -1 doesn't exist",
+    );
+
+    let too_large = r#"
+fn insert_at(index: Int) [Int] -[]> {
+    values := [1, 3]
+    values.insert(index, 2)
+    return values
+}
+fn run() {
+    print(insert_at(3))
+}
+"#;
+    assert_release_error_tiers_agree(
+        "tir_list_insert_too_large",
+        too_large,
+        "the list has 2 items, so position 3 doesn't exist",
+    );
+}
+
 /// String methods: len (char count), to_upper, to_lower, trim, split, starts_with,
 /// ends_with, replace, repeat, slice, chars, contains, to_string.
 #[test]
@@ -884,7 +1205,7 @@ fn copied_string_slice_uses_string_builtin() {
     let src = "\
 fn strip_hash(reference: String) String -> {
     text := ~reference
-    if (~text).starts_with(\"#\") -> text = (~text).slice(1, (~text).len())
+    if (~text).starts_with(\"#\") -> text = (~text).slice(1, (~text).len() - 1)
     return text
 }
 fn run() {
@@ -1378,5 +1699,28 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_fallible_when", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "15\nBad(\"bad\")\n");
+    assert_eq!(stdout, "15\nBad(bad)\n");
+}
+
+/// List predicates count every match and replace only the first matching item.
+#[test]
+fn list_predicate_operations() {
+    let src = r#"
+fn run() {
+    values := [1, 2, 2, 3]
+    print(values.count_where(item -> item % 2 == 0))
+    print(values.update_first(item -> item == 2, 9))
+    print(values)
+    print(values.update_first(item -> item == 8, 7))
+    print(values)
+}
+"#;
+    let rust = compile("tir_list_predicate_operations", src);
+    assert!(rust.contains("jet_list_count_where"));
+    assert!(rust.contains("jet_list_update_first"));
+    assert_tiers_agree(
+        "tir_list_predicate_operations",
+        src,
+        "2\ntrue\n[1, 9, 2, 3]\nfalse\n[1, 9, 2, 3]\n",
+    );
 }

@@ -1114,16 +1114,10 @@ fn yaml_scalar(s: &str, budget: &mut YamlBudget) -> Result<CtValue, ()> {
 
 fn yaml_scalar_payload(value: &CtValue) -> Option<usize> {
     if let CtValue::BigInt(integer) = value {
-        return integer
-            .limbs
-            .len()
-            .checked_mul(std::mem::size_of::<u32>());
+        return integer.limbs.len().checked_mul(std::mem::size_of::<u32>());
     }
     if let Some(CtValue::BigInt(integer)) = json_payload(value, "Int") {
-        return integer
-            .limbs
-            .len()
-            .checked_mul(std::mem::size_of::<u32>());
+        return integer.limbs.len().checked_mul(std::mem::size_of::<u32>());
     }
     Some(
         ["Text", "Number", "TypedText"]
@@ -1227,12 +1221,11 @@ impl YAMLParser {
         Ok(json_array(items))
     }
 
-    fn object(
-        &mut self,
-        entries: Vec<(String, CtValue)>,
-    ) -> Result<CtValue, YAMLParseError> {
+    fn object(&mut self, entries: Vec<(String, CtValue)>) -> Result<CtValue, YAMLParseError> {
         for (key, _) in &entries {
-            self.budget.bytes(key.len()).map_err(|_| self.limit_error())?;
+            self.budget
+                .bytes(key.len())
+                .map_err(|_| self.limit_error())?;
         }
         self.budget.node(0).map_err(|_| self.limit_error())?;
         Ok(json_object(entries))
@@ -1411,15 +1404,13 @@ impl YAMLParser {
             } else {
                 self.parse_inline_value(val_str, self.next_depth(depth)?)?
             };
-            let stored = yaml_clone(&value, &mut self.budget)
-                .map_err(|_| self.limit_error())?;
+            let stored = yaml_clone(&value, &mut self.budget).map_err(|_| self.limit_error())?;
             self.anchors.insert(name, stored);
             return Ok(value);
         }
         if let Some(name) = s.strip_prefix('*') {
             if let Some(value) = self.anchors.get(name.trim()) {
-                return yaml_clone(value, &mut self.budget)
-                    .map_err(|_| self.limit_error());
+                return yaml_clone(value, &mut self.budget).map_err(|_| self.limit_error());
             }
             return self.null();
         }
@@ -1513,9 +1504,7 @@ fn yaml_parse_flow_at(
                 let (v, nj) = yaml_parse_flow_at(chars, i, next_depth, budget)?;
                 i = nj;
                 let key = key.trim().to_string();
-                budget
-                    .bytes(key.len())
-                    .map_err(|_| FlowError::Budget)?;
+                budget.bytes(key.len()).map_err(|_| FlowError::Budget)?;
                 entries.push((key, v));
                 while i < chars.len() && chars[i].is_whitespace() {
                     i = i.saturating_add(1);
@@ -1532,7 +1521,10 @@ fn yaml_parse_flow_at(
         }
         _ => {
             let (raw, ni) = yaml_scan_flow_scalar(chars, i, false);
-            Ok((yaml_scalar(raw.trim(), budget).map_err(|_| FlowError::Budget)?, ni))
+            Ok((
+                yaml_scalar(raw.trim(), budget).map_err(|_| FlowError::Budget)?,
+                ni,
+            ))
         }
     }
 }
@@ -1547,8 +1539,7 @@ fn yaml_scan_flow_scalar(chars: &[char], mut i: usize, as_key: bool) -> (String,
         while i < chars.len() {
             if chars[i] == q {
                 if q == '\''
-                    && i
-                        .checked_add(1)
+                    && i.checked_add(1)
                         .is_some_and(|next| next < chars.len() && chars[next] == '\'')
                 {
                     out.push('\'');
@@ -1649,8 +1640,7 @@ fn yaml_top_level_colon(s: &str) -> Option<usize> {
             '[' | '{' if !in_s && !in_d => depth = depth.saturating_add(1),
             ']' | '}' if !in_s && !in_d => depth = depth.saturating_sub(1),
             ':' if !in_s && !in_d && depth == 0 => {
-                if i
-                    .checked_add(1)
+                if i.checked_add(1)
                     .is_none_or(|next| next >= chars.len() || chars[next] == ' ')
                 {
                     return Some(i);
@@ -2525,6 +2515,7 @@ fn cbor_is_u8_list(ty: Option<&Type>) -> bool {
         ty,
         Some(Type::List(elem) | Type::FixedList { elem, .. })
             if matches!(elem.as_ref(), Type::IntN { signed: false, bits: 8 })
+                || matches!(elem.as_ref(), Type::Named(name) if name == "U8")
     )
 }
 

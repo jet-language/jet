@@ -15,31 +15,31 @@ use core.files as fs
 // FEATURE_CLAIM: claim.product-boundaries | Jetpack is documented as a separate environment product.
 // FEATURE_CLAIMS:END
 
-fn current_attr(link: String, current: String) String -> {
-    if link == current -> return " aria-current=\"page\""
-    ""
+fn current_attr(link: String, current: String) HTML -> {
+    if link == current -> return HTML{" aria-current=\"page\""}
+    HTML{""}
 }
 
 fn error_href(prefix: String) String -> "{prefix}e/index.html"
 
-fn code_card(file: String, code: String) String -> """
+fn code_card(file: String, code: HTML) HTML -> HTML{"""
     <div class="code"><div class="code-head"><span>{file}</span></div><div class="code-body"><pre><code>{code}</code></pre></div></div>
-    """
+    """}
 
-fn code_card_out(file: String, code: String, command: String, output: String) String -> """
+fn code_card_out(file: String, code: HTML, command: String, output: HTML) HTML -> HTML{"""
     <div class="code"><div class="code-head"><span>{file}</span></div><div class="code-body"><pre><code>{code}</code></pre></div><div class="code-out"><span class="ps">$ jet run {command}</span><br>{output}</div></div>
-    """
+    """}
 
-fn cta_buttons(prefix: String) String -> """
+fn cta_buttons(prefix: String) HTML -> HTML{"""
     <div class="hero-ctas"><a class="btn btn-primary" href="{prefix}install.html"><svg class="delta" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M15 8 L3 2.5 L6 8 L3 13.5 Z"/></svg>Install jet</a><a class="btn btn-ghost" href="https://github.com/jet-language/jet">GitHub</a></div>
-    """
+    """}
 
-fn page_shell(title: String, description: String, body: String, prefix: String, current: String) String -> {
+fn page_shell(title: String, description: String, body: HTML, prefix: String, current: String) HTML -> {
     tour_attr :: current_attr("tour", current)
     install_attr :: current_attr("install", current)
     error_attr :: current_attr("error", current)
     error_link :: error_href(prefix)
-    """
+    HTML{"""
     <!doctype html>
     <html lang="en">
     <head>
@@ -91,18 +91,18 @@ fn page_shell(title: String, description: String, body: String, prefix: String, 
     <script src="{prefix}assets/site.js"></script>
     </body>
     </html>
-    """
+    """}
 }
 
-fn hello_code() String -> """
+fn hello_code() HTML -> HTML{"""
     <span class="c">// Your first program. `fn run` is where running starts.</span>
     <span class="k">fn</span> <span class="f">run</span>() {{
         <span class="f">print</span>(<span class="s">"hello, world"</span>)
         <span class="k">return</span>
     }}
-    """
+    """}
 
-fn values_code() String -> """
+fn values_code() HTML -> HTML{"""
     <span class="k">fn</span> <span class="f">run</span>() {{
         name <span class="g">::</span> <span class="s">"Jet"</span>
         year <span class="g">::</span> <span class="n">2026</span>
@@ -111,9 +111,9 @@ fn values_code() String -> """
         count += <span class="n">3</span>
         <span class="f">print</span>(<span class="s">"count: {{count}}"</span>)
     }}
-    """
+    """}
 
-fn signature_code() String -> """
+fn signature_code() HTML -> HTML{"""
     <span class="c">// D-SIG-SHAPE1=B: a result is bare after the parameters and `-&gt;` starts the body.</span>
     <span class="k">fn</span> <span class="f">double</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-&gt;</span> n * <span class="n">2</span>
 
@@ -123,9 +123,9 @@ fn signature_code() String -> """
     }}
 
     <span class="k">fn</span> <span class="f">run</span>() <span class="g">-[IO]&gt;</span> {{ <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }}
-    """
+    """}
 
-fn pattern_code() String -> """
+fn pattern_code() HTML -> HTML{"""
     <span class="k">fn</span> <span class="f">describe_conn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {{
         <span class="k">if</span> c == {{
             .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> {{
@@ -140,18 +140,18 @@ fn pattern_code() String -> """
             <span class="k">else</span> <span class="g">-&gt;</span> <span class="k">return</span> <span class="s">"unknown"</span>
         }}
     }}
-    """
+    """}
 
-fn failure_code() String -> """
+fn failure_code() HTML -> HTML{"""
     <span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
 
     <span class="k">fn</span> <span class="f">run</span>() {{
         port <span class="g">::</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
         <span class="f">print</span>(<span class="s">"port {{port}}"</span>)
     }}
-    """
+    """}
 
-fn defaults_code() String -> """
+fn defaults_code() HTML -> HTML{"""
     <span class="c">// D-NARG-D2 (S61): a default may reference an earlier parameter.</span>
     <span class="c">// `height: Int{{width}}` fills height with whatever width was given.</span>
     <span class="k">struct</span> <span class="t">Rect</span> {{
@@ -172,9 +172,9 @@ fn defaults_code() String -> """
         <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
         <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>, <span class="n">1</span>))
     }}
-    """
+    """}
 
-fn loops_code() String -> """
+fn loops_code() HTML -> HTML{"""
     <span class="k">fn</span> <span class="f">run</span>() {{
         values <span class="g">::</span> [<span class="t">Int</span>]{{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}}
         doubled <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
@@ -189,9 +189,9 @@ fn loops_code() String -> """
         <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> by_value.<span class="f">add</span>(value, value * <span class="n">10</span>).<span class="f">drop</span>(<span class="s">"keys are unique"</span>)
         unique <span class="g">::</span> <span class="t">Set</span>.<span class="f">from</span>(<span class="k">loop</span> value <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">2</span>, <span class="n">3</span>] <span class="g">-&gt;</span> value)
         lazy <span class="g">::</span> values.<span class="f">lazy</span>().<span class="f">map</span>(value <span class="g">-&gt;</span> value + <span class="n">10</span>)
-    """
+    """}
 
-fn concurrency_code() String -> """
+fn concurrency_code() HTML -> HTML{"""
     <span class="k">fn</span> <span class="f">run</span>() {{
         <span class="c">// Join discharges the duty and yields the value.</span>
         joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
@@ -216,9 +216,9 @@ fn concurrency_code() String -> """
         background.<span class="f">detach</span>()
         <span class="f">print</span>(<span class="s">"detached"</span>)
     }}
-    """
+    """}
 
-fn files_code() String -> """
+fn files_code() HTML -> HTML{"""
     <span class="k">use</span> core.files <span class="k">as</span> fs
 
     <span class="k">fn</span> <span class="f">run</span>() {{
@@ -228,9 +228,9 @@ fn files_code() String -> """
         <span class="f">print</span>(text.<span class="f">to_upper</span>())
         <span class="f">print</span>(fs.<span class="f">exists</span>(path))
     }}
-    """
+    """}
 
-fn diag_block() String -> """
+fn diag_block() HTML -> HTML{"""
     <div class="diag"><span class="e">Error [E0112]:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
       <span class="loc">--&gt; broken.jet:4:26</span>
         |
@@ -239,9 +239,9 @@ fn diag_block() String -> """
      <span class="why">Why: every argument must match its parameter's type</span>
      <span class="fix">Fix: use Int (a whole number) here</span>
     <span class="more">More: jet-lang.dev/e/E0112</span></div>
-    """
+    """}
 
-fn index_body() String -> """
+fn index_body() HTML -> HTML{"""
       <section class="wrap hero">
         <div class="hero-grid">
           <div>
@@ -418,19 +418,19 @@ fn index_body() String -> """
         </div>
         <p class="fineprint">Jet is pre-release and changes weekly. Package workflows, Windows support, and stability guarantees remain under active development. If this site ever disagrees with the compiler, the compiler is right; <code>jet explain</code> knows more than any web page.</p>
       </section>
-    """
+    """}
 
-fn tour_body() String -> {
-    hello :: code_card_out("examples/features/basics/hello.jet", hello_code() ?? return Err("could not render hello example"), "examples/features/basics/hello.jet", "hello, world")
-    values :: code_card_out("run it", values_code() ?? return Err("could not render values example"), "values.jet", "values: Jet 2026<br>count: 3")
-    signature :: code_card_out("examples/features/basics/signature_shape.jet", signature_code() ?? return Err("could not render signature example"), "examples/features/basics/signature_shape.jet", "40<br>41")
-    matching :: code_card("examples/features/basics/pattern_matching.jet", pattern_code() ?? return Err("could not render pattern example"))
-    failure :: code_card_out("run it", failure_code() ?? return Err("could not render failure example"), "failure.jet", "port 8080")
-    defaults :: code_card_out("examples/features/basics/default_refs.jet", defaults_code() ?? return Err("could not render defaults example"), "examples/features/basics/default_refs.jet", "5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1")
-    loops :: code_card("examples/features/basics/loop_values.jet", loops_code() ?? return Err("could not render loops example"))
-    concurrency :: code_card("examples/features/concurrency/tasks_join_all.jet", concurrency_code() ?? return Err("could not render concurrency example"))
-    files :: code_card("examples/features/io/files.jet", files_code() ?? return Err("could not render files example"))
-    """
+fn tour_body() HTML -> {
+    hello :: code_card_out("examples/features/basics/hello.jet", hello_code(), "examples/features/basics/hello.jet", HTML{"hello, world"})
+    values :: code_card_out("run it", values_code(), "values.jet", HTML{"values: Jet 2026<br>count: 3"})
+    signature :: code_card_out("examples/features/basics/signature_shape.jet", signature_code(), "examples/features/basics/signature_shape.jet", HTML{"40<br>41"})
+    matching :: code_card("examples/features/basics/pattern_matching.jet", pattern_code())
+    failure :: code_card_out("run it", failure_code(), "failure.jet", HTML{"port 8080"})
+    defaults :: code_card_out("examples/features/basics/default_refs.jet", defaults_code(), "examples/features/basics/default_refs.jet", HTML{"5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1"})
+    loops :: code_card("examples/features/basics/loop_values.jet", loops_code())
+    concurrency :: code_card("examples/features/concurrency/tasks_join_all.jet", concurrency_code())
+    files :: code_card("examples/features/io/files.jet", files_code())
+    HTML{"""
     <section class="wrap page">
       <div class="page-header">
         <p class="eyebrow">// the tour</p>
@@ -518,33 +518,33 @@ fn tour_body() String -> {
       <p>The corpus these samples come from lives in examples/features in the repository, next to the golden outputs that keep them honest.</p>
       {cta_buttons("")}
     </article>
-    """
+    """}
 }
 
-fn install_body() String -> {
-    nix_term :: """
+fn install_body() HTML -> {
+    nix_term :: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">nix --extra-experimental-features "nix-command flakes" \\</span>
         <span class="cmd">profile install github:jet-language/jet</span>
     <span class="ps">$</span> <span class="cmd">jet version</span></div>
-    """
-    source_term :: """
+    """}
+    source_term :: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">git clone https://github.com/jet-language/jet</span>
     <span class="ps">$</span> <span class="cmd">cd jet</span>
     <span class="ps">$</span> <span class="cmd">nix build</span>
     <span class="ps">$</span> <span class="cmd">export PATH="$PWD/result/bin:$PATH"</span>
     <span class="ps">$</span> <span class="cmd">jet version</span></div>
-    """
-    first_term :: """
+    """}
+    first_term :: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">jet new hello</span>
     <span class="ps">$</span> <span class="cmd">cd hello</span>
     <span class="ps">$</span> <span class="cmd">jet run</span>
     <span class="out">hello, world</span></div>
-    """
-    breaks_term :: """
+    """}
+    breaks_term :: HTML{"""
     <div class="term"><span class="ps">$</span> <span class="cmd">jet explain E0112</span>
     <span class="ps">$</span> <span class="cmd">jet fix run.jet</span></div>
-    """
-    """
+    """}
+    HTML{"""
     <section class="wrap page">
       <div class="page-header">
         <p class="eyebrow">// install</p>
@@ -587,12 +587,12 @@ fn install_body() String -> {
         <p>What remains under development: Windows support, stability guarantees, and some package-workflow corners. The language is changing weekly, and the diagnostics are the most reliable map of what is true right now.</p>
       </section>
     </article>
-    """
+    """}
 }
 
-fn error_body() String -> {
+fn error_body() HTML -> {
     diag :: diag_block()
-    """
+    HTML{"""
     <section class="wrap page">
       <div class="page-header">
         <p class="eyebrow">// error codes</p>
@@ -606,14 +606,14 @@ fn error_body() String -> {
       {diag}
       <p>If an explanation is wrong or unhelpful, that is a bug in Jet, and reporting it is a contribution.</p>
     </article>
-    """
+    """}
 }
 
-fn run() {
-    fs.create_dir_all("dist") ?? return Err("could not create dist")
+fn run() !Err {
+    fs.create_dir_all("dist") ?? return
     // tests/diagnostic_pages.rs owns dist/e/<CODE>/index.html; this SSG owns the landing page.
-    fs.create_dir_all("dist/e") ?? return Err("could not create dist/e")
-    fs.copy_dir("assets", "dist/assets") ?? return Err("could not copy assets")
+    fs.create_dir_all("dist/e") ?? return
+    fs.copy_dir("assets", "dist/assets") ?? return
 
     assets :: [String]{
         "favicon.svg",
@@ -636,29 +636,28 @@ fn run() {
         print("wrote dist/assets/{asset}")
     }
 
-    index_body_text :: index_body() ?? return Err("could not render index")
-    index_page :: page_shell("Jet, a memory-safe compiled language", "Jet is a memory-safe compiled language. Start with no ceremony; go as deep as raw memory. Every step away from safety costs one written word.", index_body_text, "", "")
-    index :: "{index_page}\n"
-    fs.write("dist/index.html", index) ?? return Err("could not write dist/index.html")
+    index_body_html :: index_body()
+    index_page :: page_shell("Jet, a memory-safe compiled language", "Jet is a memory-safe compiled language. Start with no ceremony; go as deep as raw memory. Every step away from safety costs one written word.", index_body_html, "", "")
+    fs.write("dist/index.html", index_page.text()) ?? return
     print("wrote dist/index.html")
 
-    tour_body_text :: tour_body() ?? return Err("could not render tour")
-    tour_page :: page_shell("The Jet tour", "A tour of Jet in runnable programs: values, functions, effects, pattern matching, failure, defaults, loops, concurrency, and files.", tour_body_text, "", "tour")
-    fs.write("dist/tour.html", tour_page) ?? return Err("could not write dist/tour.html")
+    tour_body_html :: tour_body()
+    tour_page :: page_shell("The Jet tour", "A tour of Jet in runnable programs: values, functions, effects, pattern matching, failure, defaults, loops, concurrency, and files.", tour_body_html, "", "tour")
+    fs.write("dist/tour.html", tour_page.text()) ?? return
     print("wrote dist/tour.html")
 
-    install_body_text :: install_body() ?? return Err("could not render install")
-    install_page :: page_shell("Install Jet", "Install the Jet toolchain on x86_64 Linux or macOS with Nix, or build it from source, and run your first program.", install_body_text, "", "install")
-    fs.write("dist/install.html", install_page) ?? return Err("could not write dist/install.html")
+    install_body_html :: install_body()
+    install_page :: page_shell("Install Jet", "Install the Jet toolchain on x86_64 Linux or macOS with Nix, or build it from source, and run your first program.", install_body_html, "", "install")
+    fs.write("dist/install.html", install_page.text()) ?? return
     print("wrote dist/install.html")
 
-    error_body_text :: error_body() ?? return Err("could not render error page")
-    error_page :: page_shell("Jet error codes", "Where jet-lang.dev/e links land: every Jet diagnostic has a code, a what, a why, and a fix, available offline through jet explain.", error_body_text, "../", "error")
-    fs.write("dist/e/index.html", error_page) ?? return Err("could not write dist/e/index.html")
+    error_body_html :: error_body()
+    error_page :: page_shell("Jet error codes", "Where jet-lang.dev/e links land: every Jet diagnostic has a code, a what, a why, and a fix, available offline through jet explain.", error_body_html, "../", "error")
+    fs.write("dist/e/index.html", error_page.text()) ?? return
     print("wrote dist/e/index.html")
 
     if fs.exists("widget/build") {
-        fs.copy_dir("widget/build", "dist/widget") ?? return Err("could not copy widget")
+        fs.copy_dir("widget/build", "dist/widget") ?? return
         print("wrote dist/widget/")
     }
     print("site generated")

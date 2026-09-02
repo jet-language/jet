@@ -8,7 +8,9 @@ mod tir_support;
 use std::fs;
 use std::process::Command;
 
-use tir_support::{assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc};
+use tir_support::{
+    assert_release_tiers_agree, assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc,
+};
 
 /// Build `src` to a binary, then run it with `stdin` piped in. Like `build_and_run`
 /// but feeds a deterministic stdin so an `io.input(...)` reads known lines (and EOF).
@@ -186,6 +188,79 @@ shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
     assert_eq!(code, 0);
     // circle/square areas via dynamic dispatch; largest([3,1,4,1,5]) = 5; scores[0].points = 10.
     assert_eq!(stdout, "circle: 3.14159\nsquare: 4.0\n5\n10\n");
+}
+
+/// A trait-object List.each lends each item to a callback. Its callback's
+/// Result carrier must propagate on every tier, while a plain Unit callback
+/// still uses the same fallible helper through an uninhabited error.
+#[test]
+fn trait_object_each_callback_result_parity() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+#Error
+enum VisitError {
+    Stop
+}
+trait Shape {
+    fn name(self) String -[]>
+}
+struct Circle {
+    radius: Float
+    impl Shape {
+        fn name(self) String -[]> {
+            return \"circle\"
+        }
+    }
+}
+struct Square {
+    side: Float
+}
+impl Square.Shape {
+    fn name(self) String -[]> {
+        return \"square\"
+    }
+}
+fn visit_ok(s: Shape) Unit !VisitError -> {
+    name :: s.name() ?? \"unreachable\"
+    print(name)
+    return
+}
+fn visit_fail(s: Shape) Unit !VisitError -> {
+    name :: s.name() ?? \"unreachable\"
+    print(name)
+    if name == \"circle\" {
+        return Err(VisitError.Stop)
+    }
+    return
+}
+fn consume_plain() Unit -[]> {
+    shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
+    shapes.each((s) -> {})
+}
+fn consume_ok() Unit !VisitError -> {
+    shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
+    shapes.each((s) -> visit_ok(s))
+    return
+}
+fn consume_fail() Unit !VisitError -> {
+    shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
+    shapes.each((s) -> visit_fail(s))
+    return
+}
+fn run() {
+    consume_ok() ? ok -> { print(\"callback-ok\") } ! error -> { print(\"callback-ok-failed\") }
+    consume_fail() ? ok -> { print(\"callback-failed-missed\") } ! error -> { print(\"callback-failed\") }
+    consume_plain()
+    print(\"plain-ok\")
+}
+";
+    assert_release_tiers_agree(
+        "tir_trait_object_each_callback",
+        src,
+        "circle\nsquare\ncallback-ok\ncircle\ncallback-failed\nplain-ok\n",
+    );
 }
 
 /// A typed trait-object list must coerce both inline literals and local

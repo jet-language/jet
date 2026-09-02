@@ -7,6 +7,7 @@
 use super::*;
 use crate::AST::{AccessConvention, Expr, ExternFn, Func, Item, Marker, ProgramBundle, Type};
 use crate::Syntax;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestDirection {
@@ -90,6 +91,59 @@ pub fn guest_import_symbol(function: &Func) -> Option<&str> {
             _ => None,
         })
 }
+/// Return the canonical generated Rust wrapper identity for one per-callable
+/// `#Import(c)` declaration. The owning module is part of the identity because
+/// local Jet names may repeat across modules.
+pub fn guest_import_wrapper_name(owner: &str, name: &str) -> String {
+    let owner = if owner.is_empty() { "root" } else { owner };
+    crate::AST::mangle_path(&format!("jet_ffi_guest.{owner}.{name}"))
+}
+
+/// Return the one native spelling used for an exported C symbol. Keep this
+/// beside the guest surface so sema, Library output, and bindings cannot drift.
+pub fn guest_export_native_symbol(name: &str) -> String {
+    let mut symbol = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if symbol.is_empty() || symbol.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        symbol.insert(0, '_');
+    }
+    symbol
+}
+
+/// Whether a per-callable import can cross the resident hidden C bridge.
+///
+/// The C-safe type law is wider than this value-shaped bridge. Per-callable
+/// imports have no C-module direct-wrapper fallback, so sema rejects a valid
+/// C signature that the canonical bridge cannot carry.
+pub fn guest_import_bridge_compatible(function: &Func) -> bool {
+    let Some(symbol) = guest_import_symbol(function) else {
+        return false;
+    };
+    let foreign = ExternFn {
+        abi: None,
+        name: function.name.clone(),
+        name_span: function.name_span,
+        params: function.params.clone(),
+        return_type: function.return_type.clone(),
+        return_type_span: function.return_type_span,
+        rust_path: symbol.to_string(),
+        rust_path_span: function.name_span,
+        effect_root: None,
+        undo: function.undo.clone(),
+        close: None,
+        span: function.span,
+    };
+    foreign.hidden_c_bridge_compatible()
+}
+
 
 fn scalar_shape(params: &[(AccessConvention, Type)], return_type: Option<&Type>) -> Option<GuestScalar> {
     let scalar = |ty: &Type| match ty {
@@ -302,6 +356,101 @@ pub(crate) fn check_guest_export_surface(
     ok
 }
 
+/// Record one native symbol in the bundle-wide guest namespace.
+fn record_guest_symbol(
+    symbols: &mut BTreeMap<String, String>,
+    symbol: String,
+    owner: &str,
+    kind: &str,
+    name: &str,
+    span: Option<crate::Diagnostics::Span>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let description = format!("{kind} `{name}` in module `{owner}`");
+    if let Some(previous) = symbols.insert(symbol.clone(), description.clone()) {
+        diags.push(Diagnostic::error(
+            "E1341",
+            format!(
+                "{previous} and {description} use the same C symbol `{symbol}`"
+            ),
+            "the native guest call surface must map every imported, exported, and generated C symbol unambiguously before codegen"
+                .to_string(),
+            "rename one declaration or its native symbol string".to_string(),
+            span,
+        ));
+    }
+}
+
+/// Reject duplicate native symbols across every bundle-defined or referenced
+/// guest row before codegen. This includes per-callable imports, C-module
+/// imports, exported library symbols, and the generated text release symbol.
+pub(crate) fn check_guest_symbol_collisions(
+    bundle: &ProgramBundle,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let mut symbols = BTreeMap::<String, String>::new();
+    let mut has_text_export = false;
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for item in &module.items {
+            match item {
+                Item::Func(function) => {
+                    if let Some(import) = guest_import_function_signature(function) {
+                        record_guest_symbol(
+                            &mut symbols,
+                            import.symbol,
+                            &module.alias,
+                            "guest imports",
+                            &function.name,
+                            Some(function.name_span),
+                            diags,
+                        );
+                    }
+                    if module_idx == bundle.entry {
+                        if let Some(export) = guest_export_signature(function) {
+                            has_text_export |= export.scalar == Some(GuestScalar::Text);
+                            record_guest_symbol(
+                                &mut symbols,
+                                guest_export_native_symbol(&export.name),
+                                &module.alias,
+                                "Library exports",
+                                &function.name,
+                                Some(function.name_span),
+                                diags,
+                            );
+                        }
+                    }
+                }
+                Item::CModule(c_module) => {
+                    for function in &c_module.functions {
+                        record_guest_symbol(
+                            &mut symbols,
+                            function.rust_path.clone(),
+                            &module.alias,
+                            "C module imports",
+                            &function.name,
+                            Some(function.name_span),
+                            diags,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if has_text_export {
+        record_guest_symbol(
+            &mut symbols,
+            "jet_text_free".to_string(),
+            "<generated>",
+            "generated Library symbols",
+            "jet_text_free",
+            None,
+            diags,
+        );
+    }
+}
+
+
 /// Check all per-callable `#Import(c)` signatures with the same C-safe law as
 /// C modules and exports. A declaration is registered only after this pass.
 pub(crate) fn check_guest_import_surface(
@@ -314,7 +463,7 @@ pub(crate) fn check_guest_import_surface(
         Item::Func(function) if guest_import_function_signature(function).is_some() => Some(function),
         _ => None,
     }) {
-        if !check_c_signature(
+        let c_safe = check_c_signature(
             &function.params,
             function.return_type.as_ref(),
             function
@@ -322,7 +471,20 @@ pub(crate) fn check_guest_import_surface(
                 .unwrap_or(function.name_span),
             registry,
             diags,
-        ) {
+        );
+        if !c_safe {
+            ok = false;
+        } else if !guest_import_bridge_compatible(function) {
+            diags.push(Diagnostic::error(
+                "E1341",
+                format!(
+                    "guest import `{}` cannot use the resident hidden C bridge",
+                    function.name
+                ),
+                "per-callable imports have no direct C-module wrapper fallback".to_string(),
+                "use a read-only scalar or String bridge signature".to_string(),
+                Some(function.name_span),
+            ));
             ok = false;
         }
     }

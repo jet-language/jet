@@ -69,6 +69,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("map-replace", 0),
     ("set-replace", 0),
     ("allow-impure", 0),
+    ("freestanding-flag", 0),
     ("scope-marker-grant", 0),
     ("core-path-free-functions", 0),
     ("core-namespace-io", 0),
@@ -1224,7 +1225,7 @@ fn tally(row: &Retirement) -> (usize, usize) {
             }
             (retired, canonical)
         }
-        "allow-impure" => {
+        "allow-impure" | "freestanding-flag" => {
             let mut retired = 0;
             let mut canonical = 0;
             for path in content_files() {

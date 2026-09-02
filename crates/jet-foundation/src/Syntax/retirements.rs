@@ -249,6 +249,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         code: Some("E1343"),
     },
     Retirement {
+        id: "freestanding-flag",
+        retired: "--freestanding",
+        canonical: "--target=<name>",
+        kind: RetirementKind::Semantic,
+        decision: "D-FREESTAND-SELECT1=B",
+        since: "2026-09-02",
+        code: Some("E2102"),
+    },
+    Retirement {
         id: "scope-marker-grant",
         retired: "#Grant",
         canonical: "#FX",

@@ -11,6 +11,18 @@
     "fixtureGen": {"script": "fixtures/gen.py", "out": "input.txt"},
     "expected": "expected.out"
   },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    }
+  },
   "authoring": {
     "jet": {
       "author": "luna-max",
@@ -30,7 +42,7 @@
         "E0121: `counts` was given away earlier, so it can't be used here",
         "exit 127: `./jet/build/main` not found (actual output was `build/main`)"
       ],
-      "notes": "Reads the declared input path from process.argv().get(1), with input.txt as the no-argument fallback. Splits complete input on ASCII whitespace (tab through carriage return plus space), then uses counts and top_n."
+      "notes": "Reads the declared input path from process.argv()[1] with ambient read_file. Splits complete input on ASCII whitespace (tab through carriage return plus space), then uses counts and top_n."
     },
     "rust": {
       "author": "luna-max",

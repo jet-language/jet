@@ -1,10 +1,16 @@
-// D-TYPEDTEXT1=D: one typed-text semantic core for AOT and TIR adapters.
+// D-TYPEDTEXT1=D: one typed-text semantic core for AOT, JIT, and TIR
+// adapters. SQL keeps its binding element type at the adapter boundary so the
+// checked SQL carrier can use `DBValue` while the standalone kernel stays
+// independent of the database wire module.
 
-pub fn jet_typed_sql_raw(template: String) -> (String, Vec<String>) {
+pub fn jet_typed_sql_raw<T>(template: String) -> (String, Vec<T>) {
     (template, Vec::new())
 }
 
-pub fn jet_typed_sql_interpolate(literals: &[&str], holes: Vec<String>) -> (String, Vec<String>) {
+pub fn jet_typed_sql_interpolate<T>(
+    literals: &[&str],
+    holes: Vec<T>,
+) -> (String, Vec<T>) {
     let mut template = String::new();
     for (index, literal) in literals.iter().enumerate() {
         template.push_str(literal);
@@ -15,11 +21,11 @@ pub fn jet_typed_sql_interpolate(literals: &[&str], holes: Vec<String>) -> (Stri
     (template, holes)
 }
 
-pub fn jet_typed_sql_template(value: &(String, Vec<String>)) -> String {
+pub fn jet_typed_sql_template<T>(value: &(String, Vec<T>)) -> String {
     value.0.clone()
 }
 
-pub fn jet_typed_sql_params(value: &(String, Vec<String>)) -> Vec<String> {
+pub fn jet_typed_sql_params<T: Clone>(value: &(String, Vec<T>)) -> Vec<T> {
     value.1.clone()
 }
 
@@ -46,12 +52,22 @@ pub fn jet_typed_html_escape(value: &str) -> String {
     out
 }
 
-pub fn jet_typed_html_interpolate(literals: &[&str], holes: Vec<String>) -> String {
-    let mut out = String::new();
+pub fn jet_typed_html_interpolate(
+    literals: &[&str],
+    holes: Vec<String>,
+    trusted_html: &[bool],
+) -> String {
+    let capacity = literals.iter().map(|literal| literal.len()).sum::<usize>()
+        + holes.iter().map(String::len).sum::<usize>();
+    let mut out = String::with_capacity(capacity);
     for (index, literal) in literals.iter().enumerate() {
         out.push_str(literal);
         if let Some(hole) = holes.get(index) {
-            out.push_str(&jet_typed_html_escape(hole));
+            if trusted_html.get(index).copied().unwrap_or(false) {
+                out.push_str(hole);
+            } else {
+                out.push_str(&jet_typed_html_escape(hole));
+            }
         }
     }
     out
@@ -148,12 +164,29 @@ mod typed_boundary_tests {
     use super::*;
 
     #[test]
+    fn html_interpolation_escapes_text_and_composes_html() {
+        assert_eq!(
+            jet_typed_html_interpolate(
+                &["<p>", "</p>", ""],
+                vec!["<script>&".to_string(), "<strong>safe</strong>".to_string(),],
+                &[false, true],
+            ),
+            "<p>&lt;script&gt;&amp;</p><strong>safe</strong>"
+        );
+    }
+
+    #[test]
+    fn missing_html_trust_flags_default_to_escaped() {
+        assert_eq!(
+            jet_typed_html_interpolate(&["", ""], vec!["<em>text</em>".to_string()], &[]),
+            "&lt;em&gt;text&lt;/em&gt;"
+        );
+    }
+
+    #[test]
     fn path_holes_are_one_component() {
         assert_eq!(
-            jet_typed_path_interpolate(
-                &["/data/", ".json"],
-                &["ada/../etc".to_string()],
-            ),
+            jet_typed_path_interpolate(&["/data/", ".json"], &["ada/../etc".to_string()],),
             "/data/ada%2F..%2Fetc.json"
         );
         assert_eq!(

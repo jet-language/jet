@@ -12,8 +12,12 @@ pub use jet_pkg_model::Overlay::{
 };
 
 use super::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
+use jet_pkg_model::Authority::AuthorityResolver;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::fs::{File, Metadata};
+use std::io::{self, Read, Write};
+use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
@@ -23,25 +27,21 @@ pub fn apply_overlay_patches(
     source_root: &Path,
     package: &PackageOverride,
 ) -> Result<Vec<PatchApplication>, OverlayError> {
-    let workspace_root = canonical_directory(workspace_root, "workspace root")?;
-    let source_root = canonical_directory(source_root, "source root")?;
+    let workspace = OverlayAuthority::open(workspace_root, "workspace root")?;
+    let source = OverlayAuthority::open(source_root, "source root")?;
     let mut staged = BTreeMap::new();
     let mut applied = Vec::new();
     for patch in &package.patches {
-        let patch_path = safe_existing_path(&workspace_root, patch, "patch")?;
-        let text = std::fs::read_to_string(&patch_path).map_err(|e| {
+        let patch_file = workspace.open_file(patch, "patch")?;
+        let text = String::from_utf8(patch_file.bytes).map_err(|_| {
             OverlayError::IO(format!(
-                "could not read patch `{}`: {e}",
-                patch_path.display()
+                "could not read patch `{}`: patch is not valid UTF-8",
+                patch_file.path.display()
             ))
         })?;
-        applied.extend(apply_unified_patch_staged(
-            &source_root,
-            &text,
-            &mut staged,
-        )?);
+        applied.extend(apply_unified_patch_staged(&source, &text, &mut staged)?);
     }
-    commit_staged(&staged)?;
+    commit_staged(&mut staged)?;
     Ok(applied)
 }
 
@@ -50,24 +50,219 @@ fn apply_unified_patch(
     source_root: &Path,
     patch_text: &str,
 ) -> Result<Vec<PatchApplication>, OverlayError> {
-    let source_root = canonical_directory(source_root, "source root")?;
+    let source = OverlayAuthority::open(source_root, "source root")?;
     let mut staged = BTreeMap::new();
-    let applications = apply_unified_patch_staged(&source_root, patch_text, &mut staged)?;
-    commit_staged(&staged)?;
+    let applications = apply_unified_patch_staged(&source, patch_text, &mut staged)?;
+    commit_staged(&mut staged)?;
     Ok(applications)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InputIdentity {
+    length: u64,
+    modified_ns: Option<u128>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(unix)]
+    links: u64,
+}
+
+fn file_identity(metadata: &Metadata) -> Result<InputIdentity, &'static str> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        if metadata.nlink() != 1 {
+            return Err("is hard-linked (multiple directory entries)");
+        }
+        return Ok(InputIdentity {
+            length: metadata.len(),
+            modified_ns: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos()),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            links: metadata.nlink(),
+        });
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(InputIdentity {
+            length: metadata.len(),
+            modified_ns: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos()),
+        })
+    }
+}
+
+fn permissions_mode(metadata: &Metadata) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        metadata.permissions().mode() & 0o7777
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        0
+    }
+}
+
+#[derive(Debug)]
+struct HeldFile {
+    path: PathBuf,
+    parent: Arc<File>,
+    name: String,
+    handle: Arc<File>,
+    identity: InputIdentity,
+    mode: u32,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug)]
 struct StagedFile {
-    path: std::path::PathBuf,
+    path: PathBuf,
+    root: Arc<File>,
+    parent: Arc<File>,
+    name: String,
+    input: Arc<File>,
+    identity: InputIdentity,
+    mode: u32,
     original: Vec<u8>,
     output: Vec<u8>,
 }
 
+#[derive(Debug)]
+struct OverlayAuthority {
+    root: PathBuf,
+    resolver: AuthorityResolver,
+    root_handle: Arc<File>,
+}
+
+impl OverlayAuthority {
+    fn open(path: &Path, label: &str) -> Result<Self, OverlayError> {
+        let resolver = AuthorityResolver::open(path).map_err(|error| {
+            OverlayError::IO(format!(
+                "could not open {label} authority `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        let root = resolver.root().to_path_buf();
+        let checked = resolver
+            .checked_directory(Path::new(""))
+            .map_err(|error| {
+                OverlayError::IO(format!(
+                    "could not hold {label} authority `{}`: {error}",
+                    root.display()
+                ))
+            })?;
+        Ok(Self {
+            root,
+            resolver,
+            root_handle: Arc::clone(&checked.handle),
+        })
+    }
+
+    fn open_file(&self, raw: &str, label: &str) -> Result<HeldFile, OverlayError> {
+        let relative = safe_relative_path(raw, label)?;
+        self.open_relative_file(&relative, label)
+    }
+
+    fn open_relative_file(
+        &self,
+        relative: &Path,
+        label: &str,
+    ) -> Result<HeldFile, OverlayError> {
+        let parent_relative = relative.parent().unwrap_or_else(|| Path::new(""));
+        let parent = self
+            .resolver
+            .checked_directory(parent_relative)
+            .map_err(|error| {
+                OverlayError::IO(format!(
+                    "could not open {label} parent `{}`: {error}",
+                    self.root.join(parent_relative).display()
+                ))
+            })?;
+        let name = relative
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                OverlayError::Patch(format!(
+                    "{label} `{}` has no ordinary final name",
+                    relative.display()
+                ))
+            })?
+            .to_string();
+        let path = self.root.join(relative);
+        let mut file = overlay_fs::open_read(&parent.handle, &name).map_err(|error| {
+            if is_symlink_error(&error) {
+                OverlayError::Patch(format!("{label} `{}` contains a symlink", path.display()))
+            } else {
+                OverlayError::IO(format!(
+                    "could not read {label} `{}`: {error}",
+                    path.display()
+                ))
+            }
+        })?;
+        let metadata = file.metadata().map_err(|error| {
+            OverlayError::IO(format!(
+                "could not inspect {label} `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        if !metadata.is_file() {
+            return Err(OverlayError::Patch(format!(
+                "{label} `{}` must be a regular file",
+                path.display()
+            )));
+        }
+        let identity = file_identity(&metadata).map_err(|detail| {
+            OverlayError::Patch(format!("{label} `{}` {detail}", path.display()))
+        })?;
+        let mode = permissions_mode(&metadata);
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(|error| {
+            OverlayError::IO(format!(
+                "could not read {label} `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        let final_metadata = file.metadata().map_err(|error| {
+            OverlayError::IO(format!(
+                "could not revalidate {label} `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        if !final_metadata.is_file()
+            || file_identity(&final_metadata).ok() != Some(identity.clone())
+        {
+            return Err(OverlayError::IO(format!(
+                "{label} `{}` changed while it was read",
+                path.display()
+            )));
+        }
+        Ok(HeldFile {
+            path,
+            parent: Arc::clone(&parent.handle),
+            name,
+            handle: Arc::new(file),
+            identity,
+            mode,
+            bytes,
+        })
+    }
+}
+
 fn apply_unified_patch_staged(
-    source_root: &Path,
+    source: &OverlayAuthority,
     patch_text: &str,
-    staged: &mut BTreeMap<std::path::PathBuf, StagedFile>,
+    staged: &mut BTreeMap<PathBuf, StagedFile>,
 ) -> Result<Vec<PatchApplication>, OverlayError> {
     let mut applications = Vec::new();
     let mut lines = patch_text.lines().peekable();
@@ -83,47 +278,26 @@ fn apply_unified_patch_staged(
         }
         let target = normalize_patch_path(next.trim_start_matches("+++ ").trim());
         let relative = safe_relative_path(&target, "patched file")?;
-        let path = source_root.join(&relative);
-        let mut cursor = source_root.to_path_buf();
-        for component in relative.components() {
-            cursor.push(component.as_os_str());
-            if let Ok(metadata) = std::fs::symlink_metadata(&cursor) {
-                if metadata.file_type().is_symlink() {
-                    return Err(OverlayError::Patch(format!(
-                        "patched file `{target}` contains a symlink"
-                    )));
-                }
-            }
-        }
-        let canonical_path = path.canonicalize().map_err(|e| {
-            OverlayError::IO(format!(
-                "could not resolve patched file `{}`: {e}",
-                path.display()
-            ))
-        })?;
-        if !canonical_path.starts_with(source_root) {
-            return Err(OverlayError::Patch(format!(
-                "patched file `{target}` escapes the source root"
-            )));
-        }
-        if !staged.contains_key(&canonical_path) {
-            let original = std::fs::read(&canonical_path).map_err(|error| {
-                OverlayError::IO(format!(
-                    "could not read patched file `{}`: {error}",
-                    path.display()
-                ))
-            })?;
+        if !staged.contains_key(&relative) {
+            let opened = source.open_relative_file(&relative, "patched file")?;
+            let original = opened.bytes.clone();
             staged.insert(
-                canonical_path.clone(),
+                relative.clone(),
                 StagedFile {
-                    path: canonical_path.clone(),
+                    path: opened.path,
+                    root: Arc::clone(&source.root_handle),
+                    parent: opened.parent,
+                    name: opened.name,
+                    input: opened.handle,
+                    identity: opened.identity,
+                    mode: opened.mode,
                     output: original.clone(),
                     original,
                 },
             );
         }
         let entry = staged
-            .get_mut(&canonical_path)
+            .get_mut(&relative)
             .expect("staged file was inserted or already present");
         let original = entry.output.clone();
         let mut file_lines: Vec<String> = String::from_utf8(original.clone())
@@ -226,39 +400,16 @@ fn apply_unified_patch_staged(
     Ok(applications)
 }
 
-fn canonical_directory(path: &Path, label: &str) -> Result<std::path::PathBuf, OverlayError> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
-        OverlayError::IO(format!(
-            "could not inspect {label} `{}`: {error}",
-            path.display()
-        ))
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(OverlayError::IO(format!(
-            "{label} `{}` is not a real directory",
-            path.display()
-        )));
-    }
-    path.canonicalize().map_err(|error| {
-        OverlayError::IO(format!(
-            "could not resolve {label} `{}`: {error}",
-            path.display()
-        ))
-    })
-}
-
-fn safe_relative_path(raw: &str, label: &str) -> Result<std::path::PathBuf, OverlayError> {
+fn safe_relative_path(raw: &str, label: &str) -> Result<PathBuf, OverlayError> {
     let path = Path::new(raw);
     if raw.is_empty()
         || path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                std::path::Component::ParentDir
-                    | std::path::Component::RootDir
-                    | std::path::Component::Prefix(_)
-            )
-        })
+        || raw.contains('\\')
+        || raw.contains('\0')
+        || raw.chars().any(|character| character.is_control())
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
     {
         return Err(OverlayError::Patch(format!(
             "{label} path `{raw}` must be a non-empty relative path without `..`"
@@ -267,61 +418,52 @@ fn safe_relative_path(raw: &str, label: &str) -> Result<std::path::PathBuf, Over
     Ok(path.to_path_buf())
 }
 
-fn safe_existing_path(
-    root: &Path,
-    raw: &str,
-    label: &str,
-) -> Result<std::path::PathBuf, OverlayError> {
-    let relative = safe_relative_path(raw, label)?;
-    let candidate = root.join(&relative);
-    let mut cursor = root.to_path_buf();
-    for component in relative.components() {
-        cursor.push(component.as_os_str());
-        if let Ok(metadata) = std::fs::symlink_metadata(&cursor) {
-            if metadata.file_type().is_symlink() {
-                return Err(OverlayError::Patch(format!(
-                    "{label} `{raw}` contains a symlink"
-                )));
-            }
-        }
-    }
-    let metadata = std::fs::symlink_metadata(&candidate).map_err(|error| {
-        OverlayError::IO(format!(
-            "could not inspect {label} `{}`: {error}",
-            candidate.display()
-        ))
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(OverlayError::Patch(format!(
-            "{label} `{}` must be a regular file inside the workspace",
-            candidate.display()
-        )));
-    }
-    let canonical = candidate.canonicalize().map_err(|error| {
-        OverlayError::IO(format!(
-            "could not resolve {label} `{}`: {error}",
-            candidate.display()
-        ))
-    })?;
-    if !canonical.starts_with(root) {
-        return Err(OverlayError::Patch(format!(
-            "{label} `{raw}` escapes the workspace root"
-        )));
-    }
-    Ok(canonical)
+fn commit_staged(staged: &mut BTreeMap<PathBuf, StagedFile>) -> Result<(), OverlayError> {
+    let mut noop = |_staged: &mut BTreeMap<PathBuf, StagedFile>| {};
+    commit_staged_inner(staged, &mut noop)
 }
 
-fn commit_staged(staged: &BTreeMap<std::path::PathBuf, StagedFile>) -> Result<(), OverlayError> {
-    let mut committed: Vec<(&Path, &[u8])> = Vec::new();
-    for entry in staged.values() {
-        if entry.output == entry.original {
+#[cfg(test)]
+fn commit_staged_with_hook(
+    staged: &mut BTreeMap<PathBuf, StagedFile>,
+    hook: &mut dyn FnMut(&mut BTreeMap<PathBuf, StagedFile>),
+) -> Result<(), OverlayError> {
+    commit_staged_inner(staged, hook)
+}
+
+fn commit_staged_inner(
+    staged: &mut BTreeMap<PathBuf, StagedFile>,
+    after_commit: &mut dyn FnMut(&mut BTreeMap<PathBuf, StagedFile>),
+) -> Result<(), OverlayError> {
+    let keys = staged.keys().cloned().collect::<Vec<_>>();
+    let mut committed = Vec::new();
+    for key in keys {
+        let unchanged = staged
+            .get(&key)
+            .map(|entry| entry.output == entry.original)
+            .unwrap_or(true);
+        if unchanged {
             continue;
         }
-        if let Err(error) = write_staged_file(entry) {
+        let write_error = {
+            let entry = staged
+                .get(&key)
+                .expect("staged file key disappeared");
+            write_staged_file(entry).err()
+        };
+        if let Some(error) = write_error {
             let mut rollback_errors = Vec::new();
-            for (path, original) in committed.iter().rev() {
-                if let Err(rollback) = write_bytes_atomically(path, original) {
-                    rollback_errors.push(format!("{}: {rollback}", path.display()));
+            for committed_key in committed.iter().rev() {
+                let committed_entry = staged
+                    .get(committed_key)
+                    .expect("committed file key disappeared");
+                if let Err(rollback) =
+                    write_bytes_atomically(committed_entry, &committed_entry.original, false)
+                {
+                    rollback_errors.push(format!(
+                        "{}: {rollback}",
+                        committed_entry.path.display()
+                    ));
                 }
             }
             let suffix = if rollback_errors.is_empty() {
@@ -329,55 +471,310 @@ fn commit_staged(staged: &BTreeMap<std::path::PathBuf, StagedFile>) -> Result<()
             } else {
                 format!("; rollback failed: {}", rollback_errors.join("; "))
             };
+            let path = staged
+                .get(&key)
+                .expect("staged file key disappeared")
+                .path
+                .display()
+                .to_string();
             return Err(OverlayError::IO(format!(
-                "could not commit patched file `{}`: {error}{suffix}",
-                entry.path.display()
+                "could not commit patched file `{path}`: {error}{suffix}"
             )));
         }
-        committed.push((&entry.path, entry.original.as_slice()));
+        committed.push(key);
+        after_commit(staged);
     }
     Ok(())
 }
 
-fn write_staged_file(entry: &StagedFile) -> std::io::Result<()> {
-    write_bytes_atomically(&entry.path, &entry.output)
+fn write_staged_file(entry: &StagedFile) -> io::Result<()> {
+    write_bytes_atomically(entry, &entry.output, true)
 }
 
-fn write_bytes_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("patched file has no parent"))?;
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("file");
-    let serial = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
-    let temporary = parent.join(format!(
-        ".{name}.jet-overlay-{}-{serial}",
-        std::process::id()
-    ));
-    let result = (|| {
-        use std::io::Write as _;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        if let Ok(metadata) = std::fs::metadata(path) {
-            std::fs::set_permissions(&temporary, metadata.permissions())?;
-        }
-        std::fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
+fn validate_staged_target(entry: &StagedFile) -> io::Result<()> {
+    let root_metadata = entry.root.metadata()?;
+    if !root_metadata.is_dir() {
+        return Err(io::Error::other("source root authority is no longer a directory"));
     }
-    result
+    let current = overlay_fs::open_read(&entry.parent, &entry.name).map_err(|error| {
+        if is_symlink_error(&error) {
+            io::Error::other("patched target contains a symlink")
+        } else {
+            error
+        }
+    })?;
+    let current_metadata = current.metadata()?;
+    if !current_metadata.is_file() {
+        return Err(io::Error::other("patched target is no longer a regular file"));
+    }
+    let current_identity = file_identity(&current_metadata)
+        .map_err(|detail| io::Error::other(format!("patched target {detail}")))?;
+    if current_identity != entry.identity {
+        return Err(io::Error::other("patched target was replaced before commit"));
+    }
+    let input_metadata = entry.input.metadata()?;
+    let input_identity = file_identity(&input_metadata)
+        .map_err(|detail| io::Error::other(format!("patched target {detail}")))?;
+    if input_identity != entry.identity {
+        return Err(io::Error::other("patched target changed after it was read"));
+    }
+    Ok(())
 }
+
+fn write_bytes_atomically(
+    entry: &StagedFile,
+    bytes: &[u8],
+    verify_target: bool,
+) -> io::Result<()> {
+    if verify_target {
+        validate_staged_target(entry)?;
+    } else {
+        let root_metadata = entry.root.metadata()?;
+        if !root_metadata.is_dir() {
+            return Err(io::Error::other("source root authority is no longer a directory"));
+        }
+    }
+    let mut collision = None;
+    for _ in 0..16 {
+        let serial = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+        let temporary = format!(
+            ".{}.jet-overlay-{}-{serial}",
+            entry.name,
+            std::process::id()
+        );
+        let mut file = match overlay_fs::create_exclusive(&entry.parent, &temporary) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                collision = Some(error);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        let result = (|| {
+            file.write_all(bytes)?;
+            overlay_fs::set_mode(&file, entry.mode)?;
+            file.sync_all()?;
+            overlay_fs::sync_directory(&entry.parent)?;
+            overlay_fs::rename(&entry.parent, &temporary, &entry.name)?;
+            // The file is durable before publication. A directory fsync after
+            // rename is best effort so a reporting failure cannot make commit
+            // report failure after the destination has already changed.
+            let _ = overlay_fs::sync_directory(&entry.parent);
+            Ok(())
+        })();
+        drop(file);
+        if result.is_ok() {
+            return Ok(());
+        }
+        let cleanup = overlay_fs::unlink(&entry.parent, &temporary);
+        return match cleanup {
+            Ok(()) => result,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => result,
+            Err(cleanup) => {
+                let write_error = result
+                    .err()
+                    .expect("failed atomic write has an error");
+                Err(io::Error::other(format!(
+                    "{write_error}; temporary cleanup failed: {cleanup}"
+                )))
+            }
+        };
+    }
+    Err(collision.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate an exclusive overlay temporary file",
+        )
+    }))
+}
+fn is_symlink_error(error: &io::Error) -> bool {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        return error.raw_os_error() == Some(40);
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        return error.raw_os_error() == Some(62);
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    )))]
+    {
+        let _ = error;
+        false
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+mod overlay_fs {
+    use super::*;
+    use std::ffi::{c_char, CString};
+    use std::os::fd::{AsRawFd as _, FromRawFd as _};
+
+    const O_RDONLY: i32 = 0;
+    const O_WRONLY: i32 = 1;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_CLOEXEC: i32 = 0o2000000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_CLOEXEC: i32 = 0x01000000;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_NOFOLLOW: i32 = 0x0100;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const O_NONBLOCK: i32 = 0o4000;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const O_NONBLOCK: i32 = 0x0004;
+    const O_CREAT: i32 = 0o100;
+    const O_EXCL: i32 = 0o200;
+
+    unsafe extern "C" {
+        fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
+        fn renameat(
+            old_directory: i32,
+            old_path: *const c_char,
+            new_directory: i32,
+            new_path: *const c_char,
+        ) -> i32;
+        fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
+        fn fchmod(file: i32, mode: u32) -> i32;
+    }
+
+    fn component(name: &str, detail: &'static str) -> io::Result<CString> {
+        CString::new(name)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, detail))
+    }
+
+    pub(super) fn open_read(parent: &File, name: &str) -> io::Result<File> {
+        let name = component(name, "overlay file name contains NUL")?;
+        // SAFETY: `parent` is a live held directory descriptor and `name` is a
+        // live single-component NUL-terminated string.
+        let fd = unsafe {
+            openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the successful call returned one uniquely owned descriptor.
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+
+    pub(super) fn create_exclusive(parent: &File, name: &str) -> io::Result<File> {
+        let name = component(name, "overlay temporary name contains NUL")?;
+        // SAFETY: `parent` is a live held directory descriptor and `name` is a
+        // live single-component NUL-terminated string.
+        let fd = unsafe {
+            openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                0o600,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the successful call returned one uniquely owned descriptor.
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+
+    pub(super) fn set_mode(file: &File, mode: u32) -> io::Result<()> {
+        // SAFETY: `file` owns a live descriptor and `fchmod` does not retain
+        // the borrowed descriptor after this call.
+        if unsafe { fchmod(file.as_raw_fd(), mode) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn rename(parent: &File, old: &str, new: &str) -> io::Result<()> {
+        let old = component(old, "overlay source name contains NUL")?;
+        let new = component(new, "overlay destination name contains NUL")?;
+        // SAFETY: both names are single components and both directories are
+        // held descriptors, so no pathname component can be redirected.
+        if unsafe {
+            renameat(
+                parent.as_raw_fd(),
+                old.as_ptr(),
+                parent.as_raw_fd(),
+                new.as_ptr(),
+            )
+        } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn unlink(parent: &File, name: &str) -> io::Result<()> {
+        let name = component(name, "overlay cleanup name contains NUL")?;
+        // SAFETY: `parent` is a live held directory descriptor and unlinkat
+        // removes only this directory entry; it never follows a symlink.
+        if unsafe { unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(super) fn sync_directory(parent: &File) -> io::Result<()> {
+        parent.sync_all()
+    }
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+)))]
+mod overlay_fs {
+    use super::*;
+
+    fn unsupported() -> io::Error {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "descriptor-relative overlay authority is unavailable on this platform",
+        )
+    }
+
+    pub(super) fn open_read(_parent: &File, _name: &str) -> io::Result<File> {
+        Err(unsupported())
+    }
+
+    pub(super) fn create_exclusive(_parent: &File, _name: &str) -> io::Result<File> {
+        Err(unsupported())
+    }
+
+    pub(super) fn set_mode(_file: &File, _mode: u32) -> io::Result<()> {
+        Err(unsupported())
+    }
+
+    pub(super) fn rename(_parent: &File, _old: &str, _new: &str) -> io::Result<()> {
+        Err(unsupported())
+    }
+
+    pub(super) fn unlink(_parent: &File, _name: &str) -> io::Result<()> {
+        Err(unsupported())
+    }
+
+    pub(super) fn sync_directory(_parent: &File) -> io::Result<()> {
+        Err(unsupported())
+    }
+}
+
 
 fn parse_hunk_range(header: &str) -> Result<(usize, usize, usize), OverlayError> {
     let old = header
@@ -873,6 +1270,289 @@ mod tests {
             "one\n"
         );
         assert!(!root.join("outside.txt").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn hardlinked_patch_input_is_rejected_without_writing_source() {
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-patch-hardlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let workspace = root.join("workspace");
+        let source = root.join("source");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(workspace.join("patches")).unwrap();
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let patch = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n";
+        std::fs::write(outside.join("change.patch"), patch).unwrap();
+        std::fs::hard_link(
+            outside.join("change.patch"),
+            workspace.join("patches/change.patch"),
+        )
+        .unwrap();
+        std::fs::write(source.join("file.txt"), "one\n").unwrap();
+        let package = PackageOverride {
+            package: "pkg".to_string(),
+            source: None,
+            version: None,
+            flags: Vec::new(),
+            priority: 0,
+            field_priorities: std::collections::BTreeMap::new(),
+            env: Vec::new(),
+            patches: vec!["patches/change.patch".to_string()],
+            allow_unfree: false,
+        };
+
+        let error = apply_overlay_patches(&workspace, &source, &package).unwrap_err();
+        assert!(error.message().contains("hard-linked"));
+        assert_eq!(
+            std::fs::read_to_string(source.join("file.txt")).unwrap(),
+            "one\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("change.patch")).unwrap(),
+            patch
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn hardlinked_target_input_is_rejected_without_writing_outside() {
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-target-hardlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let source = root.join("source");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("file.txt"), "one\n").unwrap();
+        std::fs::hard_link(outside.join("file.txt"), source.join("file.txt")).unwrap();
+        let patch = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n";
+
+        let error = apply_unified_patch(&source, patch).unwrap_err();
+        assert!(error.message().contains("hard-linked"));
+        assert_eq!(
+            std::fs::read_to_string(source.join("file.txt")).unwrap(),
+            "one\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("file.txt")).unwrap(),
+            "one\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn patch_ancestor_swap_keeps_read_on_held_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-patch-ancestor-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let workspace = root.join("workspace");
+        let source = root.join("source");
+        let outside = root.join("outside");
+        let moved = root.join("moved-patches");
+        std::fs::create_dir_all(workspace.join("patches")).unwrap();
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "keep").unwrap();
+        let patch = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n";
+        std::fs::write(workspace.join("patches/change.patch"), patch).unwrap();
+        std::fs::write(source.join("file.txt"), "one\n").unwrap();
+
+        let workspace_authority = OverlayAuthority::open(&workspace, "workspace root").unwrap();
+        let patch_parent = workspace_authority
+            .resolver
+            .checked_directory(Path::new("patches"))
+            .unwrap();
+        let mut patch_file = overlay_fs::open_read(&patch_parent.handle, "change.patch").unwrap();
+        std::fs::rename(workspace.join("patches"), &moved).unwrap();
+        symlink(&outside, workspace.join("patches")).unwrap();
+        let mut patch_text = String::new();
+        patch_file.read_to_string(&mut patch_text).unwrap();
+        assert_eq!(patch_text, patch);
+
+        let source_authority = OverlayAuthority::open(&source, "source root").unwrap();
+        let mut staged = std::collections::BTreeMap::new();
+        apply_unified_patch_staged(&source_authority, &patch_text, &mut staged).unwrap();
+        commit_staged(&mut staged).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(source.join("file.txt")).unwrap(),
+            "ONE\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+            "keep"
+        );
+        assert!(!outside.join("file.txt").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn final_target_swap_to_symlink_is_rejected_without_touching_outside() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-final-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let source = root.join("source");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(source.join("tree")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "keep\n").unwrap();
+        std::fs::write(source.join("tree/file.txt"), "one\n").unwrap();
+        let patch = "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n";
+
+        let authority = OverlayAuthority::open(&source, "source root").unwrap();
+        let mut staged = std::collections::BTreeMap::new();
+        apply_unified_patch_staged(&authority, patch, &mut staged).unwrap();
+        std::fs::remove_file(source.join("tree/file.txt")).unwrap();
+        symlink(outside.join("sentinel"), source.join("tree/file.txt")).unwrap();
+
+        let error = commit_staged(&mut staged).unwrap_err();
+        assert!(error.message().contains("symlink"));
+        assert_eq!(
+            std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+            "keep\n"
+        );
+        assert_eq!(
+            std::fs::read_link(source.join("tree/file.txt")).unwrap(),
+            outside.join("sentinel")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn target_ancestor_swap_keeps_write_on_held_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-target-ancestor-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let source = root.join("source");
+        let outside = root.join("outside");
+        let moved = root.join("moved-target");
+        std::fs::create_dir_all(source.join("tree")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "keep").unwrap();
+        std::fs::write(source.join("tree/file.txt"), "one\n").unwrap();
+        let patch = "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n";
+
+        let authority = OverlayAuthority::open(&source, "source root").unwrap();
+        let mut staged = std::collections::BTreeMap::new();
+        apply_unified_patch_staged(&authority, patch, &mut staged).unwrap();
+        std::fs::rename(source.join("tree"), &moved).unwrap();
+        symlink(&outside, source.join("tree")).unwrap();
+        commit_staged(&mut staged).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(moved.join("file.txt")).unwrap(),
+            "ONE\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+            "keep"
+        );
+        assert!(!outside.join("file.txt").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn target_ancestor_swap_rollback_failure_stays_on_held_parent() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-overlay-target-ancestor-rollback-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let source = root.join("source");
+        let outside = root.join("outside");
+        let moved = root.join("moved-target");
+        std::fs::create_dir_all(source.join("tree")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "keep").unwrap();
+        std::fs::write(source.join("tree/one.txt"), "one\n").unwrap();
+        std::fs::write(source.join("tree/two.txt"), "two\n").unwrap();
+        let patch = "--- a/tree/one.txt\n+++ b/tree/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/tree/two.txt\n+++ b/tree/two.txt\n@@ -1 +1 @@\n-two\n+TWO\n";
+
+        let authority = OverlayAuthority::open(&source, "source root").unwrap();
+        let mut staged = std::collections::BTreeMap::new();
+        apply_unified_patch_staged(&authority, patch, &mut staged).unwrap();
+        std::fs::rename(source.join("tree"), &moved).unwrap();
+        symlink(&outside, source.join("tree")).unwrap();
+        staged
+            .get_mut(Path::new("tree/two.txt"))
+            .expect("second target was staged")
+            .name = ".".to_string();
+        let mut after_first = |entries: &mut std::collections::BTreeMap<PathBuf, StagedFile>| {
+            entries
+                .get_mut(Path::new("tree/one.txt"))
+                .expect("first target was staged")
+                .name = ".".to_string();
+        };
+
+        let error = commit_staged_with_hook(&mut staged, &mut after_first).unwrap_err();
+        assert!(error.message().contains("could not commit patched file"));
+        assert!(error.message().contains("rollback failed"));
+        assert_eq!(
+            std::fs::read_to_string(moved.join("one.txt")).unwrap(),
+            "ONE\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(moved.join("two.txt")).unwrap(),
+            "two\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+            "keep"
+        );
+        assert!(!outside.join("one.txt").exists());
+        assert!(!outside.join("two.txt").exists());
+        assert!(std::fs::read_dir(&moved)
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".jet-overlay-")));
         let _ = std::fs::remove_dir_all(&root);
     }
 

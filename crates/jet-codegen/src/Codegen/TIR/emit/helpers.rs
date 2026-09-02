@@ -6,6 +6,7 @@ use crate::Codegen::mangle_path;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::emit_tir_display_value;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TExclusivity;
 use crate::Codegen::TIR::TExpr;
@@ -147,13 +148,21 @@ pub(crate) fn emit_tir_stopping_receiver(recv: &TExpr, cx: &Cx) -> Option<String
 /// other facts, both already resolved at lowering.
 pub(crate) fn emit_tir_pattern(pattern: &TPattern, cx: &Cx) -> String {
     match &pattern.position {
-        TPatternPosition::Binding => crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern),
+        TPatternPosition::Binding => crate::Codegen::emit_if_let_pattern(
+            cx,
+            &pattern.pattern,
+            pattern.enum_type.as_deref(),
+        ),
         TPatternPosition::OptionBinding => match &pattern.pattern {
             crate::AST::Pattern::Present { binding, .. } => {
                 format!("Ok({})", mangle(binding))
             }
             crate::AST::Pattern::Absent(_) => "Err(_)".to_string(),
-            _ => crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern),
+            _ => crate::Codegen::emit_if_let_pattern(
+                cx,
+                &pattern.pattern,
+                pattern.enum_type.as_deref(),
+            ),
         },
         TPatternPosition::Arm => {
             crate::Codegen::emit_match_pattern(cx, &pattern.pattern, pattern.enum_type.as_deref())
@@ -364,7 +373,12 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                     }
                 };
                 fmt.push_str("{}");
-                args.push(format!("({}).{method}()", emit_tir_expr(e, cx)));
+                let rendered = if matches!(format, crate::AST::StrFormat::Display) {
+                    emit_tir_display_value(e, cx)
+                } else {
+                    format!("({}).{method}()", emit_tir_expr(e, cx))
+                };
+                args.push(rendered);
             }
         }
     }

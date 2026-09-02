@@ -1,0 +1,41 @@
+{
+  "name": "regex-find-all-4mb",
+  "tier": "micro",
+  "cells": ["text.regex-find-all-large"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "c", "zig", "go", "python", "node"],
+  "spec": {
+    "behavior": "Read the deterministic 4 MiB corpus and count non-overlapping literal matches of the regex pattern `struct`, then print the match count.",
+    "fixture": {
+      "bytes": 4194304,
+      "needle": "struct",
+      "matches": 31476,
+      "semantics": "non-overlapping literal matches over the complete corpus"
+    },
+    "args": ["corpus.txt"],
+    "fixtureGen": {"script": "fixtures/gen.py", "out": "corpus.txt"},
+    "expected": "expected.out"
+  },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs; no binary is built or measured."}
+    }
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the shared core.regex find_all operation for the literal pattern."},
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the Rust standard-library non-overlapping literal match iterator; no external regex dependency."},
+    "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the C standard-library strstr loop with non-overlapping advancement."},
+    "zig": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses Zig standard-library literal search with non-overlapping advancement."},
+    "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the Go standard-library bytes.Count operation."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses Python str.count for non-overlapping literal matches."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses the Node standard-library String.indexOf loop with non-overlapping advancement."}
+  }
+}

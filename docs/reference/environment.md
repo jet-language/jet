@@ -36,7 +36,7 @@ one exists instead of adding another spelling for the same job.
 | `JET_REPL_HISTORY_LIMIT` | positive integer | Sets the maximum persisted REPL entries. |
 | `JET_ROOT` | path | Overrides the installed Jet runtime-data root. |
 | `JET_SCHEDULER_THREADS` | positive integer | Sets the generated program's scheduler worker count. |
-| `JET_STORE_DIR` | path | Overrides the package-store directory. |
+| `JET_PACKAGE_STORE_DIR` | path | Overrides the package-store directory. |
 | `JET_TEST_FILTER` | test-name substring | Selects generated `jet test` cases. Prefer the corresponding CLI flag. |
 | `JET_TEST_SERIAL` | `1` | Runs generated `jet test` cases serially. Prefer the corresponding CLI flag. |
 | `JET_TEST_SHUFFLE_SEED` | unsigned integer | Replays a shuffled generated test run. |

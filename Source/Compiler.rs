@@ -9,7 +9,7 @@ use jet_foundation::Report::render_status_json;
 use std::path::{Path, PathBuf};
 
 use jet_driver::Authority::{AuthorityError, AuthorityResolver};
-use jet_driver::{Lock, Package};
+use jet_driver::{Lock, Package, Public as PackageModel};
 use jet_env_model::ModuleEval::{evaluate_env_with_source_loader, SourceLoader};
 
 pub const API_VERSION: u32 = 1;
@@ -33,7 +33,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// carrier is `CompilerPackageError` with the same four fields. The retained
 /// model records no per-field source positions, so the views expose no
 /// fabricated position data.
-pub const PACKAGE_MODEL_SCHEMA_VERSION: u32 = 1;
+pub use PackageModel::PACKAGE_MODEL_SCHEMA_VERSION;
 
 fn compiler_error_value(code: &str, message: impl Into<String>, span: Span) -> CtValue {
     ct_struct(
@@ -82,112 +82,10 @@ impl PackageReadError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DependencyView {
-    pub name: String,
-    pub source: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PackageTargetView {
-    pub name: String,
-    pub targets: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OutputView {
-    pub name: String,
-    pub kind: String,
-    pub entry: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BuildProfileView {
-    pub name: String,
-    pub optimize: String,
-    pub debug_info: bool,
-    pub small: bool,
-    pub panic: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManifestView {
-    pub schema_version: u32,
-    pub file: String,
-    pub jet: Option<String>,
-    pub edition: Option<String>,
-    pub description: Option<String>,
-    pub license: Option<String>,
-    pub repository: Option<String>,
-    pub layer: Option<String>,
-    pub target: Option<String>,
-    pub dependencies: Vec<DependencyView>,
-    pub packages: Vec<PackageTargetView>,
-    pub outputs: Vec<OutputView>,
-    pub build_profiles: Vec<BuildProfileView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PackageView {
-    pub schema_version: u32,
-    pub file: String,
-    pub jet: Option<String>,
-    pub edition: Option<String>,
-    pub description: Option<String>,
-    pub license: Option<String>,
-    pub repository: Option<String>,
-    pub layer: Option<String>,
-    pub target: Option<String>,
-    pub dependencies: Vec<DependencyView>,
-    pub packages: Vec<PackageTargetView>,
-    pub outputs: Vec<OutputView>,
-    pub build_profiles: Vec<BuildProfileView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LockedPackageView {
-    pub name: String,
-    pub version: String,
-    pub source_kind: String,
-    pub source: Option<String>,
-    pub revision: Option<String>,
-    pub fingerprint: String,
-    pub content_hash: Option<String>,
-    pub dependencies: Vec<String>,
-    pub layer: Option<String>,
-    pub inferred_layer: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LockView {
-    pub schema_version: u32,
-    pub file: String,
-    pub version: u32,
-    pub root_dependencies: Vec<String>,
-    pub packages: Vec<LockedPackageView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyValueView {
-    pub key: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProfileView {
-    pub name: String,
-    pub extends: Vec<String>,
-    pub packages: Vec<String>,
-    pub collisions: Vec<KeyValueView>,
-    pub sources: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProfileSetView {
-    pub schema_version: u32,
-    pub file: String,
-    pub profiles: Vec<ProfileView>,
-}
+pub use PackageModel::{
+    BuildProfileView, DependencyView, KeyValueView, LockView, LockedPackageView, ManifestView,
+    OutputView, PackageTargetView, PackageView, ProfileSetView, ProfileView,
+};
 
 fn package_read_error(
     file: impl Into<String>,
@@ -197,12 +95,76 @@ fn package_read_error(
     PackageReadError::new("E0956", file, message, cause)
 }
 
+fn authority_reason(cause: &AuthorityError) -> String {
+    match cause {
+        AuthorityError::Missing(_) => {
+            "authority input is missing; restore the required metadata and try again".to_string()
+        }
+        AuthorityError::ManifestParse { .. } => {
+            "package metadata is malformed; fix the metadata and try again".to_string()
+        }
+        AuthorityError::Io { operation, .. } => format!(
+            "couldn't {operation} authority metadata; restore access and try again"
+        ),
+        AuthorityError::Symlink(_) => {
+            "authority input is a symlink; replace it with the expected file or directory"
+                .to_string()
+        }
+        AuthorityError::WrongKind { expected, actual, .. } => format!(
+            "authority input is a {actual}, but the operation requires a {expected}"
+        ),
+        AuthorityError::Escapes(_) => {
+            "authority path escapes its root; use a relative path below the authority root"
+                .to_string()
+        }
+        AuthorityError::AmbiguousManifest(_) => {
+            "the package has multiple manifest roots; keep only package.jet".to_string()
+        }
+        AuthorityError::RetiredManifest(_) => {
+            "the retired manifest name is not accepted; use package.jet".to_string()
+        }
+        AuthorityError::WorkspaceAmbiguous(_) => {
+            "workspace authority is declared in multiple files; keep one authority source"
+                .to_string()
+        }
+        AuthorityError::WorkspaceNoModule => {
+            "the authority source has no workspace module; declare the workspace module"
+                .to_string()
+        }
+        AuthorityError::NestedMembers { .. } => {
+            "a member Package cannot declare another members list; keep membership at one level"
+                .to_string()
+        }
+        AuthorityError::Invalid { .. } => {
+            "authority metadata is invalid; fix the metadata fields and try again".to_string()
+        }
+        AuthorityError::Changed(_) => {
+            "authority input changed during resolution; restore it and retry".to_string()
+        }
+        AuthorityError::Unsupported(_) => {
+            "authority resolution is unavailable on this platform".to_string()
+        }
+    }
+}
+
+fn authority_diagnostic(cause: &AuthorityError) -> Diagnostic {
+    let code = cause.diagnostic().code;
+    Diagnostic::error(
+        code,
+        "authority input is unavailable".to_string(),
+        authority_reason(cause),
+        "restore the authority input and retry the operation".to_string(),
+        None,
+    )
+}
+
 fn authority_read_error(
     file: impl Into<String>,
     message: impl Into<String>,
     cause: AuthorityError,
 ) -> PackageReadError {
-    package_read_error(file, message, cause.to_string())
+    let code = cause.diagnostic().code;
+    package_read_error(file, message, format!("{code}: {}", authority_reason(&cause)))
 }
 
 fn diagnostic_cause(diagnostic: &Diagnostic) -> String {
@@ -211,6 +173,135 @@ fn diagnostic_cause(diagnostic: &Diagnostic) -> String {
         None => format!("{}: {}", diagnostic.code, diagnostic.what),
     }
 }
+
+fn inline_carrier_error(error: Package::InlinePackageError) -> PackageReadError {
+    let code = error.diagnostic().code;
+    package_read_error(
+        crate::Syntax::PACKAGE_FILE,
+        "could not read the inline package",
+        format!(
+            "{code}: inline Package carrier is malformed; fix the leading package block and try again"
+        ),
+    )
+}
+
+fn inline_parse_error(error: Package::PackageParseError) -> PackageReadError {
+    let diagnostic = jet_driver::Manifest::manifest_parse_diagnostic(
+        Path::new(crate::Syntax::PACKAGE_FILE),
+        &error,
+    );
+    package_read_error(
+        crate::Syntax::PACKAGE_FILE,
+        "could not read the inline package",
+        diagnostic_cause(&diagnostic),
+    )
+}
+
+fn inline_authority_error(
+    carrier: &jet_driver::Authority::CheckedFile,
+    message: impl Into<String>,
+    error: impl std::fmt::Display,
+) -> PackageReadError {
+    authority_read_error(
+        crate::Syntax::PACKAGE_FILE,
+        message,
+        AuthorityError::Invalid {
+            path: carrier.path.clone(),
+            detail: error.to_string(),
+        },
+    )
+}
+
+fn checked_inline_package(
+    resolver: &AuthorityResolver,
+) -> Result<Option<(jet_driver::Authority::CheckedFile, Package::InlinePackageBlock, String)>, PackageReadError>
+{
+    let candidates = [
+        PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
+        PathBuf::from("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
+    ];
+    for relative in candidates {
+        let file = match resolver.checked_file(&relative) {
+            Ok(file) => file,
+            Err(error) if error.is_missing() => continue,
+            Err(error) => {
+                return Err(authority_read_error(
+                    crate::Syntax::PACKAGE_FILE,
+                    "could not read the inline package carrier",
+                    error,
+                ))
+            }
+        };
+        record_checked_file(&file);
+        let source = file.text().map_err(|error| {
+            authority_read_error(
+                crate::Syntax::PACKAGE_FILE,
+                "could not decode the inline package carrier",
+                error,
+            )
+        })?;
+        let block = Package::extract_inline_package(&source).map_err(inline_carrier_error)?;
+        resolver
+            .revalidate_file(&file)
+            .map_err(|error| {
+                authority_read_error(
+                    crate::Syntax::PACKAGE_FILE,
+                    "the inline package carrier changed while it was being read",
+                    error,
+                )
+            })?;
+        if let Some(block) = block {
+            return Ok(Some((file, block, source)));
+        }
+    }
+    Ok(None)
+}
+
+fn inline_package_facts(
+    resolver: &AuthorityResolver,
+    carrier: &jet_driver::Authority::CheckedFile,
+    block: &Package::InlinePackageBlock,
+    source: &str,
+) -> Result<Package::PackageFacts, PackageReadError> {
+    let mut facts = Package::PackageFacts::parse_uncomposed(
+        block.body(source),
+        carrier.path.display().to_string(),
+    )
+    .map_err(inline_parse_error)?;
+    facts
+        .compose_configs(resolver.root())
+        .map_err(|error| inline_authority_error(carrier, "could not compose the inline package facts", error))?;
+    facts
+        .validate_guarantees()
+        .map_err(|error| inline_authority_error(carrier, "could not validate the inline package facts", error))?;
+    facts
+        .validate_defaults()
+        .map_err(|error| inline_authority_error(carrier, "could not validate the inline package defaults", error))?;
+    facts
+        .validate_members_in(resolver.root())
+        .map_err(|error| inline_authority_error(carrier, "could not validate the inline package members", error))?;
+    Ok(facts)
+}
+
+fn record_inline_package_inputs(
+    resolver: &AuthorityResolver,
+    carrier: &jet_driver::Authority::CheckedFile,
+    facts: &Package::PackageFacts,
+) -> Result<(), PackageReadError> {
+    record_checked_file(carrier);
+    for path in &facts.resolved_config_paths {
+        let file = resolver.checked_file(Path::new(path)).map_err(|cause| {
+            authority_read_error(
+                crate::Syntax::PACKAGE_FILE,
+                "could not revalidate an inline package configuration input",
+                cause,
+            )
+        })?;
+        record_checked_file(&file);
+    }
+    Ok(())
+}
+
 
 fn record_checked_file(file: &jet_driver::Authority::CheckedFile) {
     let path = file
@@ -238,200 +329,24 @@ fn record_checked_package_inputs(
     Ok(())
 }
 
-fn option_layer(layer: Option<crate::Syntax::RuntimeLayer>) -> Option<String> {
-    layer.map(|layer| layer.as_str().to_string())
-}
-
-fn dependency_views(
-    dependencies: &std::collections::BTreeMap<String, Package::DepSource>,
-) -> Vec<DependencyView> {
-    dependencies
-        .iter()
-        .map(|(name, source)| DependencyView {
-            name: name.clone(),
-            source: Package::dep_display_redacted(source),
-        })
-        .collect()
-}
-
-fn target_name(target: &Package::Target) -> &'static str {
-    match target {
-        Package::Target::Library => "library",
-        Package::Target::Executable => "executable",
-        Package::Target::Test => "test",
-        Package::Target::Example => "example",
-        Package::Target::Plugin { .. } => "plugin",
-    }
-}
-
-fn package_target_views(packages: &[Package::PackageEntry]) -> Vec<PackageTargetView> {
-    packages
-        .iter()
-        .map(|package| PackageTargetView {
-            name: package.name.clone(),
-            targets: package
-                .targets
-                .iter()
-                .map(|target| target_name(target).to_string())
-                .collect(),
-        })
-        .collect()
-}
-
-fn output_kind_name(kind: Package::PackageOutputKind) -> &'static str {
-    match kind {
-        Package::PackageOutputKind::Library => "library",
-        Package::PackageOutputKind::Executable => "executable",
-        Package::PackageOutputKind::Service => "service",
-        Package::PackageOutputKind::Check => "check",
-        Package::PackageOutputKind::Environment => "environment",
-        Package::PackageOutputKind::Image => "image",
-        Package::PackageOutputKind::Bundle => "bundle",
-        Package::PackageOutputKind::System => "system",
-        Package::PackageOutputKind::Fleet => "fleet",
-    }
-}
-
-fn output_views(
-    outputs: &std::collections::BTreeMap<String, Package::OutputFact>,
-) -> Vec<OutputView> {
-    outputs
-        .values()
-        .map(|output| OutputView {
-            name: output.name.clone(),
-            kind: output_kind_name(output.kind).to_string(),
-            entry: output.entry.clone(),
-        })
-        .collect()
-}
-
-fn build_profile_views(profiles: &[Package::BuildProfileDef]) -> Vec<BuildProfileView> {
-    profiles
-        .iter()
-        .map(|profile| BuildProfileView {
-            name: profile.name.clone(),
-            optimize: profile.optimize.as_str().to_string(),
-            debug_info: profile.debug_info,
-            small: profile.small,
-            panic: profile.panic.map(|panic| match panic {
-                Package::BuildPanic::Unwind => "unwind".to_string(),
-                Package::BuildPanic::Abort => "abort".to_string(),
-            }),
-        })
-        .collect()
-}
-
-fn manifest_view_from_facts(facts: &Package::PackageFacts) -> ManifestView {
-    ManifestView {
-        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
-        file: crate::Syntax::PACKAGE_FILE.to_string(),
-        jet: facts.jet.clone(),
-        edition: facts.edition.clone(),
-        description: facts.description.clone(),
-        license: facts.license.clone(),
-        repository: facts.repository.clone(),
-        layer: option_layer(facts.layer),
-        target: facts.target.clone(),
-        dependencies: dependency_views(&facts.deps),
-        packages: package_target_views(&facts.packages),
-        outputs: output_views(&facts.outputs),
-        build_profiles: build_profile_views(&facts.build_profiles),
-    }
-}
-
-fn package_view_from_facts(facts: &Package::PackageFacts) -> PackageView {
-    PackageView {
-        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
-        file: crate::Syntax::PACKAGE_FILE.to_string(),
-        jet: facts.jet.clone(),
-        edition: facts.edition.clone(),
-        description: facts.description.clone(),
-        license: facts.license.clone(),
-        repository: facts.repository.clone(),
-        layer: option_layer(facts.layer),
-        target: facts.target.clone(),
-        dependencies: dependency_views(&facts.deps),
-        packages: package_target_views(&facts.packages),
-        outputs: output_views(&facts.outputs),
-        build_profiles: build_profile_views(&facts.build_profiles),
-    }
-}
-
-fn lock_source_kind(source: &Lock::LockSource) -> &'static str {
-    match source {
-        Lock::LockSource::Root => "root",
-        Lock::LockSource::Path(_) => "path",
-        Lock::LockSource::Git { .. } => "git",
-        Lock::LockSource::Nix { .. } => "nix",
-        Lock::LockSource::Cran { .. } => "cran",
-        Lock::LockSource::LuaRocks { .. } => "lua_rocks",
-        Lock::LockSource::Registry { .. } => "registry",
-        Lock::LockSource::Foreign { .. } => "foreign",
-    }
-}
-
-fn lock_source_reference(source: &Lock::LockSource) -> Option<String> {
-    match source {
-        Lock::LockSource::Root | Lock::LockSource::Path(_) => None,
-        Lock::LockSource::Git { selector, .. } => Some(selector.clone()),
-        Lock::LockSource::Nix { reference, .. }
-        | Lock::LockSource::Cran { reference, .. }
-        | Lock::LockSource::LuaRocks { reference, .. }
-        | Lock::LockSource::Registry { reference, .. }
-        | Lock::LockSource::Foreign { reference, .. } => Some(reference.clone()),
-    }
-}
-
-fn lock_view_from_lock(lock: &Lock::LockFile) -> LockView {
-    LockView {
-        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
-        file: crate::Syntax::UNIFIED_LOCK_FILE.to_string(),
-        version: lock.version,
-        root_dependencies: lock.root_dependencies.clone(),
-        packages: lock
-            .packages
-            .iter()
-            .map(|package| LockedPackageView {
-                name: package.name.clone(),
-                version: package.version.clone(),
-                source_kind: lock_source_kind(&package.source).to_string(),
-                source: lock_source_reference(&package.source),
-                revision: package.locked.as_ref().map(|revision| revision.rev.clone()),
-                fingerprint: package.fingerprint.clone(),
-                content_hash: package.content_hash.clone(),
-                dependencies: package.dependencies.clone(),
-                layer: option_layer(package.layer),
-                inferred_layer: option_layer(package.inferred_layer),
-            })
-            .collect(),
-    }
-}
 
 fn profile_view(profile: &jet_env_model::ModuleEval::PackageProfileSpec) -> ProfileView {
-    ProfileView {
-        name: profile.name.clone(),
-        extends: profile.extends.clone(),
-        packages: profile.packages.clone(),
-        collisions: profile
+    ProfileView::from_parts(
+        profile.name.clone(),
+        profile.extends.clone(),
+        profile.packages.clone(),
+        profile
             .collisions
             .iter()
-            .map(|(key, value)| KeyValueView {
-                key: key.clone(),
-                value: value.clone(),
-            })
-            .collect(),
-        sources: profile.sources.clone(),
-    }
+            .map(|(key, value)| (key.clone(), value.clone())),
+        profile.sources.clone(),
+    )
 }
 
 fn profile_set_view(
     profiles: &jet_env_model::ModuleEval::PackageProfileSet,
 ) -> ProfileSetView {
-    ProfileSetView {
-        schema_version: PACKAGE_MODEL_SCHEMA_VERSION,
-        file: crate::Syntax::ENV_FILE.to_string(),
-        profiles: profiles.profiles.values().map(profile_view).collect(),
-    }
+    ProfileSetView::from_profiles(profiles.profiles.values().map(profile_view))
 }
 
 pub fn read_manifest(root: &Path) -> Result<ManifestView, PackageReadError> {
@@ -442,17 +357,32 @@ pub fn read_manifest(root: &Path) -> Result<ManifestView, PackageReadError> {
             cause,
         )
     })?;
-    let manifest = resolver
-        .checked_manifest(Path::new("."))
-        .map_err(|cause| {
-            authority_read_error(
-                crate::Syntax::PACKAGE_FILE,
-                "could not read the package manifest",
-                cause,
+    match resolver.checked_manifest(Path::new(".")) {
+        Ok(manifest) => {
+            record_checked_file(&manifest.file);
+            Ok(PackageModel::manifest_view_from_facts(&manifest.facts))
+        }
+        Err(cause) if cause.is_missing() => {
+            let Some((carrier, block, source)) = checked_inline_package(&resolver)? else {
+                return Err(package_read_error(
+                    crate::Syntax::PACKAGE_FILE,
+                    "could not read the package manifest",
+                    "no package manifest or inline Package carrier was found",
+                ));
+            };
+            let facts = Package::PackageFacts::parse_uncomposed(
+                block.body(&source),
+                carrier.path.display().to_string(),
             )
-        })?;
-    record_checked_file(&manifest.file);
-    Ok(manifest_view_from_facts(&manifest.facts))
+            .map_err(inline_parse_error)?;
+            Ok(PackageModel::manifest_view_from_facts(&facts))
+        }
+        Err(cause) => Err(authority_read_error(
+            crate::Syntax::PACKAGE_FILE,
+            "could not read the package manifest",
+            cause,
+        )),
+    }
 }
 
 pub fn read_package(root: &Path) -> Result<PackageView, PackageReadError> {
@@ -463,15 +393,29 @@ pub fn read_package(root: &Path) -> Result<PackageView, PackageReadError> {
             cause,
         )
     })?;
-    let package = resolver.checked_root_package().map_err(|cause| {
-        authority_read_error(
+    match resolver.checked_root_package() {
+        Ok(package) => {
+            record_checked_package_inputs(&resolver, &package)?;
+            Ok(PackageModel::package_view_from_facts(&package.facts))
+        }
+        Err(cause) if cause.is_missing() => {
+            let Some((carrier, block, source)) = checked_inline_package(&resolver)? else {
+                return Err(package_read_error(
+                    crate::Syntax::PACKAGE_FILE,
+                    "could not compose the package facts",
+                    "no package manifest or inline Package carrier was found",
+                ));
+            };
+            let facts = inline_package_facts(&resolver, &carrier, &block, &source)?;
+            record_inline_package_inputs(&resolver, &carrier, &facts)?;
+            Ok(PackageModel::package_view_from_facts(&facts))
+        }
+        Err(cause) => Err(authority_read_error(
             crate::Syntax::PACKAGE_FILE,
             "could not compose the package facts",
             cause,
-        )
-    })?;
-    record_checked_package_inputs(&resolver, &package)?;
-    Ok(package_view_from_facts(&package.facts))
+        )),
+    }
 }
 
 pub fn read_lock(root: &Path) -> Result<LockView, PackageReadError> {
@@ -515,7 +459,7 @@ pub fn read_lock(root: &Path) -> Result<LockView, PackageReadError> {
                 cause,
             )
         })?;
-    Ok(lock_view_from_lock(&lock))
+    Ok(PackageModel::lock_view_from_lock(&lock))
 }
 
 struct PackageSourceLoader {
@@ -532,9 +476,9 @@ impl SourceLoader for PackageSourceLoader {
         let file = self
             .resolver
             .checked_file(relative)
-            .map_err(|cause| cause.diagnostic())?;
+            .map_err(|cause| authority_diagnostic(&cause))?;
         record_checked_file(&file);
-        let text = file.text().map_err(|cause| cause.diagnostic())?;
+        let text = file.text().map_err(|cause| authority_diagnostic(&cause))?;
         self.checked_inputs.push(file);
         Ok(text)
     }
@@ -546,7 +490,7 @@ impl SourceLoader for PackageSourceLoader {
         let files = self
             .resolver
             .discover_files(relative, Some(crate::Syntax::FILE_EXT))
-            .map_err(|cause| cause.diagnostic())?;
+            .map_err(|cause| authority_diagnostic(&cause))?;
         for file in &files {
             record_checked_file(file);
         }
@@ -556,20 +500,36 @@ impl SourceLoader for PackageSourceLoader {
 
     fn package_facts(&mut self) -> Result<Option<Package::PackageFacts>, Diagnostic> {
         self.last_file = crate::Syntax::PACKAGE_FILE.to_string();
-        let package = self
-            .resolver
-            .checked_root_package()
-            .map_err(|cause| cause.diagnostic())?;
-        record_checked_package_inputs(&self.resolver, &package).map_err(|error| {
-            Diagnostic::error(
-                error.code,
-                error.message,
-                error.cause,
-                "restore the package inputs and try again".to_string(),
-                None,
-            )
-        })?;
-        Ok(Some(package.facts))
+        match self.resolver.checked_root_package() {
+            Ok(package) => {
+                record_checked_package_inputs(&self.resolver, &package).map_err(|error| {
+                    Diagnostic::error(
+                        error.code,
+                        error.message,
+                        error.cause,
+                        "restore the package inputs and try again".to_string(),
+                        None,
+                    )
+                })?;
+                Ok(Some(package.facts))
+            }
+            Err(error) if error.is_missing() => {
+                let facts = crate::Loader::package_facts_for_root(self.resolver.root())
+                    .map_err(|mut diagnostics| {
+                        diagnostics.pop().unwrap_or_else(|| {
+                            Diagnostic::error(
+                                "E1206",
+                                "package context is unavailable".to_string(),
+                                "the inline package facts could not be loaded".to_string(),
+                                "restore the package source and try again".to_string(),
+                                None,
+                            )
+                        })
+                    })?;
+                Ok(facts)
+            }
+            Err(error) => Err(error.diagnostic()),
+        }
     }
 }
 
@@ -1984,7 +1944,10 @@ pub struct CheckedFile {
 }
 
 pub fn lex_source(src: &str) -> LexedSource {
-    let (tokens, diagnostics) = Lexer::lex(src);
+    let (tokens, diagnostics) = match Package::mask_inline_package_source(src) {
+        Ok((source, _)) => Lexer::lex(&source),
+        Err(error) => (Vec::new(), vec![error.diagnostic()]),
+    };
     LexedSource {
         api_version: API_VERSION,
         schema_version: SCHEMA_VERSION,
@@ -1993,7 +1956,6 @@ pub fn lex_source(src: &str) -> LexedSource {
         diagnostics: diagnostics.iter().map(diagnostic_view).collect(),
     }
 }
-
 pub fn parse_source(src: &str) -> SyntaxTree {
     let lexed = lex_source(src);
     if !lexed.diagnostics.is_empty() {
@@ -2006,8 +1968,12 @@ pub fn parse_source(src: &str) -> SyntaxTree {
         };
     }
 
-    let (tokens, _) = Lexer::lex(src);
-    match Parser::parse_for_check_with_source(&tokens, src) {
+    let source_for_parse = Package::mask_inline_package_source(src)
+        .map(|(source, _)| source)
+        .unwrap_or_else(|_| src.to_string());
+    let (tokens, _) = Lexer::lex(&source_for_parse);
+
+    match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
         Ok((program, parse_teaching)) => SyntaxTree {
             api_version: API_VERSION,
             schema_version: SCHEMA_VERSION,

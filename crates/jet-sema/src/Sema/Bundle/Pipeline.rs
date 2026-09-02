@@ -76,6 +76,71 @@ fn register_test_item(
         state.tests.insert(name.clone(), test.name_span);
     }
 }
+/// Register one source fact declaration in the bundle-local fact ledger.
+///
+/// Every declaration maps to one effective fact identity (`@name` when it is
+/// a plain string, otherwise its source name); duplicates remain diagnostics.
+fn fact_identity(declaration: &crate::AST::FactDecl) -> String {
+    declaration
+        .params
+        .iter()
+        .find(|parameter| parameter.name == "@name")
+        .and_then(|parameter| parameter.value.as_deref())
+        .and_then(|value| match value {
+            crate::AST::Expr::Str(parts, _) => {
+                let mut identity = String::new();
+                for part in parts {
+                    match part {
+                        crate::AST::StrPart::Lit(value) => identity.push_str(value),
+                        crate::AST::StrPart::Interp(..) => return None,
+                    }
+                }
+                Some(identity)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| declaration.name.clone())
+}
+
+fn register_fact_declaration(
+    declaration: &crate::AST::FactDecl,
+    module_idx: usize,
+    declarations: &mut HashMap<String, (usize, Span, String)>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let identity = fact_identity(declaration);
+    if let Some((first_module, first_span, first_source)) = declarations.get(&identity) {
+        diags.push(
+            Diagnostic::error(
+                "E0105",
+                format!(
+                    "fact `{identity}` is declared twice (spans {}..{} and {}..{})",
+                    first_span.start,
+                    first_span.end,
+                    declaration.name_span.start,
+                    declaration.name_span.end,
+                ),
+                "one fact name must resolve to one declaration in the loaded bundle"
+                    .to_string(),
+                "rename or remove one of the fact declarations".to_string(),
+                Some(declaration.name_span),
+            )
+            .with_detail(format!(
+                "first declaration `{first_source}`: module {first_module}, span {}..{}\nsecond declaration `{}`: module {module_idx}, span {}..{}",
+                first_span.start,
+                first_span.end,
+                declaration.name,
+                declaration.name_span.start,
+                declaration.name_span.end,
+            )),
+        );
+        return;
+    }
+    declarations.insert(
+        identity,
+        (module_idx, declaration.name_span, declaration.name.clone()),
+    );
+}
 
 fn register_generated_union_enums(
     items: &[Item],
@@ -333,7 +398,7 @@ fn is_c_import_after_validation(import: &crate::AST::ImportDecl) -> bool {
 pub(super) fn check_bundle_opts_for_output(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
@@ -341,7 +406,7 @@ pub(super) fn check_bundle_opts_for_output(
     check_bundle_opts_for_output_with_context(
         bundle,
         mode,
-        freestanding,
+        no_os,
         gates,
         explicit_output,
         incremental,
@@ -374,7 +439,7 @@ pub(super) fn check_bundle_opts_for_output(
 pub(super) fn check_bundle_opts_for_output_with_context(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
@@ -384,7 +449,7 @@ pub(super) fn check_bundle_opts_for_output_with_context(
         return check_bundle_opts_for_output_on_stack(
             bundle,
             mode,
-            freestanding,
+            no_os,
             gates,
             explicit_output,
             incremental,
@@ -401,7 +466,7 @@ pub(super) fn check_bundle_opts_for_output_with_context(
                 check_bundle_opts_for_output_on_stack(
                     bundle,
                     mode,
-                    freestanding,
+                    no_os,
                     gates,
                     explicit_output,
                     incremental,
@@ -415,7 +480,7 @@ pub(super) fn check_bundle_opts_for_output_with_context(
 fn check_bundle_opts_for_output_on_stack(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
@@ -426,7 +491,7 @@ fn check_bundle_opts_for_output_on_stack(
         check_bundle_opts_for_output_inner(
             bundle,
             mode,
-            freestanding,
+            no_os,
             gates,
             explicit_output,
             incremental,
@@ -438,7 +503,7 @@ fn check_bundle_opts_for_output_on_stack(
 fn check_bundle_opts_for_output_inner(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
     incremental: Option<&mut IncrementalSemaCache>,
@@ -738,7 +803,7 @@ fn check_bundle_opts_for_output_inner(
     // source spans before any body can run.
     let mut marker_declarations = Vec::new();
     let mut marker_declaration_spans = HashMap::<String, (usize, Span)>::new();
-    let mut fact_declaration_spans = HashMap::<String, (usize, Span)>::new();
+    let mut fact_declaration_spans = HashMap::<String, (usize, Span, String)>::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
             match item {
@@ -772,34 +837,12 @@ fn check_bundle_opts_for_output_inner(
                         marker_declarations.push(declaration.clone());
                     }
                 }
-                Item::FactDecl(declaration) => {
-                    if let Some((first_module, first_span)) = fact_declaration_spans.insert(
-                        declaration.name.clone(),
-                        (module_idx, declaration.name_span),
-                    ) {
-                        diags.push(Diagnostic::error(
-                            "E0105",
-                            format!(
-                                "fact `{}` is declared twice (spans {}..{} and {}..{})",
-                                declaration.name,
-                                first_span.start,
-                                first_span.end,
-                                declaration.name_span.start,
-                                declaration.name_span.end,
-                            ),
-                            "one fact name must resolve to one declaration in the loaded bundle"
-                                .to_string(),
-                            "rename or remove one of the fact declarations".to_string(),
-                            Some(declaration.name_span),
-                        ).with_detail(format!(
-                            "first declaration: module {first_module}, span {}..{}\nsecond declaration: module {module_idx}, span {}..{}",
-                            first_span.start,
-                            first_span.end,
-                            declaration.name_span.start,
-                            declaration.name_span.end,
-                        )));
-                    }
-                }
+                Item::FactDecl(declaration) => register_fact_declaration(
+                    declaration,
+                    module_idx,
+                    &mut fact_declaration_spans,
+                    &mut diags,
+                ),
                 _ => {}
             }
         }
@@ -843,6 +886,8 @@ fn check_bundle_opts_for_output_inner(
             &mut comptime_types,
             &base,
             &mut diags,
+            idx,
+            &mut name_ledger,
             &ct_core_imports[idx],
             &ct_core_item_imports[idx],
             &bundle.build_facts,
@@ -1666,6 +1711,7 @@ fn check_bundle_opts_for_output_inner(
     ) {
         check_guest_export_surface(&module.items, &state.registry, &mut diags);
     }
+    check_guest_symbol_collisions(bundle, &mut diags);
     // D-BOUND-UNDO1=A: an inverse belongs to the module that owns the foreign
     // binding. CFFI re-homes C declarations into a shared synthetic module, so
     // use the import links to recover that owner rather than consulting a
@@ -2336,7 +2382,7 @@ fn check_bundle_opts_for_output_inner(
         bundle,
         &states,
         mode,
-        freestanding,
+        no_os,
         gates,
         explicit_output,
         incremental,

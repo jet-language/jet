@@ -8,6 +8,13 @@
 //!      stay E3403.
 //!   2. `#Nondeterministic("reason") { … }` — expert escape suspending
 //!      determinism rejections (E3401/E3403) for its body.
+//!
+//! #2515 HashMap census for the native build path: `native_effect_projection`
+//! orders `summaries.values()` before authority rows reach receipts or
+//! diagnostics; `dependency_interface_fingerprint` sorts its `dep_roots`
+//! results before key hashing; Loader boundary policies and package dependency
+//! diagnostics are sorted before they reach emitted diagnostics. RuntimeCache
+//! identity and Driver symbol maps are lookup-only and have no output iteration.
 
 mod common;
 

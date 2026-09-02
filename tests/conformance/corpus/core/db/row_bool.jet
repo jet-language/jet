@@ -5,13 +5,16 @@ fn run() {
     connection :: db.open_memory()
     policy :: db.policy("items", "true") ?? panic("policy")
     scope :: connection.with_policy(policy, "owner")
-    migration :: db.migrate(scope, "items-v1", ["CREATE TABLE items (i INTEGER, f REAL, t TEXT, b BOOLEAN)"])
+    migration :: db.migrate(scope, "items-v1", [SQL{"CREATE TABLE items (i INTEGER, f REAL, t TEXT, b BOOLEAN)"}])
         ?? panic("migrate")
+    i :: 7
+    f :: 1.5
+    t :: "jet"
+    b :: true
     inserted :: scope.execute(
-        "INSERT INTO items (i, f, t, b) VALUES (?, ?, ?, ?)",
-        [DBValue.Int(7), DBValue.Float(1.5), DBValue.Text("jet"), DBValue.Bool(true)]
+        SQL{"INSERT INTO items (i, f, t, b) VALUES ({i}, {f}, {t}, {b})"}
     ) ?? panic("insert")
     print("setup={migration}:{inserted}")
-    row :: scope.query_one("SELECT b FROM items", []) ?? panic("query")
+    row :: scope.query_one(SQL{"SELECT b FROM items"}) ?? panic("query")
     print(db.row_bool(row, "b") ?? false)
 }

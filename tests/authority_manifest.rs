@@ -100,6 +100,56 @@ fn run() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn authority_receipt_rejects_symlinked_ancestor_without_redirecting_write() {
+    use std::os::unix::fs::symlink;
+
+    let root = authority_project("receipt-symlink-ancestor");
+    let outside = root.with_file_name(format!(
+        "jet_authority_manifest_receipt_target_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&outside);
+    fs::create_dir_all(&outside).expect("receipt target directory");
+    let target = outside.join("authority.jsonl");
+    fs::write(&target, "must survive\n").expect("receipt target");
+
+    let package = r#"
+name: "authority_receipts"
+version: "0.1.0"
+authority: { holds: { allow: [Exec, IO] } }
+"#;
+    let program = r#"
+use core.process as process
+
+fn run() {
+    #FX(authority: Exec, IO) {
+        result :: process.run(["echo", "receipt"], authority)
+        print("done")
+    }
+}
+"#;
+    fs::write(root.join("package.jet"), package).expect("receipt package");
+    fs::write(root.join("run.jet"), program).expect("receipt program");
+    fs::create_dir_all(root.join(".jet")).expect("receipt metadata directory");
+    symlink(&outside, root.join(".jet/receipts")).expect("symlink receipt directory");
+
+    let output = run_authority_cli(&root, &["run", "run.jet"]);
+    assert!(
+        !output.status.success(),
+        "run accepted a symlinked receipt directory:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&target).expect("receipt target still exists"),
+        "must survive\n"
+    );
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(outside);
+}
+
 #[test]
 fn malformed_authority_fields_share_e1221() {
     let cases = [

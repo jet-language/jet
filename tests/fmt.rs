@@ -4061,7 +4061,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_per_function_c_abi() {
-    let src = "use c.demo as c\n#Extern module c.demo {\n    #ABI(system) fn portable(x: I32) I32 = \"portable\"\n    #ABI(sysv64) fn native(x: I32) I32 = \"native\"\n}\nfn run() {}\n";
+    let src = "use c.demo as c\n#Import module c.demo {\n    #ABI(system) fn portable(x: I32) I32 = \"portable\"\n    #ABI(sysv64) fn native(x: I32) I32 = \"native\"\n}\nfn run() {}\n";
     let once = jet::format_source(src).expect("#ABI C module should format");
     assert!(
         once.contains("#ABI(system)") && once.contains("#ABI(sysv64)"),

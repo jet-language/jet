@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
+  RED_TEAM_EXECUTION_GATE,
   RED_TEAM_LANE_COUNT,
   RED_TEAM_MAX_ACTIVE,
   RED_TEAM_WAVE_COUNT,
+  hardeningDedupKey,
   assimilateFindings,
   createSessionManifest,
   makeContextPackets,
@@ -17,9 +19,15 @@ import {
   sessionManifestDigest,
   signReceipt,
   validateContextPacket,
-  validateSessionManifest,
+  validateLaneReceipt,
   verifySignedReceipt,
+  validateSessionManifest,
 } from "../scripts/agent/hardening-red-team.mjs";
+import {
+  RECEIPT_DIR_ENV,
+  canonicalJson,
+  runReceiptRunner,
+} from "../scripts/agent/hardening-red-team-receipt-runner.mjs";
 import { bundleIdentity, makeResultBundle } from "../scripts/agent/hardening-oracle-layer.mjs";
 import { prepareHardening } from "../plugins/tower/app/hardening.mjs";
 
@@ -62,11 +70,14 @@ function manifest() {
 
 function targetOf(value) {
   return {
+    root: value.target.root,
     commit: value.target.commit,
+    binary_path: value.target.binary_path,
     binary_sha256: value.target.binary_sha256,
     platform: value.target.platform,
     arch: value.target.arch,
     registry_snapshot: value.registry_snapshot,
+    public_surface_snapshot: value.public_surface_snapshot,
   };
 }
 
@@ -77,6 +88,34 @@ function laneReports(value, overrides = {}) {
     agent_id: `luna-agent-${index + 1}`,
     ...overrides,
   }));
+}
+const RECEIPT_RUNNER = resolve("scripts/agent/hardening-red-team-receipt-runner.mjs");
+
+function receiptScratch() {
+  const parent = join(homedir(), ".cache/jet-test-scratch");
+  mkdirSync(parent, { recursive: true });
+  return mkdtempSync(join(parent, "red-team-receipt-runner-"));
+}
+
+function invokeReceiptRunner(packet, receiptText, {
+  directory = receiptScratch(),
+  setDirectory = true,
+} = {}) {
+  if (receiptText !== undefined) {
+    writeFileSync(join(directory, `${packet.lane_id}.json`), receiptText);
+  }
+  const env = { ...process.env };
+  if (setDirectory) env[RECEIPT_DIR_ENV] = directory;
+  else delete env[RECEIPT_DIR_ENV];
+  return {
+    directory,
+    result: spawnSync(process.execPath, [RECEIPT_RUNNER], {
+      cwd: ROOT,
+      env,
+      input: JSON.stringify(packet),
+      encoding: "utf8",
+    }),
+  };
 }
 
 function finding(value, severity = "P0") {
@@ -161,6 +200,124 @@ test("manifest freezes the target and emits eight independent hidden-card packet
   assert.ok(packets.every((packet) => validateContextPacket(packet, value)));
   assert.notEqual(packets[0], packets[1]);
   assert.throws(() => validateContextPacket({ ...packets[0], known_findings: [] }, value), /forbidden known_findings/);
+  assert.throws(
+    () => validateSessionManifest({ ...value, lane_briefs: [...value.lane_briefs].reverse() }),
+    /ratified attack slice or wave order/,
+  );
+});
+
+test("pre-produced lane adapter binds packet identities and emits canonical JSON", () => {
+  const value = manifest();
+  const packet = makeContextPackets(value)[0];
+  const receipt = makeLaneReceipt(value, {
+    lane_id: packet.lane_id,
+    packet_digest: packet.context_digest,
+    context_id: "fresh-adapter-context",
+    agent_id: "fresh-adapter-agent",
+  });
+  const { directory, result } = invokeReceiptRunner(packet, JSON.stringify(receipt));
+  try {
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout, `${canonicalJson(receipt)}\n`);
+    assert.deepEqual(runReceiptRunner(JSON.stringify(packet), { receipt_dir: directory }), receipt);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("pre-produced lane adapter refuses absent, unsafe, stale, and mismatched receipts", () => {
+  const value = manifest();
+  const packet = makeContextPackets(value)[0];
+  const valid = makeLaneReceipt(value, {
+    lane_id: packet.lane_id,
+    packet_digest: packet.context_digest,
+    context_id: "fresh-adapter-context",
+    agent_id: "fresh-adapter-agent",
+  });
+  const clone = (item) => JSON.parse(JSON.stringify(item));
+  const cases = [
+    ["missing explicit receipt directory", valid, { setDirectory: false }, /explicit receipt directory/],
+    ["missing receipt file", undefined, {}, /missing pre-produced lane receipt/],
+    ["malformed JSON", "{", {}, /not valid JSON|unterminated|invalid/],
+    ["wrong schema", { ...valid, schema: "wrong" }, {}, /lane receipt schema/],
+    ["missing field", (() => { const item = clone(valid); delete item.counts; return item; })(), {}, /missing counts/],
+    ["extra field", { ...valid, extra: true }, {}, /unexpected field/],
+    ["nonterminal status", { ...valid, status: "running" }, {}, /status/],
+    ["early lane", { ...valid, complete: false }, {}, /stopped before completing/],
+    ["stale lane", { ...valid, semantic_change: true }, {}, /stale/],
+    ["session mismatch", { ...valid, session_id: "other-session" }, {}, /another session/],
+    ["lane mismatch", { ...valid, lane_id: "lane-2" }, {}, /lane_id does not match packet/],
+    ["packet mismatch", { ...valid, packet_digest: `sha256:${"b".repeat(64)}` }, {}, /independent context packet/],
+    ["target mismatch", { ...valid, target: { ...valid.target, commit: "c".repeat(40) } }, {}, /target does not match packet/],
+    ["surface mismatch", {
+      ...valid,
+      target: {
+        ...valid.target,
+        public_surface_snapshot: { ...valid.target.public_surface_snapshot, sha256: `sha256:${"c".repeat(64)}` },
+      },
+    }, {}, /public surface does not match packet/],
+    ["duplicate JSON field", JSON.stringify(valid).replace("{", '{"lane_id":"lane-2",'), {}, /duplicate object field lane_id/],
+    ["invalid packet lane path", undefined, { packet: { ...packet, lane_id: "../lane-1" } }, /context packet lane_id is invalid/],
+  ];
+  for (const [label, input, options, expected] of cases) {
+    const directory = options.directory || receiptScratch();
+    try {
+      const packetInput = options.packet || packet;
+      const { result } = invokeReceiptRunner(
+        packetInput,
+        input === undefined ? undefined : typeof input === "string" ? input : JSON.stringify(input),
+        { directory, setDirectory: options.setDirectory ?? true },
+      );
+      assert.notEqual(result.status, 0, `${label} unexpectedly passed`);
+      assert.equal(result.stdout, "", `${label} wrote protocol output`);
+      assert.match(result.stderr, expected, label);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  const extraDirectory = receiptScratch();
+  try {
+    writeFileSync(join(extraDirectory, `${packet.lane_id}.json`), JSON.stringify(valid));
+    writeFileSync(join(extraDirectory, "extra.json"), "{}");
+    const { result } = invokeReceiptRunner(packet, undefined, { directory: extraDirectory });
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /unexpected receipt file/);
+  } finally {
+    rmSync(extraDirectory, { recursive: true, force: true });
+  }
+
+  const symlinkDirectory = receiptScratch();
+  const symlinkTarget = receiptScratch();
+  try {
+    writeFileSync(join(symlinkTarget, `${packet.lane_id}.json`), JSON.stringify(valid));
+    const symlinkPath = join(symlinkDirectory, `${packet.lane_id}.json`);
+    symlinkSync(join(symlinkTarget, `${packet.lane_id}.json`), symlinkPath);
+    const { result } = invokeReceiptRunner(packet, undefined, { directory: symlinkDirectory });
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /symlink/);
+  } finally {
+    rmSync(symlinkDirectory, { recursive: true, force: true });
+    rmSync(symlinkTarget, { recursive: true, force: true });
+  }
+
+  const linkedDirectoryParent = receiptScratch();
+  const linkedDirectoryTarget = receiptScratch();
+  try {
+    writeFileSync(join(linkedDirectoryTarget, `${packet.lane_id}.json`), JSON.stringify(valid));
+    const linkedDirectory = join(linkedDirectoryParent, "receipts");
+    symlinkSync(linkedDirectoryTarget, linkedDirectory, "dir");
+    const { result } = invokeReceiptRunner(packet, undefined, { directory: linkedDirectory });
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /symlink/);
+  } finally {
+    rmSync(linkedDirectoryParent, { recursive: true, force: true });
+    rmSync(linkedDirectoryTarget, { recursive: true, force: true });
+  }
 });
 
 test("bounded runner executes four waves of two and signs a complete verdict", async () => {
@@ -184,18 +341,71 @@ test("bounded runner executes four waves of two and signs a complete verdict", a
         agent_id: `agent-${packet.lane_id}`,
       });
     },
-    cleanup: async () => ({ active_agents: 0, active_processes: 0, scratch_paths: [], alternate_targets: [], complete: true }),
-    signer_id: "independent-signer",
+    execution_gate: RED_TEAM_EXECUTION_GATE,
     reviewer_id: "independent-reviewer",
   });
   assert.equal(receipt.status, "PASS");
   assert.equal(maximum, RED_TEAM_MAX_ACTIVE);
   assert.deepEqual(started, ["lane-1", "lane-2", "lane-3", "lane-4", "lane-5", "lane-6", "lane-7", "lane-8"]);
   assert.equal(receipt.lanes.length, RED_TEAM_LANE_COUNT);
+
   assert.equal(receipt.max_active_lanes, RED_TEAM_MAX_ACTIVE);
   assert.equal(verifySignedReceipt(receipt), true);
   assert.equal(verifySignedReceipt(receipt, value), true);
 });
+test("pre-recorded lanes without observed waves cannot pass", async () => {
+  const value = manifest();
+  const outOfOrder = await runRedTeamSession({
+    manifest: value,
+    lane_receipts: laneReports(value).reverse(),
+    current_target: targetOf(value),
+    execution_gate: RED_TEAM_EXECUTION_GATE,
+    signer_id: "signer-order",
+    reviewer_id: "reviewer-order",
+  });
+  assert.equal(outOfOrder.status, "FAILED");
+  assert.match(outOfOrder.failure_reasons.join(";"), /frozen wave order/);
+  assert.match(outOfOrder.failure_reasons.join(";"), /observed active lane/);
+  assert.equal(outOfOrder.max_active_lanes, 0);
+  assert.equal(verifySignedReceipt(outOfOrder), true);
+  assert.equal(verifySignedReceipt(outOfOrder, value), true);
+});
+test("manifest-bound verification rejects re-signed packet, target, and slice drift", async () => {
+  const value = manifest();
+  const receipt = await runRedTeamSession({
+    manifest: value,
+    current_target: targetOf(value),
+    lane_runner: async (packet) => makeLaneReceipt(value, {
+      lane_id: packet.lane_id,
+      context_id: `context-${packet.lane_id}`,
+      agent_id: `agent-${packet.lane_id}`,
+    }),
+    execution_gate: RED_TEAM_EXECUTION_GATE,
+    reviewer_id: "independent-reviewer-bound",
+  });
+  assert.equal(receipt.status, "PASS");
+  const resign = (lanePatch) => signReceipt({
+    ...receipt,
+    lanes: receipt.lanes.map((lane, index) => index === 0 ? { ...lane, ...lanePatch } : lane),
+  }, { signer_id: "tamper-signer", reviewer_id: "tamper-reviewer" });
+  assert.throws(
+    () => verifySignedReceipt(resign({ packet_digest: `sha256:${"c".repeat(64)}` }), value),
+    /independent context packet/,
+  );
+  assert.throws(
+    () => verifySignedReceipt(resign({ target: { ...receipt.lanes[0].target, root: "/tmp/other-root" } }), value),
+    /frozen binary/,
+  );
+  assert.throws(
+    () => verifySignedReceipt(resign({ target: { ...receipt.lanes[0].target, root: "/tmp/other-root" } })),
+    /different frozen binary/,
+  );
+  assert.throws(
+    () => verifySignedReceipt(resign({ attack_surface: "not-the-frozen-slice" }), value),
+    /frozen attack slice/,
+  );
+});
+
 
 test("missing or early lanes fail, and a replayed P0 cannot pass", async () => {
   const value = manifest();
@@ -283,6 +493,67 @@ test("finding assimilation uses Tower CLI and #2338 root-seam dedup without forc
   }
 });
 
+test("lane findings deduplicate through the canonical #2338 hardening key", async () => {
+  const value = manifest();
+  const first = finding(value, "P1");
+  const second = finding(value, "P1");
+  second.finding_id = "finding-test-2";
+  second.bundle = { ...second.bundle, seed: "seed-test-2" };
+  second.bundle_identity = bundleIdentity(second.bundle);
+  assert.notEqual(first.bundle_identity, second.bundle_identity);
+  assert.equal(hardeningDedupKey(first), hardeningDedupKey(second));
+  const reports = laneReports(value);
+  reports[0] = makeLaneReceipt(value, {
+    lane_id: "lane-1",
+    context_id: "context-lane-1",
+    agent_id: "agent-lane-1",
+    minimized_reproducers: [{ id: "reproducer-test", source: first.bundle.source, value_consuming: true, observer: "print(value)" }],
+    unique_findings: [first],
+  });
+  reports[1] = makeLaneReceipt(value, {
+    lane_id: "lane-2",
+    context_id: "context-lane-2",
+    agent_id: "agent-lane-2",
+    minimized_reproducers: [{ id: "reproducer-test", source: second.bundle.source, value_consuming: true, observer: "print(value)" }],
+    unique_findings: [second],
+  });
+  const receipt = await runRedTeamSession({
+    manifest: value,
+    lane_runner: async (packet) => {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 1));
+      return reports.find((report) => report.lane_id === packet.lane_id);
+    },
+    current_target: targetOf(value),
+    replay_finding: async (item, frozen) => ({
+      confirmed: true,
+      target: targetOf(frozen),
+      bundle_identity: item.bundle_identity,
+    }),
+    assimilate: async (items) => items.map((item) => ({
+      status: "WRITTEN",
+      route: "#2338",
+      finding_id: item.finding_id,
+    })),
+    execution_gate: RED_TEAM_EXECUTION_GATE,
+    signer_id: "signer-canonical-dedup",
+    reviewer_id: "reviewer-canonical-dedup",
+  });
+  assert.equal(receipt.status, "PASS");
+  assert.equal(receipt.findings.length, 1);
+  assert.equal(receipt.findings[0].hardening_dedup_key, hardeningDedupKey(first));
+  assert.equal(receipt.finding_duplicates.length, 1);
+  assert.equal(receipt.finding_duplicates[0].hardening_dedup_key, hardeningDedupKey(first));
+  assert.equal(receipt.replayed_findings.length, 1);
+  assert.equal(receipt.assimilation.length, 1);
+  assert.throws(
+    () => verifySignedReceipt(signReceipt({ ...receipt, finding_duplicates: [] }, {
+      signer_id: "signer-dedup-tamper",
+      reviewer_id: "reviewer-dedup-tamper",
+    })),
+    /duplicate evidence is incomplete/,
+  );
+});
+
 test("signed verdict rejects self-review and tampering", () => {
   assert.throws(() => signReceipt({ status: "FAILED" }, { signer_id: "same", reviewer_id: "same" }), /distinct/);
   const receipt = signReceipt({ status: "FAILED", session_id: "s" }, { signer_id: "signer", reviewer_id: "reviewer" });
@@ -300,6 +571,10 @@ test("signed protocol PASS cannot omit lane evidence", () => {
     session: {
       commit: "b".repeat(40),
       binary_sha256: HASH,
+      binary_path: "target/debug/jet",
+      root: ".",
+      platform: process.platform,
+      arch: process.arch,
       registry_sha256: HASH,
       public_surface_sha256: HASH,
     },
@@ -388,4 +663,57 @@ test("silent-data classification cannot be demoted by a lane severity label", as
   });
   assert.equal(receipt.status, "FAILED");
   assert.equal(receipt.p0_count, 1);
+});
+test("manifest and lane receipts preserve the ratified resource and slice identity", () => {
+  const value = manifest();
+  for (const [key, expected] of [
+    ["cpu_quota_percent", 200],
+    ["memory_high_gib", 6],
+    ["memory_max_gib", 8],
+    ["memory_swap_max_gib", 2],
+    ["tasks_max", 64],
+    ["io_weight", 10],
+    ["nice", 10],
+    ["runtime_max_sec", 95 * 60],
+    ["min_free_gib", 16],
+    ["target_cap_gib", 80],
+    ["cache_cap_gib", 4],
+    ["interesting_cap_mib", 512],
+    ["log_cap_mib", 1],
+    ["incremental", 0],
+  ]) {
+    assert.equal(value.rig_config[key], expected);
+    assert.equal(value.resource_limits[key], expected);
+  }
+  const lane = makeLaneReceipt(value, { lane_id: "lane-1" });
+  assert.equal(lane.attack_surface, value.lane_briefs[0].attack_surface);
+  assert.equal(lane.brief, value.lane_briefs[0].brief);
+  assert.equal(lane.target.registry_snapshot.sha256, value.registry_snapshot.sha256);
+  assert.equal(lane.target.public_surface_snapshot.sha256, value.public_surface_snapshot.sha256);
+  assert.equal(validateLaneReceipt(lane, value).lane_id, "lane-1");
+  assert.throws(
+    () => validateLaneReceipt({ ...lane, attack_surface: "other-surface" }, value),
+    /frozen attack slice/,
+  );
+  assert.throws(
+    () => validateSessionManifest({
+      ...value,
+      resource_limits: { ...value.resource_limits, memory_max_gib: 7 },
+    }),
+    /resource_limits.memory_max_gib/,
+  );
+});
+
+test("an unauthorized library run cannot sign a passing verdict", async () => {
+  const value = manifest();
+  const receipt = await runRedTeamSession({
+    manifest: value,
+    lane_receipts: laneReports(value),
+    current_target: targetOf(value),
+    signer_id: "unauthorized-signer",
+    reviewer_id: "unauthorized-reviewer",
+  });
+  assert.equal(receipt.status, "FAILED");
+  assert.match(receipt.failure_reasons.join(";"), /owner authorization/);
+  assert.equal(verifySignedReceipt(receipt, value), true);
 });

@@ -67,6 +67,58 @@ fn build_web_fixture(stem: &str, src: &str, shown: &str) -> PathBuf {
     assert!(wasm_path.is_file(), "missing app.wasm for {stem}");
     dir
 }
+fn build_web_fixture_with_machine(
+    stem: &str,
+    src: &str,
+    shown: &str,
+    machine: &jet::TargetMachine::TargetMachine,
+) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("jet_web_{stem}_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("build")).unwrap();
+
+    let out = jet::compile_web_with_target_machine(shown, machine).unwrap_or_else(|error| match error {
+        jet::Driver::TargetMachineCompileError::Diagnostics(diags) => panic!(
+            "front end rejected selected web fixture:\n{}",
+            jet::render_diagnostics(shown, src, &diags)
+        ),
+        jet::Driver::TargetMachineCompileError::Machine(errors) => {
+            panic!("target machine rejected selected web fixture: {errors:?}")
+        }
+    });
+    let web = out
+        .web
+        .expect("selected target compile must produce web artifacts");
+    fs::write(dir.join("build/web.manifest.json"), &web.manifest_json).unwrap();
+    fs::write(dir.join("build/jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(dir.join("build/app.js"), &web.js_app).unwrap();
+    fs::write(dir.join("build/app_wasm.rs"), &web.wasm_rust).unwrap();
+
+    let wasm_path = dir.join("build/app.wasm");
+    let rustc = Command::new("rustc")
+        .current_dir(&dir)
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+            "build/app_wasm.rs",
+            "-o",
+            "build/app.wasm",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected selected web fixture for {stem}:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    assert!(wasm_path.is_file(), "missing app.wasm for {stem}");
+    dir
+}
 
 fn build_web_project(stem: &str, files: &[(&str, &str)]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("jet_web_{stem}_{}", std::process::id()));
@@ -234,8 +286,8 @@ if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected W
     );
     let wasm = fs::read_to_string(wasm_dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("__jet_z: __jet_named_all_value_")
-            && wasm.contains("__jet_a: __jet_named_all_value_"),
+        wasm.contains("__jet_z: __jet___named_all_value_")
+            && wasm.contains("__jet_a: __jet___named_all_value_"),
         "Wasm must assemble the named result by field:\n{wasm}"
     );
     let _ = fs::remove_dir_all(wasm_dir);
@@ -461,11 +513,10 @@ fn run_web_api_harness(dir: &PathBuf) -> String {
 /// D-UISHOWCASE1 (c134 Phase 8, flagship showcase — 197_ui_showcase.jet):
 /// same fake-`document` trick as `FAKE_DOM_HARNESS`, but exercises the
 /// dashboard's two independent entry points instead of one click-driven
-/// `render(n)`. `initApp`/`initFuel` each return the real `Signal` object
-/// `core.reactive.signal` compiles to (`jetDom.makeSignal` — a plain
-/// `{get, set}` cell); this harness drives both directly, the same way
-/// 197_ui_showcase.html's `requestAnimationFrame` loop and click handler do,
-/// and reads every painted box back out of the fake DOM tree.
+/// `render(n)`. `init_app`/`init_fuel` return the checked web function carrier;
+/// this harness unwraps its `Ok` payload to drive the real `Signal` object
+/// (`jetDom.makeSignal` — a plain `{get, set}` cell), the same way the companion
+/// HTML's event handlers do, then reads every painted box from the fake DOM.
 const SHOWCASE_HARNESS: &str = r#"
 class FakeElement {
   constructor(tag, doc) { this.tagName = tag; this.ownerDocument = doc; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; this.attrs = new Map(); }
@@ -491,8 +542,9 @@ boostButton.id = "boost-btn";
 doc.body.appendChild(boostButton);
 
 const { init_app, init_fuel } = await import("./app.js");
-const boosts = init_app();
-const elapsed = init_fuel();
+const unwrap = (outcome) => outcome?.tag === "Ok" ? outcome.values[0] : (() => { throw new Error(`unexpected outcome: ${JSON.stringify(outcome)}`); })();
+const boosts = unwrap(init_app());
+const elapsed = unwrap(init_fuel());
 
 const container = doc.getElementById("jet-app");
 const boxes = () => container.children.map((c) => ({ text: c.textContent, bg: c.style.background, color: c.style.color, role: c.getAttribute("role"), aria: c.getAttribute("aria-label") }));
@@ -945,6 +997,162 @@ fn jet_cli_html_marker_missing_file_is_an_error() {
     assert!(
         stderr.contains("does_not_exist.html"),
         "error should name the missing file, got:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_cli_html_marker_rejects_parent_traversal() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping #HTML traversal test");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_html_marker_traversal_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let outside = dir
+        .parent()
+        .unwrap()
+        .join(format!("jet_html_marker_traversal_outside_{}.html", std::process::id()));
+    fs::write(&outside, "<html>must survive</html>").unwrap();
+    let outside_name = outside.file_name().unwrap().to_str().unwrap();
+    fs::write(
+        dir.join("app.jet"),
+        format!("#[Target(Web), HTML(\"../{outside_name}\")]\nfn run() {{}}\n"),
+    )
+    .unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "app.jet"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "parent traversal must be rejected");
+    assert_eq!(
+        fs::read_to_string(&outside).unwrap(),
+        "<html>must survive</html>"
+    );
+    assert!(
+        !dir.join("build/index.html").exists(),
+        "rejected #HTML source must not publish an index"
+    );
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_file(outside);
+}
+
+#[test]
+fn jet_cli_html_marker_rejects_absolute_path() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping #HTML absolute-path test");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_html_marker_absolute_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let outside = dir
+        .parent()
+        .unwrap()
+        .join(format!("jet_html_marker_absolute_outside_{}.html", std::process::id()));
+    fs::write(&outside, "<html>must survive</html>").unwrap();
+    let marker = outside.to_str().unwrap().replace('\\', "\\\\");
+    fs::write(
+        dir.join("app.jet"),
+        format!("#[Target(Web), HTML(\"{marker}\")]\nfn run() {{}}\n"),
+    )
+    .unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "app.jet"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "absolute #HTML paths must be rejected");
+    assert_eq!(
+        fs::read_to_string(&outside).unwrap(),
+        "<html>must survive</html>"
+    );
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_file(outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn jet_cli_html_marker_rejects_symlink_source() {
+    use std::os::unix::fs::symlink;
+
+    if !have_tool("rustc") {
+        eprintln!("note: skipping #HTML symlink test");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_html_marker_symlink_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let outside = dir.join("outside.html");
+    fs::write(&outside, "<html>must survive</html>").unwrap();
+    fs::write(
+        dir.join("app.jet"),
+        "#[Target(Web), HTML(\"custom.html\")]\nfn run() {}\n",
+    )
+    .unwrap();
+    symlink(&outside, dir.join("custom.html")).unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "app.jet"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "symlinked #HTML source must be rejected");
+    assert_eq!(
+        fs::read_to_string(&outside).unwrap(),
+        "<html>must survive</html>"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn jet_cli_html_marker_rejects_hardlinked_source() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping #HTML hard-link test");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_html_marker_hardlink_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let outside = dir.join("outside.html");
+    fs::write(&outside, "<html>must survive</html>").unwrap();
+    fs::write(
+        dir.join("app.jet"),
+        "#[Target(Web), HTML(\"custom.html\")]\nfn run() {}\n",
+    )
+    .unwrap();
+    fs::hard_link(&outside, dir.join("custom.html")).unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "app.jet"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "hard-linked #HTML source must be rejected");
+    assert_eq!(
+        fs::read_to_string(&outside).unwrap(),
+        "<html>must survive</html>"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1440,13 +1648,14 @@ fn run() {}
         web.js_app
     );
     assert!(
-        web.js_app.contains("__jet___switch_subject"),
-        "JS arm tables must bind the switch subject:\n{}",
+        web.js_app.contains("(n == 0n)") && web.js_app.contains("(n == 1n)"),
+        "JS MixedSwitch must compare the already-bound parameter subject:\n{}",
         web.js_app
     );
     assert!(
-        web.wasm_rust.contains("__jet___switch_subject"),
-        "Wasm MixedSwitch/RangeSwitch must bind the switch subject:\n{}",
+        web.wasm_rust.contains("__jet_n == JetWasmInt::from_i64(0)")
+            && web.wasm_rust.contains("__jet___if_range_"),
+        "Wasm arm tables must reuse the parameter and cache each range subject:\n{}",
         web.wasm_rust
     );
     assert!(
@@ -2959,7 +3168,9 @@ fn run() {
     let expected_journey = format!(
         " Trail [E3002] (2 hops via ?, origin first):\n  1. read ({shown}:6) — reading source\n  2. run ({shown}:11) — running source"
     );
-    let expected_report = format!("Error [TWOHOP]: two-hop\n{expected_journey}");
+    let expected_report = format!(
+        "Error [TWOHOP]: two-hop\n  context ({shown}:6): reading source\n  context ({shown}:11): running source\n{expected_journey}"
+    );
 
     let native_runs = [
         (
@@ -3646,13 +3857,22 @@ fn run() { print("host") }
         !compiled.rust.contains("std::fs::read(&file_path)"),
         "generated devserver must not pathname-read after a containment check"
     );
+    let devserver = compiled
+        .rust
+        .split_once("mod jet_devserver_impl")
+        .and_then(|(_, source)| source.split_once("pub use jet_devserver_impl"))
+        .map(|(source, _)| source)
+        .expect("generated devserver module must have a bounded source block");
+    assert!(
+        !devserver.contains("std::fs::rename"),
+        "generated devserver must not pathname-rename during publication"
+    );
     assert!(
         compiled.rust.contains("nlink()")
             && compiled.rust.contains("GetFileInformationByHandleEx")
             && compiled.rust.contains("renameat")
             && compiled.rust.contains("SetFileInformationByHandle")
-            && compiled.rust.contains("fchdir")
-            && !compiled.rust.contains("std::fs::rename"),
+            && compiled.rust.contains("fchdir"),
         "generated devserver output must use identity checks and held-directory publication"
     );
     assert!(
@@ -4049,6 +4269,64 @@ fn web_compute_webgpu_calls_use_the_browser_prelude() {
             && js.contains("Math.fround")
             && js.contains("backend=webgpu"),
         "WebGPU calls must stay on the browser Prelude rail:\n{js}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn selected_browser_machine_emits_dossier_bound_web_artifact() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping selected browser machine test (need rustc + node)");
+        return;
+    }
+    // The binding check runs when a JS entry crosses into Wasm.
+    let shown = "examples/features/web/web_compute.jet";
+    let src = fs::read_to_string(shown).unwrap();
+    let machine = jet::TargetMachine::TargetMachine::wasm_browser();
+    assert!(machine.is_browser_target());
+    assert!(machine.is_web_target());
+    let dir = build_web_fixture_with_machine("selected_browser_machine", &src, shown, &machine);
+    let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
+    for field in [
+        "\"runtimeLayer\": \"hosted\"",
+        "\"providerIdentity\": \"target-providers-v1:",
+        "\"preludeClosureIdentity\": \"prelude-closure-v1:",
+        "\"targetEnvironment\": \"browser\"",
+        "\"artifactIdentity\": \"",
+        "\"targetDossierIdentity\": \"",
+    ] {
+        assert!(manifest.contains(field), "{field}: {manifest}");
+    }
+    let app = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(app.contains("const JET_TARGET_DOSSIER"));
+    assert!(app.contains("jet_web_verify_target_binding"));
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(wasm.contains("jet_target_artifact_identity_ptr"));
+    assert!(wasm.contains("jet_target_dossier_identity_ptr"));
+    assert_eq!(
+        run_web_app(&dir),
+        include_str!("../examples/features/expected/web/web_compute.out")
+    );
+
+    // Replacing only the JS-side binding must fail before `run` can print.
+    let broken = app.replacen("artifactIdentity: \"", "artifactIdentity: \"mismatch-", 1);
+    assert_ne!(broken, app, "generated target dossier lacked artifact identity");
+    fs::write(dir.join("build/app.js"), broken).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("app.js")
+        .output()
+        .unwrap();
+    assert!(!node.status.success(), "mismatched target binding must fail closed");
+    assert!(
+        node.stdout.is_empty(),
+        "target mismatch must be checked before user code: {}",
+        String::from_utf8_lossy(&node.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&node.stderr).contains("target binding mismatch"),
+        "missing target binding diagnostic:\n{}",
+        String::from_utf8_lossy(&node.stderr)
     );
     let _ = fs::remove_dir_all(dir);
 }
@@ -4611,9 +4889,106 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
         "list-string free export missing:\n{wasm}"
     );
     assert!(
+        wasm.contains("assert!(count <= (buf.len() - 4) / 4, \"list-string count\")"),
+        "list-string embedded count guard missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("assert!(i + len <= buf.len(), \"list-string bytes\")"),
+        "list-string embedded element-length guard missing:\n{wasm}"
+    );
+    assert!(
         wasm.contains("jet_abi_require(JET_ABI_LIST_STRING_KIND, ptr, byte_len)"),
         "list-string ownership boundary must reject untrusted pointers:\n{wasm}"
     );
+    let hostile = r#"
+import { instantiateWasm, unmarshalAbi } from "./jet_dom_runtime.js";
+
+function packed(ptr, byteLen) {
+  return (BigInt(ptr >>> 0) << 32n) | BigInt(byteLen >>> 0);
+}
+
+function mustTrap(call, label) {
+  try {
+    call();
+  } catch (error) {
+    if (!(error instanceof WebAssembly.RuntimeError) || error.message !== "unreachable") {
+      throw new Error(`${label} raised an unexpected trap: ${error}`);
+    }
+    return;
+  }
+  throw new Error(`${label} accepted a malformed ownership token`);
+}
+
+const U32_MAX = 0xffff_ffff;
+const instance = await instantiateWasm("./app.wasm");
+
+mustTrap(
+  () => instance.exports.jet_abi_list_string_free(0x100, 9),
+  "forged list-string free (ownership)",
+);
+
+const outerPtr = instance.exports.jet_abi_list_string_alloc(9);
+const outerBytes = new Uint8Array(instance.exports.memory.buffer, outerPtr, 9);
+const outerView = new DataView(instance.exports.memory.buffer, outerPtr, 9);
+outerView.setUint32(0, 1, true);
+outerView.setUint32(4, 1, true);
+outerBytes[8] = 120;
+mustTrap(
+  () => instance.exports.jet_export_echo_strs(packed(outerPtr, 10)),
+  "outer list-string length (ownership)",
+);
+instance.exports.jet_abi_list_string_free(outerPtr, 9);
+
+const countPtr = instance.exports.jet_abi_list_string_alloc(4);
+new DataView(instance.exports.memory.buffer, countPtr, 4).setUint32(0, U32_MAX, true);
+const countToken = packed(countPtr, 4);
+mustTrap(
+  () => instance.exports.jet_export_echo_strs(countToken),
+  "embedded list-string count (parser)",
+);
+mustTrap(
+  () => instance.exports.jet_abi_list_string_free(countPtr, 4),
+  "embedded list-string count token consumed twice",
+);
+
+const lengthPtr = instance.exports.jet_abi_list_string_alloc(8);
+const lengthView = new DataView(instance.exports.memory.buffer, lengthPtr, 8);
+lengthView.setUint32(0, 1, true);
+lengthView.setUint32(4, U32_MAX, true);
+const lengthToken = packed(lengthPtr, 8);
+mustTrap(
+  () => instance.exports.jet_export_echo_strs(lengthToken),
+  "embedded list-string element length (parser)",
+);
+mustTrap(
+  () => instance.exports.jet_abi_list_string_free(lengthPtr, 8),
+  "embedded list-string length token consumed twice",
+);
+
+const validPtr = instance.exports.jet_abi_list_string_alloc(9);
+const validBytes = new Uint8Array(instance.exports.memory.buffer, validPtr, 9);
+const validView = new DataView(instance.exports.memory.buffer, validPtr, 9);
+validView.setUint32(0, 1, true);
+validView.setUint32(4, 1, true);
+validBytes[8] = 120;
+const raw = instance.exports.jet_export_echo_strs(packed(validPtr, 9));
+const rawPacked = BigInt(raw);
+const rawPtr = Number((rawPacked >> 32n) & 0xffff_ffffn) >>> 0;
+const rawLen = Number(rawPacked & 0xffff_ffffn) >>> 0;
+const out = unmarshalAbi(raw, "list-string", instance.exports);
+if (out.length !== 1 || out[0] !== "x") {
+  throw new Error(`valid list-string allocation did not round-trip: ${out}`);
+}
+mustTrap(
+  () => instance.exports.jet_abi_list_string_free(rawPtr, rawLen),
+  "valid list-string return freed twice",
+);
+mustTrap(
+  () => instance.exports.jet_abi_list_string_free(validPtr, 9),
+  "valid list-string argument retained after transfer",
+);
+console.log("ok");
+"#;
     assert!(
         wasm.contains("let __jet_xs = jet_abi_list_string_arg(__jet_xs)")
             || wasm.contains("let xs = jet_abi_list_string_arg(xs)"),
@@ -4652,42 +5027,6 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
         stdout.contains("emoji🌍"),
         "Unicode scalar was lost:\n{stdout}"
     );
-    let hostile = r#"
-import { instantiateWasm, unmarshalAbi } from "./jet_dom_runtime.js";
-
-function mustTrap(call, label) {
-  try {
-    call();
-  } catch (_) {
-    return;
-  }
-  throw new Error(`${label} accepted an untrusted ownership token`);
-}
-
-const instance = await instantiateWasm("./app.wasm");
-mustTrap(
-  () => instance.exports.jet_abi_list_string_free(0x100, 9),
-  "forged list-string free",
-);
-const ptr = instance.exports.jet_abi_list_string_alloc(9);
-const bytes = new Uint8Array(instance.exports.memory.buffer, ptr, 9);
-const view = new DataView(instance.exports.memory.buffer, ptr, 9);
-view.setUint32(0, 1, true);
-view.setUint32(4, 1, true);
-bytes[8] = 120;
-mustTrap(
-  () => instance.exports.jet_export_echo_strs((BigInt(ptr >>> 0) << 32n) | 10n),
-  "list-string length mismatch",
-);
-const raw = instance.exports.jet_export_echo_strs(
-  (BigInt(ptr >>> 0) << 32n) | 9n,
-);
-const out = unmarshalAbi(raw, "list-string", instance.exports);
-if (out.length !== 1 || out[0] !== "x") {
-  throw new Error(`valid list-string allocation did not round-trip: ${out}`);
-}
-console.log("ok");
-"#;
     assert_eq!(
         run_node_harness(&dir, "wasm_list_string_ownership_harness.mjs", hostile),
         "ok\n"

@@ -976,15 +976,12 @@ impl<'a> Checker<'a> {
             self.failure_auto_depth -= 1;
         }
         let val_ty = val_ty?;
-        let optional_success = matches!(&val_ty, Type::Option(_))
-            || matches!(&val_ty, Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Option(_)));
+        // `??` consumes exactly one carrier. A Result<Option<T>, E> therefore
+        // leaves Option<T> for a second `??` to consume.
+        let optional_success = matches!(&val_ty, Type::Option(_));
         *is_option = optional_success;
         let payload = match &val_ty {
-            Type::Result { ok, .. } => ok
-                .as_ref()
-                .unwrap_option()
-                .unwrap_or(ok.as_ref())
-                .clone(),
+            Type::Result { ok, .. } => ok.as_ref().clone(),
             Type::Option(inner) => (**inner).clone(),
             other => {
                 self.diags.push(Diagnostic::error(

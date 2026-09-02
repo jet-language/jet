@@ -55,7 +55,7 @@ pub struct GuaranteePolicyReport {
 pub struct GuaranteeReport {
     pub profile: String,
     pub package: bool,
-    pub freestanding: bool,
+    pub no_os: bool,
     pub policy: GuaranteePolicyReport,
     pub components: Vec<GuaranteeComponent>,
     pub notes: Vec<String>,
@@ -69,7 +69,7 @@ pub fn guarantee_report(
     loaded_dependencies: impl IntoIterator<Item = String>,
     unsafe_gates: usize,
     profile: &str,
-    freestanding: bool,
+    no_os: bool,
 ) -> GuaranteeReport {
     let mut dependencies = BTreeSet::new();
     if let Some(package) = package {
@@ -97,7 +97,7 @@ pub fn guarantee_report(
             })
             .unwrap_or_default()
     };
-    let sentries_active = !freestanding && (profile != "release" || harden);
+    let sentries_active = !no_os && (profile != "release" || harden);
 
     let mut components = vec![GuaranteeComponent {
         name: "your code".to_string(),
@@ -115,7 +115,7 @@ pub fn guarantee_report(
         "no audited gates".to_string()
     } else if sentries_active {
         "runtime sentries active".to_string()
-    } else if freestanding {
+    } else if no_os {
         "runtime sentries unavailable".to_string()
     } else {
         "release sentries disabled".to_string()
@@ -142,7 +142,7 @@ pub fn guarantee_report(
         });
     } else {
         for dependency in dependencies {
-            let fenced = !freestanding && contained.contains(&dependency);
+            let fenced = !no_os && contained.contains(&dependency);
             components.push(GuaranteeComponent {
                 name: dependency,
                 status: if fenced {
@@ -171,11 +171,11 @@ pub fn guarantee_report(
             "single-file: no package.jet; contain/harden unavailable; externs remain TRUSTED"
                 .to_string()
         });
-    } else if harden && freestanding {
+    } else if harden && no_os {
         notes.push(if profile_hardened {
-            "hardened profile requested, but freestanding has no runtime fence".to_string()
+            "hardened profile requested, but no-OS targets have no runtime fence".to_string()
         } else {
-            "harden: true requested, but freestanding has no runtime fence".to_string()
+            "harden: true requested, but no-OS targets have no runtime fence".to_string()
         });
     } else if profile_hardened {
         notes.push("hardened profile; every foreign dependency is fenced".to_string());
@@ -195,8 +195,8 @@ pub fn guarantee_report(
             "release sentries: off; set harden: true to watch every #Unsafe gate".to_string(),
         );
     }
-    if freestanding {
-        notes.push("freestanding: prover + audit only".to_string());
+    if no_os {
+        notes.push("no-OS: prover + audit only".to_string());
     }
 
     let policy = package_guarantees
@@ -219,7 +219,7 @@ pub fn guarantee_report(
     GuaranteeReport {
         profile: profile.to_string(),
         package: package.is_some(),
-        freestanding,
+        no_os,
         policy,
         components,
         notes,
@@ -323,18 +323,8 @@ fn apply_package_effect_budget(
     facts: &crate::Sema::SemIndexEffectFacts,
     diagnostics: Vec<Diagnostic>,
 ) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
-    let manifest = match crate::Package::PackageFacts::load(&bundle.project_root) {
-        None => return Ok(diagnostics),
-        Some(Ok(facts)) => facts,
-        Some(Err(error)) => {
-            return Err(vec![Diagnostic::error(
-                "E1206",
-                "package manifest is not valid".to_string(),
-                error.to_string(),
-                "fix `package.jet` before compiling the package".to_string(),
-                None,
-            )])
-        }
+    let Some(manifest) = crate::Loader::package_facts_for_bundle(bundle)? else {
+        return Ok(diagnostics);
     };
     let entries =
         crate::EffectBudget::compute_package_effects(bundle, &facts.solved, &facts.summaries);
@@ -400,7 +390,7 @@ pub fn gate_diagnostics(
 pub fn compile_bundle_path_opts(
     file: &str,
     mode: crate::Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     cross_target: Option<&str>,
@@ -408,7 +398,7 @@ pub fn compile_bundle_path_opts(
     compile_bundle_path_opts_full(
         file,
         mode,
-        freestanding,
+        no_os,
         gates,
         web_target,
         false,
@@ -429,7 +419,7 @@ pub fn compile_bundle_path_opts(
 pub fn compile_bundle_path_opts_with_profile(
     file: &str,
     mode: crate::Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     cross_target: Option<&str>,
@@ -438,7 +428,7 @@ pub fn compile_bundle_path_opts_with_profile(
     compile_bundle_path_opts_with_profile_and_settings(
         file,
         mode,
-        freestanding,
+        no_os,
         gates,
         web_target,
         cross_target,
@@ -450,7 +440,7 @@ pub fn compile_bundle_path_opts_with_profile(
 pub fn compile_bundle_path_opts_with_profile_and_settings(
     file: &str,
     mode: crate::Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     cross_target: Option<&str>,
@@ -460,7 +450,7 @@ pub fn compile_bundle_path_opts_with_profile_and_settings(
     compile_bundle_path_opts_with_profile_and_settings_and_entry(
         file,
         mode,
-        freestanding,
+        no_os,
         gates,
         web_target,
         cross_target,
@@ -473,7 +463,7 @@ pub fn compile_bundle_path_opts_with_profile_and_settings(
 pub fn compile_bundle_path_opts_with_profile_and_settings_and_entry(
     file: &str,
     mode: crate::Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     cross_target: Option<&str>,
@@ -484,7 +474,7 @@ pub fn compile_bundle_path_opts_with_profile_and_settings_and_entry(
     compile_bundle_path_opts_full(
         file,
         mode,
-        freestanding,
+        no_os,
         gates,
         web_target,
         false,
@@ -513,10 +503,59 @@ pub fn compile_bundle_path_with_target_machine(
     mode: crate::Sema::CompileMode,
     machine: &crate::TargetMachine::TargetMachine,
 ) -> Result<crate::CompileOutput, TargetMachineCompileError> {
-    // One boundary for both front-end passes below: the machine-usage check
-    // and the compile itself reuse the same worker (I9: same seam, one stack).
+    compile_bundle_path_with_target_machine_and_profile_and_settings(
+        file,
+        mode,
+        machine,
+        crate::Policy::GateSet::default(),
+        "dev",
+        false,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn compile_bundle_path_with_target_machine_and_profile_and_settings(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    machine: &crate::TargetMachine::TargetMachine,
+    gates: crate::Policy::GateSet,
+    profile: &str,
+    locked: bool,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, TargetMachineCompileError> {
+    compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure(
+        file,
+        mode,
+        machine,
+        gates,
+        profile,
+        locked,
+        setting_overrides,
+        &[],
+    )
+}
+
+pub fn compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    machine: &crate::TargetMachine::TargetMachine,
+    gates: crate::Policy::GateSet,
+    profile: &str,
+    locked: bool,
+    setting_overrides: &BTreeMap<String, String>,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<crate::CompileOutput, TargetMachineCompileError> {
     crate::run_compiler_work(|| {
-        compile_bundle_path_with_target_machine_on_compiler_stack(file, mode, machine)
+        compile_bundle_path_with_target_machine_on_compiler_stack(
+            file,
+            mode,
+            machine,
+            gates,
+            profile,
+            locked,
+            setting_overrides,
+            source_closure,
+        )
     })
 }
 
@@ -524,28 +563,51 @@ fn compile_bundle_path_with_target_machine_on_compiler_stack(
     file: &str,
     mode: crate::Sema::CompileMode,
     machine: &crate::TargetMachine::TargetMachine,
+    gates: crate::Policy::GateSet,
+    profile: &str,
+    locked: bool,
+    setting_overrides: &BTreeMap<String, String>,
+    source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<crate::CompileOutput, TargetMachineCompileError> {
-    let usage = target_machine_usage_for_file(file, mode)
-        .map_err(TargetMachineCompileError::Diagnostics)?;
-    let machine_errors = machine.validate(&usage);
-    if !machine_errors.is_empty() {
-        return Err(TargetMachineCompileError::Machine(machine_errors));
-    }
-    compile_bundle_path_opts_full(
+    let usage = target_machine_usage_for_file(
+        file,
+        mode,
+        machine,
+        profile,
+        locked,
+        setting_overrides,
+        source_closure,
+    )
+    .map_err(TargetMachineCompileError::Diagnostics)?;
+    let compiler_identity = format!(
+        "{}@{}#{}",
+        crate::Syntax::BINARY_NAME,
+        env!("CARGO_PKG_VERSION"),
+        option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
+    );
+    let dossier = machine.target_dossier(
+        &usage,
+        crate::TargetMachine::ExecutionTier::Aot,
+        compiler_identity,
+        "none",
+    );
+    compile_bundle_path_opts_full_with_target_dossier(
         file,
         mode,
         machine.no_os,
-        crate::Policy::GateSet::default(),
-        false,
+        gates,
+        machine.is_web_target(),
         false,
         false,
         false,
         Some(machine.triple.as_str()),
         None,
-        "dev",
-        &BTreeMap::new(),
-        false,
+        profile,
+        setting_overrides,
+        locked,
         None,
+        dossier,
+        source_closure,
     )
     .map_err(TargetMachineCompileError::Diagnostics)
 }
@@ -756,6 +818,9 @@ pub fn target_machine_by_name(name: &str) -> Option<crate::TargetMachine::Target
         "board.virt_aarch64" | "virt" => {
             Some(crate::TargetMachine::TargetMachine::board_virt_aarch64())
         }
+        "wasm.browser" => Some(crate::TargetMachine::TargetMachine::wasm_browser()),
+        "wasm.wasi" => Some(crate::TargetMachine::TargetMachine::wasm_wasi()),
+        "wasm.no-os" => Some(crate::TargetMachine::TargetMachine::wasm_no_os()),
         "hosted" => Some(crate::TargetMachine::TargetMachine::hosted(
             "x86_64-unknown-linux-gnu",
         )),
@@ -763,8 +828,15 @@ pub fn target_machine_by_name(name: &str) -> Option<crate::TargetMachine::Target
     }
 }
 
-/// The machine names `--target` accepts beside a rustc triple.
-pub const TARGET_MACHINE_NAMES: &[&str] = &["board.sensor_v1", "board.virt_aarch64", "hosted"];
+/// The typed profile names `--target` accepts beside a rustc triple.
+pub const TARGET_MACHINE_NAMES: &[&str] = &[
+    "board.sensor_v1",
+    "board.virt_aarch64",
+    "wasm.browser",
+    "wasm.wasi",
+    "wasm.no-os",
+    "hosted",
+];
 
 /// D-TARGET-AUDIT1: machine audit JSON for a named board machine.
 pub fn target_machine_dossier_json(machine_name: &str) -> Result<String, String> {
@@ -875,6 +947,24 @@ pub fn compile_bundle_path_opts_plugin_with_gates_and_settings(
     cross_target: Option<&str>,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_plugin_with_gates_and_profile_and_settings(
+        file,
+        mode,
+        gates,
+        cross_target,
+        "dev",
+        setting_overrides,
+    )
+}
+
+pub fn compile_bundle_path_opts_plugin_with_gates_and_profile_and_settings(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    gates: crate::Policy::GateSet,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts_full(
         file,
         mode,
@@ -886,7 +976,7 @@ pub fn compile_bundle_path_opts_plugin_with_gates_and_settings(
         false,
         cross_target,
         None,
-        "dev",
+        profile,
         setting_overrides,
         false,
         None,
@@ -934,6 +1024,26 @@ pub fn compile_bundle_path_opts_library_with_gates_and_settings(
     locked: bool,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_library_with_gates_and_profile_and_settings(
+        file,
+        mode,
+        gates,
+        explicit_output,
+        locked,
+        "dev",
+        setting_overrides,
+    )
+}
+
+pub fn compile_bundle_path_opts_library_with_gates_and_profile_and_settings(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    gates: crate::Policy::GateSet,
+    explicit_output: Option<&str>,
+    locked: bool,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts_full(
         file,
         mode,
@@ -945,7 +1055,7 @@ pub fn compile_bundle_path_opts_library_with_gates_and_settings(
         false,
         None,
         explicit_output,
-        "dev",
+        profile,
         setting_overrides,
         locked,
         None,
@@ -960,7 +1070,7 @@ pub fn compile_bundle_path_opts_library_with_gates_and_settings(
 pub fn compile_bundle_path_opts_dbg(
     file: &str,
     mode: crate::Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     debug_linemap: bool,
@@ -969,7 +1079,7 @@ pub fn compile_bundle_path_opts_dbg(
     compile_bundle_path_opts_full(
         file,
         mode,
-        freestanding,
+        no_os,
         gates,
         web_target,
         false,
@@ -1004,7 +1114,7 @@ pub fn compile_bundle_path_output(
 pub fn compile_bundle_path_output_opts(
     file: &str,
     output: &str,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
@@ -1013,7 +1123,7 @@ pub fn compile_bundle_path_output_opts(
     compile_bundle_path_output_opts_with_settings(
         file,
         output,
-        freestanding,
+        no_os,
         gates,
         web_target,
         plugin_target,
@@ -1025,17 +1135,41 @@ pub fn compile_bundle_path_output_opts(
 pub fn compile_bundle_path_output_opts_with_settings(
     file: &str,
     output: &str,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
     cross_target: Option<&str>,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_output_opts_with_profile_and_settings(
+        file,
+        output,
+        no_os,
+        gates,
+        web_target,
+        plugin_target,
+        cross_target,
+        "dev",
+        setting_overrides,
+    )
+}
+
+pub fn compile_bundle_path_output_opts_with_profile_and_settings(
+    file: &str,
+    output: &str,
+    no_os: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts_full(
         file,
         crate::Sema::CompileMode::Run,
-        freestanding,
+        no_os,
         gates,
         web_target,
         plugin_target,
@@ -1043,7 +1177,7 @@ pub fn compile_bundle_path_output_opts_with_settings(
         false,
         cross_target,
         Some(output),
-        "dev",
+        profile,
         setting_overrides,
         false,
         None,
@@ -1053,20 +1187,29 @@ pub fn compile_bundle_path_output_opts_with_settings(
 fn target_machine_usage_for_file(
     file: &str,
     mode: crate::Sema::CompileMode,
+    machine: &crate::TargetMachine::TargetMachine,
+    profile: &str,
+    locked: bool,
+    setting_overrides: &BTreeMap<String, String>,
+    source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<crate::TargetMachine::TargetMachineUse, Vec<Diagnostic>> {
-    let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    seed_build_facts(&mut bundle, "dev", false, &BTreeMap::new())?;
+    let overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    let mut bundle = crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
+    seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = gate_diagnostics(&bundle, parse_teaching, diags, Vec::new())?;
-    let mmio = collect_mmio_usage(&bundle);
-    let mut core_apis: Vec<String> = bundle.used_core.into_iter().collect();
-    core_apis.sort();
-    Ok(crate::TargetMachine::TargetMachineUse {
-        core_apis,
-        mmio,
-        ..crate::TargetMachine::TargetMachineUse::default()
-    })
+    let mut usage = crate::Sema::target_machine_use(&bundle);
+    usage.mmio = collect_mmio_usage(&bundle);
+    let target_diags = crate::Sema::check_target_machine(machine, &usage);
+    if target_diags.is_empty() {
+        Ok(usage)
+    } else {
+        Err(target_diags)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1428,7 +1571,7 @@ pub struct BuildRunOptions {
     /// target does not list the source explicitly.
     pub emit_generated: bool,
     pub locked: bool,
-    pub freestanding: bool,
+    pub no_os: bool,
     pub web_target: bool,
     pub plugin_target: bool,
     pub cross_target: Option<String>,
@@ -1462,7 +1605,7 @@ impl Default for BuildRunOptions {
             inspect_only: false,
             emit_generated: false,
             locked: false,
-            freestanding: false,
+            no_os: false,
             web_target: false,
             plugin_target: false,
             cross_target: None,
@@ -1553,19 +1696,7 @@ fn seed_build_facts_from_stamp(
     } else {
         bundle.build_facts.target_triple.clone()
     };
-    let manifest = match crate::Package::PackageFacts::load(&bundle.project_root) {
-        None => None,
-        Some(Ok(facts)) => Some(facts),
-        Some(Err(error)) => {
-            return Err(vec![Diagnostic::error(
-                "E1206",
-                "package manifest is not valid".to_string(),
-                error.to_string(),
-                "fix `package.jet` before compiling the package".to_string(),
-                None,
-            )]);
-        }
-    };
+    let manifest = crate::Loader::package_facts_for_bundle(bundle)?;
     let package_name = manifest
         .as_ref()
         .map(|facts| facts.name.clone())
@@ -1585,13 +1716,14 @@ fn seed_build_facts_from_stamp(
         .as_ref()
         .and_then(|facts| facts.version.clone())
         .unwrap_or_else(|| "0.0.0".to_string());
+    let profile_source = manifest
+        .as_ref()
+        .map(|facts| facts.origin.as_str())
+        .unwrap_or("<default>");
     let profile_key = jet_foundation::Policy::FactKey::with_default_source(
         "Build.Profile",
         jet_foundation::Policy::FactValue::Text("dev".to_string()),
-        manifest
-            .as_ref()
-            .map(|_| "package.jet")
-            .unwrap_or("<default>"),
+        profile_source,
     );
     let mut profile_contributions = Vec::new();
     if profile != "dev" {
@@ -1613,11 +1745,10 @@ fn seed_build_facts_from_stamp(
     // D-CONF-READ1=A / D-CONF-STAMP1=B: fixed build leaves are facts too.
     // They enter the same resolver and retain one writer chain, so explain
     // does not grow a special provenance path for package, OS, or stamp data.
-    let package_source = if manifest.is_some() {
-        "package.jet"
-    } else {
-        "<source>"
-    };
+    let package_source = manifest
+        .as_ref()
+        .map(|facts| facts.origin.as_str())
+        .unwrap_or("<source>");
     let fixed_facts = [
         (
             "Build.Package.Name",
@@ -1826,6 +1957,7 @@ fn seed_build_facts_from_stamp(
             &declaration_site,
         )]);
     }
+    let target_dossier = bundle.build_facts.target_dossier.clone();
     bundle.build_facts = jet_foundation::Facts::BuildFactSnapshot {
         package_name,
         package_version,
@@ -1836,7 +1968,7 @@ fn seed_build_facts_from_stamp(
         contributions,
         settings,
         setting_provenance,
-        target_dossier: jet_foundation::Facts::TargetDossier::default(),
+        target_dossier,
     };
     Ok(())
 }
@@ -2128,6 +2260,7 @@ pub struct GeneratedSourceProvenance {
     pub name: String,
     pub path: std::path::PathBuf,
     pub digest: crate::Comptime::Build::ContentDigest,
+    pub source: String,
 }
 
 #[derive(Debug, Clone)]
@@ -2368,7 +2501,7 @@ fn build_query_options() -> BuildRunOptions {
         inspect_only: true,
         emit_generated: false,
         locked: false,
-        freestanding: false,
+        no_os: false,
         web_target: false,
         plugin_target: false,
         cross_target: None,
@@ -2448,8 +2581,8 @@ pub fn build_plan_json(plan: &crate::Comptime::Build::BuildPlan) -> String {
 ///
 /// A prepared front end may only be resumed by a compile that asks for the
 /// same program under the same facts. The compile compares this value against
-/// its own `BuildRunOptions` before resuming; a mismatch cannot produce wrong
-/// output, it only costs the second front end this seam exists to remove.
+/// its own `BuildRunOptions` before resuming; a mismatch fails closed before
+/// another source snapshot can be loaded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontEndInputs {
     pub file: String,
@@ -2513,7 +2646,7 @@ pub struct PreparedBuildFrontEnd {
     build_stamp: jet_foundation::Facts::BuildStamp,
     runtime_bundle_for_package: Option<crate::AST::ProgramBundle>,
     runtime_source_paths: Vec<std::path::PathBuf>,
-    direct_package_overlay: Option<(std::path::PathBuf, String)>,
+    source_closure: Vec<(std::path::PathBuf, String)>,
     timing: bool,
     timer: crate::PhaseTiming::PhaseTimer,
 }
@@ -2563,6 +2696,10 @@ impl PreparedBuildFrontEnd {
     pub fn effect_facts(&self) -> &crate::Sema::SemIndexEffectFacts {
         &self.effect_facts
     }
+    /// Immutable source texts for every module in the checked build closure.
+    pub fn source_closure(&self) -> &[(std::path::PathBuf, String)] {
+        &self.source_closure
+    }
 
     /// Lap the shared stopwatch, so work a caller does between the two halves
     /// (hashing the cache key) lands in the same `jet-timing.json` report.
@@ -2579,7 +2716,35 @@ impl PreparedBuildFrontEnd {
 pub fn prepare_build_front_end(
     inputs: FrontEndInputs,
 ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
-    crate::run_compiler_work(move || prepare_build_front_end_on_compiler_stack(inputs, None))
+    crate::run_compiler_work(move || {
+        prepare_build_front_end_on_compiler_stack(inputs, None, &[])
+    })
+}
+
+/// Run the build front end against the complete authority-selected source
+/// closure. Every imported module is supplied as immutable bytes to the same
+/// loader invocation as the entry module.
+pub fn prepare_build_front_end_with_source_closure(
+    inputs: FrontEndInputs,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    let source_closure = source_closure.to_vec();
+    crate::run_compiler_work(move || {
+        prepare_build_front_end_on_compiler_stack(inputs, None, &source_closure)
+    })
+}
+
+/// Run the build front end against an authority-selected source snapshot.
+/// The entry overlay replaces only the virtual source file; imported modules
+/// continue resolving relative to `source_path`.
+pub fn prepare_build_front_end_with_overlay(
+    inputs: FrontEndInputs,
+    source_path: &std::path::Path,
+    source: &str,
+) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        prepare_build_front_end_on_compiler_stack(inputs, Some((source_path, source)), &[])
+    })
 }
 
 /// D-BUILDENTRY1 complete driver staging: check root bundle, evaluate selected
@@ -2594,14 +2759,34 @@ pub fn compile_bundle_path_build(
 
 /// #2083: `compile_bundle_path_build` resuming a front end the caller already
 /// ran through `prepare_build_front_end`. The prepared bundle is checked
-/// against `options` before it is resumed, so a stale or foreign front end
-/// falls back to a fresh one rather than compiling the wrong program.
+/// against `options` before it is resumed; a stale or foreign front end fails
+/// closed instead of reloading a different program.
 pub fn compile_bundle_path_build_with_front_end(
     file: &str,
     options: BuildRunOptions,
     prepared: Option<PreparedBuildFrontEnd>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_build_inner(file, options, None, None, prepared, false, false)
+}
+
+/// Resume or stage a build while carrying the complete authority-selected
+/// source closure through build evaluation and runtime code generation.
+pub fn compile_bundle_path_build_with_front_end_and_source_closure(
+    file: &str,
+    options: BuildRunOptions,
+    prepared: Option<PreparedBuildFrontEnd>,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_build_inner_with_source_closure(
+        file,
+        options,
+        None,
+        None,
+        prepared,
+        false,
+        false,
+        source_closure,
+    )
 }
 
 /// Resume a checked build front end for the read-only project-check promise.
@@ -2725,6 +2910,28 @@ fn compile_bundle_path_build_inner(
     without_codegen: bool,
     project_check: bool,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_build_inner_with_source_closure(
+        file,
+        options,
+        overlay,
+        dependency_boundary,
+        prepared,
+        without_codegen,
+        project_check,
+        &[],
+    )
+}
+
+fn compile_bundle_path_build_inner_with_source_closure(
+    file: &str,
+    options: BuildRunOptions,
+    overlay: Option<(&std::path::Path, &str)>,
+    dependency_boundary: Option<&str>,
+    prepared: Option<PreparedBuildFrontEnd>,
+    without_codegen: bool,
+    project_check: bool,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
         compile_bundle_path_build_on_compiler_stack(
             file,
@@ -2734,8 +2941,20 @@ fn compile_bundle_path_build_inner(
             prepared,
             without_codegen,
             project_check,
+            source_closure,
         )
     })
+}
+
+fn prepared_front_end_mismatch(file: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E2105",
+        format!("prepared build front end does not match `{file}`"),
+        "resuming it could compile a source or build-input snapshot different from the requested build"
+            .to_string(),
+        "restart the build from the current source and build inputs".to_string(),
+        None,
+    )
 }
 
 fn compile_bundle_path_build_on_compiler_stack(
@@ -2746,22 +2965,30 @@ fn compile_bundle_path_build_on_compiler_stack(
     prepared: Option<PreparedBuildFrontEnd>,
     without_codegen: bool,
     project_check: bool,
+    source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    let mut options = options;
+    if project_check {
+        // D-CHECKSCOPE1=A: a project check is an inspect-only build-front-end
+        // pass.  The facade already selects `execute: false`; make the
+        // no-authority-grant bit part of this seam so every project-check
+        // caller, including workspace members, gets the same policy.
+        options.execute = false;
+        options.inspect_only = true;
+        options.emit_generated = false;
+    }
     if options.locked {
         crate::Loader::verify_locked_dependency_sources(file)?;
     }
     let inputs = FrontEndInputs::for_build(file, &options);
-    // #2083: resume the caller's front end only when it checked this program,
-    // under these facts, without an entry overlay. Anything else gets a fresh
-    // stage one — the same work this pipeline always did.
     let prepared = match prepared {
         Some(prepared) if overlay.is_none() && prepared.inputs == inputs => prepared,
-        _ => prepare_build_front_end_on_compiler_stack(inputs, overlay)?,
+        Some(_) => return Err(vec![prepared_front_end_mismatch(file)]),
+        None => prepare_build_front_end_on_compiler_stack(inputs, overlay, source_closure)?,
     };
     compile_build_from_front_end(
         file,
         options,
-        overlay,
         dependency_boundary,
         prepared,
         without_codegen,
@@ -2776,6 +3003,7 @@ fn compile_bundle_path_build_on_compiler_stack(
 fn prepare_build_front_end_on_compiler_stack(
     inputs: FrontEndInputs,
     overlay: Option<(&std::path::Path, &str)>,
+    source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
     let file = inputs.file.as_str();
     // c121: with `JET_TIMING=1` every build writes `jet-timing.json`
@@ -2790,7 +3018,12 @@ fn prepare_build_front_end_on_compiler_stack(
     } else {
         None
     };
-    let mut bundle = load_build_entry_bundle(file, overlay, direct_package_overlay.as_ref())?;
+    let mut bundle = load_build_entry_bundle(
+        file,
+        overlay,
+        direct_package_overlay.as_ref(),
+        source_closure,
+    )?;
     let mut runtime_bundle_for_package = None;
     let mut package_build_fingerprint = None;
     // D-BUILDSCOPE1: resolve one package build entry through PackageFacts. The
@@ -2920,11 +3153,19 @@ fn prepare_build_front_end_on_compiler_stack(
             // The selected runtime file already is the checked package build
             // entry. Keep its loader snapshot and continue through one path.
         } else {
+            let mut source_closure = bundle_source_closure(&bundle);
+            source_closure.push((package_path.clone(), package_source.clone()));
+            source_closure.sort_by(|left, right| left.0.cmp(&right.0));
+            source_closure.dedup_by(|left, right| left.0 == right.0);
+            let overlays = source_closure
+                .iter()
+                .map(|(path, source)| (path.as_path(), source.as_str()))
+                .collect::<Vec<_>>();
             runtime_bundle_for_package = Some(bundle);
             let package_path_string = package_path.to_string_lossy().into_owned();
-            bundle = crate::Loader::load_entry_with_overlay(
+            bundle = crate::Loader::load_entry_with_overlays(
                 &package_path_string,
-                Some((&package_path, &package_source)),
+                &overlays,
                 false,
             )?;
             package_build_fingerprint = Some(crate::SHA256::sha256_hex(
@@ -3002,6 +3243,12 @@ fn prepare_build_front_end_on_compiler_stack(
     if timing {
         timer.lap("sema");
     }
+    let mut source_closure = bundle_source_closure(&bundle);
+    if let Some(runtime) = runtime_bundle_for_package.as_ref() {
+        source_closure.extend(bundle_source_closure(runtime));
+    }
+    source_closure.sort_by(|left, right| left.0.cmp(&right.0));
+    source_closure.dedup_by(|left, right| left.0 == right.0);
     Ok(PreparedBuildFrontEnd {
         inputs,
         bundle,
@@ -3016,7 +3263,7 @@ fn prepare_build_front_end_on_compiler_stack(
         package_build_fingerprint,
         runtime_bundle_for_package,
         runtime_source_paths,
-        direct_package_overlay,
+        source_closure,
         timing,
         timer,
     })
@@ -3028,7 +3275,6 @@ fn prepare_build_front_end_on_compiler_stack(
 fn compile_build_from_front_end(
     file: &str,
     options: BuildRunOptions,
-    overlay: Option<(&std::path::Path, &str)>,
     dependency_boundary: Option<&str>,
     prepared: PreparedBuildFrontEnd,
     without_codegen: bool,
@@ -3048,17 +3294,24 @@ fn compile_build_from_front_end(
         package_build_fingerprint,
         mut runtime_bundle_for_package,
         runtime_source_paths,
-        direct_package_overlay,
+        source_closure,
         timing,
         mut timer,
     } = prepared;
+    // Capture lock presence before runtime reload can publish any lock update.
+    // The first build must bootstrap dependency names once; later builds must
+    // remain fail-closed when the manifest and lock drift.
+    let lock_was_present = bundle
+        .project_root
+        .join(crate::Syntax::UNIFIED_LOCK_FILE)
+        .exists();
     // The cache capability is constructed only after parser, sema, policy,
     // extension, and diagnostic classification have all succeeded.
     let front_end_completion = crate::Comptime::Build::FrontEndCompletion::all_complete();
 
     let mut build_run = None;
+    let mut locked_provenance = Vec::<crate::AST::ComptimeInput>::new();
     let mut filesystem_transaction = None;
-    let mut generated_lock_provenance = None;
     if let Some(index) = build_index {
         let build = match &bundle.modules[bundle.entry].items[index] {
             crate::AST::Item::Func(func) => func,
@@ -3243,7 +3496,11 @@ fn compile_build_from_front_end(
         // owning project root, which is also the root used by generated
         // output, action execution, and lock provenance.
         let base_dir = &bundle.project_root;
-        let package = build_package_name(file)?;
+        let package = if bundle.build_facts.package_name.is_empty() {
+            build_package_name(file)?
+        } else {
+            bundle.build_facts.package_name.clone()
+        };
         let mut evaluated = crate::Comptime::Build::with_packaged_plugin_runner(
             crate::BuildPluginHook::run_packaged_build_plugin,
             || {
@@ -3405,10 +3662,14 @@ fn compile_build_from_front_end(
             )
             .chain(std::iter::once(bundle.project_root.join(".jet/lock")))
             .collect::<Vec<_>>();
-        filesystem_transaction = Some(
-            BuildFilesystemTransaction::new(transaction_paths)
-                .map_err(|error| vec![generated_io_diag("build filesystem transaction", &error)])?,
-        );
+        if !project_check {
+            filesystem_transaction = Some(
+                BuildFilesystemTransaction::new(transaction_paths)
+                    .map_err(|error| {
+                        vec![generated_io_diag("build filesystem transaction", &error)]
+                    })?,
+            );
+        }
         if options.locked {
             crate::Lock::verify_locked_build_contributions(
                 &bundle.project_root,
@@ -3442,6 +3703,7 @@ fn compile_build_from_front_end(
                     name: module.name.clone(),
                     path: bundle.project_root.join(module.path.as_str()),
                     digest: module.source_digest.clone(),
+                    source: module.source.clone(),
                 })
                 .collect()
         };
@@ -3478,7 +3740,7 @@ fn compile_build_from_front_end(
             )?);
         }
         if options.execute {
-            let mut locked_provenance = generated
+            locked_provenance = generated
                 .iter()
                 .map(|item| crate::AST::ComptimeInput {
                     path: item
@@ -3523,23 +3785,26 @@ fn compile_build_from_front_end(
                     });
                 }
             }
-            locked_provenance.sort_by(|a, b| a.path.cmp(&b.path));
+            locked_provenance.sort_by(|a, b| {
+                a.path.cmp(&b.path).then_with(|| a.hash.cmp(&b.hash))
+            });
             locked_provenance.dedup_by(|a, b| a.path == b.path && a.hash == b.hash);
-            // Keep the lock write until the fresh selected runtime bundle has
-            // passed its complete sema check.  A package dependency loader
-            // may run during that reload; writing a new generated-only lock
-            // here would make that loader see an incomplete dependency lock.
-            generated_lock_provenance = Some(locked_provenance);
+            // Keep lock publication until the fresh selected runtime bundle has
+            // passed its complete sema check. A package dependency loader may
+            // run during that reload; writing a generated-only lock here would
+            // make that loader see an incomplete dependency lock.
         }
         let mut planned_bundle = if options.execute || project_check {
             let project_root = bundle.project_root.clone();
             let stashed_runtime_bundle = runtime_bundle_for_package.take();
+            let source_closure = source_closure.clone();
             load_planned_runtime_bundle(
                 file,
                 &evaluated.plan,
                 &generated,
                 &selected_generated,
                 &project_root,
+                &source_closure,
                 || {
                     match stashed_runtime_bundle {
                         // Stashed before the build-entry check ran, so it still
@@ -3550,10 +3815,12 @@ fn compile_build_from_front_end(
                         // against the snapshot that had no `fn build` contribution,
                         // and a fact read is replaced in place, so that AST can no
                         // longer answer the final snapshot. Re-parse the entry and
-                        // let the complete front end below fold the contributed
-                        // values.
                         None => {
-                            load_build_entry_bundle(file, overlay, direct_package_overlay.as_ref())
+                            let overlays = source_closure
+                                .iter()
+                                .map(|(path, source)| (path.as_path(), source.as_str()))
+                                .collect::<Vec<_>>();
+                            crate::Loader::load_entry_with_overlays(file, &overlays, false)
                         }
                     }
                 },
@@ -3602,18 +3869,18 @@ fn compile_build_from_front_end(
     // before any runtime codegen.
     let mut runtime_effect_facts = None;
     if project_check || (build_run.is_some() && options.execute) {
-        let (planned_diags, planned_facts) = if options.freestanding && !options.gates.is_empty() {
+        let (planned_diags, planned_facts) = if options.no_os && !options.gates.is_empty() {
             (
-                crate::Sema::check_bundle_freestanding_with_gates(
+                crate::Sema::check_bundle_no_os_with_gates(
                     &mut bundle,
                     compile_mode,
                     options.gates,
                 ),
                 None,
             )
-        } else if options.freestanding {
+        } else if options.no_os {
             (
-                crate::Sema::check_bundle_freestanding(&mut bundle, compile_mode),
+                crate::Sema::check_bundle_no_os(&mut bundle, compile_mode),
                 None,
             )
         } else if !options.gates.is_empty() {
@@ -3658,17 +3925,16 @@ fn compile_build_from_front_end(
         timer.lap("build_plan");
     }
 
-    if let Some(provenance) = generated_lock_provenance.take() {
-        crate::Lock::record_generated_inputs(
-            &bundle.project_root,
-            &provenance,
-            options.locked,
-            &bundle.build_facts.stamp,
-        )
-        .map_err(|diagnostic| vec![diagnostic])?;
-    }
     if options.execute {
         if let Some(build_run) = build_run.as_ref() {
+            crate::Lock::record_generated_inputs_with_lock_state(
+                &bundle.project_root,
+                &locked_provenance,
+                options.locked,
+                &build_stamp,
+                lock_was_present,
+            )
+            .map_err(|diagnostic| vec![diagnostic])?;
             crate::Lock::record_build_contributions(
                 &bundle.project_root,
                 &bundle.build_facts.package_name,
@@ -3679,16 +3945,12 @@ fn compile_build_from_front_end(
             .map_err(|diagnostic| vec![diagnostic])?;
         }
     }
-
     // Static graph/query/explain (`execute: false`) must not codegen the
     // pre-build entry: `fn run` may call generated symbols that only exist
     // after materialization. CLI/LSP consumers need only the plan and folded
     // fact snapshot. Project check is the read-only exception: it has already
     // loaded and sema-checked the planned runtime graph in memory.
     if project_check {
-        if let Some(transaction) = filesystem_transaction.as_mut() {
-            transaction.commit();
-        }
         let build_facts = bundle.build_facts.clone();
         let compile = crate::CompileOutput {
             rust: String::new(),
@@ -3862,44 +4124,71 @@ fn compile_build_from_front_end(
     })
 }
 
+fn bundle_source_closure(
+    bundle: &crate::AST::ProgramBundle,
+) -> Vec<(std::path::PathBuf, String)> {
+    let mut closure = bundle
+        .modules
+        .iter()
+        .map(|module| (module.path.clone(), module.source.clone()))
+        .collect::<Vec<_>>();
+    closure.sort_by(|left, right| left.0.cmp(&right.0));
+    closure.dedup_by(|left, right| left.0 == right.0);
+    closure
+}
+
 fn generated_source_for_path<'a>(
     path: &std::path::Path,
     project_root: &std::path::Path,
     generated_sources: &'a [&crate::Comptime::Build::BuildGeneratedModule],
 ) -> Option<&'a str> {
-    let path = normalize_project_path(project_root, path);
-    generated_sources.iter().find_map(|module| {
-        let generated_path = normalize_project_path(
-            project_root,
-            std::path::Path::new(module.path.as_str()),
-        );
-        (generated_path == path).then_some(module.source.as_str())
-    })
+    let normalized = normalize_project_path(project_root, path);
+    generated_sources
+        .iter()
+        .find(|module| {
+            normalize_project_path(project_root, std::path::Path::new(module.path.as_str()))
+                == normalized
+        })
+        .map(|module| module.source.as_str())
 }
 
 fn load_planned_source(
     build_file: &str,
     path: &std::path::Path,
     project_root: &std::path::Path,
+    generated: &[GeneratedSourceProvenance],
     generated_sources: &[&crate::Comptime::Build::BuildGeneratedModule],
+    source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
-    let overlay = generated_source_for_path(path, project_root, generated_sources)
-        .map(|source| (path, source));
-    crate::Loader::load_entry_with_overlay(
+    let mut overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    if let Some(source) = generated
+        .iter()
+        .find(|item| normalize_project_path(project_root, &item.path) == normalize_project_path(project_root, path))
+        .map(|item| item.source.as_str())
+        .or_else(|| generated_source_for_path(path, project_root, generated_sources))
+    {
+        overlays.push((path, source));
+    }
+    crate::Loader::load_entry_with_overlays(
         path.to_str().unwrap_or(build_file),
-        overlay,
+        &overlays,
         false,
     )
-}
 
+}
 fn load_planned_runtime_bundle(
     build_file: &str,
     plan: &crate::Comptime::Build::BuildPlan,
     generated: &[GeneratedSourceProvenance],
     generated_sources: &[&crate::Comptime::Build::BuildGeneratedModule],
     project_root: &std::path::Path,
+    source_closure: &[(std::path::PathBuf, String)],
     fallback_bundle: impl FnOnce() -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>>,
 ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
+
     let sources = plan
         .selected_sources()
         .map_err(|error| vec![build_plan_diagnostic(&error)])?;
@@ -3918,19 +4207,59 @@ fn load_planned_runtime_bundle(
     // parsed bundle. Every fact read has to still be foldable, because the one
     // complete front-end pass after this reload is what folds the final
     // `@build.*` snapshot.
-    let mut bundle = if let Some(entry_source) = sources.first() {
-        let entry_path = resolve(entry_source.as_str());
-        load_planned_source(build_file, &entry_path, project_root, generated_sources)?
+    // A package build may list generated roots before its runtime source after
+    // materialization. Keep the canonical `fn run` source as the bundle entry;
+    // every other selected root is promoted below.
+    let (entry_index, mut bundle) = if sources.is_empty() {
+        (0, fallback_bundle()?)
     } else {
-        fallback_bundle()?
+        let first = load_planned_source(
+            build_file,
+            &resolve(sources[0].as_str()),
+            project_root,
+            generated,
+            generated_sources,
+            source_closure,
+        )?;
+        let has_run = |bundle: &crate::AST::ProgramBundle| {
+            bundle
+                .modules
+                .get(bundle.entry)
+                .is_some_and(|module| {
+                    module.items.iter().any(|item| {
+                        matches!(item, crate::AST::Item::Func(function) if function.name == "run")
+                    })
+                })
+        };
+        if has_run(&first) {
+            (0, first)
+        } else {
+            let mut selected = (0, first);
+            for (index, entry_source) in sources.iter().enumerate().skip(1) {
+                let candidate = load_planned_source(
+                    build_file,
+                    &resolve(entry_source.as_str()),
+                    project_root,
+                    generated,
+                    generated_sources,
+                    source_closure,
+                )?;
+                if has_run(&candidate) {
+                    selected = (index, candidate);
+                    break;
+                }
+            }
+            selected
+        }
     };
 
     // Additional selected roots and generated modules merge before the one
     // complete sema pass, so runtime code can call generated declarations.
     let mut additions = sources
         .iter()
-        .skip(1)
-        .map(|path| ("selected source", resolve(path.as_str())))
+        .enumerate()
+        .filter(|(index, _)| *index != entry_index)
+        .map(|(_, path)| ("selected source", resolve(path.as_str())))
         .chain(
             generated
                 .iter()
@@ -3950,7 +4279,14 @@ fn load_planned_runtime_bundle(
         .collect::<std::collections::BTreeSet<_>>();
     let mut loaded_by_path = std::collections::BTreeMap::new();
     for (generator, path) in additions {
-        let loaded = load_planned_source(build_file, &path, project_root, generated_sources)
+        let loaded = load_planned_source(
+            build_file,
+            &path,
+            project_root,
+            generated,
+            generated_sources,
+            source_closure,
+        )
         .map_err(|mut diagnostics| {
             for diagnostic in &mut diagnostics {
                 diagnostic.what = format!("generated by `{generator}`: {}", diagnostic.what);
@@ -4118,7 +4454,7 @@ fn check_action_generated_sources(
             })?;
             let mut generated_bundle = crate::Loader::load_entry_with_overlay(
                 path.to_str().unwrap_or(output.as_str()),
-                None,
+                Some((&path, &source)),
                 false,
             )
             .map_err(|mut diags| {
@@ -4143,6 +4479,7 @@ fn check_action_generated_sources(
                 name: action.name.clone(),
                 path,
                 digest: crate::Comptime::Build::ContentDigest::from_bytes(source.as_bytes()),
+                source,
             });
         }
     }
@@ -4400,7 +4737,7 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
     let parent = absolute.parent().unwrap_or(std::path::Path::new("."));
     let workspace_root = crate::Loader::find_workspace_root_checked(parent)
         .map_err(|diagnostic| vec![diagnostic])?;
-    let package_root = crate::Loader::find_manifest_root_checked(parent)
+    let package_root = crate::Loader::find_package_root_checked(parent)
         .map_err(|diagnostic| vec![diagnostic])?
         .filter(|root| {
             workspace_root
@@ -4408,42 +4745,10 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
                 .is_none_or(|workspace| crate::Loader::is_physically_within(workspace, root))
         });
     if let Some(root) = package_root {
-        let resolver = AuthorityResolver::open(&root).map_err(|error| vec![error.diagnostic()])?;
-        let checked = resolver
-            .checked_manifest(std::path::Path::new("."))
-            .map_err(|error| vec![error.diagnostic()])?;
-        let source = checked
-            .file
-            .text()
-            .map_err(|error| vec![error.diagnostic()])?;
-        resolver
-            .revalidate_file(&checked.file)
-            .map_err(|error| vec![error.diagnostic()])?;
-        let manifest = crate::Package::PackageFacts::parse_uncomposed(
-            &source,
-            checked.file.path.display().to_string(),
-        )
-        .map_err(|error| {
-            vec![match &error {
-                crate::Package::PackageParseError::Composition(detail)
-                    if detail.contains("is a diagnostic code") =>
-                {
-                    crate::Manifest::manifest_parse_diagnostic(&checked.file.path, &error)
-                }
-                _ => Diagnostic::error(
-                    "E1206",
-                    "invalid package manifest".to_string(),
-                    error.to_string(),
-                    "fix the fields in package.jet before loading the project".to_string(),
-                    None,
-                ),
-            }]
-        })?;
-        resolver
-            .revalidate_file(&checked.file)
-            .map_err(|error| vec![error.diagnostic()])?;
-        if !manifest.name.is_empty() {
-            return Ok(manifest.name);
+        if let Some(package) = crate::Loader::package_facts_for_root(&root)? {
+            if !package.name.is_empty() {
+                return Ok(package.name);
+            }
         }
     }
     if workspace_root.is_some() {
@@ -4463,13 +4768,11 @@ fn package_build_entry_source(
 ) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
     let resolver =
         AuthorityResolver::open(project_root).map_err(|error| vec![error.diagnostic()])?;
-    let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
-        Ok(checked) => checked,
-        Err(error) if error.is_missing() => return Ok(None),
-        Err(error) => return Err(vec![error.diagnostic()]),
+    let package = match crate::Loader::package_facts_for_root(project_root)? {
+        Some(package) => package,
+        None => return Ok(None),
     };
-    let entry = checked
-        .facts
+    let entry = package
         .resolve_build_entry_checked(&resolver)
         .map_err(|error| vec![build_entry_resolution_diagnostic(&error)])?;
     let Some(entry) = entry else {
@@ -4551,7 +4854,8 @@ pub fn selects_build_entry(source: &str, project_root: Option<&std::path::Path>)
 /// shape from an ordinary function that happens to be named `build`. `None`
 /// preserves routing to the build pipeline for parser diagnostics.
 fn source_has_build_entry(source: &str) -> Option<bool> {
-    let (tokens, lex_diags) = crate::Lexer::lex(source);
+    let source = crate::Package::mask_inline_package_source(source).ok()?.0;
+    let (tokens, lex_diags) = crate::Lexer::lex(&source);
     if !lex_diags.is_empty() {
         return None;
     }
@@ -4570,14 +4874,18 @@ fn load_build_entry_bundle(
     file: &str,
     overlay: Option<(&std::path::Path, &str)>,
     direct_package_overlay: Option<&(std::path::PathBuf, String)>,
+    source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
-    match (overlay, direct_package_overlay) {
-        (Some(overlay), _) => crate::Loader::load_entry_with_overlay(file, Some(overlay), false),
-        (None, Some((path, source))) => {
-            crate::Loader::load_entry_with_overlay(file, Some((path, source)), false)
-        }
-        (None, None) => crate::Loader::load_entry_with_overlay(file, None, false),
+    let mut overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    if let Some(overlay) = overlay {
+        overlays.push(overlay);
+    } else if let Some((path, source)) = direct_package_overlay {
+        overlays.push((path.as_path(), source.as_str()));
     }
+    crate::Loader::load_entry_with_overlays(file, &overlays, false)
 }
 
 fn package_manifest_build_overlay(
@@ -5016,7 +5324,7 @@ fn materialize_and_check_generated(
                 .map_err(|error| vec![generated_io_diag(&module.name, &error)])?;
             let mut generated_bundle = crate::Loader::load_entry_with_overlay(
                 path.to_str().unwrap_or(module.path.as_str()),
-                None,
+                Some((&path, &module.source)),
                 false,
             )
             .map_err(|mut diags| {
@@ -5041,6 +5349,7 @@ fn materialize_and_check_generated(
                 name: module.name.clone(),
                 path,
                 digest: module.source_digest.clone(),
+                source: module.source.clone(),
             });
         }
     }
@@ -5368,7 +5677,7 @@ fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError
 fn compile_bundle_path_opts_full(
     file: &str,
     mode: crate::Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
@@ -5385,7 +5694,7 @@ fn compile_bundle_path_opts_full(
         compile_bundle_path_opts_on_compiler_stack(
             file,
             mode,
-            freestanding,
+            no_os,
             gates,
             web_target,
             plugin_target,
@@ -5397,14 +5706,16 @@ fn compile_bundle_path_opts_full(
             setting_overrides,
             locked,
             entry_fn,
+            None,
+            None,
+            None,
         )
     })
 }
-
-fn compile_bundle_path_opts_on_compiler_stack(
+fn compile_bundle_path_opts_full_with_target_dossier(
     file: &str,
     mode: crate::Sema::CompileMode,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
     web_target: bool,
     plugin_target: bool,
@@ -5416,6 +5727,138 @@ fn compile_bundle_path_opts_on_compiler_stack(
     setting_overrides: &BTreeMap<String, String>,
     locked: bool,
     entry_fn: Option<&str>,
+    target_dossier: jet_foundation::Facts::TargetDossier,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_bundle_path_opts_on_compiler_stack(
+            file,
+            mode,
+            no_os,
+            gates,
+            web_target,
+            plugin_target,
+            library_target,
+            debug_linemap,
+            cross_target,
+            explicit_output,
+            profile,
+            setting_overrides,
+            locked,
+            entry_fn,
+            None,
+            Some(target_dossier),
+            Some(source_closure),
+        )
+    })
+}
+
+/// Compile a path-shaped entry from an authority-selected source snapshot.
+/// The loader consumes `source` as an entry overlay and never reopens
+/// `file`; imported modules still resolve from the virtual entry's parent.
+pub fn compile_bundle_path_opts_with_overlay(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    no_os: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    library_target: bool,
+    debug_linemap: bool,
+    cross_target: Option<&str>,
+    explicit_output: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    locked: bool,
+    entry_fn: Option<&str>,
+    source_path: &std::path::Path,
+    source: &str,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_bundle_path_opts_on_compiler_stack(
+            file,
+            mode,
+            no_os,
+            gates,
+            web_target,
+            plugin_target,
+            library_target,
+            debug_linemap,
+            cross_target,
+            explicit_output,
+            profile,
+            setting_overrides,
+            locked,
+            entry_fn,
+            Some((source_path, source)),
+            None,
+            None,
+        )
+    })
+}
+/// Compile every module from one immutable authority-selected source closure.
+///
+/// The loader resolves the entry and all imports from `source_closure`; no
+/// checked source path is reopened during this compile.
+pub fn compile_bundle_path_opts_with_source_closure(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    no_os: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    library_target: bool,
+    debug_linemap: bool,
+    cross_target: Option<&str>,
+    explicit_output: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    locked: bool,
+    entry_fn: Option<&str>,
+    source_closure: &[(std::path::PathBuf, String)],
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_bundle_path_opts_on_compiler_stack(
+            file,
+            mode,
+            no_os,
+            gates,
+            web_target,
+            plugin_target,
+            library_target,
+            debug_linemap,
+            cross_target,
+            explicit_output,
+            profile,
+            setting_overrides,
+            locked,
+            entry_fn,
+            None,
+            None,
+            Some(source_closure),
+        )
+    })
+}
+
+
+fn compile_bundle_path_opts_on_compiler_stack(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    no_os: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    library_target: bool,
+    debug_linemap: bool,
+    cross_target: Option<&str>,
+    explicit_output: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    locked: bool,
+    entry_fn: Option<&str>,
+    overlay: Option<(&std::path::Path, &str)>,
+    target_dossier: Option<jet_foundation::Facts::TargetDossier>,
+    source_closure: Option<&[(std::path::PathBuf, String)]>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     // D-OSTARGET1=A: resolve the active native OS bucket once, from the same
     // `--target=<triple>` flag E2-M15 already threads through (host OS when
@@ -5426,13 +5869,26 @@ fn compile_bundle_path_opts_on_compiler_stack(
     if locked {
         crate::Loader::verify_locked_dependency_sources(file)?;
     }
-    let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    let mut overlays = source_closure
+        .unwrap_or(&[])
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    if let Some((path, source)) = overlay {
+        overlays.push((path, source));
+    }
+    let mut bundle =
+        crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
     // D-OSTARGET2=B: the `@if @build.os == { … }` desugar (run in sema)
     // must fold to the same OS bucket codegen filters `impl`s by, so seed the
     // bundle from the same resolved `active_os` as `emit_bundle`.
     bundle.active_os = active_os;
     set_bundle_target(&mut bundle, cross_target);
     seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
+    let has_target_dossier = target_dossier.is_some();
+    if let Some(dossier) = target_dossier {
+        bundle.build_facts.target_dossier = dossier;
+    }
     if let Some(entry_fn) = entry_fn {
         swap_entry_point(&mut bundle, entry_fn);
     }
@@ -5453,14 +5909,14 @@ fn compile_bundle_path_opts_on_compiler_stack(
                 &mut bundle,
                 mode,
                 output,
-                freestanding,
+                no_os,
                 gates,
             ),
             None,
         )
-    } else if freestanding {
+    } else if no_os {
         (
-            crate::Sema::check_bundle_freestanding(&mut bundle, mode),
+            crate::Sema::check_bundle_no_os(&mut bundle, mode),
             None,
         )
     } else if !gates.is_empty() {
@@ -5472,6 +5928,28 @@ fn compile_bundle_path_opts_on_compiler_stack(
         let (diags, facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
         (diags, Some(facts))
     };
+    // A web build without an explicitly selected machine still has a real
+    // browser boundary. Fold the built-in browser provider facts after sema
+    // has discovered the complete Core closure, so the web artifact manifest
+    // and every downstream identity describe the same closure.
+    if web_target && !has_target_dossier {
+        let machine = crate::TargetMachine::TargetMachine::wasm_browser();
+        bundle.build_facts.target_triple = machine.triple.clone();
+        let usage =
+            crate::TargetMachine::TargetMachineUse::from_core_apis(bundle.used_core.iter());
+        let compiler_identity = format!(
+            "{}@{}#{}",
+            crate::Syntax::BINARY_NAME,
+            env!("CARGO_PKG_VERSION"),
+            option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
+        );
+        bundle.build_facts.target_dossier = machine.target_dossier(
+            &usage,
+            crate::TargetMachine::ExecutionTier::Aot,
+            compiler_identity,
+            "none",
+        );
+    }
     if timing {
         timer.lap("sema");
     }
@@ -5683,10 +6161,17 @@ fn compile_src_on_compiler_stack(
     generated: bool,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     crate::boot_tir_eval();
-    let (toks, lex_diags) = if generated {
-        crate::Lexer::lex_generated(src)
+    let source_for_parse = if generated {
+        src.to_string()
     } else {
-        crate::Lexer::lex(src)
+        crate::Package::mask_inline_package_source(src)
+            .map(|(masked, _)| masked)
+            .map_err(|error| vec![error.diagnostic()])?
+    };
+    let (toks, lex_diags) = if generated {
+        crate::Lexer::lex_generated(&source_for_parse)
+    } else {
+        crate::Lexer::lex(&source_for_parse)
     };
     if !lex_diags.is_empty() {
         return Err(lex_diags);
@@ -5755,6 +6240,24 @@ fn compile_src_on_compiler_stack(
     }
     if !errors.is_empty() {
         return Err(errors);
+    }
+    if options.web_target {
+        let machine = crate::TargetMachine::TargetMachine::wasm_browser();
+        bundle.build_facts.target_triple = machine.triple.clone();
+        let usage =
+            crate::TargetMachine::TargetMachineUse::from_core_apis(bundle.used_core.iter());
+        let compiler_identity = format!(
+            "{}@{}#{}",
+            crate::Syntax::BINARY_NAME,
+            env!("CARGO_PKG_VERSION"),
+            option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
+        );
+        bundle.build_facts.target_dossier = machine.target_dossier(
+            &usage,
+            crate::TargetMachine::ExecutionTier::Aot,
+            compiler_identity,
+            "none",
+        );
     }
     let ffi = match crate::FFI::prepare(&bundle) {
         Ok(link) => link,
@@ -5849,18 +6352,13 @@ pub fn check_file_with_effect_facts_and_settings(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
-    let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+    check_file_with_effect_facts_profile_and_settings(
         file,
-        &overlays,
+        overlay,
         is_lsp,
-        None,
-        None,
         "dev",
         setting_overrides,
-        None,
-    );
-    (diagnostics, bundle, facts)
+    )
 }
 
 /// Like `check_file_with_effect_facts`, with an explicitly selected build
@@ -5875,6 +6373,26 @@ pub fn check_file_with_effect_facts_profile(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
+    check_file_with_effect_facts_profile_and_settings(
+        file,
+        overlay,
+        is_lsp,
+        profile,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn check_file_with_effect_facts_profile_and_settings(
+    file: &str,
+    overlay: Option<(&Path, &str)>,
+    is_lsp: bool,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
         file,
@@ -5883,12 +6401,38 @@ pub fn check_file_with_effect_facts_profile(
         None,
         None,
         profile,
-        &BTreeMap::new(),
+        setting_overrides,
         None,
     );
     (diagnostics, bundle, facts)
 }
 
+pub fn check_file_with_effect_facts_profile_and_settings_with_source_closure(
+    file: &str,
+    source_closure: &[(std::path::PathBuf, String)],
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    let overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+        file,
+        &overlays,
+        false,
+        None,
+        None,
+        profile,
+        setting_overrides,
+        None,
+    );
+    (diagnostics, bundle, facts)
+}
 /// Like `check_file_with_effect_facts_profile`, but retain Run-mode Output
 /// selection facts for read-only tooling that explains the selected Output.
 pub fn check_file_with_effect_facts_for_run(
@@ -5917,6 +6461,133 @@ pub fn check_file_with_effect_facts_for_run_and_entry(
         check_file_with_effect_facts_impl_for_run(file, profile, setting_overrides, entry_fn);
     (diagnostics, bundle, facts)
 }
+/// Run-mode effect check for an entry whose source is supplied by an in-memory
+/// overlay. The overlay is authoritative for the entry while ordinary imports
+/// still resolve through the loader's normal authority checks.
+pub fn check_file_with_effect_facts_for_run_and_entry_with_overlay(
+    file: &str,
+    overlay: Option<(&Path, &str)>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    entry_fn: Option<&str>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    let overlays = overlay.into_iter().collect::<Vec<_>>();
+    let (diagnostics, bundle, facts, _) =
+        check_file_with_effect_facts_impl_for_run_with_overlays(
+            file,
+            &overlays,
+            profile,
+            setting_overrides,
+            entry_fn,
+        );
+    (diagnostics, bundle, facts)
+}
+
+pub fn check_file_with_effect_facts_for_run_and_entry_with_source_closure(
+    file: &str,
+    source_closure: &[(std::path::PathBuf, String)],
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    entry_fn: Option<&str>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    let overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    let (diagnostics, bundle, facts, _) =
+        check_file_with_effect_facts_impl_for_run_with_overlays(
+            file,
+            &overlays,
+            profile,
+            setting_overrides,
+            entry_fn,
+        );
+    (diagnostics, bundle, facts)
+}
+
+/// Resolve and snapshot every module in one entry closure.
+///
+/// Later compiler stages consume these bytes as overlays instead of reopening
+/// source paths selected by the authority check.
+pub fn load_immutable_source_closure(
+    file: &str,
+    overlays: &[(&Path, &str)],
+) -> Result<Vec<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        crate::Loader::load_entry_with_overlays(file, overlays, false)
+            .map(|bundle| bundle_source_closure(&bundle))
+    })
+}
+/// Immutable checked source closure used by authority-sensitive consumers.
+///
+/// Every module source comes from the bundle that produced the semantic facts.
+/// Consumers must pass this value onward instead of reopening module paths.
+pub struct CheckedSourceBundle {
+    pub bundle: crate::AST::ProgramBundle,
+    pub effect_facts: crate::Sema::SemIndexEffectFacts,
+    pub project_root: std::path::PathBuf,
+    pub source_closure: Vec<(std::path::PathBuf, String)>,
+}
+
+impl CheckedSourceBundle {
+    pub fn new(
+        bundle: crate::AST::ProgramBundle,
+        effect_facts: crate::Sema::SemIndexEffectFacts,
+    ) -> Self {
+        let project_root = bundle.project_root.clone();
+        let mut source_closure = bundle
+            .modules
+            .iter()
+            .map(|module| (module.path.clone(), module.source.clone()))
+            .collect::<Vec<_>>();
+        source_closure.sort_by(|left, right| left.0.cmp(&right.0));
+        source_closure.dedup_by(|left, right| left.0 == right.0);
+        Self {
+            bundle,
+            effect_facts,
+            project_root,
+            source_closure,
+        }
+    }
+
+    pub fn overlays(&self) -> Vec<(&std::path::Path, &str)> {
+        self.source_closure
+            .iter()
+            .map(|(path, source)| (path.as_path(), source.as_str()))
+            .collect()
+    }
+}
+
+/// Run-mode check that returns the complete immutable source closure together
+/// with the semantic effect facts used to check it.
+pub fn check_file_with_checked_source_bundle_for_run_and_entry(
+    file: &str,
+    overlays: &[(&Path, &str)],
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    entry_fn: Option<&str>,
+) -> (Vec<Diagnostic>, Option<CheckedSourceBundle>) {
+    let (diagnostics, bundle, facts, _) =
+        check_file_with_effect_facts_impl_for_run_with_overlays(
+            file,
+            overlays,
+            profile,
+            setting_overrides,
+            entry_fn,
+        );
+    let checked = bundle.map(|bundle| CheckedSourceBundle::new(bundle, facts));
+    (diagnostics, checked)
+}
+
+
 
 pub fn check_file_with_effect_facts_for_output(
     file: &str,
@@ -5940,6 +6611,63 @@ pub fn check_file_with_effect_facts_for_output(
     );
     (diagnostics, bundle, facts)
 }
+/// Output-selection effect check from an entry source overlay.
+///
+/// The overlay pair is `(canonical_path, text)`, and is used for the entry
+/// instead of reopening the mutable path after the caller has checked it.
+pub fn check_file_with_effect_facts_for_output_with_overlay(
+    file: &str,
+    output: &str,
+    overlay: Option<(&Path, &str)>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    let overlays = overlay.into_iter().collect::<Vec<_>>();
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+        file,
+        &overlays,
+        false,
+        None,
+        None,
+        profile,
+        setting_overrides,
+        Some(output),
+    );
+    (diagnostics, bundle, facts)
+}
+
+pub fn check_file_with_effect_facts_for_output_with_source_closure(
+    file: &str,
+    output: &str,
+    source_closure: &[(std::path::PathBuf, String)],
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    let overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+        file,
+        &overlays,
+        false,
+        None,
+        None,
+        profile,
+        setting_overrides,
+        Some(output),
+    );
+    (diagnostics, bundle, facts)
+}
+
 
 pub fn check_file_with_effect_facts_incremental(
     file: &str,
@@ -6053,10 +6781,31 @@ fn check_file_with_effect_facts_impl_for_run(
     crate::Sema::SemIndexEffectFacts,
     Vec<std::path::PathBuf>,
 ) {
+    check_file_with_effect_facts_impl_for_run_with_overlays(
+        file,
+        &[],
+        profile,
+        setting_overrides,
+        entry_fn,
+    )
+}
+
+fn check_file_with_effect_facts_impl_for_run_with_overlays(
+    file: &str,
+    overlays: &[(&Path, &str)],
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    entry_fn: Option<&str>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+    Vec<std::path::PathBuf>,
+) {
     crate::run_compiler_work(|| {
         check_file_on_compiler_stack_with_entry(
             file,
-            &[],
+            overlays,
             false,
             None,
             None,
@@ -6305,7 +7054,17 @@ fn check_eval_on_compiler_stack(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
-    let (toks, lex_diags) = crate::Lexer::lex(src);
+    let source_for_parse = match crate::Package::mask_inline_package_source(src) {
+        Ok((masked, _)) => masked,
+        Err(error) => {
+            return (
+                vec![error.diagnostic()],
+                None,
+                crate::Sema::SemIndexEffectFacts::default(),
+            );
+        }
+    };
+    let (toks, lex_diags) = crate::Lexer::lex(&source_for_parse);
     if !lex_diags.is_empty() {
         return (lex_diags, None, crate::Sema::SemIndexEffectFacts::default());
     }
@@ -6401,7 +7160,7 @@ fn compile_tests_on_compiler_stack(
     profile: &str,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    apply_profile_guarantees(&mut bundle, profile);
+    seed_build_facts(&mut bundle, profile, false, &BTreeMap::new())?;
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = classify_diagnostics(
@@ -6495,7 +7254,7 @@ fn compile_fuzz_on_compiler_stack(
 /// The selected function keeps its source name so callers (D-JPK-TASKRUN1
 /// plain-call job deps) still resolve. The same entry-swap seam serves
 /// `jet dev` and dev-tier job argv.
-/// Native only — never freestanding/impure/web (those toggles don't apply to
+/// Native only — never no-OS/impure/web (those toggles don't apply to
 /// the `fn dev()` entry path; a `dev()` function's job is to configure and run
 /// an ordinary value like `core.web.devserver`, nothing more).
 pub fn compile_bundle_path_with_entry(
@@ -6757,7 +7516,7 @@ fn compile_command_override_on_compiler_stack(
     profile: &str,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    apply_profile_guarantees(&mut bundle, profile);
+    seed_build_facts(&mut bundle, profile, false, &BTreeMap::new())?;
     swap_command_entry_point(&mut bundle, kind);
     let mode = match kind {
         crate::Codegen::CommandOverrideKind::Test => crate::Sema::CompileMode::TestOverride,

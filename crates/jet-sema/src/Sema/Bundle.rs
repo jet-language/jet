@@ -19,6 +19,7 @@ mod InlineCalls;
 mod Liveness;
 mod Outputs;
 mod Pipeline;
+mod TargetMachine;
 mod Validation;
 
 pub use Comptime::bundle_has_comptime_evaluation;
@@ -44,6 +45,7 @@ pub(crate) use Validation::{
     collect_core_stmts, collect_used_core, expand_core_reachable_closure, fn_types_compatible,
     func_sig_to_fn_type, register_func_item,
 };
+pub use TargetMachine::{check_target_machine, target_machine_use};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct IncrementalSemaStats {
@@ -2239,22 +2241,22 @@ pub fn check_bundle_for_output_opts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     output: &str,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
 ) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, freestanding, gates, Some(output), None).0
+    pipeline_check_bundle_opts_for_output(bundle, mode, no_os, gates, Some(output), None).0
 }
 pub fn check_bundle_for_output_opts_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     output: &str,
-    freestanding: bool,
+    no_os: bool,
     gates: crate::Policy::GateSet,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
-        freestanding,
+        no_os,
         gates,
         Some(output),
         None,
@@ -2389,7 +2391,7 @@ pub fn check_bundle_with_effect_facts_incremental(
 }
 
 /// Like `check_bundle` but with extra build options (E2-M15).
-pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
+pub fn check_bundle_no_os(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2401,7 +2403,7 @@ pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) 
     .0
 }
 
-pub fn check_bundle_freestanding_with_gates(
+pub fn check_bundle_no_os_with_gates(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     gates: crate::Policy::GateSet,

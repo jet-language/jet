@@ -33,6 +33,18 @@ pub const ROOT_PATH: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ripgrep
 pub const LIB_PATH: &str = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-ripgrep-lib-1.0";
 pub const RUNTIME_PATH: &str = "/nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0";
 pub const DRV_PATH: &str = "/nix/store/dddddddddddddddddddddddddddddddd-ripgrep-15.2.0.drv";
+fn valid_fixture_times() -> (u64, u64, u64) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("test clock is before Unix epoch")
+        .as_secs();
+    (
+        now.saturating_sub(60),
+        now.saturating_sub(60),
+        now.saturating_add(365 * 24 * 60 * 60),
+    )
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ObjectKind {
@@ -103,6 +115,7 @@ impl NixIndexCacheServer {
         let address = listener.local_addr().expect("Nix test server address");
         let endpoint = format!("http://127.0.0.1:{}", address.port());
         let index_endpoint = format!("{endpoint}/index");
+        let (released_unix, issued_unix, expires_unix) = valid_fixture_times();
         let signed_index = test_nix_index::signed(
             SIGNING_SEED,
             INDEX_KEY_ID,
@@ -110,10 +123,10 @@ impl NixIndexCacheServer {
             CHANNEL,
             REVISION,
             SYSTEM,
-            1_000_000_000_000,
+            released_unix,
             1,
-            1_000_000_000_000,
-            4_000_000_000_000,
+            issued_unix,
+            expires_unix,
             Vec::new(),
             vec![(vec!["postgres".to_string()], "missing-narinfo".to_string())],
         )
@@ -345,6 +358,7 @@ fn ripgrep_fixture(
     index_endpoint: &str,
     scratch: &Path,
 ) -> (TestSignedIndex, BTreeMap<String, Vec<u8>>, &'static str, Vec<String>) {
+    let (released_unix, issued_unix, expires_unix) = valid_fixture_times();
     let signed_index = test_nix_index::signed(
         SIGNING_SEED,
         INDEX_KEY_ID,
@@ -352,12 +366,10 @@ fn ripgrep_fixture(
         CHANNEL,
         REVISION,
         SYSTEM,
-        // Keep the decoded canonical JSON length aligned to a full xxh64
-        // lane. This value remains an otherwise inert publication timestamp.
-        100_000_000_000,
+        released_unix,
         1,
-        100_000_000_000,
-        400_000_000_000,
+        issued_unix,
+        expires_unix,
         vec![TestIndexRecord {
             attrpath: vec!["ripgrep".to_string()],
             version: "15.2.0".to_string(),

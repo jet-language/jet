@@ -1637,6 +1637,31 @@ pub fn jet_runtime_drain_atexit<T>(handlers: &mut Vec<T>, mut invoke: impl FnMut
 /// D-REPORT-RUNTIME1=A: the dependency-free runtime projection of one
 /// registered diagnostic. AOT, JIT, and the interpreter marshal into this
 /// value; none of those engines owns report text or exit policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetRuntimeObligationStatus {
+    Failed,
+}
+
+impl JetRuntimeObligationStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "false",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetRuntimeObligation {
+    pub name: String,
+    pub status: JetRuntimeObligationStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetRuntimeForeignEdge {
+    pub component: String,
+    pub fenced: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JetRuntimeDiagnostic {
     pub code: &'static str,
@@ -1646,6 +1671,8 @@ pub struct JetRuntimeDiagnostic {
     pub fix: String,
     pub rendered: String,
     pub exit_code: i32,
+    pub obligation: Option<JetRuntimeObligation>,
+    pub foreign: Option<JetRuntimeForeignEdge>,
 }
 
 /// One active runtime row projected into a standalone Prelude. The host
@@ -2027,6 +2054,8 @@ pub fn jet_render_runtime_stop_from_row(
                 jet_diagnostic_more_line(code)
             ),
             exit_code: 101,
+            obligation: None,
+            foreign: None,
         };
     };
 
@@ -2099,6 +2128,8 @@ pub fn jet_render_runtime_stop_from_row(
         fix,
         rendered,
         exit_code: 70,
+        obligation: None,
+        foreign: None,
     }
 }
 
@@ -2129,10 +2160,11 @@ pub fn jet_render_runtime_stop(
 }
 // JET_HOST_RUNTIME_STOP_END
 
-/// D-MEM-SENTRY1: shared wording for a runtime memory witness. The source
-/// location and gate facts come from the engine; report copy and exit policy
-/// stay in the Foundation Prelude for AOT, JIT, and TIR.
-pub fn jet_render_runtime_sentry(
+/// D-MEM-SENTRY1: render one memory witness through the registered R0801
+/// series. The source location and sentry facts come from the engine; the
+/// diagnostic row owns What, Why, and Fix text for every execution tier.
+pub fn jet_render_runtime_sentry_from_row(
+    row: Option<JetRuntimeDiagnosticRow>,
     code: &'static str,
     file: &str,
     line: u32,
@@ -2140,46 +2172,86 @@ pub fn jet_render_runtime_sentry(
     operation: &str,
     obligation: &str,
     detail: &str,
+    obligation_status: &str,
+    foreign_component: Option<&str>,
+    foreign_fenced: Option<bool>,
 ) -> JetRuntimeDiagnostic {
-    // Keep the diagnostic wording intact without putting the Rust keyword in
-    // the generated source. I1 scans generated tokens, not runtime prose.
-    let gate = if gate.is_empty() {
-        concat!("this un", "safe gate")
-    } else {
-        gate
+    let obligation_report = Some(JetRuntimeObligation {
+        name: obligation.to_string(),
+        status: JetRuntimeObligationStatus::Failed,
+    });
+    let foreign_report = foreign_component
+        .filter(|component| !component.is_empty())
+        .map(|component| JetRuntimeForeignEdge {
+            component: component.to_string(),
+            fenced: foreign_fenced.unwrap_or(false),
+        });
+    let Some(row) = row else {
+        let what = format!("runtime diagnostic `{code}` is not an active runtime row");
+        let why = "Jet could not resolve this sentry through the active diagnostic registry";
+        let fix = "report this as a Jet compiler or host defect";
+        let mut rendered = format!("Internal error: {what}\n Why: {why}\n Fix: {fix}\n");
+        rendered.push_str(&format!(
+            "obligation: {obligation} = {obligation_status}\n"
+        ));
+        if let Some(foreign) = foreign_report.as_ref() {
+            rendered.push_str(&format!(
+                "foreign: {} = {}\n",
+                foreign.component,
+                if foreign.fenced { "fenced" } else { "unfenced" }
+            ));
+        }
+        rendered.push_str(&jet_diagnostic_more_line(code));
+        rendered.push('\n');
+        return JetRuntimeDiagnostic {
+            code,
+            source: "host",
+            what: what.clone(),
+            why: why.to_string(),
+            fix: fix.to_string(),
+            rendered,
+            exit_code: 101,
+            obligation: obligation_report,
+            foreign: foreign_report,
+        };
     };
-    let (what, why, fix) = match code {
-        "R0801" => (
-            format!("Raw {operation} outside `{gate}`'s storage"),
-            format!("The pointer is outside allocation provenance tracked for `{gate}` ({detail})"),
-            format!("Bound the raw {operation} before it reaches storage — obligation `{obligation}` was not met on this run"),
-        ),
-        "R0802" => (
-            format!("Use of storage after its lifetime ended in `{gate}`"),
-            format!("The storage was released or its owning Jet frame expired before this {operation} ({detail})"),
-            format!("Do not use the pointer after release or frame exit — obligation `{obligation}` was not met on this run"),
-        ),
-        "R0803" => (
-            format!("Misaligned raw {operation} in `{gate}`"),
-            format!("The pointer alignment does not satisfy the allocation provenance ({detail})"),
-            format!("Align the raw {operation} before access — obligation `{obligation}` was not met on this run"),
-        ),
-        _ => (
-            format!("Raw {operation} violated `{gate}`'s sentry"),
-            detail.to_string(),
-            format!("Satisfy obligation `{obligation}` before the raw access"),
-        ),
-    };
+
+    let holes = row
+        .template_holes
+        .iter()
+        .map(|hole| {
+            let value = match *hole {
+                "operation" => operation,
+                "gate" => gate,
+                "obligation" => obligation,
+                "detail" | "msg" => detail,
+                _ => detail,
+            };
+            (*hole, value)
+        })
+        .collect::<Vec<_>>();
+    let (what, why, fix) = row.render(&holes);
     let what = jet_sentence_case_line(&what);
     let why = jet_sentence_case_line(&why);
     let fix = jet_sentence_case_line(&fix);
-    let mut rendered = format!("Runtime fault [{code}]: {what}\n");
+    let mut rendered = format!("{what}\n");
     if !file.is_empty() {
         rendered.push_str(&format!(
-            "  --> {file}:{line}, in #Unsafe gate {file}:{line}\n"
+            "  --> {file}:{line}, in #Unsafe gate {gate:?}\n"
         ));
     }
     rendered.push_str(&format!(" Why: {why}\n Fix: {fix}\n"));
+    rendered.push_str(&format!(
+        "obligation: {obligation} = {obligation_status}\n"
+    ));
+    if let Some(foreign) = foreign_report.as_ref() {
+        rendered.push_str(&format!(
+            "foreign: {} = {}\n",
+            foreign.component,
+            if foreign.fenced { "fenced" } else { "unfenced" }
+        ));
+    }
+    rendered.push_str("exit: 1\n");
     rendered.push_str(&jet_diagnostic_more_line(code));
     rendered.push('\n');
     JetRuntimeDiagnostic {
@@ -2190,5 +2262,68 @@ pub fn jet_render_runtime_sentry(
         fix,
         rendered,
         exit_code: 70,
+        obligation: obligation_report,
+        foreign: foreign_report,
     }
 }
+
+// JET_HOST_RUNTIME_SENTRY_BEGIN
+/// Foundation-side adapter. Embedded Preludes strip this wrapper and append a
+/// generated lookup over the active Registry rows.
+pub fn jet_render_runtime_sentry(
+    code: &'static str,
+    file: &str,
+    line: u32,
+    gate: &str,
+    operation: &str,
+    obligation: &str,
+    detail: &str,
+) -> JetRuntimeDiagnostic {
+    jet_render_runtime_sentry_with_context(
+        code,
+        file,
+        line,
+        gate,
+        operation,
+        obligation,
+        detail,
+        "false",
+        None,
+        None,
+    )
+}
+
+pub fn jet_render_runtime_sentry_with_context(
+    code: &'static str,
+    file: &str,
+    line: u32,
+    gate: &str,
+    operation: &str,
+    obligation: &str,
+    detail: &str,
+    obligation_status: &str,
+    foreign_component: Option<&str>,
+    foreign_fenced: Option<bool>,
+) -> JetRuntimeDiagnostic {
+    let row = crate::Registry::active_runtime_diagnostic(code).map(|row| JetRuntimeDiagnosticRow {
+        code: row.code,
+        what: row.what,
+        why: row.why,
+        fix: row.fix,
+        template_holes: row.template_holes,
+    });
+    jet_render_runtime_sentry_from_row(
+        row,
+        code,
+        file,
+        line,
+        gate,
+        operation,
+        obligation,
+        detail,
+        obligation_status,
+        foreign_component,
+        foreign_fenced,
+    )
+}
+// JET_HOST_RUNTIME_SENTRY_END

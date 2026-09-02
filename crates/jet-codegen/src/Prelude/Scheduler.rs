@@ -760,9 +760,11 @@ pub fn jet_scheduler_loop_pause_check() {
     }
 }
 
-/// Park at a yield point; honors pause/cancel on the running task.
 pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
-    jet_observe_task_update("blocked", wait_kind, jet_deadline_remaining_ms());
+    let observe_task = current_task_control().is_some();
+    if observe_task {
+        jet_observe_task_update("blocked", wait_kind, jet_deadline_remaining_ms());
+    }
     let ctrl = current_task_control();
     // D-CANCELMODEL1=C: inside a shielded region, cancel/deadline are deferred to
     // region exit — this wait point behaves as if the task were not cancelled, so
@@ -824,7 +826,9 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Optio
         }
         ctrl.wait_while_paused();
     }
-    jet_observe_task_update("running", "", jet_deadline_remaining_ms());
+    if observe_task {
+        jet_observe_task_update("running", "", jet_deadline_remaining_ms());
+    }
 }
 
 /// Shared bounded-task admission wait. The task-group Prelude owns the
@@ -948,7 +952,7 @@ fn timer_wheel() -> Arc<TimerWheel> {
                 notify: Condvar::new(),
             });
             let w = wheel.clone();
-            thread::spawn(move || w.run());
+            jet_scheduler_spawn_detached_timer(move || w.run());
             wheel
         })
         .clone()
@@ -3170,6 +3174,16 @@ pub fn jet_scheduler_try_select_int_channels_tagged(
         Some(JetSelectOutcome::After { arm }) => ((channels.len() + arm) as i64, None),
         Some(JetSelectOutcome::Closed) | None => (-1, None),
     }
+}
+
+/// Run an internal timer producer on a detached host thread. Timer producers
+/// are not user tasks: their channel send ends the producer when its receiver
+/// is gone, and the producer must not enter the observed Jet task tree.
+pub fn jet_scheduler_spawn_detached_timer<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    let _ = thread::spawn(f);
 }
 
 /// Submit `f` to the M:N pool and return a join handle. An empty label keeps

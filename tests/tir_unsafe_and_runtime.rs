@@ -374,7 +374,7 @@ fn run() {
 ";
     let expired_stack_source = "\
 use core.mem
-fn leak() Int {
+fn leak() Int -> {
     cell :: 1337
     return mem.address_of(cell)
 }
@@ -388,7 +388,7 @@ fn run() {
 ";
     let expired_recursive_source = "\
 use core.mem
-fn leak(depth: Int) Int {
+fn leak(depth: Int) Int -> {
     cell :: depth
     if depth == 0 {
         return mem.address_of(cell)
@@ -408,31 +408,31 @@ fn run() {
             "unsafe_sentries_provenance",
             include_str!("../examples/features/memory/unsafe_sentries_provenance.jet"),
             "R0801",
-            "outside allocation provenance",
+            "the pointer is outside the allocation provenance",
         ),
         (
             "unsafe_sentries_quarantine",
             include_str!("../examples/features/memory/unsafe_sentries.jet"),
             "R0802",
-            "quarantined storage",
+            "storage after its lifetime ended",
         ),
         (
             "unsafe_sentries_alignment",
             misaligned_source,
             "R0803",
-            "misaligned raw read",
+            "misaligned raw `read`",
         ),
         (
             "unsafe_sentries_expired_stack",
             expired_stack_source,
             "R0802",
-            "owning Jet frame has expired",
+            "owning Jet frame expired",
         ),
         (
             "unsafe_sentries_expired_recursive_stack",
             expired_recursive_source,
             "R0802",
-            "owning Jet frame has expired",
+            "owning Jet frame expired",
         ),
     ];
     let aot_available = have_rustc();

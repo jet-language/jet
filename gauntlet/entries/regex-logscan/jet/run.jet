@@ -6,14 +6,14 @@ struct Args {
 }
 
 fn run(args: Args) !IOError -> {
-    text :: files.read(args.input)
+    input :: files.open(~args.input)
     pattern :: Regex{"^([0-9.]+) - - \[[^]]+\] \"GET /api/[^ ]+ HTTP/1\.1\" 5[0-9][0-9] "}
     counts := [String:Int]{}
     matches := 0
 
-    loop line in text.lines() {
-        if regex.match(pattern, line) == .Val(mat) {
-            ip :: mat.group(1) ?? ""
+    loop line in input.lines() {
+        if pattern.is_match(line) {
+            ip := line.before(" ")
             counts[ip] = (counts.get(ip) ?? 0) + 1
             matches += 1
         }

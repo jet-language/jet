@@ -244,6 +244,8 @@ fn lock_roundtrip_layer_metadata() {
         name: "embed".into(),
         version: "0.1.0".into(),
         source: LockSource::Root,
+        nix_closure: None,
+
         locked: None,
         fingerprint: String::new(),
         content_hash: None,

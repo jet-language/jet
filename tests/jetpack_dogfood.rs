@@ -43,6 +43,13 @@ const EXPECTED_PACKAGES: &[&str] = &[
     "tree-sitter",
     "pkg-config",
 ];
+const BOOTSTRAP_LOCK: &str = r#"version = 1
+
+[[source_channel]]
+name = "default"
+channel = "nixos-unstable"
+exact = "github:NixOS/nixpkgs#e5bdc4a41d4c072fe1e3787eaa0320a384741d44"
+"#;
 
 struct Probe {
     package: &'static str,
@@ -179,7 +186,8 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let contract = assert_env_lock_contract(&repo);
     let lock_path = repo.join(".jet/lock");
-    let lock_before = fs::read(&lock_path).expect("read checked-in Jet lock");
+    fs::create_dir_all(lock_path.parent().expect("lock parent")).expect("create lock parent");
+    fs::write(&lock_path, BOOTSTRAP_LOCK).expect("seed source channel lock");
     let scratch = DogfoodScratch::new(&repo);
     env::set_var(DOGFOOD_ROOT_ENV, &scratch.root);
 
@@ -195,11 +203,17 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
     let mut receipts = BTreeMap::new();
     let mut physical = BTreeMap::new();
 
+    let mut lock_after_online = None;
     for (mode, network_mode) in modes {
         let mode = mode.to_owned();
         env::set_var(DOGFOOD_MODE_ENV, &mode);
         no_nix_namespace::run_in_no_nix_namespace(test_name, network_mode, || {});
         assert!(!scratch.root.join("fixtures").exists());
+        if mode == "online" {
+            lock_after_online = Some(
+                fs::read(repo.join(".jet/lock")).expect("online run must publish portable lock"),
+            );
+        }
 
         let summary = read_phase_summary(&scratch, &mode);
         let roots = Store::Roots::at(scratch.root.clone());
@@ -234,7 +248,26 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
     assert_eq!(online.du, offline.du);
     assert_eq!(receipts.get("online"), receipts.get("offline"));
     assert_eq!(physical.get("online"), physical.get("offline"));
-    assert_eq!(lock_before, fs::read(lock_path).expect("re-read Jet lock"));
+    let lock_bytes = fs::read(repo.join(".jet/lock")).expect("re-read Jet lock");
+    assert_eq!(
+        lock_after_online.as_deref(),
+        Some(lock_bytes.as_slice()),
+        "offline replay must preserve the online portable lock"
+    );
+    let lock = Lock::parse(std::str::from_utf8(&lock_bytes).expect("lock is UTF-8"))
+        .expect("online run must publish a parseable portable lock");
+    assert_eq!(lock.packages.len(), contract.all_packages.len());
+    for package in &lock.packages {
+        if let LockSource::Nix { output, .. } = &package.source {
+            assert!(!output.starts_with('/'), "lock contains a machine path: {output}");
+            assert!(
+                package.nix_closure.is_some(),
+                "Nix package lacks its portable closure: {}",
+                package.name
+            );
+        }
+    }
+    fs::remove_file(repo.join(".jet/lock")).expect("remove generated dogfood lock");
 }
 
 #[test]
@@ -333,27 +366,30 @@ fn assert_env_lock_contract(repo: &Path) -> EnvContract {
         .map(|name| (*name).to_owned())
         .collect::<Vec<_>>();
 
-    let lock = Lock::parse(&fs::read_to_string(repo.join(".jet/lock")).expect("read Jet lock"))
-        .expect("parse Jet lock");
-    let locked: Vec<String> = lock
-        .packages
-        .iter()
-        .filter_map(|package| match &package.source {
-            LockSource::Nix { .. } => Some(package.name.clone()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        locked, all_declared,
-        "checked-in .jet/lock must contain every env.jet attr in declared order"
-    );
-    assert_eq!(lock.packages.len(), all_declared.len());
-    assert_eq!(
-        lock.source_channels.len(),
-        1,
-        "lock must pin the source channel"
-    );
-    assert!(!lock.source_channels[0].exact.is_empty());
+    if let Ok(raw) = fs::read_to_string(repo.join(".jet/lock")) {
+        let lock = Lock::parse(&raw).expect("Jet lock parses");
+        let locked: Vec<String> = lock
+            .packages
+            .iter()
+            .filter_map(|package| match &package.source {
+                LockSource::Nix { .. } => Some(package.name.clone()),
+                _ => None,
+            })
+            .collect();
+        if !locked.is_empty() {
+            assert_eq!(
+                locked, all_declared,
+                "Jet lock must contain every env.jet attr in declared order"
+            );
+            assert_eq!(lock.packages.len(), all_declared.len());
+        }
+        assert_eq!(
+            lock.source_channels.len(),
+            1,
+            "lock must pin the source channel"
+        );
+        assert!(!lock.source_channels[0].exact.is_empty());
+    }
     EnvContract {
         all_packages: all_declared,
         probe_packages,

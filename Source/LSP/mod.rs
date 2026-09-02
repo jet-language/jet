@@ -166,6 +166,33 @@ mod tests {
     }
 
     #[test]
+    fn inline_package_is_masked_for_lsp_but_keeps_pub_package() {
+        let project = TestProject::new();
+        std::fs::remove_file(project.root.join(crate::Syntax::PACKAGE_FILE))
+            .expect("remove the ordinary manifest for inline-package coverage");
+        let source = r#"package {
+    name: "lsp-inline"
+}
+
+pub(package) fn secret() => String {
+    return "ok"
+}
+
+fn run() {
+    print(secret())
+}
+"#;
+        let (diagnostics, bundle, _) = check_document_with_bundle(project.entry(), source);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| !matches!(diagnostic.code.as_str(), "E1360" | "E1361" | "E1362" | "E1363")),
+            "inline Package should not produce carrier diagnostics: {diagnostics:?}"
+        );
+        assert!(bundle.is_some(), "LSP should retain a checked bundle");
+    }
+
+    #[test]
     fn lsp_pos_round_trip() {
         let src = "fn run() {\n    x :: 1\n}\n";
         let offset = 18; // somewhere in 'x ::'

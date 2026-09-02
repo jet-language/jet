@@ -194,13 +194,42 @@ fn builtin_recv_ty(
             ty
         });
     }
-    if let Expr::Call(call) = receiver {
-        if matches!(cx.fn_types.get(&call.name), Some(Type::Fn { .. })) {
-            let ty = match crate::Codegen::TIR::call_return_type(cx, &call.name) {
-                Type::Result { ok, .. } | Type::Option(ok) => *ok,
-                other => other,
-            };
-            return Some(crate::Codegen::TIR::builtin_dispatch_ty(ty));
+    if let Expr::MethodCall {
+        receiver: call_receiver,
+        method: call_method,
+        resolved_ret,
+        ..
+    } = receiver
+    {
+        // Fixed Core aliases (for example `files.read(path)`) are represented
+        // as MethodCall nodes. Sema intentionally leaves monomorphic fixed
+        // returns off that node because lowering reads the authoritative
+        // signature table. Recover the carrier here so a following builtin
+        // method sees its actual success type instead of the legacy List
+        // fallback.
+        if let Expr::Ident(alias, _) = call_receiver.as_ref() {
+            if !env.locals.contains_key(alias) {
+                if let Some(module) =
+                    cx.core_import_module_for_function(&env.fn_name, alias)
+                {
+                    let ty = resolved_ret.clone().or_else(|| {
+                        crate::Sema::core_fixed_sig(module, call_method)
+                            .and_then(|(_, ret)| ret)
+                    });
+                    if let Some(ty) = ty {
+                        return Some(if unwrap_carrier {
+                            match ty {
+                                Type::Result { ok, .. } | Type::Option(ok) => {
+                                    crate::Codegen::TIR::builtin_dispatch_ty(*ok)
+                                }
+                                other => other,
+                            }
+                        } else {
+                            ty
+                        });
+                    }
+                }
+            }
         }
     }
     let ty = crate::Codegen::TIR::builtin_dispatch_ty(declared_field_ty(receiver, cx, env)?);
@@ -583,7 +612,7 @@ pub(crate) fn resolve_builtin_op(
         ("intersperse", 1) => TBuiltinOp::Intersperse,
         ("clear", 0) => TBuiltinOp::Clear,
         ("chars", 0) => TBuiltinOp::Chars,
-        ("bytes", 0) => TBuiltinOp::Bytes,
+        ("bytes", 0) => TBuiltinOp::Bytes { owned: false },
         ("trim", 0) => TBuiltinOp::Trim,
         ("trim_start", 0) => TBuiltinOp::TrimStart,
         ("trim_end", 0) => TBuiltinOp::TrimEnd,
@@ -1077,6 +1106,7 @@ pub(crate) fn resolve_closure_op(
         "any" => TClosureOp::Any,
         "all" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapAll,
         "all" => TClosureOp::All,
+        "count_where" => TClosureOp::CountWhere,
         "sort_by"
             if fallible_callback
                 && matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(lam)) if lam.params.len() == 1) =>
@@ -1146,6 +1176,7 @@ pub(crate) fn resolve_closure_op(
         "max_by" => TClosureOp::MaxBy,
         "group_by" => TClosureOp::GroupBy,
         "count_by" => TClosureOp::CountBy,
+        "update_first" => TClosureOp::UpdateFirst,
         "dedup_by" => TClosureOp::DedupBy,
         "is_sorted_by" => TClosureOp::IsSortedBy,
         "chunk_while" => TClosureOp::ChunkWhile,

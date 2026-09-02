@@ -6,8 +6,8 @@ use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{Expr, Type};
 
-/// E2-M15: modules that require an OS and are forbidden in `--freestanding` builds.
-pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
+/// E2-M15: modules that require an OS and are forbidden on no-OS targets.
+pub(crate) fn is_no_os_forbidden(module: &str) -> bool {
     matches!(
         module,
         "core.files" | "core.watcher" | "core.term" | "core.net" | "core.net.tls" | "core.tasks"
@@ -24,27 +24,27 @@ pub(crate) fn module_short_name(module: &str) -> &str {
 }
 
 /// Fix hint for E3301 depending on the forbidden module.
-pub(crate) fn freestanding_hint(module: &str) -> &'static str {
+pub(crate) fn no_os_hint(module: &str) -> &'static str {
     match module {
         "core.files" => {
-            "Embed the data at compile time with `@embed(\"file\")`, or build without `--freestanding`."
+            "Embed the data at compile time with `@embed(\"file\")`, or select a hosted target."
         }
         "core.net" | "core.net.tls" | "core.http" => {
-            "Freestanding targets have no network stack. Build without `--freestanding`, or use a bare-metal driver."
+            "No-OS targets have no network stack. Select a hosted target, or use a declared network provider."
         }
         "core.tasks" => {
             "OS threads are not available without an OS. Use cooperative or interrupt-driven concurrency."
         }
         "core.term" => {
-            "Standard I/O requires an OS. Use a platform-specific write routine or build without `--freestanding`."
+            "Standard I/O requires an OS. Use a declared IO provider or select a hosted target."
         }
         "core.process" | "core.time" => {
-            "System calls are not available in a freestanding build. Build without `--freestanding`."
+            "System calls are not available on a no-OS target. Select a hosted target or declare the required provider."
         }
         "core.log" => {
-            "The log module writes to stderr (an OS resource). Use a bare-metal write routine or build without `--freestanding`."
+            "The log module writes to stderr (an OS resource). Use a declared IO provider or select a hosted target."
         }
-        _ => "Build without `--freestanding`, or replace this call with a core-level alternative.",
+        _ => "Select a hosted target, or replace this call with a core-level alternative.",
     }
 }
 
@@ -273,7 +273,7 @@ fn e2411_unknown_union_shape(union_ty: &str, member: &str, span: Span) -> Diagno
 pub(crate) fn e2415(union_ty: &str, a: &str, b: &str, shape: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E2415",
-        format!("union `{union_ty}` can't be decoded — `{a}` and `{b}` share wire shape `{shape}`"),
+        format!("Union `{union_ty}` can't be decoded — `{a}` and `{b}` share wire shape `{shape}`"),
         "anonymous-union decode picks a member by wire shape; two members with the same shape would force an arbitrary order".to_string(),
         "use a named enum with an explicit tag, or change the members so each has a distinct wire shape".to_string(),
         Some(span),
@@ -292,6 +292,7 @@ fn validate_union_decode_shapes(
 
     if let Type::Union(members) = ty {
         let mut seen: Vec<(crate::AST::SerdeWireShape, &Type)> = Vec::new();
+        let mut reported_pairs = std::collections::HashSet::new();
         for member in members {
             let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
                 out.push(e2411_unknown_union_shape(&ty.show(), &label(member), span));
@@ -299,13 +300,16 @@ fn validate_union_decode_shapes(
             };
             for shape in shapes {
                 if let Some((_, previous)) = seen.iter().find(|(known, _)| *known == shape) {
-                    out.push(e2415(
-                        &ty.show(),
-                        &label(previous),
-                        &label(member),
-                        shape.name(),
-                        span,
-                    ));
+                    let pair = (label(previous), label(member));
+                    if reported_pairs.insert(pair.clone()) {
+                        out.push(e2415(
+                            &ty.show(),
+                            &pair.0,
+                            &pair.1,
+                            shape.name(),
+                            span,
+                        ));
+                    }
                 } else {
                     seen.push((shape, member));
                 }

@@ -9,14 +9,17 @@
 // Connection handles are u64 keys into a thread-local HashMap. Handle 0
 // is the error sentinel (never a live connection).
 //
-// D-DBDRIVER1: the generic driver interface is parameterized-query only — no
-// raw-string execute escape. `query`/`execute` take SQL text plus a separate
-// `[DBValue]` bind list; values never get concatenated into the SQL string.
+// D-TYPEDSQL-SINK1=A: the public driver contract carries one `SQL` value,
+// pairing its checked template with its ordered `[DBValue]` binds. This hidden
+// bridge is the final marshalling seam: only here do the pair's fields split
+// into SQLite's `sql` text and bound values. Values never get concatenated into
+// SQL text.
+//
 // The always-compiled prelude (Source/Prelude/CoreLib.rs, `jet_std::DBValue`)
 // and this bridge crate are two independently built crates linked at the
-// program's final `rustc` invocation, so they can't share Rust types — they
-// exchange bind params and result rows as a small tagged-length wire text
-// (`encode`/`decode` below), never full SQL text.
+// program's final `rustc` invocation, so they can't share Rust types. They
+// exchange the final bound values and result rows as tagged-length wire text
+// (`encode`/`decode` below).
 
 use std::cell::RefCell;
 use std::collections::HashMap;

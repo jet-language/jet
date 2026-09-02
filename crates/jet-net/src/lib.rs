@@ -207,11 +207,30 @@ fn fetch_with_root_timeout(
     timeout: Duration,
     base_dir: &Path,
 ) -> Result<Vec<u8>, FetchError> {
+    fetch_with_root_timeout_and_http(url, timeout, base_dir, comptime_http_stream)
+}
+
+fn fetch_with_root_timeout_and_http(
+    url: &str,
+    timeout: Duration,
+    base_dir: &Path,
+    http_stream: impl FnOnce(&str, Duration) -> Result<StreamResponse, FetchError>,
+) -> Result<Vec<u8>, FetchError> {
     if let Some(path) = url.strip_prefix("file://") {
         let file = open_scoped_file(path, base_dir)?;
         read_limited(file, MAX_FETCH_BYTES).map_err(|e| FetchError::IO(e.to_string()))
     } else if url.starts_with("http://") || url.starts_with("https://") {
-        read_limited(comptime_http_stream(url, timeout)?, MAX_FETCH_BYTES)
+        let response = http_stream(url, timeout)?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_FETCH_BYTES as u64)
+        {
+            return Err(FetchError::http(
+                url,
+                "response exceeds its size bound".to_string(),
+            ));
+        }
+        read_limited(response, MAX_FETCH_BYTES)
             .map_err(|e| FetchError::http(url, e.to_string()))
     } else {
         let scheme = url.find("://").map(|i| &url[..i]).unwrap_or(url);
@@ -951,6 +970,30 @@ mod tests {
     }
 
     #[test]
+    fn fetch_in_root_rejects_a_sparse_over_limit_file_at_the_shared_cap() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-net-fetch-over-limit-root-{}",
+            std::process::id()
+        ));
+        let path = root.join("over-limit");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create source root");
+        let file = std::fs::File::create(&path).expect("create sparse fixture");
+        file.set_len(MAX_FETCH_BYTES as u64 + 1)
+            .expect("size sparse fixture");
+        drop(file);
+
+        let error = fetch_in_root("file://over-limit", &root)
+            .expect_err("over-limit file must fail at the shared cap");
+
+        assert_eq!(
+            error.to_string(),
+            format!("fetch response exceeds {MAX_FETCH_BYTES} bytes")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn comptime_file_fetch_rejects_paths_outside_source_root() {
         let root = std::env::temp_dir().join(format!("jet-net-fetch-root-{}", std::process::id()));
         let outside = std::env::temp_dir().join(format!("jet-net-fetch-outside-{}", std::process::id()));
@@ -1121,6 +1164,62 @@ mod tests {
     fn fetch_reader_rejects_an_endless_response_at_the_boundary() {
         let error = read_limited(std::io::repeat(0), 8).expect_err("reader must be bounded");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn fetch_in_root_rejects_an_endless_http_stream_at_the_shared_cap() {
+        let url = "http://fixture.invalid/endless";
+        let timeout = Duration::from_millis(25);
+        let error = fetch_with_root_timeout_and_http(
+            url,
+            timeout,
+            Path::new("."),
+            |stream_url, stream_timeout| {
+                assert_eq!(stream_url, url);
+                assert_eq!(stream_timeout, timeout);
+                Ok(StreamResponse {
+                    status: 200,
+                    content_length: None,
+                    location: None,
+                    reader: Box::new(std::io::repeat(0)),
+                })
+            },
+        )
+        .expect_err("endless HTTP stream must fail at the shared cap");
+
+        assert_eq!(
+            error.to_string(),
+            format!("fetch response exceeds {MAX_FETCH_BYTES} bytes")
+        );
+    }
+
+    #[test]
+    fn fetch_in_root_rejects_an_over_limit_http_content_length_before_reading() {
+        struct ReadMustNotBeCalled;
+
+        impl Read for ReadMustNotBeCalled {
+            fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+                panic!("over-limit Content-Length was not rejected before reading");
+            }
+        }
+
+        let url = "http://fixture.invalid/declared-over-limit";
+        let error = fetch_with_root_timeout_and_http(
+            url,
+            Duration::from_millis(25),
+            Path::new("."),
+            |_, _| {
+                Ok(StreamResponse {
+                    status: 200,
+                    content_length: Some(MAX_FETCH_BYTES as u64 + 1),
+                    location: None,
+                    reader: Box::new(ReadMustNotBeCalled),
+                })
+            },
+        )
+        .expect_err("over-limit Content-Length must fail at the shared cap");
+
+        assert_eq!(error.to_string(), "response exceeds its size bound");
     }
 
     #[test]

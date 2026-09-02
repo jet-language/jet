@@ -100,9 +100,18 @@ pub(crate) fn lambda_body_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
 /// `LambdaMeta::fallible_propagation`) early-returns the enclosing function's
 /// error out of the closure, so the element is the fallible carrier
 /// `Result<tail, E>` (`Option<tail>` for optional propagation) — the same
-/// type the rendered Rust closure returns.
+/// type the rendered Rust closure returns. Task-group normalization can attach
+/// the shared carrier to an otherwise infallible sibling through
+/// `LambdaMeta::fallible_carrier`; that fact takes precedence over the
+/// enclosing environment here.
 pub(crate) fn spawn_body_result_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
     let t = lambda_body_ty(lam, cx, env);
+    if let Some(Type::Result { err, .. }) = lam.meta.fallible_carrier.as_ref() {
+        return Type::Result {
+            ok: Box::new(t),
+            err: err.clone(),
+        };
+    }
     if !lam.meta.fallible_propagation {
         return t;
     }

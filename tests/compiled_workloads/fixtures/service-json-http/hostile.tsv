@@ -1,4 +1,10 @@
-GET|/health|
-POST|/sum|1,2,3,4,5,6,7,8
-POST|/sum|1,2,bad
+# Expert controls stay loopback-only while exposing worker, timeout,
+# body-limit, readiness, and shutdown values.
+CONFIG|expert|127.0.0.1:0|1|100|100|64|200
+GET|/ready|
+MALFORMED|/sum|{
+OVERSIZE|/sum|
+SLOW|/sum|{"numbers":[9]}
+CONCURRENT|/sum|{"numbers":[1,2,3]}|2
 PUT|/unknown|payload
+SHUTDOWN||

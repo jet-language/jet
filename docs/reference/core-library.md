@@ -98,6 +98,53 @@ fn parse_fast(text: String) Int -> text.parse() ?? 0
 An expected marker argument also accepts a dot literal without an import:
 `#Inline(.Always)`.
 
+### `core.compiler` — package model views
+
+`core.compiler` also exposes the typed, read-only package model during
+compile-time package builds. `manifest()`, `package()`, `lock()`, and
+`profiles()` return the four separate v1 views. They use the compiler's
+authority-checked package root; they do not read arbitrary paths, dependencies,
+or sibling packages.
+
+The D-PACKAGE-MODEL1=A field matrix is versioned by
+`PACKAGE_MODEL_SCHEMA_VERSION = 1`:
+
+| View | Value and composition | Ordering |
+| --- | --- | --- |
+| `manifest()` → `CompilerManifest` | `schema_version`, `file`, optional `jet`, `edition`, `description`, `license`, `repository`, `layer`, and `target`; plus `dependencies`, `packages`, `outputs`, and `build_profiles`. This is the uncomposed `package.jet` declaration or the leading inline `package { … }` carrier in a single entry file. | `dependencies` and `outputs` use manifest map-key order; `packages` and `build_profiles` keep declaration order. |
+| `package()` → `CompilerPackage` | The same fields and types as `CompilerManifest`, after the package's declared Config files compose successfully. `name` and `version` are intentionally absent: current-package identity keeps its one spelling, `@build.package.name` and `@build.package.version`. Inline Package carriers and `package.jet` use this same canonical model. | The same ordering rules as `manifest()`. |
+| `lock()` → `CompilerLock` | `schema_version`, `file`, `version`, `root_dependencies`, and `packages`. Each `CompilerLockedPackage` has `name`, `version`, `source_kind`, `fingerprint`, `dependencies`, and optional `source`, `revision`, `content_hash`, `layer`, and `inferred_layer`. | Root dependencies and locked packages keep lock-model order. |
+| `profiles()` → `CompilerProfileSet` | `schema_version`, `file`, and `profiles`. Each `CompilerProfile` has `name`, `extends`, `packages`, `collisions`, and `sources`; each collision is a `CompilerKeyValue` with `key` and `value`. | The profile set and collision maps use key order; `extends`, `packages`, and `sources` keep declaration order. |
+
+`CompilerDependency` has required `name` and `source`. `CompilerPackageTarget`
+has required `name` and `targets`. `CompilerPackageOutput` has required `name`
+and `kind` plus optional `entry`. `CompilerBuildProfile` has required `name`,
+`optimize`, `debug_info`, and `small` plus optional `panic`. Optional source
+fields are `Option<String>` values and absent collections are present as empty
+lists. Git dependency sources remove credentials and URL query or fragment
+material from the projection.
+
+Every operation returns a named result. A failed read carries
+`PackageReadError { code, message, file, cause }`; the `core.compiler` value
+carrier is `CompilerPackageError` with the same four fields. Malformed,
+changed, missing, or escaping inputs therefore cannot become an empty view.
+The cause keeps the underlying typed diagnostic code and an actionable
+logical reason; it does not expose absolute authority paths or secret material.
+The package manifest and each contributing Config, lock, or profile file
+are recorded as relative hashed build inputs, so they also participate in the
+build cache key. The retained package and environment models do not carry
+field-level source positions, so the views do not invent them. All four calls
+are compile-time-only; a runtime call is E0956.
+
+```jet
+use core.compiler as compiler
+
+@manifest :: compiler.manifest() ?? panic("manifest")
+@package :: compiler.package() ?? panic("package")
+@lock :: compiler.lock() ?? panic("lock")
+@profiles :: compiler.profiles() ?? panic("profiles")
+```
+
 ### `core.mod` — pinned library loading
 
 `core.mod.load` loads a project-contained, pinned Jet library through an explicit
@@ -206,7 +253,7 @@ choices; this inventory records the resulting methods and does not add aliases.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
-| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort`, `sort_by`, `sort_desc`, `sort_by_desc`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `counts`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `pop` |
+| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort`, `sort_by`, `sort_desc`, `sort_by_desc`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count_where`, `counts`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `update_first(predicate, replacement)`, `pop` |
 | `[K:V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `top_n`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `pop`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `to_list`, `len`, `is_empty`, `clear` |
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
@@ -1140,7 +1187,7 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `style(name, text)` | `String` | ANSI style only when stdout is a TTY and `NO_COLOR` is absent |
 | `style_force(name, text)` | `String` | Expert override that always emits known ANSI styles |
 | `progress(text)` | `!IOError` | TTY: carriage-return progress update; non-TTY: one plain line |
-| `progress(source[, description[, format]])` | `Iter<T>` | Wrap a `List<T>` or `Iter<T>`; report percent, count, elapsed time, remaining estimate, and rate as items are pulled. Format fields are `{description}`, `{percent}`, `{count}`, `{total}`, `{elapsed}`, `{remaining}`, and `{rate}`. |
+| `progress(source[, description[, format]])` | `Iter<T>` | Wrap a `[T]` or `Iter<T>`; report percent, count, elapsed time, remaining estimate, and rate as items are pulled. Format fields are `{description}`, `{percent}`, `{count}`, `{total}`, `{elapsed}`, `{remaining}`, and `{rate}`. |
 
 `print` stays in the core prelude (no `use` needed). `term.print` is its
 qualified twin for `#NoPrelude` files — it has the same newline-per-value
@@ -1161,7 +1208,7 @@ arrives.
 
 `jet run file.jet -- arg1 arg2` forwards everything after `--` verbatim as
 program arguments. `process.argv()` preserves the complete process vector,
-including `argv[0]`; `process.args()` returns a fresh `List<String>` containing
+including `argv[0]`; `process.args()` returns a fresh `[String]` containing
 only the values after `argv[0]`. Plain positional words
 with no separator also work (`jet run greet.jet Ada`). An unknown `--`-flag
 written before the `--` is **E2102**, which teaches the `--` form (D-CLI1).
@@ -1388,13 +1435,13 @@ and machine.
 | `getppid()` | `Int` | Parent process id (0 when unavailable) |
 | `getuid()` / `geteuid()` | `Int` | Real / effective user id |
 | `getgid()` / `getegid()` | `Int` | Real / effective group id |
-| `getgroups()` | `List[Int]` | Supplementary group ids |
+| `getgroups()` | `[Int]` | Supplementary group ids |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError` | Process group / session id |
 | `getpgrp()` | `Int` | Calling process group id |
 | `expand(template)` | `String` | Expand `$VAR` / `${VAR}` from the environment |
 | `uptime()` | `Float` | Seconds since boot when known, else `0.0` |
-| `loadavg()` | `List[Float]` | 1/5/15-minute load averages |
-| `times()` | `List[Float]` | Process CPU times (user, system, children, elapsed) |
+| `loadavg()` | `[Float]` | 1/5/15-minute load averages |
+| `times()` | `[Float]` | Process CPU times (user, system, children, elapsed) |
 | `exitcode(status)` | `Int` | Exit code extracted from a wait status |
 | `success(status)` | `Bool` | Whether a wait status is a normal zero exit |
 | `sync()` | `()` | Flush filesystem buffers (POSIX no-op elsewhere) |
@@ -1415,7 +1462,7 @@ POSIX process/session control (requires `#Unsafe("…")` and an OS gate):
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `setsid` / `initgroups` | fallible | Credential / session control |
 | `kill(pid, sig)` | `!IOError` | Send a signal |
 | `wait` / `waitpid` | `Int !IOError` | Wait status |
-| `pipe()` | `List[Int] !IOError` | `[read_fd, write_fd]` |
+| `pipe()` | `[Int] !IOError` | `[read_fd, write_fd]` |
 | `close_fd(fd)` | `()` | Close a raw pipe/fifo descriptor |
 | `mkfifo(path, mode)` | `!IOError` | Create a named pipe |
 
@@ -3885,38 +3932,37 @@ request policy, not the negotiated result. Example:
 ## core.db
 
 `core.db` opens SQLite connections through `db.open(path)` or
-`db.open_memory()`. Queries use one path: SQL text plus `[DBValue]` parameters.
-Checked `SQL` literals feed that path through `db.params(sql)`, so holes become
-bound parameters, not string interpolation. The runtime uses SQLite's prepared
-statement cache under that same path; there is no separate unsafe raw-query or
-prepare-only API.
+`db.open_memory()`. Every SQL sink consumes one `SQL` value. The value keeps
+the template text and ordered `[DBValue]` bindings together until the driver
+marshals them.
 
-`SQL{"…"}` is the checked query form: literal segments stay in the template and
-each `{hole}` becomes one bound parameter. `HTML{"…"}` escapes each hole before
-inserting it, and `Sh{"…"}` makes each hole one argv item without shell word
-splitting. A runtime `String` cannot become one of these types; the explicit
-`.raw(...)` constructors are the audited escape for already-reviewed text.
+`SQL{"…"}` is the checked query form: literal segments stay in the template
+and each `{hole}` becomes one bound parameter. `SQL.raw("…")` is the sole
+explicit unchecked SQL-text escape. `HTML{"…"}` escapes ordinary holes. A
+hole already typed as `HTML` composes directly, so trusted fragments are not
+escaped twice. `Sh{"…"}` makes each hole one argv item without shell word
+splitting. A runtime `String` cannot become one of these types.
 
 D-DBDRIVER1=A / D-DBPOLICY-BIND1=A: `Driver` is the backend-neutral trait for
-that parameterized surface (`query` / `query_one` / `execute` / `begin` /
-`commit` / `rollback`). `DBConnection` opens the connection and establishes a
-typed `DBScope`; only the scope implements row operations. Call sites can take
-`T: Driver` without naming SQLite, while the policy and user stay attached to
-the driver. Cleanup stays on `Close` via `close(...)`.
+that typed surface (`query` / `query_one` / `execute` / `begin` /
+`commit` / `rollback`). `DBConnection` opens the connection and establishes
+a typed `DBScope`; only the scope implements row operations. Call sites can
+take `T: Driver` without naming SQLite, while the policy and user stay
+attached to the driver. Cleanup stays on `Close` via `close(...)`.
 
 | API | Returns | Notes |
 |-----|---------|-------|
 | `db.policy(table, expression)` | `RowPolicy !String` | Closed policies: `true` or `owner == user` |
 | `conn.with_policy(policy, user)` | `DBScope` | Binds the policy and identity; the raw connection has no row operations |
 | `db.policy_audit(scope)` | `String` | Audits the active scope's compiled predicate and bound user |
-| `scoped.execute(sql, params)` | `Int !DBError` | Affected row count, with the policy applied; schema/control SQL belongs to `db.migrate` or explicit transaction controls |
-| `scoped.query(sql, params)` | `[Row] !DBError` | `Row` is `Map<String, DBValue>`; returned rows are scoped |
-| `scoped.query_one(sql, params)` | `?Row !DBError` | First allowed row, if any |
-| `scoped.live(sql, params)` | `LiveQuery !DBError` | The same policy is applied to the live-query read; matching write-set invalidation reruns it and updates the canonical signal/transport seam |
+| `scoped.execute(sql)` | `Int !DBError` | Affected row count, with the policy applied; schema/control SQL belongs to `db.migrate` or explicit transaction controls |
+| `scoped.query(sql)` | `[Row] !DBError` | `Row` is `[String: DBValue]`; returned rows are scoped |
+| `scoped.query_one(sql)` | `?Row !DBError` | First allowed row, if any |
+| `scoped.live(sql)` | `LiveQuery !DBError` | The same policy is applied to the live-query read; matching write-set invalidation reruns it and updates the canonical signal/transport seam |
 | `scoped.begin()` / `commit()` / `rollback()` / `close()` | `Bool` | Explicit transaction control through the same scope |
 | `db.row_int(row, key)` / `row_float` / `row_text` / `row_bool` | `T !String` | Typed column read with missing/type errors |
-| `db.transaction(scoped, label, statements)` | `Int !DBError` | Runs scoped statements in one transaction, rollback on first error |
-| `db.migrate(scoped, name, statements)` | `Int !DBError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
+| `db.transaction(scoped, label, statements)` | `Int !DBError` | Runs an ordered list of `SQL` values in one transaction, rollback on first error |
+| `db.migrate(scoped, name, statements)` | `Int !DBError` | Runs an ordered list of `SQL` values and records each checked template and its bindings in the migration checksum; rerun returns `0`, changed checksum errors |
 
 `DBValue` variants are `Null`, `Int`, `Float`, `Text`, and `Bool`.
 
@@ -4286,7 +4332,7 @@ share that source-owned TIR path.
 | `examples/features/serde/json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/io/cli.jet` | Args, environment, exit codes |
 | `examples/features/io/cli_args.jet` | `core.args` — flag/option/positional spec + parse |
-| `examples/features/io/db_checked_sql.jet` | `core.db` — checked SQL params, typed row reads, transactions, migrations |
+| `examples/features/io/db_checked_sql.jet` | `core.db` — checked SQL templates with typed bindings, typed row reads, transactions, migrations |
 | `examples/features/io/dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
 | `examples/features/serde/serde_derive.jet` | `#Codable` encode + typed `decode<T>` with `#Rename` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |

@@ -366,15 +366,21 @@ fn compile_artifact(
             "rlib",
         ])
         .args(rustc_flags);
+    command.arg("-C").arg(format!("metadata={key}"));
     if let Some((dependency_name, dependency_path)) = dependency {
         command
             .arg("--extern")
             .arg(format!("{dependency_name}={}", dependency_path.display()));
     }
+    if let Ok(root_prefix) = fs::canonicalize(root) {
+        command
+            .arg("--remap-path-prefix")
+            .arg(format!("{}=/jet/runtime-cache", root_prefix.display()));
+    }
     if let Ok(staging_prefix) = fs::canonicalize(&staging) {
         command
             .arg("--remap-path-prefix")
-            .arg(format!("{}=jet-runtime-build", staging_prefix.display()));
+            .arg(format!("{}=/jet/build", staging_prefix.display()));
     }
     command.arg(&source).arg("-o").arg(&staged_rlib);
     for (name, value) in rustc_env {

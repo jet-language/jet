@@ -121,6 +121,10 @@ const EXPLICIT_EXCLUSIONS = Object.freeze([
     reason: "The canceled discovery report is prior scan evidence, not scan input.",
   },
   {
+    pattern: "docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md",
+    reason: "The canceled discovery report is prior scan evidence, not scan input.",
+  },
+  {
     pattern: "docs/audits/security-final-*/**",
     reason: "Prior final reports are outputs and must not become scan input.",
   },

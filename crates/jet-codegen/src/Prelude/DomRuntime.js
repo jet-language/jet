@@ -27,6 +27,19 @@ class JetHostAbiError extends Error {
     if (cause !== undefined) this.cause = cause;
   }
 }
+// Target identity is part of the executable artifact, not optional metadata.
+// The generated JS calls this before invoking any Wasm export and treats a
+// missing identity exactly like a mismatched one.
+export function targetBindingError(expected, actual, cause) {
+  const expectedArtifact = String(expected?.artifactIdentity ?? "<missing>");
+  const actualArtifact = String(actual?.artifactIdentity ?? "<missing>");
+  const expectedDossier = String(expected?.dossierIdentity ?? "<missing>");
+  const actualDossier = String(actual?.dossierIdentity ?? "<missing>");
+  return new JetHostWasmError(
+    `WebAssembly target binding mismatch (artifact expected ${expectedArtifact}, received ${actualArtifact}; dossier expected ${expectedDossier}, received ${actualDossier})`,
+    cause,
+  );
+}
 
 // D-FAIL-EDGE1=A: every browser-visible failure keeps the report frame from
 // the edge object. The overlay uses textContent so report punctuation and
@@ -257,6 +270,10 @@ function jetReadableTextColor(hex) {
 
 export function paint(backend, node) {
   const perfStarted = perfNow();
+  // Reactive reruns reuse the captured backend instead of calling
+  // `createBackend()` again. Mark that stable key live for this render scope
+  // before scope cleanup prunes untouched backends.
+  jetDomTouchedBackends.add(backend.boxKey);
   const frame = backend.frame ?? { x: 0, y: 0, width: node.width, height: node.height };
   const live = new Set();
   const activeElement = typeof document !== "undefined"

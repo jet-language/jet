@@ -115,7 +115,7 @@ fn program_at(marker: &str, row: &AppliedRule, site: RuleSite) -> Option<String>
             "fn inverse() {{}}\n#[Unsafe(\"coverage\"), FFI(c), Undo(inverse)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n"
         ),
         RuleSite::Function if marker.starts_with("#ABI") => format!(
-            "#Extern module c.demo {{\n    {marker} fn helper(value: I32) I32 = \"helper\"\n}}\n\nfn run() {{\n}}\n"
+            "#Import module c.demo {{\n    {marker} fn helper(value: I32) I32 = \"helper\"\n}}\n\nfn run() {{\n}}\n"
         ),
         RuleSite::Function if marker.starts_with("#FFI") => format!(
             "#[Unsafe(\"coverage\"), FFI(c)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n"

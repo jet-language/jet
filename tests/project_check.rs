@@ -33,6 +33,18 @@ fn run_check(name: &str, args: &[&str]) -> Output {
         .unwrap_or_else(|error| panic!("jet check {name} failed to start: {error}"))
 }
 
+fn run_uncached(name: &str, args: &[&str]) -> Output {
+    let dir = fixture(name);
+    Command::new(jet_bin())
+        .args(args)
+        .current_dir(&dir)
+        .env("JET_RECEIPT_BYPASS", "1")
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .output()
+        .unwrap_or_else(|error| panic!("jet {} {name} failed to start: {error}", args[0]))
+}
+
 fn scrub_fixture_path(text: &str, dir: &Path) -> String {
     let absolute = dir
         .canonicalize()
@@ -89,10 +101,14 @@ fn assert_project_proof_rows(fixture_name: &str, proof: &str) {
     ] {
         assert!(
             rows.iter()
-                .any(|row| row.contains(label) && row.contains(code)),
-            "project check {fixture_name} missing {label} ({code}):\n{proof}"
+                .any(|row| row.contains(label) && row.contains(code) && row.contains("[proven]")),
+            "project check {fixture_name} did not prove {label} ({code}):\n{proof}"
         );
     }
+    assert!(
+        !proof.contains("absent from the checked module graph"),
+        "clean project check reported an unresolved output:\n{proof}"
+    );
 }
 
 fn assert_clean_project(name: &str) {
@@ -108,7 +124,7 @@ fn assert_clean_project(name: &str) {
 }
 
 #[test]
-fn in_package_file_uses_the_owning_project_graph() {
+fn explicit_in_package_file_keeps_file_scope() {
     let output = run_check("frozen_dogfood", &["check", "src/cli/main.jet"]);
     assert!(
         output.status.success(),
@@ -117,12 +133,70 @@ fn in_package_file_uses_the_owning_project_graph() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("scope=project"),
-        "in-package check did not use the owning project graph:\n{stdout}"
+        stdout.contains("scope=explicit-file"),
+        "explicit in-package check changed scope:\n{stdout}"
     );
     let proof = proof_snapshot(&output, &fixture("frozen_dogfood"));
-    assert_project_proof_rows("frozen_dogfood in-package", &proof);
-    assert_snapshot("frozen_dogfood", "in-package.stdout", &proof);
+    let rows = proof.lines().collect::<Vec<_>>();
+    assert_eq!(
+        rows.len(),
+        4,
+        "explicit-file check must expose four non-project proof rows:\n{proof}"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row.contains("output=not-applicable") && row.contains("[not applicable]")),
+        "explicit-file check exposed project proof:\n{proof}"
+    );
+}
+
+#[test]
+fn bare_project_check_enumerates_outputs_without_writing_artifacts() {
+    let dir = fixture("entry_resolution");
+    let package = dir.join("package.jet");
+    let lock = dir.join(".jet/lock");
+    let generated = dir.join(".jet/generated");
+    let package_mtime = fs::metadata(&package)
+        .unwrap_or_else(|error| panic!("package fixture metadata: {error}"))
+        .modified()
+        .unwrap_or_else(|error| panic!("package fixture mtime: {error}"));
+    let lock_mtime = fs::metadata(&lock).ok().and_then(|metadata| metadata.modified().ok());
+    let generated_mtime = fs::metadata(&generated)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+
+    let output = run_check("entry_resolution", &["check"]);
+    assert!(
+        output.status.success(),
+        "bare project check failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("scope=project"),
+        "bare check did not use project scope:\n{stdout}"
+    );
+    let proof = proof_snapshot(&output, &dir);
+    assert_project_proof_rows("entry_resolution bare", &proof);
+    assert!(
+        proof.lines().all(|row| row.contains("output=release")),
+        "bare check did not enumerate the declared runnable output:\n{proof}"
+    );
+
+    let after_package_mtime = fs::metadata(&package)
+        .unwrap_or_else(|error| panic!("package fixture metadata after check: {error}"))
+        .modified()
+        .unwrap_or_else(|error| panic!("package fixture mtime after check: {error}"));
+    let after_lock_mtime = fs::metadata(&lock).ok().and_then(|metadata| metadata.modified().ok());
+    let after_generated_mtime = fs::metadata(&generated)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+    assert_eq!(package_mtime, after_package_mtime, "project check touched package.jet");
+    assert_eq!(lock_mtime, after_lock_mtime, "project check touched .jet/lock");
+    assert_eq!(
+        generated_mtime, after_generated_mtime,
+        "project check touched .jet/generated"
+    );
 }
 
 
@@ -161,14 +235,140 @@ fn unsupported_web_tier_is_not_reported_clean() {
 }
 
 #[test]
-fn isolated_project_import_teaches_missing_context() {
-    let output = run_check("missing_context", &["check", "orphan.jet"]);
+fn explicit_file_without_owning_project_context_teaches_missing_context() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "jet-project-check-missing-context-{}-{stamp}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create isolated missing-context fixture");
+    let source = fs::read_to_string(fixture("missing_context").join("orphan.jet"))
+        .expect("read missing-context fixture source");
+    fs::write(root.join("orphan.jet"), source).expect("write isolated missing-context source");
+
+    let output = Command::new(jet_bin())
+        .args(["check", "orphan.jet"])
+        .current_dir(&root)
+        .env("JET_RECEIPT_BYPASS", "1")
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .output()
+        .expect("jet check missing_context failed to start");
     assert!(!output.status.success(), "E2393 witness unexpectedly passed");
-    let stderr = stderr_snapshot(&output, &fixture("missing_context"));
+    let stderr = stderr_snapshot(&output, &root);
     assert!(stderr.contains("Error [E2393]"), "missing E2393:\n{stderr}");
     assert!(
         stderr.contains("use project.<module>"),
         "missing canonical import teaching:\n{stderr}"
     );
     assert_snapshot("missing_context", "stderr", &stderr);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn clean_project_check_then_default_run_and_aot_build_stay_clean() {
+    for name in [
+        "frozen_dogfood",
+        "entry_resolution",
+        "module_graph",
+        "core_closure",
+    ] {
+        let check = run_uncached(name, &["check"]);
+        assert!(
+            check.status.success(),
+            "project check {name} failed:\n{}",
+            String::from_utf8_lossy(&check.stderr)
+        );
+
+        let run = run_uncached(name, &["run"]);
+        assert!(
+            run.status.success(),
+            "default-tier run after project check {name} failed:\n{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+
+        let build = run_uncached(name, &["build"]);
+        assert!(
+            build.status.success(),
+            "AOT build after project check {name} failed:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+    }
+}
+
+#[test]
+fn explicit_file_uses_owning_project_context() {
+    let output = run_uncached("owning_context", &["check", "src/main.jet"]);
+    assert!(
+        output.status.success(),
+        "explicit in-package project import failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("scope=explicit-file"),
+        "explicit owning-context check changed scope:\n{stdout}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("E2393"),
+        "owning project context was treated as absent:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let proof = proof_snapshot(&output, &fixture("owning_context"));
+    assert_snapshot("owning_context", "stdout", &proof);
+}
+
+#[test]
+fn extension_optional_check_replays_receipt() {
+    let dir = fixture("frozen_dogfood");
+    let receipt_dir = std::env::temp_dir().join(format!(
+        "jet-project-check-replay-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&receipt_dir);
+
+    let run = || {
+        Command::new(jet_bin())
+            .args(["check", "src/cli/main"])
+            .current_dir(&dir)
+            .env("JET_RECEIPT_DIR", &receipt_dir)
+            .env_remove("JET_RECEIPT_BYPASS")
+            .env_remove("JET_TIMING")
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("extension-optional project check failed to start")
+    };
+
+    let first = run();
+    assert!(
+        first.status.success(),
+        "extension-optional project check failed:\n{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let second = run();
+    assert!(
+        second.status.success(),
+        "replayed extension-optional project check failed:\n{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(
+        first.stdout, second.stdout,
+        "receipt replay changed extension-optional check output"
+    );
+    assert!(
+        String::from_utf8_lossy(&second.stderr).contains("ok: check current"),
+        "extension-optional invocation did not replay its receipt:\n{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+
+    let _ = fs::remove_dir_all(&receipt_dir);
 }

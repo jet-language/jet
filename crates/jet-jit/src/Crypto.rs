@@ -863,6 +863,124 @@ fn jet_jit_crypto_expert_aes256gcm_open(key: i64, nonce: i64, ciphertext: i64, a
     }
 }
 
+fn jet_jit_crypto_expert_xchacha20poly1305_seal(
+    key: i64,
+    nonce: i64,
+    plaintext: i64,
+    aad: i64,
+) -> i64 {
+    match runtime::jet_crypto_expert_xchacha20poly1305_seal_impl(
+        &clone_bytes(key),
+        &clone_bytes(nonce),
+        &clone_bytes(plaintext),
+        &clone_bytes(aad),
+    ) {
+        Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+        Err(err) => error(err.to_string()),
+    }
+}
+
+fn jet_jit_crypto_expert_xchacha20poly1305_open(
+    key: i64,
+    nonce: i64,
+    ciphertext: i64,
+    aad: i64,
+) -> i64 {
+    match runtime::jet_crypto_expert_xchacha20poly1305_open_impl(
+        &clone_bytes(key),
+        &clone_bytes(nonce),
+        &clone_bytes(ciphertext),
+        &clone_bytes(aad),
+    ) {
+        Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
+        Err(err) => error(err.to_string()),
+    }
+}
+
+fn jet_jit_crypto_expert_ed25519_sign(key: i64, message: i64) -> i64 {
+    match runtime::jet_crypto_expert_ed25519_sign_impl(&clone_bytes(key), &clone_bytes(message)) {
+        Ok(signature) => result(true, push(CryptoValue::Signature(signature)) as u64),
+        Err(err) => error(err.to_string()),
+    }
+}
+
+fn jet_jit_crypto_expert_ed25519_verify(
+    key: i64,
+    message: i64,
+    signature: i64,
+) -> i64 {
+    match runtime::jet_crypto_expert_ed25519_verify_strict_impl(
+        &clone_bytes(key),
+        &clone_bytes(message),
+        &clone_bytes(signature),
+    ) {
+        Ok(valid) => result(true, u64::from(valid)),
+        Err(err) => error(err.to_string()),
+    }
+}
+
+
+fn jet_jit_crypto_expert_argon2id(
+    password: i64,
+    salt: i64,
+    memory_kib: i64,
+    iterations: i64,
+    lanes: i64,
+    output_length: i64,
+) -> i64 {
+    let Some(password) = with_crypto(password, |value| match value {
+        CryptoValue::Secret(password) => Some(runtime::clone_secret(password)),
+        _ => None,
+    }) else {
+        return error("invalid Secret handle".to_string());
+    };
+    match runtime::jet_crypto_expert_argon2id_cancel_impl(
+        &password,
+        &clone_bytes(salt),
+        memory_kib,
+        iterations,
+        lanes,
+        output_length,
+        jet_codegen::scheduler::jet_scheduler_wait_point_cancelled,
+        jet_codegen::scheduler::jet_task_deliver_cancel,
+        jet_codegen::scheduler::jet_scheduler_blocking_wait_enter,
+        jet_codegen::scheduler::jet_scheduler_blocking_wait_leave,
+    ) {
+        Ok(secret) => result(true, push(CryptoValue::Secret(secret)) as u64),
+        Err(err) => error(err.to_string()),
+    }
+}
+
+fn jet_jit_crypto_expert_signing_key_bytes(key: i64) -> i64 {
+    match with_crypto(key, |value| match value {
+        CryptoValue::SigningKey(key) => {
+            Some(runtime::jet_crypto_expert_signing_key_bytes_impl(key))
+        }
+        _ => None,
+    }) {
+        Some(bytes) => alloc_bytes(&bytes),
+        None => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid signing key handle"));
+            0
+        }
+    }
+}
+
+fn jet_jit_crypto_expert_x25519_secret_bytes(key: i64) -> i64 {
+    match with_crypto(key, |value| match value {
+        CryptoValue::X25519SecretKey(key) => {
+            Some(runtime::jet_crypto_expert_x25519_secret_bytes_impl(key))
+        }
+        _ => None,
+    }) {
+        Some(bytes) => alloc_bytes(&bytes),
+        None => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid X25519 secret key handle"));
+            0
+        }
+    }
+}
+
 fn jet_jit_crypto_expert_open_v1(key: i64, blob: i64) -> i64 {
     match runtime::jet_crypto_expert_open_v1_impl(&clone_bytes(key), &clone_bytes(blob)) {
         Ok(bytes) => result(true, alloc_bytes(&bytes) as u64),
@@ -1895,6 +2013,13 @@ host_fns! {
     file_seal: "jet_jit_crypto_file_seal" => jet_jit_crypto_file_seal: ternary;
     expert_aes256gcm_seal: "jet_jit_crypto_expert_aes256gcm_seal" => jet_jit_crypto_expert_aes256gcm_seal: quaternary;
     expert_aes256gcm_open: "jet_jit_crypto_expert_aes256gcm_open" => jet_jit_crypto_expert_aes256gcm_open: quaternary;
+    expert_xchacha20poly1305_seal: "jet_jit_crypto_expert_xchacha20poly1305_seal" => jet_jit_crypto_expert_xchacha20poly1305_seal: quaternary;
+    expert_xchacha20poly1305_open: "jet_jit_crypto_expert_xchacha20poly1305_open" => jet_jit_crypto_expert_xchacha20poly1305_open: quaternary;
+    expert_ed25519_sign: "jet_jit_crypto_expert_ed25519_sign" => jet_jit_crypto_expert_ed25519_sign: binary;
+    expert_ed25519_verify: "jet_jit_crypto_expert_ed25519_verify" => jet_jit_crypto_expert_ed25519_verify: ternary;
+    expert_argon2id: "jet_jit_crypto_expert_argon2id" => jet_jit_crypto_expert_argon2id: senary;
+    expert_signing_key_bytes: "jet_jit_crypto_expert_signing_key_bytes" => jet_jit_crypto_expert_signing_key_bytes: unary;
+    expert_x25519_secret_bytes: "jet_jit_crypto_expert_x25519_secret_bytes" => jet_jit_crypto_expert_x25519_secret_bytes: unary;
     expert_open_v1: "jet_jit_crypto_expert_open_v1" => jet_jit_crypto_expert_open_v1: binary;
     expert_migrate_v1: "jet_jit_crypto_expert_migrate_v1" => jet_jit_crypto_expert_migrate_v1: quaternary;
     expert_x25519: "jet_jit_crypto_expert_x25519" => jet_jit_crypto_expert_x25519: ternary;

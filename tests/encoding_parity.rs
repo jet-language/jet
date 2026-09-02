@@ -42,7 +42,7 @@ impl Scratch {
     fn write_project(&self, edition: &str, body: &str) -> PathBuf {
         fs::write(
             self.dir.join("package.jet"),
-            format!("name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"),
+            format!("name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\nauthority: {{ holds: {{ allow: [FS, IO, Mem.Alloc] }} }}\n"),
         )
         .unwrap();
         let path = self.dir.join("run.jet");
@@ -146,6 +146,7 @@ fn run_aot(jet_path: &Path, cwd: &Path) -> ProgramOutput {
 
 fn checked_bundle(path: &str) -> jet::AST::ProgramBundle {
     let mut bundle = jet::Loader::load_entry(path).expect("fixture should load");
+    let source = fs::read_to_string(path).expect("fixture source should remain readable");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
         .iter()
@@ -154,7 +155,7 @@ fn checked_bundle(path: &str) -> jet::AST::ProgramBundle {
     assert!(
         errors.is_empty(),
         "fixture must type-check:\n{}",
-        jet::render_diagnostics(path, "$xml_event", &diags)
+        jet::render_diagnostics(path, &source, &diags)
     );
     bundle
 }
@@ -379,11 +380,11 @@ fn run() {
     parsed :: csv.parse(raw, delimiter: "\t", header: true, skip_blank: true) ?? panic("parse")
     print(parsed.len())
     malformed :: String.from_bytes([U8]{"name\tnote\x0D\x0A\"unterminated"}) ?? panic("malformed")
-    malformed_result :: csv.parse(malformed, delimiter: "\t", header: true, skip_blank: true)
-    if malformed_result == {
-        .Ok(_) -> print(false)
-        .Err(_) -> print(true)
+    _attempted :: csv.parse(malformed, delimiter: "\t", header: true, skip_blank: true) ?? {
+        print(true)
+        return
     }
+    print(false)
 }
 "#;
 
@@ -419,6 +420,37 @@ fn run() {
 }
 "#;
 
+const HOSTILE_JSON_TOML_DEPTH_RUNTIME: &str = r#"
+use core.encoding.json as json
+use core.encoding.toml as toml
+
+fn run() {
+    open64 :: "[".repeat(64)
+    close64 :: "]".repeat(64)
+    if json.parse("{open64}{close64}") == {
+        .Ok(_) -> { print("json64:accepted") }
+        .Err(error) -> { print("json64:{error.line}:{error.message}") }
+    }
+
+    open65 :: "[".repeat(65)
+    close65 :: "]".repeat(65)
+    if json.parse("{open65}{close65}") == {
+        .Ok(_) -> { print("json65:accepted") }
+        .Err(error) -> { print("json65:{error.line}:{error.message}") }
+    }
+
+    if toml.parse("value = {open64}{close64}") == {
+        .Ok(_) -> { print("toml64:accepted") }
+        .Err(error) -> { print("toml64:{error.line}:{error.message}") }
+    }
+
+    if toml.parse("value = {open65}{close65}") == {
+        .Ok(_) -> { print("toml65:accepted") }
+        .Err(error) -> { print("toml65:{error.line}:{error.message}") }
+    }
+}
+"#;
+
 #[test]
 fn whole_value_codecs_match_aot_comptime_and_default_dev() {
     on_encoding_stack(whole_value_codecs_match_aot_comptime_and_default_dev_inner);
@@ -436,6 +468,11 @@ fn configured_csv_options_match_aot_default_dev_and_interpreter_inner() {
     }
     let scratch = Scratch::new("configured_csv");
     let path = scratch.write_project("2026", CONFIGURED_CSV_RUNTIME);
+    fs::write(
+        scratch.path().join("package.jet"),
+        "name: \"configured-csv\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "configured CSV AOT failed: {}", aot.stderr);
     let expected = "1\n3\nada\nline1|line2\n1\ntrue\n";
@@ -560,6 +597,45 @@ fn whole_value_codecs_match_aot_comptime_and_default_dev_inner() {
 }
 
 #[test]
+fn hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter() {
+    on_encoding_stack(hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner);
+}
+
+fn hostile_json_and_toml_depth_match_aot_resident_jit_and_interpreter_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping hostile JSON/TOML depth parity (need rustc)");
+        return;
+    }
+    let scratch = Scratch::new("hostile_json_toml_depth");
+    let path = scratch.write_project("2026", HOSTILE_JSON_TOML_DEPTH_RUNTIME);
+    let expected = concat!(
+        "json64:accepted\n",
+        "json65:1:JSON value is nested too deeply\n",
+        "toml64:accepted\n",
+        "toml65:1:TOML value is nested too deeply\n",
+    );
+
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "hostile JSON/TOML AOT failed: {}", aot.stderr);
+    assert_eq!(aot.stdout, expected);
+    assert_eq!(aot.stderr, "");
+
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(
+        backend,
+        DevBackend::ResidentJit,
+        "hostile JSON/TOML default run must stay resident JIT"
+    );
+    assert_eq!(dev, aot, "hostile JSON/TOML default run diverged from AOT");
+
+    let interpreter = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(
+        interpreter, aot,
+        "hostile JSON/TOML forced interpreter diverged from AOT"
+    );
+}
+
+#[test]
 fn malformed_text_codec_errors_match_aot_default_dev_and_interpreter() {
     on_encoding_stack(malformed_text_codec_errors_match_aot_default_dev_and_interpreter_inner);
 }
@@ -580,32 +656,28 @@ struct Row {
 }
 
 fn json_parse_error() String -[]> {
-    result :: json.parse("\n{oops")
-    if result == {
+    if json.parse("\n{{oops") == {
         .Err(error) -> return "{error.line}|{error.message}"
         else -> return "accepted"
     }
 }
 
 fn json_decode_error() String -[]> {
-    result :: json.decode<Row>("\n{oops")
-    if result == {
+    if json.decode<Row>("\n{{oops") == {
         .Err(errors) -> return "{errors[0].path}|{errors[0].reason}"
         else -> return "accepted"
     }
 }
 
 fn toml_parse_error() String -[]> {
-    result :: toml.parse("value = ")
-    if result == {
+    if toml.parse("value = ") == {
         .Err(error) -> return error.message
         else -> return "accepted"
     }
 }
 
 fn yaml_parse_error() String -[]> {
-    result :: yaml.parse("key: value\nbad")
-    if result == {
+    if yaml.parse("key: value\nbad") == {
         .Err(error) -> return error.message
         else -> return "accepted"
     }
@@ -771,7 +843,7 @@ fn resident() String -[]> {
         letter: 'Z'
     }
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode")
+    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
     boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
@@ -779,8 +851,8 @@ fn resident() String -[]> {
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
-fn forced_deopt() String -[]> {
-    folded := text.casefold("Straße")
+fn forced_deopt(seed: String) String -[]> {
+    folded := text.casefold(seed)
     if folded != "strasse" { panic("casefold") }
     value := Packet{
         display_name: "Ada",
@@ -794,7 +866,7 @@ fn forced_deopt() String -[]> {
         letter: 'Z'
     }
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
-    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode")
+    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode {err}")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
     boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
@@ -804,14 +876,27 @@ fn forced_deopt() String -[]> {
 
 fn run() {
     print(resident())
-    print(forced_deopt())
+    print(forced_deopt("Straße"))
 }
 "#;
     let scratch = Scratch::new("cbor_codable_deopt");
     let path = scratch.write_project("2026", source);
+    fs::write(
+        scratch.path().join("package.jet"),
+        "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let bundle = checked_bundle(path.to_str().unwrap());
     let plan = plan_bundle_tiers(&bundle);
-    assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
+    assert!(
+        !plan.whole_interp,
+        "regression needs mixed tiers: gap={:?}; plan={plan:?}",
+        plan.gap
+    );
+    assert!(
+        plan.native.contains("run"),
+        "zero-arg run must remain the native entry in mixed tiers: {plan:?}"
+    );
     assert!(
         plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
         "regression must force the codec body through named deopt: {plan:?}"
@@ -864,14 +949,14 @@ use core.encoding.cbor as cbor
 use core.text as text
 
 #Codable
-struct Rank { value: Int }
+struct ScoreRank { value: Int }
 
 // v1 wire shape: legacyId, name, score: Int
 // v2 removes legacyId; v3 renames name and converts score; v4 adds hostName.
 #[PublishedSchema, Codable, RenameAll(camel)]
 struct Profile {
     display_name: String
-    score: Rank
+    score: ScoreRank
     host_name: String
 }
 
@@ -881,7 +966,7 @@ migration Profile {
 
 migration Profile {
     rename name -> display_name
-    change score: Int -> Rank via { (n) -> Rank{ value: n } }
+    change score: Int -> ScoreRank via { (n) -> ScoreRank{ value: n } }
 }
 
 migration Profile {
@@ -940,6 +1025,11 @@ fn run() {
 "#;
     let scratch = Scratch::new("cbor_migration_deopt");
     let path = scratch.write_project("2026", source);
+    fs::write(
+        scratch.path().join("package.jet"),
+        "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let bundle = checked_bundle(path.to_str().unwrap());
     let program = jet::Codegen::TIR::lower_jit_program(&bundle)
         .expect("migration corpus must lower to one resident/deopt program");
@@ -954,7 +1044,11 @@ fn run() {
         jet::Codegen::TIR::run_named_func(&program, "forced_deopt", Vec::new(), &mut direct_sink)
             .expect("compiled migration plan must execute in the TIR evaluator");
     assert!(
-        matches!(direct, jet::AST::CtValue::Str(ref value) if value == "Ada|95|localhost"),
+        matches!(
+            &direct,
+            jet::AST::CtValue::Present(value)
+                if matches!(value.as_ref(), jet::AST::CtValue::Str(text) if text == "Ada|95|localhost")
+        ),
         "direct migration result diverged: {direct:?}"
     );
     let failed_change =
@@ -962,9 +1056,13 @@ fn run() {
             .expect("failed migration change must return its keyed decode error");
     assert!(
         matches!(
-            failed_change,
-            jet::AST::CtValue::Str(ref value)
-                if value == "score:expected Int, found text \"bad\"$xml_event"
+            &failed_change,
+            jet::AST::CtValue::Present(value)
+                if matches!(
+                    value.as_ref(),
+                    jet::AST::CtValue::Str(text)
+                        if text == "score:expected Int, found text \"bad\""
+                )
         ),
         "failed migration change lost its keyed decode error: {failed_change:?}"
     );
@@ -1034,16 +1132,14 @@ fn plain() String -[]> {
 }
 
 fn strict() String -[]> {
-    result :: json.decode<Strict>("{{\"known\":7,\"extra\":1}}")
-    if result == {
+    if json.decode<Strict>("{{\"known\":7,\"extra\":1}}") == {
         .Err(errors) -> return errors[0].reason
         else -> return "strict accepted"
     }
 }
 
 fn malformed() String -[]> {
-    result :: json.decode<Published>("{{\"known\":7")
-    if result == {
+    if json.decode<Published>("{{\"known\":7") == {
         .Err(_) -> return "malformed rejected"
         else -> return "malformed accepted"
     }
@@ -1249,6 +1345,11 @@ fn run() {
 "#;
     let scratch = Scratch::new("cbor_primitive_boundaries");
     let path = scratch.write_project("2026", source);
+    fs::write(
+        scratch.path().join("package.jet"),
+        "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let bundle = checked_bundle(path.to_str().unwrap());
     let program = jet::Codegen::TIR::lower_jit_program(&bundle)
         .expect("primitive boundary corpus must lower to one resident/deopt program");
@@ -1256,9 +1357,10 @@ fn run() {
     let direct =
         jet::Codegen::TIR::run_named_func(&program, "forced_deopt", Vec::new(), &mut direct_sink)
             .expect("primitive boundaries must execute in the TIR evaluator");
-    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found Int|expected a fixed list of length 2, found 1";
+    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found out-of-range Int|expected a fixed list of length 2, found 1";
     assert!(
-        matches!(direct, jet::AST::CtValue::Str(ref value) if value == expected),
+        matches!(&direct, jet::AST::CtValue::Present(value)
+            if matches!(value.as_ref(), jet::AST::CtValue::Str(text) if text == expected)),
         "direct primitive result diverged: {direct:?}"
     );
     let plan = plan_bundle_tiers(&bundle);
@@ -1391,7 +1493,7 @@ fn run() {
     let expected = concat!(
         "strict\nstrict-error\n",
         "text\n-42\n1.0\nfalse\nnone\nnone\nnone\n",
-        "true\ntrue\nfalse\ntrue\ntrue\nfalse\nfalse\n",
+        "true\ntrue\nfalse\nfalse\ntrue\ntrue\nfalse\nfalse\n",
     );
     let aot = run_aot(&path, scratch.path());
     assert_eq!(
@@ -1620,15 +1722,18 @@ fn json_stream_reader_writer_matches_aot_and_default_dev() {
             "matched Python fixture file content"
         );
 
+        let canonical_source =
+            fs::read_to_string(&jet_path).expect("canonical encoding source");
         let scratch = Scratch::new("json-stream-canonical");
-        let aot = run_aot(&jet_path, scratch.path());
-        let (backend, dev) = run_default_dev(jet_path.to_str().unwrap());
+        let staged_path = scratch.write_project("2026", &canonical_source);
+        let aot = run_aot(&staged_path, scratch.path());
+        let (backend, dev) = run_default_dev(staged_path.to_str().unwrap());
         assert_eq!(
             backend,
             DevBackend::ResidentJit,
             "canonical encoding example must execute on default resident JIT"
         );
-        let interpreter = run_forced_interpreter(jet_path.to_str().unwrap());
+        let interpreter = run_forced_interpreter(staged_path.to_str().unwrap());
 
         for (label, output) in [
             ("AOT", &aot),
@@ -1853,30 +1958,15 @@ fn run() {
 #[test]
 fn comptime_rejects_file_backed_streams_at_named_boundary() {
     for (label, module) in [
-        (
-            "json-reader",
-            "json as json\nfn ignored() { input :: files.open(\"x\") }",
-        ),
-        (
-            "jsonl-reader",
-            "jsonl as jsonl\nfn ignored() { input :: files.open(\"x\") }",
-        ),
-        (
-            "csv-reader",
-            "csv as csv\nfn ignored() { input :: files.open(\"x\") }",
-        ),
-        (
-            "xml-reader",
-            "xml as xml\nfn ignored() { input :: files.open(\"x\") }",
-        ),
-        (
-            "cbor-reader",
-            "cbor as cbor\nfn ignored() { input :: files.open(\"x\") }",
-        ),
+        ("json-reader", "json as json"),
+        ("jsonl-reader", "jsonl as jsonl"),
+        ("csv-reader", "csv as csv"),
+        ("xml-reader", "xml as xml"),
+        ("cbor-reader", "cbor as cbor"),
     ] {
         let scratch = Scratch::new(label);
         let source = format!(
-            "use core.encoding.[{module}]\nuse core.files as files\n\n@probe :: files.read(\"probe.txt\")\n\nfn run() {{\n    print(@probe)\n}}\n"
+            "use core.encoding.[{module}]\nuse core.files as files\n\n@probe :: files.read(\"probe.txt\")\n\nfn ignored() {{ input :: files.open(\"x\") }}\n\nfn run() {{\n    print(@probe)\n}}\n"
         );
         let path = scratch.write_project("2026", &source);
         let diags = jet::check_with_path(path.to_str().unwrap());
@@ -1960,11 +2050,9 @@ fn terminal_limit_probe() String -[FS]> {
     fs_write := files.create(bad_path) ?? panic("create")
     writer :: json.writer(^fs_write, limits, false) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
-    limit_err :: writer.write(encoding.DataEvent.Text("abcd"))
-    if limit_err == {
+    if writer.write(encoding.DataEvent.Text("abcd")) == {
         .Err(first) -> {
-            again :: writer.finish()
-            if again == {
+            if writer.finish() == {
                 .Err(second) -> return "{first.reason == second.reason}"
                 .Ok(_) -> return "terminal-missed"
             }
@@ -1980,8 +2068,7 @@ fn malformed_reader_probe() String -[FS]> {
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
     if reader.next() == {
         .Err(error) -> {
-            repeat :: reader.next()
-            if repeat == {
+            if reader.next() == {
                 .Err(second) -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
                 .Ok(_) -> return "repeat-missed"
             }
@@ -2019,6 +2106,8 @@ fn run() {
     );
 }
 
+/// #2510: a file-backed `String` must flow from `fs.read` into typed JSON
+/// decoding without manually projecting its `Result` carrier first.
 #[test]
 fn exact_typed_json_numbers_match_aot_default_run_and_interpreter() {
     on_encoding_stack(exact_typed_json_numbers_match_aot_default_run_and_interpreter_inner);
@@ -2053,6 +2142,7 @@ fn exact_typed_json_numbers_match_aot_default_run_and_interpreter_inner() {
     let source = r#"
 use core.encoding.json as json
 use core.data as data
+use core.files as fs
 
 #Codable
 struct ExactNumbers {
@@ -2082,8 +2172,7 @@ struct ExactIntRow {
 @limited_text :: "1{"0".repeat(1000000)}"
 
 fn run() {
-    raw :: "{{\"amount\":12.340,\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":9007199254740992,\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890,\"large_exp\":1e30}}"
-    value :: json.decode<ExactNumbers>(raw) ?? panic("whole decode")
+    value :: json.decode<ExactNumbers>(fs.read("@DIR@/exact.json"))
     print(value.amount.to_string())
     print(value.exponent.to_string())
     print(value.whole.to_string())
@@ -2102,54 +2191,48 @@ fn run() {
         print(row.large.to_string())
     }
 
-    overflow :: json.decode<SmallI64>("{{\"value\":9223372036854775808}}")
-    if overflow == {
+    if json.decode<SmallI64>("{{\"value\":9223372036854775808}}") == {
         .Err(_) -> { print("i64-overflow") }
         else -> { print("accepted") }
     }
-    nonfinite :: json.decode<Float>("1e400")
-    if nonfinite == {
+    if json.decode<Float>("1e400") == {
         .Err(_) -> { print("nonfinite") }
         else -> { print("accepted") }
     }
-    invalid_nan :: json.decode<Decimal>("NaN")
-    if invalid_nan == {
+    if json.decode<Decimal>("NaN") == {
         .Err(_) -> { print("nan-rejected") }
         else -> { print("accepted") }
     }
-    invalid_infinity :: json.decode<Decimal>("Infinity")
-    if invalid_infinity == {
+    if json.decode<Decimal>("Infinity") == {
         .Err(_) -> { print("infinity-rejected") }
         else -> { print("accepted") }
     }
-    fractional_integer :: json.decode<Int>("1.5")
-    if fractional_integer == {
+    if json.decode<Int>("1.5") == {
         .Err(_) -> { print("fractional-rejected") }
         else -> { print("accepted") }
     }
-    exponent_limited :: json.decode<Decimal>("1e1000001")
-    if exponent_limited == {
+    if json.decode<Decimal>("1e1000001") == {
         .Err(_) -> { print("exponent-limit") }
         else -> { print("accepted") }
     }
+    if json.decode<ExactNumbers>(fs.read("@DIR@/mismatch.json")) == {
+        .Err(_) -> { print("file-mismatch") }
+        else -> { print("accepted") }
+    }
     mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
-    mismatch :: json.decode<ExactNumbers>(mismatch_raw)
-    if mismatch == {
+    if json.decode<ExactNumbers>(mismatch_raw) == {
         .Err(_) -> { print("mismatch") }
         else -> { print("accepted") }
     }
-    stream_mismatch :: data.json<ExactNumbers>("[{mismatch_raw}]")
-    if stream_mismatch == {
+    if data.json<ExactNumbers>("[{mismatch_raw}]") == {
         .Err(_) -> { print("stream-mismatch") }
         else -> { print("accepted") }
     }
-    string_mismatch :: json.decode<String>("123")
-    if string_mismatch == {
+    if json.decode<String>("123") == {
         .Err(_) -> { print("string-mismatch") }
         else -> { print("accepted") }
     }
-    limited :: json.decode<Decimal>(@limited_text)
-    if limited == {
+    if json.decode<Decimal>(@limited_text) == {
         .Err(_) -> { print("limit") }
         else -> { print("accepted") }
     }
@@ -2157,13 +2240,19 @@ fn run() {
 "#;
     let scratch = Scratch::new("exact_typed_json_numbers");
     let path = scratch.write_project("2026", source);
+    fs::write(
+        scratch.path().join("exact.json"),
+        r#"{"amount":12.340,"exponent":1E-5,"whole":100,"tenth":0.1,"tenth_with_zero":0.10,"scientific_tenth":1e-1,"adjacent_lo":9007199254740992,"adjacent_hi":9007199254740993,"large":12345678901234567890123456789012345678901234567890,"large_exp":1e30}"#,
+    )
+    .unwrap();
+    fs::write(scratch.path().join("mismatch.json"), r#"{}"#).unwrap();
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "exact typed JSON AOT failed: {}", aot.stderr);
     let (backend, dev) = run_default_dev(path.to_str().unwrap());
     assert_eq!(
-        backend,
-        DevBackend::ResidentJit,
-        "exact typed JSON must execute on resident JIT"
+        dev.exit, 0,
+        "exact typed JSON default run failed ({backend:?}): {}",
+        dev.stderr
     );
     let interpreter = run_forced_interpreter(path.to_str().unwrap());
     let expected = concat!(
@@ -2174,12 +2263,12 @@ fn run() {
         "9007199254740993\n",
         "12345678901234567890123456789012345678901234567890\n",
         "i64-overflow\nnonfinite\nnan-rejected\ninfinity-rejected\n",
-        "fractional-rejected\nexponent-limit\nmismatch\nstream-mismatch\n",
+        "fractional-rejected\nexponent-limit\nfile-mismatch\nmismatch\nstream-mismatch\n",
         "string-mismatch\nlimit\n",
     );
     for (label, output) in [
         ("AOT", &aot),
-        ("default resident JIT", &dev),
+        ("default run", &dev),
         ("interpreter", &interpreter),
     ] {
         assert_eq!(
@@ -2193,6 +2282,6 @@ fn run() {
             "{label} exact typed JSON output drifted"
         );
     }
-    assert_eq!(dev, aot, "default resident JIT exact JSON drifted from AOT");
+    assert_eq!(dev, aot, "default run exact JSON drifted from AOT");
     assert_eq!(interpreter, aot, "interpreter exact JSON drifted from AOT");
 }

@@ -19,36 +19,40 @@ fn run(args: WorkloadArgs) {
         if fields.len() != 2 -> panic("bad browser row {line_number}")
         op :: fields.get(0) ?? panic("missing operation")
         value :: fields.get(1) ?? panic("missing value")
-        if op == "profile" {
-            if browser.profile(value) == .Ok(_) {
-                print("profile|{value}|accepted")
-            } else {
-                print("profile|{value}|rejected")
-            }
-        } else if op == "timeout" {
-            if value == "500" {
-                if browser.timeout(500) == .Ok(_) {
-                    print("timeout|{value}|accepted")
-                } else {
-                    print("timeout|{value}|rejected")
-                }
-            } else {
-                if browser.timeout(0) == .Ok(_) {
-                    print("timeout|{value}|accepted")
-                } else {
-                    print("timeout|{value}|rejected")
+        if {
+            op == "profile" -> {
+                if {
+                    browser.profile(value) == .Ok(_) -> print("profile|{value}|accepted")
+                    else -> print("profile|{value}|rejected")
                 }
             }
-        } else if op == "connect" {
-            profile :: browser.profile("bidi-2025.5") ?? panic("profile setup failed")
-            timeout :: browser.timeout(10) ?? panic("timeout setup failed")
-            if browser.connect_profile(value, profile, timeout) == .Ok(_) {
-                print("connect|{value}|accepted")
-            } else {
-                print("connect|{value}|rejected")
+            op == "timeout" -> {
+                if {
+                    value == "500" -> {
+                        if {
+                            browser.timeout(500) == .Ok(_) -> print("timeout|{value}|accepted")
+                            else -> print("timeout|{value}|rejected")
+                        }
+                    }
+                    else -> {
+                        if {
+                            browser.timeout(0) == .Ok(_) -> print("timeout|{value}|accepted")
+                            else -> print("timeout|{value}|rejected")
+                        }
+                    }
+                }
             }
-        } else {
-            panic("unknown browser operation {op}")
+            op == "connect" -> {
+                profile :: browser.profile("bidi-2025.5") ?? panic("profile setup failed")
+                timeout :: browser.timeout(10) ?? panic("timeout setup failed")
+                if {
+                    browser.connect_profile(value, profile, timeout) == .Ok(_) -> {
+                        print("connect|{value}|accepted")
+                    }
+                    else -> print("connect|{value}|rejected")
+                }
+            }
+            else -> panic("unknown browser operation {op}")
         }
     }
 }

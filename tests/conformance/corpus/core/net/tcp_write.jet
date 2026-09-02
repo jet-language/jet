@@ -6,8 +6,10 @@ fn run() {
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     client :: net.tcp_connect(address) ?? panic("connect")
     server :: net.tcp_accept(listener) ?? panic("accept")
-    result :: net.tcp_write(&client, "write") ?? panic("write")
+    print((() -> {
+        net.tcp_write(&client, "write") ?? panic("write")
+        true
+    })())
     received :: server.read_text(5) ?? panic("read")
-    print(result)
     print(received)
 }

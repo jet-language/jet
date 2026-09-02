@@ -25,12 +25,17 @@ The task files freeze the input shape and the output contract.
 
 `tests/compiled_workloads/peer_ledger.tsv` freezes source URL, source
 revision, build command, run command, dependency rule, source boundary, and
-target list. Each task has one `best-applicable` peer. Candidate rows keep the
-other named languages visible.
+target list. Each task has one `best-applicable` peer for the Jet loss
+comparison. Candidate rows keep every other named peer visible and require
+the same source execution when the host target applies.
 
 `tests/compiled_workloads/adapter_ledger.tsv` binds each task to its Jet and
-peer source, hostile fixture, and immutable peer revision. The measurement
-policy freezes sample count, variance limits, and the 1.05 loss tolerance.
+selected-peer source and hostile fixture. The
+`tests/compiled_workloads/peer_adapter_ledger.tsv` binds every selected and
+candidate peer row to its own source, hostile fixture, and immutable revision.
+The measurement policy freezes sample count, variance limits, and a strict
+`1.00` peer ratio.
+Rust is the only noise-parity exception, with a `1.05` ratio.
 
 Public task references and revision notes live in
 `docs/research/card-1414-compiled-peer-task-definitions.md`.
@@ -41,7 +46,10 @@ Each outcome row must use the same task input, expected outcome, run identity,
 dependency rule, and source boundary for Jet and its selected peer. A row must
 record both tool versions. A result that does not build or run is not a pass.
 
-Each task must record these metrics for Jet and the selected peer:
+Each task must record these metrics for Jet and its selected peer. Every
+applicable candidate row must also record the same metric set; a missing
+candidate adapter, source execution, hostile execution, or metric row fails
+the gate.
 
 `source_effort`, `build_time`, `edit_time`, `runtime`, `memory`,
 `artifact_size`, `diagnostics`, `debugging`, `deployment`, and
@@ -52,8 +60,9 @@ Missing data fails the gate. The gate does not turn missing data into zero or
 
 ## Report contract
 
-The measurement producer writes one report directory with eight TSV evidence
-files. The release checker requires every file.
+The measurement producer writes one report directory with ten TSV evidence
+files. An independent review workflow adds `review.tsv`; the release checker
+requires all eleven files.
 
 | File | Purpose |
 | --- | --- |
@@ -65,13 +74,16 @@ files. The release checker requires every file.
 | `tiers.tsv` | One row for each declared execution tier for Jet and the selected peer. |
 | `receipts.tsv` | Hashes for source, input, expected output, hostile input/output, tool identity, command, and exit status. |
 | `tier_receipts.tsv` | Artifact/output hashes and execution receipt for every declared tier and comparison side. |
+| `peer_coverage.tsv` | Source, normal/hostile output, command, target, and execution receipt for every selected and candidate peer row. |
+| `peer_measurements.tsv` | The ten metrics for every applicable peer row, with explicit `not-applicable` rows for unsupported hosts. |
 
 An outcome row must record `platform=linux|macos|windows` in its comparison
 identity, plus a current `candidate=<40-hex-commit>`, `jet_tool_version`, and
-`peer_tool_version`. It must
-also record `review_status=pass` and non-empty `review_evidence`. The fresh
-review evidence names the candidate revision, reviewer, fairness scope, and
-measurement scope. A pending or missing declaration fails the gate.
+`peer_tool_version`. Producer outcomes retain `review_status=pending` and
+`review_evidence=-`; the separate `review.tsv` records the authenticated
+workflow, run, actor, fairness scopes, and report digest. A pending producer
+declaration is expected before review, but a missing or stale external review
+fails the release gate.
 
 Reports are host-scoped. A required row outside the report platform is
 `not-applicable`; the release matrix must check each required host report.
@@ -81,12 +93,14 @@ one ratified `non-goal:D-*` ruling. The validator reads the decision and
 requires `status=ratified` with an owner outcome. A syntactically valid but
 stale card does not close the owner obligation.
 
-The report validator checks the task identity, selected peer, metric set,
-execution tiers, review declaration, and loss-owner field. It does not create
-measurements or turn unavailable data into a pass. It recomputes each lower-is-
-better Jet metric against the selected peer and the frozen tolerance, so a
-report cannot hide a measured loss behind a `measured` label. Measurement
-toolchain IDs must also match the versions recorded by the outcome row.
+The report validator checks the task identity, selected peer, all-peer coverage
+and measurement rows, metric set, execution tiers, review declaration, and
+loss-owner field. It does not create measurements or turn unavailable data
+into a pass. It recomputes each lower-is-better Jet metric against the
+selected peer using strict `<1.00` superiority; Rust uses `<=1.05` noise
+parity. A report cannot hide a measured loss behind a `measured` label.
+Measurement toolchain IDs must also match the versions recorded by the
+outcome row.
 
 ## Open gate findings
 
@@ -120,8 +134,8 @@ claim can pass.
 
 `tests/compiled_workloads/canaries.tsv` names the removal mutations. The
 self-check exercises every row. It covers missing outcomes, unowned losses,
-missing metrics, missing tier proof, changed inputs, missing fresh review, and
-stale candidate identity.
+missing metrics, missing tier proof, changed inputs, missing fresh review,
+stale candidate identity, and missing all-peer measurement coverage.
 
 ## Owner law
 
@@ -140,7 +154,14 @@ Check the frozen contract:
 TMPDIR="$HOME/.cache/jet-test-scratch" bash tools/ci/compiled-workload-gate.sh --contract
 ```
 
-Check a complete report directory:
+Review and check a producer report in the independent workflow:
+
+```sh
+REVIEW_RUN=1 REVIEW_ACTOR=reviewer \
+  node tools/ci/compiled-workload-review.mjs <report-dir>
+```
+
+Check a complete reviewed report directory:
 
 ```sh
 TMPDIR="$HOME/.cache/jet-test-scratch" bash tools/ci/compiled-workload-gate.sh --check <report-dir>

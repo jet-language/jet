@@ -98,14 +98,16 @@
 import { init_app, init_fuel } from "./app.js";
 
 // `init_app`/`init_fuel` each paint their own real DOM elements once (the two
-// static stat cards + the "Boosts" counter box, and the Fuel card) and
-// return the live `Signal` object `core.reactive.signal` compiled to
-// (crates/jet-codegen/src/Prelude/DomRuntime.js's `makeSignal`) — this page
-// drives both signals directly with plain `.get()`/`.set()`, the same real
-// reactive object 195_ui_web_reactive.jet's native golden test exercises,
-// not a lookalike.
-const boosts = init_app();
-const elapsed = init_fuel();
+// static stat cards + the "Boosts" counter box, and the Fuel card). Checked
+// Jet functions expose their `Ok` carrier to direct JavaScript callers; unwrap
+// that payload to drive the live `Signal` objects compiled by
+// `core.reactive.signal` (`jetDom.makeSignal`), not lookalikes.
+const unwrap = (outcome) => {
+  if (outcome?.tag === "Ok") return outcome.values[0];
+  throw new Error(`Jet initialization failed: ${JSON.stringify(outcome)}`);
+};
+const boosts = unwrap(init_app());
+const elapsed = unwrap(init_fuel());
 
 const DURATION_MS = 600;
 let boosting = false;
@@ -113,7 +115,7 @@ let boostStart = 0;
 
 const btn = document.getElementById("boost-btn");
 btn.addEventListener("click", () => {
-  boosts.set(boosts.get() + 1);
+  boosts.set(boosts.get() + 1n);
   boostStart = performance.now();
   btn.dataset.motionState = "running";
   if (!boosting) {
@@ -130,7 +132,7 @@ btn.addEventListener("click", () => {
 function frame() {
   if (!boosting) return;
   const t = Math.round(performance.now() - boostStart);
-  elapsed.set(t);
+  elapsed.set(BigInt(t));
   if (t >= DURATION_MS) {
     boosting = false;
     btn.dataset.motionState = "complete";

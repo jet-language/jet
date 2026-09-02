@@ -1206,6 +1206,11 @@ fn run() {{
 fn csv_stream_drop_and_codec_heap_ceiling_are_enforced() {
     let dir = std::env::temp_dir().join(format!("jet_csv_stream_drop_heap_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"csv_stream_drop_heap\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let partial_path = dir.join("partial.csv");
     let heap_path = dir.join("heap.csv");
     // Capacity doubles to 131072; the next byte charges past the shared codec
@@ -1253,12 +1258,10 @@ fn run() {{
     reader :: csv.reader(^input, limits) ?? panic("heap reader")
     count := 0
     loop count < 4 {{
-        result :: reader.next()
-        if result == {{
+        if reader.next() == {{
             .Ok(_) -> {{ count++ }}
             .Err(first) -> {{
-                again :: reader.next()
-                if again == {{
+                if reader.next() == {{
                     .Ok(_) -> {{ print("heap-not-latched") }}
                     .Err(second) -> {{
                         print(first.byte_offset)
@@ -1542,6 +1545,13 @@ use core.encoding.csv as csv
 #Codable
 struct Note { name: String, note: String }
 
+fn csv_error_contains(input: String, needle: String) Bool -> {
+    _rows :: csv.parse(input) ?? {
+        return err.contains(needle)
+    }
+    return false
+}
+
 fn run() {
     raw :: "name,note\nAda,\"line1\nline2\"\nLin,\"said \"\"hi\"\"\"\n"
     rows :: csv.parse(raw) ?? panic("parse")
@@ -1555,14 +1565,8 @@ fn run() {
     print(notes[0].name)
     print(notes[0].note)
 
-    if csv.parse("a,\"unterminated") == {
-        .Ok(_) -> { print("unterminated-missed") }
-        .Err(message) -> { print(message.contains("quoted field ended before its closing quote")) }
-    }
-    if csv.parse("a,\"ok\"junk") == {
-        .Ok(_) -> { print("closing-junk-missed") }
-        .Err(message) -> { print(message.contains("may follow a closing quote")) }
-    }
+    print(csv_error_contains("a,\"unterminated", "quoted field ended before its closing quote"))
+    print(csv_error_contains("a,\"ok\"junk", "may follow a closing quote"))
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "csv_whole", source, &[], None);
@@ -1579,6 +1583,11 @@ fn run() {
 fn csv_stream_records_are_incremental_rfc4180_bounded_and_terminal() {
     let dir = std::env::temp_dir().join(format!("jet_csv_stream_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"csv_stream\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
     let input_path = dir.join("input.csv");
     let output_path = dir.join("output.csv");
     let malformed_path = dir.join("malformed.csv");
@@ -1613,12 +1622,10 @@ fn run() {{
     writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
-    after_finish :: writer.write(["late"])
-    if after_finish == {{
+    if writer.write(["late"]) == {{
         .Ok(_) -> {{ print("write-after-finish-missed") }}
         .Err(writer_first) -> {{
-            after_terminal :: writer.flush()
-            if after_terminal == {{
+            if writer.flush() == {{
                 .Ok(_) -> {{ print("writer-terminal-missed") }}
                 .Err(writer_second) -> {{ print(writer_first.byte_offset == writer_second.byte_offset && writer_first.reason == writer_second.reason) }}
             }}
@@ -1627,33 +1634,32 @@ fn run() {{
 
     input :: files.open("{input}") ?? panic("open")
     reader :: csv.reader(^input) ?? panic("reader")
-    first :: reader.next() ?? panic("first")
+    first :: reader.next()
     if first == {{
-        Val(row) -> {{ print(row.fields[0]); print(row.line); print(row.fields[1]); print(row.fields[2]); print(row.fields[3]) }}
-        None -> {{ print("first-missing") }}
+        .Val(row) -> {{ print(row.fields[0]); print(row.line); print(row.fields[1]); print(row.fields[2]); print(row.fields[3]) }}
+        .None -> {{ print("first-missing") }}
     }}
-    second :: reader.next() ?? panic("second")
+    second :: reader.next()
     if second == {{
-        Val(row) -> {{ print(row.fields[0]); print(row.line); print(row.fields[1] == ""); print(row.fields[2]) }}
-        None -> {{ print("second-missing") }}
+        .Val(row) -> {{ print(row.fields[0]); print(row.line); print(row.fields[1] == ""); print(row.fields[2]) }}
+        .None -> {{ print("second-missing") }}
     }}
-    eof :: reader.next() ?? panic("eof")
-    if eof == {{ Val(_) -> {{ print(false) }} None -> {{ print(true) }} }}
-    eof_again :: reader.next() ?? panic("eof again")
-    if eof_again == {{ Val(_) -> {{ print(false) }} None -> {{ print(true) }} }}
-
+    eof :: reader.next()
+    if eof == {{ .Val(_) -> {{ print(false) }} .None -> {{ print(true) }} }}
+    eof_again :: reader.next()
+    if eof_again == {{ .Val(_) -> {{ print(false) }} .None -> {{ print(true) }} }}
     options_input :: files.open("{options}") ?? panic("options open")
     options_reader :: csv.reader(
         ^options_input, delimiter: "\t", header: true, skip_blank: true
     ) ?? panic("options reader")
-    options_first :: options_reader.next() ?? panic("options first")
+    options_first :: options_reader.next()
     crlf :: String.from_bytes([U8]{{"\x0D\x0A"}}) ?? panic("crlf")
     if options_first == {{
-        Val(row) -> {{ print(row.line); print(row.fields[0]); print(row.fields[1].replace(crlf, "|")) }}
-        None -> {{ print("options-missing") }}
+        .Val(row) -> {{ print(row.line); print(row.fields[0]); print(row.fields[1].replace(crlf, "|")) }}
+        .None -> {{ print("options-missing") }}
     }}
-    options_eof :: options_reader.next() ?? panic("options eof")
-    if options_eof == {{ Val(_) -> {{ print(false) }} None -> {{ print(true) }} }}
+    options_eof :: options_reader.next()
+    if options_eof == {{ .Val(_) -> {{ print(false) }} .None -> {{ print(true) }} }}
 
     malformed_input :: files.open("{malformed}") ?? panic("malformed open")
     malformed_reader :: csv.reader(^malformed_input) ?? panic("malformed reader")
@@ -1711,25 +1717,26 @@ fn run() {{
     writer_limits.max_item_bytes = 3
     limited_output :: files.create("{output}.limited") ?? panic("limited create")
     limited_writer :: csv.writer(^limited_output, writer_limits) ?? panic("limited writer")
-    limited_result :: limited_writer.write(["abcd"])
-    if limited_result == {{
+    if limited_writer.write(["abcd"]) == {{
         .Ok(_) -> {{ print("writer-limit-missed") }}
         .Err(limited_first) -> {{
-            limited_again :: limited_writer.finish()
-            if limited_again == {{
-                .Ok(_) -> {{ print("writer-limit-terminal-missed") }}
-                .Err(limited_second) -> {{ print(limited_first.path); print(limited_first.reason == limited_second.reason) }}
+            _ :: limited_writer.finish() ?? {{
+                print(limited_first.path)
+                print(limited_first.reason == err.reason)
+                return
+            }}
+            print("writer-limit-terminal-missed")
+            return
             }}
         }}
     }}
-}}
 "#
     );
     let (code, stdout, stderr) = build_and_run(&dir, "csv_stream", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "true\na\n1\nb,b\nc\"c\nline1\nline2\nlast\n3\ntrue\ntail\ntrue\ntrue\n3\nAda\nline1|line2\ntrue\n$[0][0]\ntrue\n3\n1\n4\n$[0][1]\n$[0][0]\ntrue\n$[0][0]\ntrue\n$[0][1]\ntrue\n"
+        "true\na\n1\nb,b\nc\"c\nline1\nline2\nlast\n3\ntrue\ntail\ntrue\ntrue\n3\nAda\nline1|line2\ntrue\n$[0][0]\ntrue\n2\n1\n4\n$[0][1]\n$[0][0]\ntrue\n3\n$[0][1]\ntrue\n$[0][0]\ntrue\n"
     );
     assert_eq!(fs::read_to_string(&output_path).unwrap(), "a,\"b,b\",\"c\"\"c\",\"line1\nline2\"\r\nlast,,tail\r\n");
     assert_eq!(stderr, "");

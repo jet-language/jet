@@ -28,9 +28,10 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::{Component as PathComponent, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasmtime::component::{Component, Linker, Type, Val};
-use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder, Trap};
 
 const PLUGIN_MAX_FUEL: u64 = 10_000_000;
 const PLUGIN_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
@@ -66,11 +67,114 @@ fn plugin_engine() -> Result<Engine, String> {
 fn plugin_limits() -> StoreLimits {
     StoreLimitsBuilder::new()
         .memory_size(PLUGIN_MAX_MEMORY_BYTES)
-        .table_elements(PLUGIN_MAX_TABLE_ELEMENTS)
+        .table_elements(PLUGIN_MAX_TABLE_ELEMENTS as _)
         .instances(1)
         .memories(1)
         .tables(1)
         .build()
+}
+
+fn plugin_relative_candidate(
+    path: &Path,
+    root_text: &str,
+) -> Result<Option<PathBuf>, String> {
+    let explicit_root = root_text != "repo";
+    if path.is_absolute() {
+        if !explicit_root {
+            return Ok(None);
+        }
+        let root = Path::new(root_text);
+        if !root.is_absolute() {
+            return Err(
+                "an absolute plugin path requires an absolute explicit FS.Read root".to_string(),
+            );
+        }
+        let Some(relative) = path.strip_prefix(root).ok() else {
+            return Ok(None);
+        };
+        if relative.as_os_str().is_empty() {
+            return Err("plugin path names the FS.Read root, not a file".to_string());
+        }
+        if relative.components().any(|component| {
+            matches!(
+                component,
+                PathComponent::ParentDir | PathComponent::RootDir | PathComponent::Prefix(_)
+            )
+        }) {
+            return Err("plugin path escapes its explicit FS.Read root".to_string());
+        }
+        return Ok(Some(relative.to_path_buf()));
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            PathComponent::ParentDir | PathComponent::RootDir | PathComponent::Prefix(_)
+        )
+    }) {
+        return Err("plugin path must be relative and must not contain `..`".to_string());
+    }
+    Ok(Some(path.to_path_buf()))
+}
+
+fn plugin_read_module(path: &str, authority: &str) -> Result<Vec<u8>, String> {
+    let path = Path::new(path);
+    if authority.is_empty() {
+        return jet_foundation::SHA256::read_file_nofollow(
+            path,
+            jet_foundation::SHA256::MAX_TREE_FILE_BYTES,
+        )
+        .map_err(|error| format!("couldn't read plugin `{}`: {error}", path.display()));
+    }
+
+    let mut saw_read_grant = false;
+    let mut matched_root = false;
+    let mut last_error = None;
+    for right in authority.split('\n') {
+        let Some(root_text) = right.strip_prefix("FS.Read:") else {
+            continue;
+        };
+        saw_read_grant = true;
+        if root_text.is_empty() {
+            return Err("plugin FS.Read authority names an empty root".to_string());
+        }
+        let root = if root_text == "repo" {
+            Path::new(".")
+        } else {
+            Path::new(root_text)
+        };
+        let Some(relative) = plugin_relative_candidate(path, root_text)? else {
+            continue;
+        };
+        matched_root = true;
+        match jet_foundation::SHA256::read_file_nofollow_at_root(
+            root,
+            &relative,
+            jet_foundation::SHA256::MAX_TREE_FILE_BYTES,
+        ) {
+            Ok(bytes) => return Ok(bytes),
+            Err(error) => {
+                last_error = Some(format!(
+                    "couldn't read plugin `{}`: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    if !saw_read_grant {
+        return Err("plugin load requires an FS.Read authority".to_string());
+    }
+    if !matched_root {
+        return Err(format!(
+            "plugin path `{}` is outside the granted FS.Read roots",
+            path.display()
+        ));
+    }
+    Err(last_error.unwrap_or_else(|| {
+        format!(
+            "couldn't read plugin `{}` from the granted FS.Read roots",
+            path.display()
+        )
+    }))
 }
 
 /// Load a plugin `.wasm` Component Model module from `path`. Returns
@@ -81,11 +185,15 @@ fn plugin_limits() -> StoreLimits {
 /// rendered as a plain message (I2: no raw loader crash reaches the host
 /// program).
 pub fn jet_plugin_load(path: &str, authority: &str) -> String {
+    let component_bytes = match plugin_read_module(path, authority) {
+        Ok(bytes) => bytes,
+        Err(error) => return format!("E:{error}"),
+    };
     let engine = match plugin_engine() {
         Ok(engine) => engine,
         Err(error) => return format!("E:{error}"),
     };
-    let component = match Component::from_file(&engine, path) {
+    let component = match Component::new(&engine, &component_bytes) {
         Ok(c) => c,
         Err(e) => return format!("E:couldn't load plugin `{path}`: {e}"),
     };
@@ -147,39 +255,27 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
         if params_wire.len() > PLUGIN_MAX_WIRE_BYTES {
             return "E:plugin call arguments exceed the 16 MiB resource budget".to_string();
         }
-        if let Err(error) = plugin.store.set_fuel(PLUGIN_MAX_FUEL) {
-            return format!("E:plugin fuel setup failed: {error}");
-        }
-        plugin.store.set_epoch_deadline(1);
-        plugin.store.epoch_deadline_trap();
-        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let cancelled_timer = std::sync::Arc::clone(&cancelled);
-        let timer_engine = plugin.engine.clone();
-        let timer = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now()
-                + std::time::Duration::from_millis(PLUGIN_TIMEOUT_MS);
-            while std::time::Instant::now() < deadline {
-                if cancelled_timer.load(Ordering::Relaxed) {
-                    return;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            if !cancelled_timer.load(Ordering::Relaxed) {
-                timer_engine.increment_epoch();
-            }
-        });
         let Some(func) = plugin.instance.get_func(&mut plugin.store, name) else {
-            cancelled.store(true, Ordering::Relaxed);
-            let _ = timer.join();
-            plugin.store.set_epoch_deadline(1_000_000_000);
             return format!("E:plugin has no exported function `{name}`");
         };
         let want_params = func.params(&plugin.store);
-        let args = plugin_decode_params(params_wire);
+        let decoded = plugin_decode_params(params_wire);
+        let args = match decoded {
+            Ok(args) => args,
+            Err(PluginParamDecodeError::TooMany { .. }) => {
+                // Preserve the established arity diagnostic while keeping the
+                // rejection typed internally; this must never become an empty
+                // argument list that can satisfy a zero-parameter export.
+                return format!(
+                    "E:`{name}` expects {} argument(s), got 0",
+                    want_params.len()
+                );
+            }
+            Err(error) => {
+                return format!("E:plugin call arguments rejected: {error}");
+            }
+        };
         if args.len() != want_params.len() {
-            cancelled.store(true, Ordering::Relaxed);
-            let _ = timer.join();
-            plugin.store.set_epoch_deadline(1_000_000_000);
             return format!(
                 "E:`{name}` expects {} argument(s), got {}",
                 want_params.len(),
@@ -191,9 +287,6 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
             match plugin_to_val(arg, ty) {
                 Some(v) => call_args.push(v),
                 None => {
-                    cancelled.store(true, Ordering::Relaxed);
-                    let _ = timer.join();
-                    plugin.store.set_epoch_deadline(1_000_000_000);
                     return format!(
                         "E:argument {} to `{name}` doesn't match the plugin's declared type ({})",
                         i + 1,
@@ -202,6 +295,30 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
                 }
             }
         }
+        if let Err(error) = plugin.store.set_fuel(PLUGIN_MAX_FUEL) {
+            return format!("E:plugin fuel setup failed: {error}");
+        }
+        plugin.store.set_epoch_deadline(1);
+        plugin.store.epoch_deadline_trap();
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancelled_timer = std::sync::Arc::clone(&cancelled);
+        let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let timed_out_timer = std::sync::Arc::clone(&timed_out);
+        let timer_engine = plugin.engine.clone();
+        let timer = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_millis(PLUGIN_TIMEOUT_MS);
+            while std::time::Instant::now() < deadline {
+                if cancelled_timer.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            if !cancelled_timer.load(Ordering::Relaxed) {
+                timed_out_timer.store(true, Ordering::Relaxed);
+                timer_engine.increment_epoch();
+            }
+        });
         let want_results = func.results(&plugin.store);
         if want_results.len() != 1 {
             cancelled.store(true, Ordering::Relaxed);
@@ -217,8 +334,10 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
         cancelled.store(true, Ordering::Relaxed);
         let _ = timer.join();
         plugin.store.set_epoch_deadline(1_000_000_000);
-        if let Err(e) = call_result {
-            return format!("E:calling `{name}` trapped: {e}");
+        if let Err(error) = call_result {
+            let fuel_exhausted = matches!(plugin.store.get_fuel(), Ok(0));
+            let deadline_elapsed = timed_out.load(Ordering::Relaxed);
+            return plugin_call_trap_error(name, error, fuel_exhausted, deadline_elapsed);
         }
         // Component Model contract: `post_return` must run after every call
         // before the instance can be called again.
@@ -231,6 +350,23 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
             ),
         }
     })
+}
+
+fn plugin_call_trap_error(
+    name: &str,
+    error: wasmtime::Error,
+    fuel_exhausted: bool,
+    deadline_elapsed: bool,
+) -> String {
+    let limit_trap = error
+        .downcast_ref::<Trap>()
+        .is_some_and(|trap| matches!(*trap, Trap::OutOfFuel | Trap::Interrupt));
+    if fuel_exhausted || deadline_elapsed || limit_trap {
+        return format!(
+            "E:calling `{name}` trapped: plugin execution limit reached (fuel/epoch interrupt)"
+        );
+    }
+    format!("E:calling `{name}` trapped: {error}")
 }
 
 /// Component Model scalar types accepted by the plugin export validator and
@@ -301,22 +437,50 @@ fn plugin_read_tagged(bytes: &[u8], pos: &mut usize) -> Option<(char, String)> {
     Some((tag, payload))
 }
 
+#[derive(Debug)]
+enum PluginParamDecodeError {
+    Malformed,
+    TooMany { count: usize },
+}
+
+impl std::fmt::Display for PluginParamDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Malformed => f.write_str("malformed plugin call argument frame"),
+            Self::TooMany { count } => write!(
+                f,
+                "plugin call argument frame contains {count} parameters; maximum is {PLUGIN_MAX_PARAMS}"
+            ),
+        }
+    }
+}
+
 /// Decode a count-prefixed tagged-value list (the same shape `DB.rs` uses for
-/// bind params): `"<count>:<tag><len>:<payload>…"`.
-fn plugin_decode_params(wire: &str) -> Vec<(char, String)> {
+/// bind params): `"<count>:<tag><len>:<payload>…"`. Every byte must belong to
+/// one declared value; malformed input is a rejection, never an empty list.
+fn plugin_decode_params(
+    wire: &str,
+) -> Result<Vec<(char, String)>, PluginParamDecodeError> {
     let bytes = wire.as_bytes();
-    let Some(colon) = bytes.iter().position(|b| *b == b':') else { return Vec::new() };
-    let Ok(count) = std::str::from_utf8(&bytes[..colon]).unwrap_or("0").parse::<usize>() else {
-        return Vec::new();
+    let Some(colon) = bytes.iter().position(|byte| *byte == b':') else {
+        return Err(PluginParamDecodeError::Malformed);
     };
+    let count = std::str::from_utf8(&bytes[..colon])
+        .ok()
+        .and_then(|text| text.parse::<usize>().ok())
+        .ok_or(PluginParamDecodeError::Malformed)?;
     if count > PLUGIN_MAX_PARAMS {
-        return Vec::new();
+        return Err(PluginParamDecodeError::TooMany { count });
     }
     let mut pos = colon + 1;
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
-        let Some(pair) = plugin_read_tagged(bytes, &mut pos) else { break };
+        let pair =
+            plugin_read_tagged(bytes, &mut pos).ok_or(PluginParamDecodeError::Malformed)?;
         out.push(pair);
     }
-    out
+    if pos != bytes.len() {
+        return Err(PluginParamDecodeError::Malformed);
+    }
+    Ok(out)
 }

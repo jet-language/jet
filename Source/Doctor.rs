@@ -10,6 +10,7 @@
 //! The C-FFI section (D-BUILD1) reports pkg-config presence and hangar link
 //! dirs honestly.
 
+use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -446,98 +447,165 @@ fn ffi_cache_dir() -> PathBuf {
     dirs_home().join(".cache").join("jet").join("ffi")
 }
 
-/// E2-M15: check that a cross-compilation target triple is installed.
-/// Reports whether `rustup target list --installed` contains the triple,
-/// and whether the target's std library directory exists under the sysroot.
-fn check_cross_target(triple: &str) -> Check {
-    if triple == crate::Syntax::BUILD_TARGET_WEB {
-        return Check::ok("cross", triple, "Jet web backend target (WASM + JS)");
-    }
-    // D-DEP-WASM1=A (c81): `--target=sandbox` needs `wasm-tools` on PATH (to
-    // lift the rustc-built core wasm module into a Component Model binary)
-    // in addition to the ordinary `wasm32-unknown-unknown` rustc target this
-    // function's normal path below already checks.
-    if triple == crate::Syntax::TARGET_SANDBOX {
-        let have_wasm_tools = Command::new("wasm-tools")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        if !have_wasm_tools {
-            return Check::problem(
-                "cross",
-                triple,
-                "`wasm-tools` isn't on PATH (needed to build a sandbox's Component)",
-                "install wasm-tools (ships in the project's `nix develop` shell), or add it to PATH",
-                false,
-            );
-        }
-        return check_cross_target("wasm32-unknown-unknown");
-    }
-    // Step 1: is it a known rustc target at all?
-    let known = Command::new("rustc")
-        .arg("--print")
-        .arg("target-list")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| {
-            let list = String::from_utf8_lossy(&o.stdout);
-            list.lines().any(|l| l.trim() == triple)
-        })
-        .unwrap_or(false);
+/// The Rust target used by Jet's backend aliases.
+pub const WASM_TARGET: &str = "wasm32-unknown-unknown";
 
-    if !known {
-        return Check::problem(
-            "cross",
-            triple,
-            "not a recognised rustc target triple",
-            &format!(
+/// Resolve a Jet backend target to the Rust target whose installed component
+/// the compiler will actually invoke.
+pub fn target_rustc_triple(triple: &str) -> &str {
+    match triple {
+        crate::Syntax::BUILD_TARGET_WEB | crate::Syntax::TARGET_SANDBOX => WASM_TARGET,
+        _ => triple,
+    }
+}
+
+/// Why the target-component probe could not prove readiness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetComponentProbeError {
+    /// The target-list command could not provide usable output.
+    TargetListUnavailable,
+    /// Rustc ran, but did not report the requested target.
+    TargetNotKnown,
+    /// The sysroot command could not provide a usable path.
+    SysrootUnavailable,
+    /// The target lib directory is absent, inaccessible, or empty.
+    LibraryUnavailable(PathBuf),
+}
+
+impl fmt::Display for TargetComponentProbeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TargetListUnavailable => {
+                write!(f, "could not run the rustc target metadata probe")
+            }
+            Self::TargetNotKnown => write!(f, "not a recognised rustc target triple"),
+            Self::SysrootUnavailable => write!(f, "could not determine the rustc sysroot"),
+            Self::LibraryUnavailable(path) => write!(
+                f,
+                "target-specific standard-library component is missing or empty ({})",
+                path.display()
+            ),
+        }
+    }
+}
+
+impl TargetComponentProbeError {
+    /// Actionable remediation without exposing a failed rustc command's stderr.
+    pub fn fix(&self, requested: &str) -> String {
+        let triple = target_rustc_triple(requested);
+        match self {
+            Self::TargetNotKnown => format!(
                 "run `rustc --print target-list | grep {}` to search for similar names",
                 triple
             ),
+            Self::TargetListUnavailable | Self::SysrootUnavailable => {
+                "make the project's rustc toolchain available, then re-run the target check"
+                    .to_string()
+            }
+            Self::LibraryUnavailable(_) => {
+                format!("run `rustup target add {triple}` to install the standard library")
+            }
+        }
+    }
+}
+
+/// Prove that the Rust component needed by a Jet target is installed.
+///
+/// A successful target-list query alone is not enough: rustup can leave a
+/// target directory behind after an interrupted installation. The target's
+/// actual `lib` directory must contain non-empty regular-file content.
+pub fn probe_target_component(
+    triple: &str,
+) -> Result<PathBuf, TargetComponentProbeError> {
+    let rust_triple = target_rustc_triple(triple);
+
+    let target_list = Command::new("rustc")
+        .args(["--print", "target-list"])
+        .output()
+        .map_err(|_| TargetComponentProbeError::TargetListUnavailable)?;
+    if !target_list.status.success() {
+        return Err(TargetComponentProbeError::TargetListUnavailable);
+    }
+    let known = String::from_utf8_lossy(&target_list.stdout)
+        .lines()
+        .any(|line| line.trim() == rust_triple);
+    if !known {
+        return Err(TargetComponentProbeError::TargetNotKnown);
+    }
+
+    let sysroot = Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .output()
+        .map_err(|_| TargetComponentProbeError::SysrootUnavailable)?;
+    if !sysroot.status.success() {
+        return Err(TargetComponentProbeError::SysrootUnavailable);
+    }
+    let root = String::from_utf8_lossy(&sysroot.stdout).trim().to_string();
+    if root.is_empty() {
+        return Err(TargetComponentProbeError::SysrootUnavailable);
+    }
+
+    let target_lib = PathBuf::from(root)
+        .join("lib")
+        .join("rustlib")
+        .join(rust_triple)
+        .join("lib");
+    let has_component = fs::read_dir(&target_lib)
+        .map(|entries| {
+            entries.flatten().any(|entry| {
+                entry
+                    .metadata()
+                    .map(|metadata| metadata.is_file() && metadata.len() > 0)
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    if !has_component {
+        return Err(TargetComponentProbeError::LibraryUnavailable(target_lib));
+    }
+    Ok(target_lib)
+}
+
+/// E2-M15: check that a cross-compilation target triple is installed.
+/// Backend aliases are checked against the Rust target they invoke.
+fn check_cross_target(triple: &str) -> Check {
+    // D-DEP-WASM1=A (c81): `--target=sandbox` needs `wasm-tools` on PATH (to
+    // lift the rustc-built core wasm module into a Component Model binary).
+    // Keep this prerequisite separate from the Rust std-component probe below.
+    if triple == crate::Syntax::TARGET_SANDBOX && !command_ok("wasm-tools", &["--version"]) {
+        return Check::problem(
+            "cross",
+            triple,
+            "`wasm-tools` isn't on PATH (needed to build a sandbox's Component)",
+            "install wasm-tools (ships in the project's `nix develop` shell), or add it to PATH",
             false,
         );
     }
 
-    // Step 2: is the std library installed for this target?
-    let sysroot = Command::new("rustc")
-        .arg("--print")
-        .arg("sysroot")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-
-    if let Some(root) = sysroot {
-        let target_lib = std::path::PathBuf::from(&root)
-            .join("lib")
-            .join("rustlib")
-            .join(triple);
-        if !target_lib.exists() {
-            return Check::problem(
-                "cross",
-                triple,
-                "std library for this target is not installed",
-                &format!("run `rustup target add {}` to install it", triple),
-                false,
-            );
+    match probe_target_component(triple) {
+        Ok(target_lib) => {
+            let description = if triple == crate::Syntax::BUILD_TARGET_WEB {
+                format!(
+                    "Jet web backend target (WASM + JS; installed ({}))",
+                    target_lib.display()
+                )
+            } else if triple == crate::Syntax::BUILD_TARGET_WASI_SERVER {
+                format!(
+                    "Jet WASI Preview 2 server Component target ({})",
+                    target_lib.display()
+                )
+            } else {
+                format!("installed ({})", target_lib.display())
+            };
+            Check::ok("cross", triple, description)
         }
-        let description = if triple == crate::Syntax::BUILD_TARGET_WASI_SERVER {
-            format!(
-                "Jet WASI Preview 2 server Component target ({})",
-                target_lib.display()
-            )
-        } else {
-            format!("installed ({})", target_lib.display())
-        };
-        Check::ok("cross", triple, description)
-    } else {
-        Check::note(
+        Err(error) => Check::problem(
             "cross",
             triple,
-            "could not determine sysroot; target may or may not be installed",
-        )
+            error.to_string(),
+            error.fix(triple),
+            false,
+        ),
     }
 }
 

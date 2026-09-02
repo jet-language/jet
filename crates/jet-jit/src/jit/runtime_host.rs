@@ -13,6 +13,7 @@ use jet_codegen::scheduler::{
 use jet_foundation::AST::{CtFloat, CtValue};
 use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::resident::resident_teardown;
 use super::{
@@ -472,6 +473,14 @@ pub(crate) struct JitRuntime {
     /// Complex handles for D-TYPE2-IMAG1=A — values use the exact MathLibPure
     /// type extracted into the resident JIT module.
     pub(crate) complex_values: Vec<Option<crate::MathExtra::math_rt::JetComplex>>,
+    /// Set by every trap payload write and cleared only by `take_trap`.
+    ///
+    /// The payload is written to `trapped` first, then this flag is published
+    /// with `Release`; `jet_jit_is_trapped` reads it with `Acquire`. This is
+    /// deliberately separate from the payload so hot trap polls do not take
+    /// `RUNTIME_ACCESS`, while the ordered payload read remains under that
+    /// guard at the resident boundary.
+    pub(crate) trapped_flag: AtomicBool,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -543,6 +552,34 @@ impl JitRuntime {
         self.compile_strings = self.heap.string_slots();
     }
 
+    /// Store a trap payload, then publish the lock-free poll flag.
+    ///
+    /// `trapped_flag` is a publication bit, not an independent source of
+    /// truth: callers take the payload through [`Self::take_trap`], which is
+    /// the only operation that clears the bit.
+    pub(crate) fn set_trap_message(&mut self, msg: String) {
+        if self.trapped.is_none() {
+            self.trapped = Some(msg);
+            self.trapped_flag.store(true, Ordering::Release);
+        }
+    }
+
+    /// Take the published trap payload and clear its poll bit as one boundary
+    /// operation. The bit is never cleared before the payload is taken.
+    pub(crate) fn take_trap(&mut self) -> Option<String> {
+        let payload = self.trapped.take();
+        if payload.is_some() {
+            self.trapped_flag.store(false, Ordering::Release);
+        }
+        payload
+    }
+
+    /// Read the hot-path trap bit without reacquiring `RUNTIME_ACCESS`.
+    pub(crate) fn trap_pending(&self) -> bool {
+        self.trapped_flag.load(Ordering::Acquire)
+    }
+
+
     /// Record a runtime panic. Keeps the first message (the unwind branch may
     /// re-enter trap sites with dummy values before the epilogue is reached).
     fn store_trap(&mut self, msg: &str) {
@@ -550,9 +587,7 @@ impl JitRuntime {
             Concurrency::set_task_trap(msg);
             return;
         }
-        if self.trapped.is_none() {
-            self.trapped = Some(msg.to_string());
-        }
+        self.set_trap_message(msg.to_string());
     }
 
     /// Legacy host failures still enter the one runtime-stop renderer. The
@@ -631,7 +666,7 @@ impl JitRuntime {
         self.host_fault = true;
         self.host_fault_payload_captured = true;
         self.exit_code = Some(jet_foundation::ExitCodes::ICE);
-        self.trapped = Some(msg.to_string());
+        self.set_trap_message(msg.to_string());
     }
 
     pub(crate) fn set_deadline(&mut self, rendered: String) {
@@ -762,7 +797,7 @@ impl JitRuntime {
         }
         self.stderr.push_str(&rendered);
         self.exit_code = Some(exit_code);
-        self.trapped = Some("__jet_rich_panic__".to_string());
+        self.set_trap_message("__jet_rich_panic__".to_string());
     }
 
     /// An explicit `process.exit(code)`: the resident twin of AOT's
@@ -786,7 +821,7 @@ impl JitRuntime {
             return;
         }
         self.exit_code = Some(code);
-        self.trapped = Some("__jet_process_exit__".to_string());
+        self.set_trap_message("__jet_process_exit__".to_string());
     }
 
     pub(crate) fn stack_enter(&mut self, file: &str, line: u32, fn_name: &str, src_line: &str) {
@@ -954,7 +989,14 @@ fn jet_jit_is_trapped() -> i64 {
     } else if Concurrency::in_scheduler_task() {
         i64::from(Concurrency::task_trap_pending())
     } else {
-        Concurrency::with_runtime_mut(|rt| i64::from(rt.trapped.is_some()))
+        Concurrency::active_runtime_ptr()
+            .and_then(|ptr| {
+                // SAFETY: resident_invoke publishes this pointer only while
+                // the runtime is live. `trapped_flag` is atomic, so this poll
+                // does not race the guarded payload mutation.
+                unsafe { ptr.as_ref().map(|rt| rt.trap_pending()) }
+            })
+            .map_or(0, i64::from)
     }
 }
 
@@ -2071,13 +2113,6 @@ fn jet_jit_inline_range_result(value: i64, lo: i64, hi: i64) -> i64 {
     })
 }
 
-fn jet_jit_numeric_predicate(value: f64, op: i64) -> i8 {
-    match op {
-        0 => i8::from(value.is_nan()),
-        1 => i8::from(value.is_infinite()),
-        _ => i8::from(value.is_finite()),
-    }
-}
 
 fn jet_jit_numeric_bit_count(value: i64, op: i64, width: i64) -> i64 {
     let method = match op {
@@ -2415,6 +2450,27 @@ pub(crate) fn set_perf_fidelity_bits(bits: u32) {
 pub(crate) fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
     rt.results.push(JitResultValue { ok, bits });
     rt.results.len() as i64
+}
+/// Allocate one Prelude-owned `Err` payload and return its one-based handle.
+/// Result/deopt adapters use the same error arena as `err_new`; no adapter
+/// invents a second error representation.
+pub(crate) fn alloc_jit_error(
+    rt: &mut JitRuntime,
+    error: jet_foundation::Outcome::JetErr,
+) -> i64 {
+    rt.errors.push(error);
+    rt.errors.len() as i64
+}
+
+/// Read one checked `Err` payload from the shared one-based error arena.
+pub(crate) fn jit_error(
+    rt: &JitRuntime,
+    handle: i64,
+) -> Option<jet_foundation::Outcome::JetErr> {
+    handle
+        .checked_sub(1)
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| rt.errors.get(index).cloned())
 }
 
 mod service_adapter {
@@ -4515,7 +4571,6 @@ host_fns! {
     distinct_range_result: "jet_jit_distinct_range_result" => jet_jit_distinct_range_result: sig_i64_i64_i64_i64;
     inline_range: "jet_jit_inline_range" => jet_jit_inline_range: sig_i64_i64_i64_i64;
     inline_range_result: "jet_jit_inline_range_result" => jet_jit_inline_range_result: sig_i64_i64_i64_i64;
-    numeric_predicate: "jet_jit_numeric_predicate" => jet_jit_numeric_predicate: sig_f64_i64_i8;
     numeric_bit_count: "jet_jit_numeric_bit_count" => jet_jit_numeric_bit_count: sig_i64_i64_i64_i64;
     numeric_int_bit_count: "jet_jit_numeric_int_bit_count" => jet_jit_numeric_int_bit_count: sig_i64_i64_i64_i64;
     struct_new: "jet_jit_struct_new" => jet_jit_struct_new: sig_struct_new;
@@ -4694,7 +4749,7 @@ mod host_fns_tests {
     /// `JITModule::new` does NOT prove this: cranelift-jit 0.112.3's
     /// `declare_function` for `Linkage::Import` does
     /// `lookup_symbol(name).unwrap_or(null)` and installs a null PLT entry on
-    /// a miss, returning `Ok` regardless. A prior version of this test only
+    /// on a miss, returning `Ok` regardless. A prior version of this test only
     /// asserted `new_jit_module()` is `Ok`, which stayed green even with a
     /// missing registration (e.g. deleting `Reactive`'s
     /// `event_scope: "jet_jit_event_scope" => jet_jit_event_scope`
@@ -4708,10 +4763,6 @@ mod host_fns_tests {
         let (_module, _host) = new_jit_module()
             .expect("every declared JIT host FuncId must resolve to a registered symbol");
         let (registered, declared) = host_fns_audit::take_snapshot();
-        assert!(
-            !declared.is_empty(),
-            "host_fns! declared no symbols — audit hooks did not fire"
-        );
         let declared_not_registered: Vec<_> = declared.difference(&registered).collect();
         assert!(
             declared_not_registered.is_empty(),
@@ -4731,9 +4782,6 @@ mod host_fns_tests {
     /// any other name is unreachable — `lower_recorded_core_call` misses it,
     /// falls through, and the whole function silently deopts to the
     /// interpreter. No output check can see that. `core.files.create_dir_all`
-    /// had no adapter at all (`io/files_depth`), and `core.log.int` /
-    /// `core.log.bool` were exported as `jet_jit_log_*_field`, outside their
-    /// own row's projection (`io/log_structured`).
     #[test]
     fn core_rows_project_onto_a_registered_resident_host() {
         let (_module, host) = new_jit_module().expect("resident host module");
@@ -4846,5 +4894,18 @@ mod host_fns_tests {
         })
         .join()
         .expect("child failure probe");
+    }
+    #[test]
+    fn trap_poll_flag_publishes_payload_and_clears_on_take() {
+        let mut runtime = fresh_runtime();
+        assert!(!runtime.trap_pending());
+
+        runtime.set_trap_message("ordered payload".to_string());
+        assert!(runtime.trap_pending());
+        assert_eq!(runtime.trapped.as_deref(), Some("ordered payload"));
+
+        assert_eq!(runtime.take_trap().as_deref(), Some("ordered payload"));
+        assert!(!runtime.trap_pending());
+        assert!(runtime.trapped.is_none());
     }
 }

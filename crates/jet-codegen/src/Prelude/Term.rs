@@ -490,7 +490,6 @@ mod jet_term_mode {
         target_os = "netbsd",
     ))]
     const VMIN: usize = 16;
-
     #[cfg(any(target_os = "linux", target_os = "android"))]
     const VTIME: usize = 5;
     #[cfg(any(
@@ -501,6 +500,19 @@ mod jet_term_mode {
         target_os = "netbsd",
     ))]
     const VTIME: usize = 17;
+
+    #[cfg(target_os = "linux")]
+    const NCCS: usize = 32;
+    #[cfg(target_os = "android")]
+    const NCCS: usize = 19;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    const NCCS: usize = 20;
 
     #[cfg(any(
         target_os = "linux",
@@ -521,18 +533,7 @@ mod jet_term_mode {
         c_lflag: TermFlag,
         #[cfg(any(target_os = "linux", target_os = "android"))]
         c_line: u8,
-        #[cfg(target_os = "linux")]
-        c_cc: [u8; 32],
-        #[cfg(target_os = "android")]
-        c_cc: [u8; 19],
-        #[cfg(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "netbsd",
-        ))]
-        c_cc: [u8; 20],
+        c_cc: [u8; NCCS],
         #[cfg(any(
             target_os = "linux",
             target_os = "macos",
@@ -566,10 +567,110 @@ mod jet_term_mode {
     ))]
     const _: () = assert!(std::mem::size_of::<Termios>() == 44);
 
+    #[allow(dead_code)]
+    pub(super) fn layout_fingerprint() -> [usize; 20] {
+        let c_line_offset = {
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            {
+                std::mem::offset_of!(Termios, c_line)
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            {
+                usize::MAX
+            }
+        };
+        let c_ispeed_offset = {
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "freebsd",
+                target_os = "openbsd",
+                target_os = "netbsd",
+            ))]
+            {
+                std::mem::offset_of!(Termios, c_ispeed)
+            }
+            #[cfg(target_os = "android")]
+            {
+                usize::MAX
+            }
+        };
+        let c_ospeed_offset = {
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "freebsd",
+                target_os = "openbsd",
+                target_os = "netbsd",
+            ))]
+            {
+                std::mem::offset_of!(Termios, c_ospeed)
+            }
+            #[cfg(target_os = "android")]
+            {
+                usize::MAX
+            }
+        };
+        let c_line_size = {
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            {
+                std::mem::size_of::<u8>()
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            {
+                usize::MAX
+            }
+        };
+        let speed_size = {
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "freebsd",
+                target_os = "openbsd",
+                target_os = "netbsd",
+            ))]
+            {
+                std::mem::size_of::<TermSpeed>()
+            }
+            #[cfg(target_os = "android")]
+            {
+                usize::MAX
+            }
+        };
+        [
+            std::mem::size_of::<Termios>(),
+            std::mem::align_of::<Termios>(),
+            std::mem::size_of::<TermFlag>(),
+            std::mem::offset_of!(Termios, c_iflag),
+            std::mem::offset_of!(Termios, c_oflag),
+            std::mem::offset_of!(Termios, c_cflag),
+            std::mem::offset_of!(Termios, c_lflag),
+            c_line_offset,
+            std::mem::offset_of!(Termios, c_cc),
+            c_ispeed_offset,
+            c_ospeed_offset,
+            NCCS,
+            VMIN,
+            VTIME,
+            TCSANOW as usize,
+            ECHO as usize,
+            ICANON as usize,
+            c_line_size,
+            speed_size,
+            std::mem::size_of::<[u8; NCCS]>(),
+        ]
+    }
+
+    // Keep the C declarations layout-opaque. This file is included by the
+    // interpreter, JIT, and AOT host modules, each with its own Rust Termios
+    // type; raw pointers give every inclusion the same ABI declaration.
     unsafe extern "C" {
-        fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
-        fn tcsetattr(fd: i32, optional_actions: i32, termios: *const Termios) -> i32;
-        fn cfmakeraw(termios: *mut Termios);
+        fn tcgetattr(fd: i32, termios: *mut u8) -> i32;
+        fn tcsetattr(fd: i32, optional_actions: i32, termios: *const u8) -> i32;
+        fn cfmakeraw(termios: *mut u8);
     }
 
     std::thread_local! {
@@ -579,7 +680,7 @@ mod jet_term_mode {
     pub(super) fn enter(raw: bool) -> bool {
         unsafe {
             let mut mode = std::mem::zeroed::<Termios>();
-            if tcgetattr(0, &mut mode) != 0 {
+            if tcgetattr(0, (&mut mode as *mut Termios).cast::<u8>()) != 0 {
                 return false;
             }
             let saved_mode = mode;
@@ -589,7 +690,7 @@ mod jet_term_mode {
                 mode.c_cc[VMIN] = 1;
                 mode.c_cc[VTIME] = 0;
             }
-            if tcsetattr(0, TCSANOW, &mode) != 0 {
+            if tcsetattr(0, TCSANOW, (&mode as *const Termios).cast::<u8>()) != 0 {
                 return false;
             }
             SAVED.with(|saved| saved.borrow_mut().push(saved_mode));
@@ -600,15 +701,15 @@ mod jet_term_mode {
     pub(super) fn configure_fd(fd: i32, raw: bool) -> std::io::Result<()> {
         unsafe {
             let mut mode = std::mem::zeroed::<Termios>();
-            if tcgetattr(fd, &mut mode) != 0 {
+            if tcgetattr(fd, (&mut mode as *mut Termios).cast::<u8>()) != 0 {
                 return Err(std::io::Error::last_os_error());
             }
             if raw {
-                cfmakeraw(&mut mode);
+                cfmakeraw((&mut mode as *mut Termios).cast::<u8>());
                 mode.c_cc[VMIN] = 1;
                 mode.c_cc[VTIME] = 0;
             }
-            if tcsetattr(fd, TCSANOW, &mode) != 0 {
+            if tcsetattr(fd, TCSANOW, (&mode as *const Termios).cast::<u8>()) != 0 {
                 return Err(std::io::Error::last_os_error());
             }
         }
@@ -619,7 +720,7 @@ mod jet_term_mode {
         unsafe {
             SAVED.with(|saved| {
                 if let Some(mode) = saved.borrow_mut().pop() {
-                    tcsetattr(0, TCSANOW, &mode);
+                    tcsetattr(0, TCSANOW, (&mode as *const Termios).cast::<u8>());
                 }
             });
         }
@@ -744,4 +845,17 @@ pub(crate) fn jet_term_configure_fd(_fd: i32, _raw: bool) -> std::io::Result<()>
         std::io::ErrorKind::Unsupported,
         "terminal attributes are unsupported on this target",
     ))
+}
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+))]
+#[allow(dead_code)]
+pub(crate) fn jet_term_layout_fingerprint() -> [usize; 20] {
+    jet_term_mode::layout_fingerprint()
 }

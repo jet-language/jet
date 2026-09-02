@@ -114,7 +114,7 @@ fn increment(value: I32) I32 -[]> {
     return value + 1
 }
 
-#Extern module c.callback {
+#Import module c.callback {
     fn foreign_callback(callback: fn(I32) I32 -[]>, value: I32) I32 = "foreign_callback"
     fn foreign_async(value: I32) I32 = "foreign_async"
 }
@@ -192,7 +192,7 @@ fn increment(value: I32) I32 -[]> {
     return value + 1
 }
 
-#Extern module c.callback {
+#Import module c.callback {
     fn foreign_callback(callback: fn(I32) I32 -[]>, value: I32) I32 = "foreign_callback"
     fn foreign_async(value: I32) I32 = "foreign_async"
 }

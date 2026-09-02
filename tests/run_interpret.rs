@@ -13,6 +13,11 @@ fn run_interpret_forces_tier_zero_without_watch() {
     let dir = std::env::temp_dir().join(format!("jet_run_interpret_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"run_interpret_tier\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+    )
+    .unwrap();
     let file = dir.join("main.jet");
     let marker = format!("run-interpreter-{}", std::process::id());
     fs::write(&file, format!("fn run() {{\n    print(\"{marker}\")\n}}\n")).unwrap();
@@ -246,6 +251,7 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
 #[test]
 fn c_extern_calls_match_aot_and_interpreter() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let project = root.join("examples/features/lowlevel/cbind");
     let cache = std::env::temp_dir().join(format!("jet_c_extern_parity_{}", std::process::id()));
     let _ = fs::remove_dir_all(&cache);
 
@@ -262,11 +268,12 @@ fn c_extern_calls_match_aot_and_interpreter() {
             _ => {}
         }
         command
-            .arg("examples/features/lowlevel/cbind/run.jet")
-            .current_dir(&root)
+            .arg("run.jet")
+            .current_dir(&project)
             .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
             .env("JET_CACHE_DIR", cache.join(mode).join("build"))
             .env("NO_COLOR", "1")
+            .env("JETPACK_ENV", "1")
             .output()
             .unwrap()
     };

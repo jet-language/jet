@@ -1,9 +1,10 @@
 // ── binary.Reader / text.Cursor (D-SHIFT1, c7shift) ──────────────────────────
 // The "shift" kernel from linear stream parsing (Jai's `shift` primitive),
-// without a dedicated operator (D-SHIFT1=A rejected that). `Reader` owns a
-// copy of its byte buffer plus a read position; every read is fallible —
-// a bounds miss is an ordinary `Err` string, never a panic or silent
-// truncation.
+// without a dedicated operator (D-SHIFT1=A rejected that). `Reader` owns its
+// byte buffer plus a read position; the borrowed constructor copies its input,
+// while the lowering-only owned constructor transfers an already-owned buffer.
+// Every read is fallible — a bounds miss is an ordinary `Err`, never a panic or
+// silent truncation.
 //
 // I9: this file is the ONE implementation. `Codegen/mod.rs` splices it verbatim
 // into the emitted AOT prelude (`include_str!`), and the canonical TIR
@@ -27,6 +28,10 @@ pub fn jet_reader_over(bytes: &Vec<u8>) -> JetReader {
         buf: bytes.clone(),
         pos: 0,
     }
+}
+
+pub fn jet_reader_over_owned(bytes: Vec<u8>) -> JetReader {
+    JetReader { buf: bytes, pos: 0 }
 }
 
 #[cold]

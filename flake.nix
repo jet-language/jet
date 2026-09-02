@@ -33,6 +33,11 @@
           jetR
         ];
         jetTzdb = "${pkgs.tzdata}/share/zoneinfo";
+        # pkgs.vitejs calls fetchPnpmDeps without pinning `pnpm`, defaulting
+        # to pnpm_11 (fetcherVersion 3), which nixpkgs rejects; pin pnpm_10.
+        jetVite = pkgs.vitejs.override {
+          fetchPnpmDeps = args: pkgs.fetchPnpmDeps (args // { pnpm = pkgs.pnpm_10; });
+        };
 
         jet = pkgs.rustPlatform.buildRustPackage {
           pname = "jet";
@@ -119,6 +124,10 @@
             pkgs.clang
             pkgs.lld
             pkgs.nodejs_22
+            pkgs.bun
+            jetVite
+            pkgs.nodemon
+            pkgs.entr
             # agent_workloads / verify-full adapters shell out to python3.
             pkgs.python3
             # gauntlet competitive-corpus rails (owner-approved 2026-08-27):
@@ -139,6 +148,10 @@
             jetDev
             jetpackDev
             pkgs.pkg-config
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            # D-BUILDENTRY1 / #95: core verification executes typed build actions.
+            pkgs.bubblewrap
           ];
 
           shellHook = ''
@@ -209,6 +222,10 @@
             # qemu-aarch64. OS image and VM tooling does not belong here.
             pkgs.qemu
             pkgs.nodejs_22
+            pkgs.bun
+            jetVite
+            pkgs.nodemon
+            pkgs.entr
             # agent_workloads / verify-full adapters shell out to python3.
             pkgs.python3
             pkgs.nixfmt

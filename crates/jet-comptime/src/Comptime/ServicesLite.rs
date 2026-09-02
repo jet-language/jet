@@ -1364,9 +1364,15 @@ fn delivery_receipt_to_ct(receipt: JetDeliveryReceipt) -> CtValue {
             ("id".to_string(), CtValue::Str(receipt.id)),
             ("state".to_string(), delivery_state_to_ct(receipt.state)),
             ("attempts".to_string(), CtValue::Int(receipt.attempts)),
-            ("retention_until".to_string(), CtValue::Int(receipt.retention_until)),
+            (
+                "retention_until".to_string(),
+                CtValue::Int(receipt.retention_until),
+            ),
             ("deadline".to_string(), CtValue::Int(receipt.deadline)),
-            ("idempotency_key".to_string(), CtValue::Str(receipt.idempotency_key)),
+            (
+                "idempotency_key".to_string(),
+                CtValue::Str(receipt.idempotency_key),
+            ),
             ("duplicate".to_string(), CtValue::Bool(receipt.duplicate)),
             ("authority".to_string(), CtValue::Str(receipt.authority)),
             ("generation".to_string(), CtValue::Int(receipt.generation)),
@@ -1459,10 +1465,7 @@ fn ct_to_delivery_state(value: &CtValue, span: Span) -> Result<JetDeliveryState,
     }
 }
 
-fn ct_to_delivery_receipt(
-    value: &CtValue,
-    span: Span,
-) -> Result<JetDeliveryReceipt, Diagnostic> {
+fn ct_to_delivery_receipt(value: &CtValue, span: Span) -> Result<JetDeliveryReceipt, Diagnostic> {
     let CtValue::Struct { type_name, fields } = value else {
         return Err(unsupported("DeliveryReceipt", span));
     };
@@ -1471,12 +1474,10 @@ fn ct_to_delivery_receipt(
     }
     Ok(JetDeliveryReceipt {
         id: service_ct_text(fields, "DeliveryReceipt", "id", span)?,
-        state: ct_to_delivery_state(service_ct_field(
-            fields,
-            "DeliveryReceipt",
-            "state",
+        state: ct_to_delivery_state(
+            service_ct_field(fields, "DeliveryReceipt", "state", span)?,
             span,
-        )?, span)?,
+        )?,
         attempts: service_ct_int(fields, "DeliveryReceipt", "attempts", span)?,
         retention_until: service_ct_int(fields, "DeliveryReceipt", "retention_until", span)?,
         deadline: service_ct_int(fields, "DeliveryReceipt", "deadline", span)?,
@@ -1497,12 +1498,10 @@ fn ct_to_delivery_event(value: &CtValue, span: Span) -> Result<JetDeliveryEvent,
     }
     Ok(JetDeliveryEvent {
         sequence: service_ct_int(fields, "DeliveryEvent", "sequence", span)?,
-        state: ct_to_delivery_state(service_ct_field(
-            fields,
-            "DeliveryEvent",
-            "state",
+        state: ct_to_delivery_state(
+            service_ct_field(fields, "DeliveryEvent", "state", span)?,
             span,
-        )?, span)?,
+        )?,
         attempts: service_ct_int(fields, "DeliveryEvent", "attempts", span)?,
         timestamp: service_ct_int(fields, "DeliveryEvent", "timestamp", span)?,
         signature: service_ct_text(fields, "DeliveryEvent", "signature", span)?,
@@ -1991,24 +1990,23 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 },
             )
         }
-        "delivery_wait"
-        | "delivery_status"
-        | "delivery_retry"
-        | "delivery_cancel"
-        | "delivery_receipt"
-        | "delivery_events" => {
+        "delivery_wait" | "delivery_status" | "delivery_retry" | "delivery_cancel"
+        | "delivery_receipt" | "delivery_events" => {
             let delivery = ct_to_delivery_record(one(0)?, span)?;
             let result = match method {
-                "delivery_wait" => jet_services_delivery_wait(&delivery)
-                    .map(delivery_state_to_ct),
-                "delivery_status" => jet_services_delivery_status(&delivery)
-                    .map(delivery_state_to_ct),
-                "delivery_retry" => jet_services_delivery_retry(&delivery)
-                    .map(delivery_record_to_ct),
-                "delivery_cancel" => jet_services_delivery_cancel(&delivery)
-                    .map(delivery_record_to_ct),
-                "delivery_receipt" => jet_services_delivery_receipt(&delivery)
-                    .map(delivery_receipt_to_ct),
+                "delivery_wait" => jet_services_delivery_wait(&delivery).map(delivery_state_to_ct),
+                "delivery_status" => {
+                    jet_services_delivery_status(&delivery).map(delivery_state_to_ct)
+                }
+                "delivery_retry" => {
+                    jet_services_delivery_retry(&delivery).map(delivery_record_to_ct)
+                }
+                "delivery_cancel" => {
+                    jet_services_delivery_cancel(&delivery).map(delivery_record_to_ct)
+                }
+                "delivery_receipt" => {
+                    jet_services_delivery_receipt(&delivery).map(delivery_receipt_to_ct)
+                }
                 "delivery_events" => jet_services_delivery_events(&delivery).map(|events| {
                     CtValue::List(events.into_iter().map(delivery_event_to_ct).collect())
                 }),

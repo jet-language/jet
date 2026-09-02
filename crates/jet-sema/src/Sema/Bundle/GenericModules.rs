@@ -2879,6 +2879,7 @@ fn hoist_inline_module_types(
     let module_name = code_module.name.clone();
     let mut direct_types = HashMap::new();
     let mut direct_names = Vec::new();
+    let display_alias = inline_type_alias(&module_name);
     for inner in body.iter() {
         let (name, is_pub) = match inner {
             Item::Struct(def) => (&def.name, def.is_pub || def.is_package_pub),
@@ -2891,9 +2892,14 @@ fn hoist_inline_module_types(
         direct_types.insert(name.clone(), resolved.clone());
         direct_types.insert(format!("{module_name}.{name}"), resolved.clone());
         direct_types.insert(format!("{source_path}.{name}"), resolved.clone());
+        // A file imported under an alias can still carry a compiler-owned
+        // nominal spelling from its defining module. Normalize that spelling
+        // to the wrapper's canonical identity before body checking.
+        direct_types.insert(module_type_name(&display_alias, name), resolved.clone());
         direct_names.push(name.clone());
         if is_pub {
-            exported.insert(format!("{source_path}.{name}"), resolved);
+            exported.insert(format!("{source_path}.{name}"), resolved.clone());
+            exported.insert(format!("{module_name}.{name}"), resolved);
         }
     }
 

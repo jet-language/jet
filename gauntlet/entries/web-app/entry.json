@@ -20,8 +20,16 @@
   },
   "non_applicable": {
     "node": {
+      "basis": "workload_surface",
       "reason": "The workload contract requires browser DOM interaction replay; a Node process alone does not provide the required DOM surface.",
       "evidence": "spec.behavior requires mounting and clicking a DOM counter, while the declared js incumbent uses runner.mjs with a DOM shim. No generic Node rail can satisfy this browser contract without changing the workload."
+    }
+  },
+  "metric_applicability": {
+    "js": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail runs through the host Node interpreter and has no entry-local compile phase.", "evidence": "The harness invokes node runner.mjs directly for the declared JS app rail and produces no JavaScript executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail runs through the host Node interpreter and has no entry-local compile phase.", "evidence": "The harness invokes node runner.mjs directly for the declared JS app rail and produces no JavaScript executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail has no entry-local executable artifact.", "evidence": "The harness run command is node runner.mjs; no JavaScript binary is built or measured."}
     }
   },
   "authoring": {

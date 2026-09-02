@@ -230,7 +230,12 @@ fn e3204(lib: &str, header: &str, span: Span) -> Diagnostic {
 /// uses (D-CFFI2). On any unresolved lib, returns the E3201 diagnostics.
 /// The returned strings are ready to append to a `rustc`/`cc` command.
 pub fn rustc_link_args(cffi: &CFfi, project_root: &Path) -> Result<Vec<String>, Vec<Diagnostic>> {
-    rustc_link_args_for_target(cffi, project_root, &crate::FFI::host_target())
+    rustc_link_args_for_target_with_entry(
+        cffi,
+        project_root,
+        &crate::FFI::host_target(),
+        None,
+    )
 }
 
 pub fn rustc_link_args_for_target(
@@ -238,10 +243,21 @@ pub fn rustc_link_args_for_target(
     project_root: &Path,
     target: &str,
 ) -> Result<Vec<String>, Vec<Diagnostic>> {
+    rustc_link_args_for_target_with_entry(cffi, project_root, target, None)
+}
+
+/// Resolve C link arguments using an optional entry source for an inline
+/// Package carrier. The path-only API remains for standalone callers.
+pub fn rustc_link_args_for_target_with_entry(
+    cffi: &CFfi,
+    project_root: &Path,
+    target: &str,
+    entry: Option<&Path>,
+) -> Result<Vec<String>, Vec<Diagnostic>> {
     let mut args = Vec::new();
     let mut diags = Vec::new();
     for lib in &cffi.libs {
-        match resolve_link_for_target(&lib.lib, project_root, target) {
+        match resolve_link_for_target_with_entry(&lib.lib, project_root, target, entry) {
             Ok(flags) => {
                 if let Err(diagnostic) = validate_link_inputs(
                     &lib.lib,
@@ -249,6 +265,7 @@ pub fn rustc_link_args_for_target(
                     target,
                     &flags,
                     &cffi.overlay_overrides,
+                    entry,
                 ) {
                     diags.push(diagnostic);
                     continue;
@@ -281,6 +298,7 @@ fn validate_link_inputs(
     target: &str,
     flags: &LinkFlags,
     overlay_overrides: &[COverlayOverride],
+    entry: Option<&Path>,
 ) -> Result<(), Diagnostic> {
     if let Some(actual) = lib.strip_prefix("jet_cpp_") {
         let directory = project_root
@@ -318,7 +336,7 @@ fn validate_link_inputs(
         let archive = directory.join(format!("libjet_com_{actual}.a"));
         return validate_com_binding(actual, &directory, &archive);
     }
-    validate_c_binding(lib, project_root, overlay_overrides)
+    validate_c_binding(lib, project_root, overlay_overrides, entry)
 }
 
 fn validate_com_binding(
@@ -486,6 +504,7 @@ fn validate_c_binding(
     lib: &str,
     project_root: &Path,
     overlay_overrides: &[COverlayOverride],
+    entry: Option<&Path>,
 ) -> Result<(), Diagnostic> {
     let cache = binding_cache_file(project_root, ForeignLanguage::C, lib);
     if !cache.is_file() {
@@ -507,7 +526,8 @@ fn validate_c_binding(
                 "the C binding provenance has no source header",
             )
         })?;
-        let expected = c_binding_identity(project_root, lib, Path::new(header), &cache)
+        let expected =
+            c_binding_identity_with_entry(project_root, lib, Path::new(header), &cache, entry)
             .map_err(|reason| {
                 e3208(
                     &provenance_path.display().to_string(),
@@ -543,7 +563,7 @@ fn validate_c_binding(
         }
     }
 
-    let Some(input) = local_c_archive_inputs(project_root, lib).into_iter().next() else {
+    let Some(input) = local_c_archive_inputs(project_root, lib, entry).into_iter().next() else {
         return Ok(());
     };
     if !input.path.is_file() {
@@ -1437,6 +1457,10 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
     let already: std::collections::HashSet<std::path::PathBuf> =
         bundle.modules.iter().map(|m| m.path.clone()).collect();
 
+    let entry_path = bundle
+        .modules
+        .get(bundle.entry)
+        .map(|module| module.path.clone());
     for lib in libs {
         let cache_path = binding_cache_file(&bundle.project_root, ForeignLanguage::C, &lib);
 
@@ -1516,11 +1540,12 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             if std::fs::write(&cache_path, &result.source).is_ok() {
                 let _ = crate::CBind::write_bind_hash(&cache_path, header_src, "");
                 let header = resolve_header_path(header_path, &bundle.project_root);
-                if let Err(reason) = write_c_binding_provenance(
+                if let Err(reason) = write_c_binding_provenance_with_entry(
                     &bundle.project_root,
                     &lib,
                     &header,
                     &cache_path,
+                    entry_path.as_deref(),
                 ) {
                     diags.push(e3208(header_path, &lib, &reason));
                     continue;
@@ -1553,11 +1578,12 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
             let provenance_path = cache_path.with_extension("provenance");
             if !provenance_path.is_file() {
                 let header = resolve_header_path(header_path, &bundle.project_root);
-                if let Err(reason) = write_c_binding_provenance(
+                if let Err(reason) = write_c_binding_provenance_with_entry(
                     &bundle.project_root,
                     &lib,
                     &header,
                     &cache_path,
+                    entry_path.as_deref(),
                 ) {
                     diags.push(e3208(header_path, &lib, &reason));
                     continue;
@@ -1581,8 +1607,12 @@ fn resolve_header_path(header_path: &str, project_root: &std::path::Path) -> std
 
 const C_BINDER_SCHEMA: &str = "jet-c-bind-v1";
 
-fn local_c_archive_inputs(project_root: &Path, lib: &str) -> Vec<crate::ForeignBridge::ArchiveInput> {
-    let Some(target) = declared_c_dep(lib, project_root) else {
+fn local_c_archive_inputs(
+    project_root: &Path,
+    lib: &str,
+    entry: Option<&Path>,
+) -> Vec<crate::ForeignBridge::ArchiveInput> {
+    let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) else {
         return Vec::new();
     };
     if target == Syntax::SYSTEM_LIB_TARGET || target.starts_with(NIXPKGS_TARGET_PREFIX) {
@@ -1608,6 +1638,16 @@ pub fn c_binding_identity(
     lib: &str,
     header: &Path,
     cache: &Path,
+) -> Result<String, String> {
+    c_binding_identity_with_entry(project_root, lib, header, cache, None)
+}
+
+pub fn c_binding_identity_with_entry(
+    project_root: &Path,
+    lib: &str,
+    header: &Path,
+    cache: &Path,
+    entry: Option<&Path>,
 ) -> Result<String, String> {
     let header = header.canonicalize().unwrap_or_else(|_| header.to_path_buf());
     let cache = cache.canonicalize().unwrap_or_else(|_| cache.to_path_buf());
@@ -1640,12 +1680,12 @@ pub fn c_binding_identity(
     identity.field("cflags", b"");
     identity.field("cc", crate::ForeignBridge::tool_identity("cc").as_bytes());
     identity.field("ar", crate::ForeignBridge::tool_identity("ar").as_bytes());
-    if let Some(target) = declared_c_dep(lib, project_root) {
+    if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
         identity.field("dependency", target.as_bytes());
     } else {
         identity.field("dependency_missing", b"true");
     }
-    let local_archives = local_c_archive_inputs(project_root, lib);
+    let local_archives = local_c_archive_inputs(project_root, lib, entry);
     crate::ForeignBridge::add_archive_inputs(&mut identity, &local_archives);
     Ok(identity.finish())
 }
@@ -1659,9 +1699,19 @@ pub fn write_c_binding_provenance(
     header: &Path,
     cache: &Path,
 ) -> Result<PathBuf, String> {
+    write_c_binding_provenance_with_entry(project_root, lib, header, cache, None)
+}
+
+pub fn write_c_binding_provenance_with_entry(
+    project_root: &Path,
+    lib: &str,
+    header: &Path,
+    cache: &Path,
+    entry: Option<&Path>,
+) -> Result<PathBuf, String> {
     let header = header.canonicalize().unwrap_or_else(|_| header.to_path_buf());
     let cache = cache.canonicalize().unwrap_or_else(|_| cache.to_path_buf());
-    let identity = c_binding_identity(project_root, lib, &header, &cache)?;
+    let identity = c_binding_identity_with_entry(project_root, lib, &header, &cache, entry)?;
     let descriptor = crate::AST::binder_descriptor(ForeignLanguage::C)
         .ok_or_else(|| "C binder descriptor is not registered".to_string())?;
     let mut fields = vec![
@@ -1680,10 +1730,10 @@ pub fn write_c_binding_provenance(
         ("cc", crate::ForeignBridge::tool_identity("cc")),
         ("ar", crate::ForeignBridge::tool_identity("ar")),
     ];
-    if let Some(target) = declared_c_dep(lib, project_root) {
+    if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
         fields.push(("dependency", target));
     }
-    for input in local_c_archive_inputs(project_root, lib) {
+    for input in local_c_archive_inputs(project_root, lib, entry) {
         fields.push(("linked-library", input.library));
         fields.push((
             "linked-archive",
@@ -1789,13 +1839,22 @@ fn load_cache_source(
 ///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
 ///   3. Else E3201.
 pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
-    resolve_link_for_target(lib, project_root, &crate::FFI::host_target())
+    resolve_link_for_target_with_entry(lib, project_root, &crate::FFI::host_target(), None)
 }
 
 pub fn resolve_link_for_target(
     lib: &str,
     project_root: &Path,
     target: &str,
+) -> Result<LinkFlags, Diagnostic> {
+    resolve_link_for_target_with_entry(lib, project_root, target, None)
+}
+
+pub fn resolve_link_for_target_with_entry(
+    lib: &str,
+    project_root: &Path,
+    target: &str,
+    entry: Option<&Path>,
 ) -> Result<LinkFlags, Diagnostic> {
     if let Some(actual) = lib.strip_prefix("jet_cpp_") {
         let dir = project_root
@@ -2263,7 +2322,7 @@ pub fn resolve_link_for_target(
         return Err(e3201(lib));
     }
     // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
-    if let Some(target) = declared_c_dep(lib, project_root) {
+    if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
         return clib_link(lib, &target, project_root);
     }
     // 2. pkg-config fallback (undeclared `use c.<lib>`).
@@ -2273,13 +2332,27 @@ pub fn resolve_link_for_target(
     }
 }
 
-/// Look up a declared `<lib>: c@<target>` dep in the package manifest at
-/// `project_root`, returning its target (`"system"` or a local path) when
-/// present. Uses the one Package parser — the same one that produces
-/// `facts.deps` — not an ad-hoc reader.
-fn declared_c_dep(lib: &str, project_root: &Path) -> Option<String> {
+
+fn declared_c_dep_for_entry(
+    lib: &str,
+    project_root: &Path,
+    entry: Option<&Path>,
+) -> Option<String> {
     use crate::Package::{DepSource, PackageFacts};
-    let facts: PackageFacts = PackageFacts::load(project_root)?.ok()?;
+    let facts: PackageFacts = if let Some(entry) = entry {
+        let source = std::fs::read_to_string(entry).ok()?;
+        match crate::Package::extract_inline_package(&source).ok()? {
+            Some(block) => {
+                if PackageFacts::load(project_root).is_some() {
+                    return None;
+                }
+                PackageFacts::parse(block.body(&source), entry.display().to_string()).ok()?
+            }
+            None => PackageFacts::load(project_root)?.ok()?,
+        }
+    } else {
+        PackageFacts::load(project_root)?.ok()?
+    };
     facts.deps.into_iter().find_map(|(name, source)| {
         if name != lib {
             return None;

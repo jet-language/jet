@@ -6,32 +6,81 @@ use crate::Store::{admit_nix_closure_with_progress, plan_nix_downloads, NixOutpu
 pub(crate) struct NixProvider;
 
 impl Provider for NixProvider {
+    fn validate_cache_authority(
+        &self,
+        _spec: &RefSpec,
+        _table: &SourceTable,
+        ctx: &Ctx,
+    ) -> Result<(), ProviderError> {
+        if let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) {
+            crate::Lock::load_strict(project).map_err(ProviderError::BadOutput)?;
+        }
+        Ok(())
+    }
+
     fn cache_expectation(
         &self,
         spec: &RefSpec,
         table: &SourceTable,
         ctx: &Ctx,
     ) -> Option<crate::Store::CacheExpectation> {
+        if let Some(project) = ctx.project_dir {
+            if crate::Lock::load_strict(project).is_err() {
+                return None;
+            }
+            if let Some((closure, env)) = crate::Lock::nix_realization(project, &spec.raw) {
+                let platform = if env.platform.is_empty() {
+                    closure.system.clone()
+                } else {
+                    env.platform.clone()
+                };
+                if env.output_hash.is_empty()
+                    || closure.output != env.output_hash
+                    || platform != closure.system
+                {
+                    return None;
+                }
+                let roots = ctx.nix_roots?;
+                return Some(crate::Store::CacheExpectation {
+                    identity: crate::Store::CacheIdentity {
+                        source_fingerprint: env.output_hash.clone(),
+                        recipe_fingerprint: crate::SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
+                        policy_fingerprint: closure.cache_key.clone(),
+                        platform,
+                    },
+                    owned_output: Some(
+                        roots.hangar_dir().join("objects").join(&closure.output),
+                    ),
+                    allow_unsigned_local: true,
+                });
+            }
+        }
+        if let Some(project) = ctx.project_dir {
+            if let Some((output, _, repository, authority, envelope)) =
+                crate::Lock::registry_realization(project, "jetpackage", &spec.raw)
+            {
+                if (repository.starts_with("github:NixOS/nixpkgs#")
+                    || authority.contains("jetpack-nix-fallback-v1"))
+                    && !output.is_empty()
+                    && envelope.output_hash == output
+                    && !envelope.platform.is_empty()
+                {
+                    let platform = envelope.platform;
+                    let roots = ctx.nix_roots?;
+                    return Some(crate::Store::CacheExpectation {
+                        identity: nix_cache_identity(&output, &platform, spec, table, ctx),
+                        owned_output: Some(roots.hangar_dir().join("objects").join(&output)),
+                        allow_unsigned_local: true,
+                    });
+                }
+            }
+        }
         if let Some(index) = ctx.nix_index {
             if let Ok(Some(recipe)) = index.resolve_native_recipe(&spec.package) {
                 return Some(native::catalog_cache_expectation(spec, &recipe, ctx));
             }
         }
-        let project = ctx.project_dir?;
-        let (output, env) = crate::Lock::nix_realization(project, &spec.raw)?;
-        if env.output_hash.is_empty() {
-            return None;
-        }
-        let platform = if env.platform.is_empty() {
-            crate::Envelope::host_platform()
-        } else {
-            env.platform.clone()
-        };
-        Some(crate::Store::CacheExpectation {
-            identity: nix_cache_identity(&env.output_hash, &platform, spec, table, ctx),
-            owned_output: Some(PathBuf::from(output)),
-            allow_unsigned_local: true,
-        })
+        None
     }
 
     fn plan_downloads(
@@ -114,6 +163,15 @@ impl Provider for NixProvider {
         table: &SourceTable,
         ctx: &Ctx,
     ) -> Result<Realized, ProviderError> {
+        self.validate_cache_authority(spec, table, ctx)?;
+        if let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) {
+            if crate::Lock::locked_nix_package(project, &spec.raw).is_some() {
+                return Err(ProviderError::BadOutput(
+                    "fully locked Nix realization must replay its project CAS bundle before catalog discovery"
+                        .into(),
+                ));
+            }
+        }
         if let Some(index) = ctx.nix_index {
             if let Some(recipe) = index
                 .resolve_native_recipe(&spec.package)

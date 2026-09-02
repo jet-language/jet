@@ -67,6 +67,9 @@ fn compiler_extension_env(
     std::sync::MutexGuard<'static, ()>,
     CompilerExtensionEnvRestore,
 ) {
+    if compiler_extension.is_some() {
+        let _ = jetpack_bin();
+    }
     let guard = compiler_extension_env_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -223,9 +226,9 @@ fn ui_snapshots() {
         } else {
             shown_path.clone()
         };
-        // E2-M15: files marked with `// @freestanding` are compiled with
-        // the freestanding profile (E3301 checks enabled).
-        let freestanding = src.lines().any(|l| l.trim() == "// @freestanding");
+        // E2-M15: files marked with `// @no-os` are compiled with the
+        // no-OS profile (E3301 checks enabled).
+        let no_os = src.lines().any(|l| l.trim() == "// @no-os");
         // I4: `// @all_diags` and workspace fixtures run `check_with_path`.
         let all_diags = src.lines().any(|l| l.trim() == "// @all_diags")
             || path.file_name().and_then(|name| name.to_str()) == Some(jet::Syntax::WORKSPACE_FILE);
@@ -549,8 +552,8 @@ fn ui_snapshots() {
             } else {
                 jet::render_diagnostics(&render_path, &src, &diags)
             }
-        } else if freestanding {
-            match jet::compile_freestanding(&file_arg) {
+        } else if no_os {
+            match jet::compile_no_os(&file_arg) {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
@@ -1208,6 +1211,7 @@ fn semantic_guidance_fixtures_keep_one_selected_rule_and_edit() {
         ("complete_ascii_case_ladder", &["L0521"], "to_ascii_"),
         ("walk_files_filter", &["L0522"], "walk_files"),
         ("repeated_list_head", &["L0523"], "[Point]{"),
+        ("raw_multiline_html", &["L0524"], "HTML{\"\"\""),
     ];
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for (name, expected_codes, edit_fragment) in cases {
@@ -1221,7 +1225,15 @@ fn semantic_guidance_fixtures_keep_one_selected_rule_and_edit() {
             .filter(|diagnostic| {
                 matches!(
                     diagnostic.code.as_str(),
-                    "L0515" | "L0516" | "L0517" | "L0518" | "L0519" | "L0521" | "L0522" | "L0523"
+                    "L0515"
+                        | "L0516"
+                        | "L0517"
+                        | "L0518"
+                        | "L0519"
+                        | "L0521"
+                        | "L0522"
+                        | "L0523"
+                        | "L0524"
                 )
             })
             .collect::<Vec<_>>();
@@ -1250,5 +1262,18 @@ fn semantic_guidance_fixtures_keep_one_selected_rule_and_edit() {
                 .is_some_and(|edit| edit.new_text.contains(*edit_fragment))),
             "{name} selected lint lost its mechanical edit"
         );
+        if *name == "raw_multiline_html" {
+            let edit = selected[0].edit.as_ref().expect("raw HTML edit");
+            let literal_start = source.find("\"\"\"").expect("opening triple quote");
+            let literal_end = source.rfind("\"\"\"").expect("closing triple quote") + 3;
+            assert_eq!(
+                edit.span,
+                jet::Diagnostics::Span::new(literal_start, literal_end)
+            );
+            assert_eq!(
+                edit.new_text,
+                format!("HTML{{{}}}", &source[literal_start..literal_end])
+            );
+        }
     }
 }

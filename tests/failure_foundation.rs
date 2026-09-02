@@ -154,9 +154,9 @@ fn optional_success_result(value: Int) ?Int !TestFailure -> {
 }
 
 fn run() {
-    print(optional_success_result(8080) ?? 0)
-    print(optional_success_result(0) ?? 0)
-    print(optional_success_result(-1) ?? 0)
+    print((optional_success_result(8080) ?? None) ?? 0)
+    print((optional_success_result(0) ?? None) ?? 0)
+    print((optional_success_result(-1) ?? None) ?? 0)
 }
 "#,
         "8080\n0\n0\n",

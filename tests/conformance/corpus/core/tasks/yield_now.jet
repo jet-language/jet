@@ -3,7 +3,10 @@ use core.tasks as tasks
 
 fn run() {
     before :: tasks.current_task()
-    print(tasks.yield_now())
+    print((() -> {
+        tasks.yield_now()
+        true
+    })())
     after :: tasks.current_task()
     print(before == after)
 }

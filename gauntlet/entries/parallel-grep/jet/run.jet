@@ -1,32 +1,23 @@
 use core.files as files
 
-#CLI
-struct Args {
-    root: String
-    needle: String
-}
+#CLI struct Args { root: String, needle: String }
 
-fn count_file(path: String, needle: String) Int -> {
-    text :: files.read(path) ?? ""
-    text.lines().map(line -> line.count(needle)).sum()
-}
+fn scan(path: String, needle: String) Int -> (files.read(path) ?? panic("read failed")).count(needle)
 
 fn run(args: Args) {
-    root :: ~args.root
-    needle :: ~args.needle
-    paths := (files.list_dir(root) ?? panic("list failed")).filter(entry -> !entry.is_dir && entry.name.ends_with(".txt")).map(entry -> entry.path)
-    paths.sort()
-    counts := paths.para_map((path: String) -> count_file(path, needle), limit: 32)
-    normalized := counts.map(count -> Int{count})
-    zero :: Int{0}
+    root :: args.root
+    needle :: args.needle
+    paths := (files.walk_files(root) ?? panic("walk failed")).filter(entry -> entry.path.ends_with(".txt")).map(entry -> entry.path)
+    counts := paths.para_map(path -> scan(path, needle))
     matched := 0
-    loop index in 0..<paths.len() {
-        count :: normalized[index]
-        if count > zero {
-            path :: paths.get(index) ?? ""
-            print("{path}:{count}")
-            matched += 1
+    total := 0
+    loop pair in paths.zip(counts) {
+        count :: pair.b ?? panic("scan failed")
+        if count > 0 {
+            print("{pair.a}:{count}")
+            matched++
         }
+        total += count
     }
-    print("files {matched}/{paths.len()} total {normalized.sum()}")
+    print("files {matched}/{paths.len()} total {total}")
 }

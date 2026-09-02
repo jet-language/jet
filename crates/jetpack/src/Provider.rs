@@ -466,6 +466,19 @@ fn nix_cache_identity(
     identity.platform = platform.to_string();
     identity
 }
+fn nix_cache_key(identity: &super::Store::CacheIdentity) -> String {
+    SHA256::sha256_hex(
+        format!(
+            "nix-cache-key-v1\nsource={}\nrecipe={}\npolicy={}\nplatform={}",
+            identity.source_fingerprint,
+            identity.recipe_fingerprint,
+            identity.policy_fingerprint,
+            identity.platform,
+        )
+        .as_bytes(),
+    )
+}
+
 
 pub fn validate_cache_authority(
     spec: &RefSpec,
@@ -762,8 +775,8 @@ pub(crate) fn prepare_nix_identity(
         ProviderError::BadOutput("Nix provider returned no non-empty `out` or `bin` output".into())
     })?;
     if let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) {
-        if let Some((_, locked)) = super::Lock::nix_realization(project, &spec.raw) {
-            if locked.output_hash != output_hash {
+        if let Some((locked_closure, locked)) = super::Lock::nix_realization(project, &spec.raw) {
+            if locked.output_hash != output_hash || locked_closure.output != output_hash {
                 return Err(ProviderError::Ingest(format!(
                     "Nix output digest mismatch for `{}`: lock has `{}`, realized bytes have `{output_hash}`",
                     spec.raw, locked.output_hash
@@ -830,6 +843,10 @@ fn prepared_nix_facts(identity: &PreparedNixIdentity) -> BTreeMap<String, String
             identity.cache_identity.platform.clone(),
         ),
     ]);
+    facts.insert(
+        "nix.cache.key".into(),
+        nix_cache_key(&identity.cache_identity),
+    );
     for (key, value) in nix_build_facts_record() {
         facts.insert(key, value);
     }
@@ -956,6 +973,47 @@ pub(crate) fn validate_nix_lock_before_store(
     Ok(())
 }
 
+fn required_nix_fact(
+    producer: &super::Store::ProducerRecord,
+    key: &str,
+) -> Result<String, ProviderError> {
+    producer
+        .facts
+        .get(key)
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .ok_or_else(|| ProviderError::BadOutput(format!("Nix realization is missing `{key}`")))
+}
+
+fn nix_closure_record(
+    entry: &super::Store::StoreEntry,
+    producer: &super::Store::ProducerRecord,
+    project_cas_bundle: String,
+) -> Result<super::Lock::NixClosureRecord, ProviderError> {
+    let size = required_nix_fact(producer, "nix.nar-size")?
+        .parse::<u64>()
+        .map_err(|_| ProviderError::BadOutput("Nix realization has an invalid NAR size".into()))?;
+    let record = super::Lock::NixClosureRecord {
+        channel: required_nix_fact(producer, "nix.index.channel")?,
+        revision: required_nix_fact(producer, "nix.index.revision")?,
+        system: required_nix_fact(producer, "nix.index.system")?,
+        signed_index_manifest: required_nix_fact(producer, "nix.index.manifest.sha256")?,
+        derivation: required_nix_fact(producer, "nix.derivation.sha256")?,
+        output: entry.envelope.output_hash.clone(),
+        nar_hash: required_nix_fact(producer, "nix.nar-hash")?,
+        size,
+        compression: required_nix_fact(producer, "nix.compression")?,
+        references: entry.references.clone(),
+        upstream_proof: required_nix_fact(producer, "nix.proof")?,
+        cache_key: required_nix_fact(producer, "nix.cache.key")?,
+        project_cas_bundle,
+    };
+    record
+        .validate()
+        .map_err(ProviderError::BadOutput)?;
+    Ok(record)
+}
+
 /// Publish Nix lock state only after Store returned a registered entry.
 /// Missing or non-directory project roots intentionally do nothing.
 pub(crate) fn record_nix_lock_after_store(
@@ -975,18 +1033,20 @@ pub(crate) fn record_nix_lock_after_store(
     let nix_realization = producer.provider == "nix"
         && entry.cache_identity.source_fingerprint == entry.envelope.output_hash
         && entry.cache_identity.recipe_fingerprint == SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes());
-    let local_native = producer.provider == "jetpackage"
-        && producer
-            .facts
-            .get("source.kind")
-            .is_some_and(|kind| kind == "local-unofficial-catalog")
-        && producer
-            .facts
-            .get("nix.index.tier")
-            .is_some_and(|tier| tier == "local-unofficial");
+    let local_native = producer.facts.contains_key("nix.fallback.provenance")
+        || (producer.provider == "jetpackage"
+            && producer
+                .facts
+                .get("source.kind")
+                .is_some_and(|kind| kind == "local-unofficial-catalog")
+            && producer
+                .facts
+                .get("nix.index.tier")
+                .is_some_and(|tier| tier == "local-unofficial"));
     if !nix_realization && !local_native {
         return Ok(entry.clone());
     }
+
     let Some(expected_lock_digest) = producer.facts.get("nix.lock.digest") else {
         return Err(ProviderError::BadOutput(
             "Nix Store entry is missing its prepared lock digest".into(),
@@ -999,7 +1059,75 @@ pub(crate) fn record_nix_lock_after_store(
             "Nix project lock changed after Store registration: prepared `{expected_lock_digest}`, current `{current_lock_digest}`"
         )));
     }
+    if local_native {
+        let expected_lock_digest = expected_lock_digest.to_string();
+        let source_hash = producer
+            .facts
+            .get("nix.fallback.document.sha256")
+            .or_else(|| producer.facts.get("nix.fallback.lock.sha256"))
+            .cloned()
+            .unwrap_or_else(|| entry.envelope.output_hash.clone());
+        let repository = producer
+            .facts
+            .get("nix.fallback.locked-input")
+            .cloned()
+            .unwrap_or_else(|| "local-nix".into());
+        let authority = producer
+            .facts
+            .get("nix.fallback.provenance")
+            .cloned()
+            .unwrap_or_else(|| entry.envelope.provenance.clone());
+        let envelope = super::Lock::LockEnvelope {
+            output_hash: entry.envelope.output_hash.clone(),
+            platform: entry.envelope.platform.clone(),
+            signature: entry.envelope.signature.clone(),
+            provenance: entry.envelope.provenance.clone(),
+            catalog_tier: "not-applicable".into(),
+            catalog_trust: "local-unofficial".into(),
+        };
+        super::RuntimePolicy::with_project_lock(
+            project,
+            "local-nix-lock-publication",
+            || {
+                let current_lock_digest = project_lock_digest(Some(project))
+                    .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+                if current_lock_digest != expected_lock_digest {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "project lock changed during local provider publication",
+                    ));
+                }
+                super::Lock::record_registry_realization(
+                    project,
+                    "jetpackage",
+                    &entry.name,
+                    &entry.version,
+                    &entry.reference,
+                    &entry.envelope.output_hash,
+                    &source_hash,
+                    &repository,
+                    &authority,
+                    Vec::new(),
+                    envelope,
+                );
+                Ok(())
+            },
+        )
+        .map_err(|error| ProviderError::BadOutput(error.to_string()))?;
+        return Ok(entry.clone());
+    }
     let expected_lock_digest = expected_lock_digest.to_string();
+    let project_cas_bundle = super::Store::publish_nix_cas_bundle(
+        project,
+        roots,
+        &entry.envelope.output_hash,
+    )
+    .map_err(|error| {
+        ProviderError::BadOutput(format!(
+            "could not publish portable Nix CAS bundle: {error}"
+        ))
+    })?;
+    let nix_closure = nix_closure_record(entry, &producer, project_cas_bundle)?;
     let local_import = producer.facts.contains_key("nix.fallback.provenance");
     let catalog_tier = producer
         .facts
@@ -1013,6 +1141,11 @@ pub(crate) fn record_nix_lock_after_store(
         .cloned()
         .or_else(|| local_import.then(|| "unverified-local-nix".into()))
         .unwrap_or_default();
+    // Once the lock is published, its cache key becomes the stable policy
+    // identity. This keeps the warm path on the same verified key that cold
+    // replay reconstructs from the portable closure.
+    let mut lock_entry = entry.clone();
+    lock_entry.cache_identity.policy_fingerprint = nix_closure.cache_key.clone();
     let refreshed = super::RuntimePolicy::with_project_lock(
         project,
         "nix-lock-publication",
@@ -1029,15 +1162,16 @@ pub(crate) fn record_nix_lock_after_store(
             }
             super::Lock::record_nix_realization(
                 project,
-                &entry.name,
-                &entry.version,
-                &entry.reference,
-                &entry.out,
+                &lock_entry.name,
+                &lock_entry.version,
+                &lock_entry.reference,
+                &lock_entry.envelope.output_hash,
+                nix_closure.clone(),
                 super::Lock::LockEnvelope {
-                    output_hash: entry.envelope.output_hash.clone(),
-                    platform: entry.envelope.platform.clone(),
-                    signature: entry.envelope.signature.clone(),
-                    provenance: entry.envelope.provenance.clone(),
+                    output_hash: lock_entry.envelope.output_hash.clone(),
+                    platform: lock_entry.envelope.platform.clone(),
+                    signature: lock_entry.envelope.signature.clone(),
+                    provenance: lock_entry.envelope.provenance.clone(),
                     catalog_tier: catalog_tier.clone(),
                     catalog_trust: catalog_trust.clone(),
                 },
@@ -1045,12 +1179,13 @@ pub(crate) fn record_nix_lock_after_store(
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
             let lock_digest = project_lock_digest(Some(project))
                 .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-            super::Store::refresh_nix_lock_digest(roots, entry, &lock_digest)
-                .map_err(|error| {
+            super::Store::refresh_nix_lock_digest(roots, &lock_entry, &lock_digest).map_err(
+                |error| {
                     std::io::Error::other(format!(
                         "could not refresh the Nix Store producer after lock publication: {error}"
                     ))
-                })
+                },
+            )
         },
     )
     .map_err(|error| ProviderError::BadOutput(error.to_string()))?;
@@ -1617,6 +1752,14 @@ fn realization_from_index(
                 "Nix cache closure object `{store_path}` has no upstream proof"
             )));
         }
+        if object.nar_hash.trim().is_empty()
+            || object.size == 0
+            || object.compression.trim().is_empty()
+        {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache closure object `{store_path}` has incomplete NAR metadata"
+            )));
+        }
         if object
             .direct_reference_digests
             .iter()
@@ -1643,6 +1786,13 @@ fn realization_from_index(
             verified.trust.signature_chain().into(),
         ),
         ("nix.index.proof.v1".into(), verified.proof.canonical_json()),
+        ("nix.index.channel".into(), verified.proof.channel.clone()),
+        ("nix.index.revision".into(), verified.proof.revision.clone()),
+        ("nix.index.system".into(), verified.proof.system.clone()),
+        (
+            "nix.derivation.sha256".into(),
+            SHA256::sha256_hex(verified.record.drv_path.as_bytes()),
+        ),
         (
             "nix.index.record.sha256".into(),
             verified.proof.record_sha256.clone(),
@@ -1682,6 +1832,9 @@ fn realization_from_index(
             || closure_object.hangar_digest != object.hangar_digest
             || closure_object.direct_reference_digests != object.direct_reference_digests
             || closure_object.upstream_proof_sha256 != object.upstream_proof_sha256
+            || closure_object.nar_hash != object.nar_hash
+            || closure_object.size != object.size
+            || closure_object.compression != object.compression
         {
             return Err(ProviderError::BadOutput(format!(
                 "Nix cache output `{name}` disagrees with its closure object"
@@ -1750,6 +1903,14 @@ fn realization_from_index(
         platform: super::Envelope::host_platform(),
     };
     let derivation_digest = SHA256::sha256_hex(verified.record.drv_path.as_bytes());
+    facts.insert("nix.cache.key".into(), nix_cache_key(&provisional_identity));
+    facts.insert("nix.nar-hash".into(), primary_object.nar_hash.clone());
+    facts.insert("nix.nar-size".into(), primary_object.size.to_string());
+    facts.insert("nix.compression".into(), primary_object.compression.clone());
+    facts.insert(
+        "nix.proof".into(),
+        primary_object.upstream_proof_sha256.clone(),
+    );
     let producer = producer_record(
         "nix",
         &verified.record.drv_path,
@@ -2606,6 +2767,9 @@ mod tests {
                         hangar_digest: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                         direct_reference_digests: vec![leaf.into()],
                         upstream_proof_sha256: "4".repeat(64),
+                        nar_hash: "sha256-nar-out".into(),
+                        size: 42,
+                        compression: "zstd".into(),
                     },
                 ),
                 (
@@ -2616,6 +2780,9 @@ mod tests {
                         hangar_digest: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
                         direct_reference_digests: vec![bin_leaf.into(), leaf.into()],
                         upstream_proof_sha256: "5".repeat(64),
+                        nar_hash: "sha256-nar-bin".into(),
+                        size: 43,
+                        compression: "zstd".into(),
                     },
                 ),
             ]),
@@ -2628,6 +2795,9 @@ mod tests {
                         hangar_digest: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                         direct_reference_digests: vec![leaf.into()],
                         upstream_proof_sha256: "4".repeat(64),
+                        nar_hash: "sha256-nar-out".into(),
+                        size: 42,
+                        compression: "zstd".into(),
                     },
                 ),
                 (
@@ -2638,6 +2808,9 @@ mod tests {
                         hangar_digest: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
                         direct_reference_digests: vec![bin_leaf.into(), leaf.into()],
                         upstream_proof_sha256: "5".repeat(64),
+                        nar_hash: "sha256-nar-bin".into(),
+                        size: 43,
+                        compression: "zstd".into(),
                     },
                 ),
             ]),

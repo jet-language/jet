@@ -258,15 +258,11 @@ fn evaluate_with_resolver(
             } else {
                 "workspace overlay policy is malformed".to_string()
             },
-            if malformed_build_policy {
-                "Build authority must pass all three independent checks before any probe or action executes.".to_string()
-            } else {
-                e.message().to_string()
-            },
+            e.message().to_string(),
             if malformed_build_policy {
                 "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy.".to_string()
             } else if unsupported_policy {
-                "use `policy: .{ deny: #(…) }` or subject-scoped `policy: .{ grants: .{ \"package\": #(…) } }`".to_string()
+                "use `policy: { deny: #(…) }` or subject-scoped `policy: { grants: { \"package\": #(…) } }`".to_string()
             } else {
                 "write `overlay <name> { provider: Provider.nixpkgs(channel: \"...\"); package(\"pkg\").patches += [patch(\"path.patch\")] }`".to_string()
             },
@@ -1079,7 +1075,7 @@ module workspace {
         let dir = tempdir("ws-arbitrary");
         std::fs::write(
             dir.join("repo-index.jet"),
-            "module workspace { policy: .{ deny: #(Exec) } }\n",
+            "module workspace { policy: { deny: #(Exec) } }\n",
         )
         .unwrap();
         assert!(load(&dir).is_none(), "authority metadata is not the index");
@@ -1110,7 +1106,7 @@ module workspace {
         let dir = tempdir("ws-in-pkg");
         std::fs::write(
             dir.join(Syntax::PAYLOAD_FILE),
-            "module workspace { policy: .{ deny: #(FS) } }\n",
+            "module workspace { policy: { deny: #(FS) } }\n",
         )
         .unwrap();
         assert!(load(&dir).is_none(), "authority metadata is not the index");
@@ -1130,7 +1126,7 @@ module workspace {
         // A canonical filename never shadows another declaration.
         std::fs::write(
             dir.join("other.jet"),
-            "module workspace { policy: .{ deny: #(FS) } }\n",
+            "module workspace { policy: { deny: #(FS) } }\n",
         )
         .unwrap();
         let diagnostic = load(&dir)
@@ -1146,12 +1142,12 @@ module workspace {
         let dir = tempdir("ws-ambiguous");
         std::fs::write(
             dir.join("a.jet"),
-            "module workspace { policy: .{ deny: #(FS) } }\n",
+            "module workspace { policy: { deny: #(FS) } }\n",
         )
         .unwrap();
         std::fs::write(
             dir.join("b.jet"),
-            "module workspace { policy: .{ deny: #(FS) } }\n",
+            "module workspace { policy: { deny: #(FS) } }\n",
         )
         .unwrap();
         let d = load(&dir).expect("should be Some").expect_err("ambiguous");

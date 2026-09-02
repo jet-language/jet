@@ -68,6 +68,24 @@ mod collection_semantics {
     {
         jet_zip_rows(lengths, mode, read, fill)
     }
+
+    pub(super) fn list_count_where<T, E, F>(xs: &[T], predicate: F) -> Result<i64, E>
+    where
+        F: FnMut(&T) -> Result<bool, E>,
+    {
+        jet_list_count_where_result_kernel(xs, predicate)
+    }
+
+    pub(super) fn list_update_first<T, E, F>(
+        xs: &mut Vec<T>,
+        predicate: F,
+        replacement: T,
+    ) -> Result<bool, E>
+    where
+        F: FnMut(&T) -> Result<bool, E>,
+    {
+        jet_list_update_first_result_kernel(xs, predicate, replacement)
+    }
 }
 #[allow(dead_code)]
 mod measurement_semantics {
@@ -151,6 +169,17 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{BinMatchPart, Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
 use jet_foundation::MatchScan::BinBind;
 use jet_foundation::Reflection::ReflectionField;
+/// Match a checked Jet field name against the evaluator's stored record key.
+///
+/// Tuple and struct carriers use the same generated Rust identifier as AOT
+/// emission (`mangle`), while a few evaluator-produced records retain the
+/// source spelling or only the generated prefix. Keep reads and writes on this
+/// one name-resolution law.
+pub(super) fn field_name_matches(actual: &str, requested: &str) -> bool {
+    actual == requested
+        || actual == crate::Codegen::mangle(requested)
+        || actual.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(requested)
+}
 
 /// Cross-tier hook: Cranelift-native functions callable from the TIR evaluator (#778).
 pub type NativeCallHook = fn(&str, &[CtValue]) -> Option<Result<CtValue, Diagnostic>>;
@@ -332,14 +361,21 @@ fn stream_producer_cancel_completed(
             == crate::task_group::JetTaskFailure::Cancelled
 }
 
+
 fn task_child_panic(message: String, span: Span) -> Diagnostic {
-    crate::Sema::Diagnostics::render_registered(
+    // E0953 is an internal transport for a program-computed TaskFailure
+    // payload. Registered diagnostics normalize product prose to lower-case
+    // storage; this value must instead retain the user's exact payload.
+    let what = message.clone();
+    let mut diagnostic = crate::Sema::Diagnostics::render_registered(
         "E0953",
         message,
         "a child task panicked".to_string(),
         String::new(),
         Some(span),
-    )
+    );
+    diagnostic.what = what;
+    diagnostic
 }
 
 pub(super) fn reborrow_repl_authorizer<'short, 'long: 'short>(
@@ -2923,7 +2959,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         } else {
             crate::scheduler::jet_task_delay_ms_defaulted(duration_ms)
         };
-        crate::scheduler::jet_scheduler_spawn(move || {
+        // Timer producers are host-owned resources, not Jet task bodies. Keep
+        // them out of the observed task tree so an interval still sleeping at
+        // program exit cannot be reported as a leaked parked task.
+        crate::scheduler::jet_scheduler_spawn_detached_timer(move || {
             if repeating {
                 let mut tick = 1i64;
                 loop {
@@ -3337,21 +3376,30 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             }
         };
         if let Err(interruption) = self.task_wait_cancel_check() {
-            let cancel_runtime = self.runtime.clone();
-            group.close_with_cancel(
-                move |child| {
-                    if let Some(task) = cancel_runtime
-                        .lock()
-                        .expect("evaluator runtime poisoned")
-                        .tasks
-                        .get(*child)
-                        .and_then(Option::as_ref)
-                    {
-                        task.control.cancel();
-                    }
-                },
-                drain,
-            );
+            // A lexical group closes normally while its owner unwinds from
+            // ordinary cancellation: AOT and resident JIT join every child
+            // unless a deadline is pending. Only a deadline stop requests
+            // child cancellation; cancelling here made the interpreter skip
+            // child cleanup that the other tiers preserve.
+            if interruption.code == "TASK_CANCELLED" {
+                group.close_with(drain);
+            } else {
+                let cancel_runtime = self.runtime.clone();
+                group.close_with_cancel(
+                    move |child| {
+                        if let Some(task) = cancel_runtime
+                            .lock()
+                            .expect("evaluator runtime poisoned")
+                            .tasks
+                            .get(*child)
+                            .and_then(Option::as_ref)
+                        {
+                            task.control.cancel();
+                        }
+                    },
+                    drain,
+                );
+            }
             return Err(interruption);
         }
         group.close_with(drain);
@@ -4662,6 +4710,7 @@ pub fn lower_expr_for_eval(
     expr: &Expr,
     funcs: &HashMap<String, &Func>,
     methods: &HashMap<(String, String), &Func>,
+    binding_types: &HashMap<String, Type>,
     structs: &HashMap<String, &crate::AST::StructDef>,
     computed_fields: &HashMap<(String, String), &Expr>,
     globals: &HashMap<String, CtValue>,
@@ -4706,14 +4755,17 @@ pub fn lower_expr_for_eval(
     seed_fragment_unit_families(&mut cx, unit_families);
     seed_fragment_funcs(&mut cx, funcs);
     cx.const_values = globals.clone();
-    for (name, value) in globals {
+    for name in globals.keys() {
         cx.consts.insert(name.clone(), String::new());
-        let _ = value;
     }
     cx.core_imports = core_imports.clone();
     let mut env = LowerEnv::new("__ct".into());
-    for name in globals.keys() {
-        env.bind(name, TLocal::user(name), None);
+    for (name, value) in globals {
+        let ty = binding_types
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| value.jet_type());
+        env.bind(name, TLocal::user(name), Some(ty));
     }
     // Fragment eval: sema facts may still be incomplete (e.g. IndexKind::Unknown).
     // Try lower under catch_unwind; refuse with E0956 only when lower can't.
@@ -4730,6 +4782,7 @@ pub fn lower_stmts_for_eval(
     stmts: &[Stmt],
     funcs: &HashMap<String, &Func>,
     methods: &HashMap<(String, String), &Func>,
+    binding_types: &HashMap<String, Type>,
     structs: &HashMap<String, &crate::AST::StructDef>,
     computed_fields: &HashMap<(String, String), &Expr>,
     globals: &HashMap<String, CtValue>,
@@ -4758,8 +4811,12 @@ pub fn lower_stmts_for_eval(
     }
     cx.core_imports = core_imports.clone();
     let mut env = LowerEnv::new("__ct_block".into());
-    for name in globals.keys() {
-        env.bind(name, TLocal::user(name), None);
+    for (name, value) in globals {
+        let ty = binding_types
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| value.jet_type());
+        env.bind(name, TLocal::user(name), Some(ty));
     }
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_stmts(stmts, &cx, &mut env))
@@ -4778,8 +4835,22 @@ pub fn lower_interp_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     }
 }
 
+fn func_refs(funcs: &[TFunc]) -> HashMap<String, &TFunc> {
+    let mut out = HashMap::new();
+    for func in funcs {
+        if out
+            .get(&func.name)
+            .is_some_and(|existing: &&TFunc| !existing.synthetic && func.synthetic)
+        {
+            continue;
+        }
+        out.insert(func.name.clone(), func);
+    }
+    out
+}
+
 fn program_funcs(program: &JitProgram) -> HashMap<String, &TFunc> {
-    program.funcs.iter().map(|f| (f.name.clone(), f)).collect()
+    func_refs(&program.funcs)
 }
 
 fn serve_entry_value(ctx: &mut EvalCtx<'_, '_>, value: CtValue) -> Result<CtValue, Diagnostic> {
@@ -5595,9 +5666,11 @@ fn eval_expr_hook(
     req: &mut Comptime::TirBridge::ExprEvalRequest<'_>,
 ) -> Result<CtValue, Diagnostic> {
     let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
+    let item_funcs = req.funcs;
     let error_conversions = req.error_conversions;
     let expr = req.expr;
     let methods = req.methods;
+    let binding_types = req.binding_types;
     let structs = req.structs;
     let computed_fields = req.computed_fields;
     let globals = req.globals;
@@ -5611,6 +5684,7 @@ fn eval_expr_hook(
                 expr,
                 &fragment_funcs,
                 methods,
+                binding_types,
                 structs,
                 computed_fields,
                 globals,
@@ -5634,26 +5708,30 @@ fn eval_expr_hook(
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         crate::Codegen::TIR::with_eval_fragment(|| {
                             let mut lowered = match name.rsplit_once("::") {
+                                Some((owner, "encode")) if item_funcs.contains_key(name) => {
+                                    TIR::lower_trait_method(
+                                        f,
+                                        owner,
+                                        &cx,
+                                        crate::Generics::ENCODE,
+                                        f.compiler_generated,
+                                    )
+                                }
+                                Some((owner, "decode")) if item_funcs.contains_key(name) => {
+                                    TIR::lower_trait_method(
+                                        f,
+                                        owner,
+                                        &cx,
+                                        crate::Generics::DECODE,
+                                        f.compiler_generated,
+                                    )
+                                }
                                 Some((owner, method))
                                     if methods
                                         .contains_key(&(owner.to_string(), method.to_string())) =>
                                 {
                                     TIR::lower_method(f, owner, &cx)
                                 }
-                                Some((owner, "encode")) => TIR::lower_trait_method(
-                                    f,
-                                    owner,
-                                    &cx,
-                                    crate::Generics::ENCODE,
-                                    f.compiler_generated,
-                                ),
-                                Some((owner, "decode")) => TIR::lower_trait_method(
-                                    f,
-                                    owner,
-                                    &cx,
-                                    crate::Generics::DECODE,
-                                    f.compiler_generated,
-                                ),
                                 _ => TIR::lower_func(f, &cx),
                             };
                             lowered.name = name.clone();
@@ -5677,7 +5755,7 @@ fn eval_expr_hook(
             spawn_lambdas.extend(std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()));
             Ok((tir, spawn_lambdas, lowered))
         })?;
-    let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();
+    let funcs = func_refs(&lowered);
     let base_dir = req.base_dir.to_path_buf();
     let fuel = req.fuel;
     let core_imports = req.core_imports;
@@ -5777,10 +5855,12 @@ fn eval_block_hook(
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
     let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
     let error_conversions = req.error_conversions;
+    let binding_types = req.binding_types;
     let (tir, mut spawn_lambdas) = lower_stmts_for_eval(
         req.stmts,
         &fragment_funcs,
         req.methods,
+        binding_types,
         req.structs,
         req.computed_fields,
         req.globals,
@@ -5828,7 +5908,7 @@ fn eval_block_hook(
         }
     }
     spawn_lambdas.extend(std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()));
-    let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();
+    let funcs = func_refs(&lowered);
     let base_dir = req.base_dir.to_path_buf();
     let fuel = req.fuel;
     let core_imports = req.core_imports;

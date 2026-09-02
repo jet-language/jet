@@ -3,7 +3,7 @@
   "tier": "program",
   "cells": ["cli.app", "formats.json-app"],
   "mode": "batch-steps",
-  "perf": false,
+  "perf": true,
   "languages": ["jet", "rust", "python", "go", "node"],
   "spec": {
     "behavior": "Maintain a JSON task store in tasks.json. Add assigns the next integer id and persists; done marks an existing task done or reports a missing id; list prints tasks in id order and open/done totals.",
@@ -11,8 +11,20 @@
     "fixtureGen": null,
     "expected": "expected.out"
   },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs; no binary is built or measured."}
+    }
+  },
   "authoring": {
-    "jet": {"author": "luna-max", "turns": 13, "retries": 12, "diagnosticsHit": ["E0003: `task` is reserved for structured task syntax", "E1803: application authority is undecided for `Exec, Mem.Alloc, Panic`", "E0113: `save` promises to return Bool !IOError, but this returns Unit", "E2404: `?` can't turn a `Err` into a `IOError` here", "E0107: nothing named `item` exists here", "E0002: this `{` never gets a matching `}`", "E0001: `\\r` isn't an escape Jet knows", "E0311: `append` isn't a method on this value", "E0209: implicit clone of `tasks`", "E0308: generated Rust expected bool/DataTree but found Result", "L0507: prefer an ordered arm table for this branch", "L0508: this arrow loop body computes a value and drops it"], "notes": "Raw process.argv dispatch because typed subcommands were not used. #Codable on a user struct hit an AOT ICE (generated Rust E0308), so the final version uses dynamic DataTree parsing and manual JSON writing. Default jet run with forwarded args produced blank stdout because process.argv saw only [jet]; profile=debug AOT produced the canonical six-step output."},
+    "jet": {"author": "luna-max", "turns": 13, "retries": 12, "diagnosticsHit": ["E0003: `task` is reserved for structured task syntax", "E1803: application authority is undecided for `Exec, Mem.Alloc, Panic`", "E0113: `save` promises to return Bool !IOError, but this returns Unit", "E2404: `?` can't turn a `Err` into a `IOError` here", "E0107: nothing named `item` exists here", "E0002: this `{` never gets a matching `}`", "E0001: `\\r` isn't an escape Jet knows", "E0311: `append` isn't a method on this value", "E0209: implicit clone of `tasks`", "E0308: generated Rust expected bool/DataTree but found Result", "L0507: prefer an ordered arm table for this branch", "L0508: this arrow loop body computes a value and drops it"], "notes": "Final source uses typed Task/Store JSON APIs, canonical process.args dispatch, and one-pass List.each output. Typed #CLI subcommands were audited but not adopted because they change unknown-command and malformed-id behavior."},
     "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Hand-rolled fixed-schema JSON parser/writer because Rust std has no JSON."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib json."},
     "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib encoding/json."},

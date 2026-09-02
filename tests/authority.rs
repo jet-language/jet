@@ -1,3 +1,11 @@
+use std::{
+    io::Read,
+    path::Path,
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
 #[path = "common/mod.rs"]
 mod common;
 
@@ -129,13 +137,14 @@ fn run() {
 
 #[test]
 fn plugin_call_rejects_an_overlarge_argument_list_before_guest_execution() {
-    if !common::have_rustc() {
-        eprintln!(
-            "note: skipping plugin resource-bound integration test (need rustc)"
-        );
-        return;
-    }
-    let params = std::iter::repeat("\"x\"")
+    let plugin_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/packages/sandbox_mathkit/mathkit.wasm")
+        .canonicalize()
+        .expect("plugin fixture should exist")
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let params = std::iter::repeat("1.0")
         .take(1025)
         .collect::<Vec<_>>()
         .join(", ");
@@ -144,32 +153,430 @@ fn plugin_call_rejects_an_overlarge_argument_list_before_guest_execution() {
 use core.plugin as plugin
 
 fn run() {{
-    mathkit :: plugin.load("examples/features/packages/sandbox_mathkit/mathkit.wasm")
+    mathkit :: plugin.load("{plugin_path}")
     greeting :: mathkit.call_text("greet", ["Ada"]) ?? panic("plugin fixture")
     print(greeting)
-    if mathkit.call_text("greet", [{params}]) == {{
-        .Ok(_) -> print("accepted")
-        .Err(_) -> print("rejected")
-        else -> print("unexpected")
+    _result :: mathkit.call("scale", [{params}]) ?? {{
+        print(err)
+        return
     }}
+    print("guest-executed")
 }}
 "#,
+        plugin_path = plugin_path,
         params = params
     );
-    let (code, stdout, stderr) = common::build_and_run("jet_plugin_limits", "wire_limit", &source);
-    assert_eq!(code, 0, "plugin resource test failed: {stderr}");
-    assert_eq!(stdout, "hello, Ada!\nrejected\n");
-    let runtime = include_str!("../crates/jet-pkg-model/src/Prelude/Plugin.rs");
-    for marker in [
-        "config.consume_fuel(true)",
-        "epoch_interruption(true)",
-        "memory_size(PLUGIN_MAX_MEMORY_BYTES)",
-        "table_elements(PLUGIN_MAX_TABLE_ELEMENTS)",
-        "PLUGIN_TIMEOUT_MS",
-    ] {
-        assert!(runtime.contains(marker), "plugin sandbox guard disappeared: {marker}");
+    let expected = "hello, Ada!\n`scale` expects 2 argument(s), got 0\n";
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) =
+        tir_support::interpreter_run("jet_plugin_limits_interpreter", &source);
+    assert_eq!(
+        interpreter_code, 0,
+        "forced interpreter plugin resource test failed: {interpreter_stderr}"
+    );
+    assert_eq!(interpreter_stdout, expected);
+    assert!(
+        !interpreter_stdout.contains("guest-executed"),
+        "forced interpreter entered the guest: {interpreter_stdout}"
+    );
+    assert_eq!(interpreter_stderr, "");
+
+    if common::have_rustc() {
+        let (aot_code, aot_stdout, aot_stderr) =
+            common::build_and_run("jet_plugin_limits", "wire_limit", &source);
+        assert_eq!(aot_code, 0, "AOT plugin resource test failed: {aot_stderr}");
+        assert_eq!(aot_stdout, expected);
+        assert!(
+            !aot_stdout.contains("guest-executed"),
+            "AOT entered the guest: {aot_stdout}"
+        );
+        assert_eq!(aot_stderr, "");
+        assert_eq!(
+            aot_stdout, interpreter_stdout,
+            "AOT and forced interpreter plugin errors differ"
+        );
+        assert_eq!(
+            aot_stderr, interpreter_stderr,
+            "AOT and forced interpreter diagnostics differ"
+        );
+    } else {
+        eprintln!("note: skipping AOT plugin resource witness (need rustc)");
     }
 }
+
+fn write_plugin_component(
+    scratch: &common::Scratch,
+    name: &str,
+    wat_source: &str,
+) -> std::path::PathBuf {
+    let bytes = wat::parse_str(wat_source)
+        .unwrap_or_else(|error| panic!("hostile plugin WAT should parse: {error}"));
+    let path = scratch.join(name);
+    std::fs::write(&path, bytes)
+        .unwrap_or_else(|error| panic!("write hostile plugin fixture {}: {error}", path.display()));
+    path
+}
+
+fn plugin_failure_source(
+    path: &Path,
+    export: &str,
+    failure_marker: &str,
+    success_marker: &str,
+) -> String {
+    let plugin_path = path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    format!(
+        r#"
+use core.plugin as plugin
+
+fn run() {{
+    hostile :: plugin.load("{plugin_path}")
+    _result :: hostile.call_int("{export}", []) ?? {{
+        print("{failure_marker}")
+        print(err)
+        return
+    }}
+    print("{success_marker}")
+    print(_result)
+}}
+"#,
+        plugin_path = plugin_path,
+        export = export,
+        failure_marker = failure_marker,
+        success_marker = success_marker,
+    )
+}
+
+fn assert_plugin_failure_result(
+    tier: &str,
+    result: &(i32, String, String),
+    failure_marker: &str,
+    required_error_terms: &[&str],
+) {
+    let (code, stdout, stderr) = result;
+    assert_eq!(code, &0, "{tier} plugin witness failed: {stderr}");
+    assert_eq!(stderr, "", "{tier} plugin witness wrote diagnostics");
+    assert!(
+        stdout.starts_with(&format!("{failure_marker}\n")),
+        "{tier} did not return the typed failure marker: {stdout}"
+    );
+    assert!(
+        !stdout.contains("guest-returned"),
+        "{tier} entered the success path: {stdout}"
+    );
+    assert!(
+        stdout.len() <= 4096,
+        "{tier} returned an unbounded plugin failure: {} bytes",
+        stdout.len()
+    );
+    assert!(
+        stdout.contains("trapped"),
+        "{tier} did not reach a guest trap through the plugin call seam: {stdout}"
+    );
+    assert!(
+        required_error_terms.is_empty()
+            || required_error_terms
+                .iter()
+                .any(|term| stdout.to_ascii_lowercase().contains(term)),
+        "{tier} trap did not identify the expected resource guard: {stdout}"
+    );
+}
+
+const PLUGIN_CHILD_TEST_ENV: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_TEST";
+const PLUGIN_CHILD_TIER_ENV: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_TIER";
+const PLUGIN_CHILD_SOURCE_ENV: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_SOURCE";
+const PLUGIN_CHILD_OK_MARKER: &str = "JET_AUTHORITY_PLUGIN_RESOURCE_CHILD_OK";
+const PLUGIN_CHILD_CAPTURE_LIMIT: usize = 16 * 1024;
+
+fn run_plugin_resource_child_if_selected(test_name: &str) -> bool {
+    let Ok(requested_test) = std::env::var(PLUGIN_CHILD_TEST_ENV) else {
+        return false;
+    };
+    if requested_test != test_name {
+        return false;
+    }
+    let tier = std::env::var(PLUGIN_CHILD_TIER_ENV)
+        .unwrap_or_else(|error| panic!("plugin child tier is required: {error}"));
+    let source = std::env::var(PLUGIN_CHILD_SOURCE_ENV)
+        .unwrap_or_else(|error| panic!("plugin child source is required: {error}"));
+    let (failure_marker, required_error_terms): (&str, &[&str]) = match requested_test.as_str() {
+        "plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers" => (
+            "execution-bound-failure",
+            &["fuel", "epoch", "interrupt"],
+        ),
+        "plugin_call_rejects_linear_memory_growth_beyond_the_cap_on_all_hosted_tiers" => {
+            ("memory-bound-failure", &[])
+        }
+        "plugin_call_rejects_table_growth_beyond_the_cap_on_all_hosted_tiers" => {
+            ("table-bound-failure", &[])
+        }
+        other => panic!("unknown plugin child test `{other}`"),
+    };
+    let result = match tier.as_str() {
+        "jit" => tir_support::jit_run("plugin_resource_child_jit", &source),
+        "interpreter" => {
+            tir_support::interpreter_run("plugin_resource_child_interpreter", &source)
+        }
+        "aot" => {
+            assert!(common::have_rustc(), "AOT child requires rustc");
+            common::build_and_run("jet_plugin_resource_child", "resource", &source)
+        }
+        other => panic!("unknown plugin child tier `{other}`"),
+    };
+    assert_plugin_failure_result(
+        &format!("isolated {tier}"),
+        &result,
+        failure_marker,
+        required_error_terms,
+    );
+    println!("{PLUGIN_CHILD_OK_MARKER}");
+    true
+}
+
+fn bounded_plugin_capture(path: &Path) -> String {
+    let file = std::fs::File::open(path)
+        .unwrap_or_else(|error| panic!("open bounded plugin child capture: {error}"));
+    let mut bytes = Vec::with_capacity(PLUGIN_CHILD_CAPTURE_LIMIT + 1);
+    file.take((PLUGIN_CHILD_CAPTURE_LIMIT + 1) as u64)
+        .read_to_end(&mut bytes)
+        .unwrap_or_else(|error| panic!("read bounded plugin child capture: {error}"));
+    let truncated = bytes.len() > PLUGIN_CHILD_CAPTURE_LIMIT;
+    bytes.truncate(PLUGIN_CHILD_CAPTURE_LIMIT);
+    if truncated {
+        let suffix = b"\n[output truncated]";
+        let start = PLUGIN_CHILD_CAPTURE_LIMIT.saturating_sub(suffix.len());
+        bytes[start..].copy_from_slice(&suffix[..PLUGIN_CHILD_CAPTURE_LIMIT - start]);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+#[cfg(unix)]
+fn kill_plugin_resource_process_group(pid: u32) {
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    if let Ok(pid) = i32::try_from(pid) {
+        let _ = unsafe { kill(-pid, 9) };
+    }
+}
+
+fn run_plugin_resource_child(
+    test_name: &str,
+    tier: &str,
+    source: &str,
+) -> (bool, String, String) {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after the Unix epoch")
+        .as_nanos();
+    let prefix = format!(
+        "jet_authority_plugin_resource_{}_{}_{}",
+        std::process::id(),
+        stamp,
+        tier
+    );
+    let stdout_path = std::env::temp_dir().join(format!("{prefix}.stdout"));
+    let stderr_path = std::env::temp_dir().join(format!("{prefix}.stderr"));
+    let stdout_file = std::fs::File::create(&stdout_path)
+        .unwrap_or_else(|error| panic!("create plugin child stdout capture: {error}"));
+    let stderr_file = std::fs::File::create(&stderr_path)
+        .unwrap_or_else(|error| panic!("create plugin child stderr capture: {error}"));
+    let mut command = Command::new(
+        std::env::current_exe().expect("authority test executable should be available"),
+    );
+    command
+        .args(["--exact", test_name, "--nocapture"])
+        .env(PLUGIN_CHILD_TEST_ENV, test_name)
+        .env(PLUGIN_CHILD_TIER_ENV, tier)
+        .env(PLUGIN_CHILD_SOURCE_ENV, source)
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file));
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command
+        .spawn()
+        .unwrap_or_else(|error| panic!("spawn isolated plugin {tier} child: {error}"));
+    let timeout = if tier == "aot" {
+        Duration::from_secs(60)
+    } else {
+        Duration::from_secs(10)
+    };
+    let started = Instant::now();
+    loop {
+        match child
+            .try_wait()
+            .unwrap_or_else(|error| panic!("poll isolated plugin {tier} child: {error}"))
+        {
+            Some(status) => {
+                let _ = child
+                    .wait()
+                    .unwrap_or_else(|error| panic!("reap isolated plugin {tier} child: {error}"));
+                let stdout = bounded_plugin_capture(&stdout_path);
+                let stderr = bounded_plugin_capture(&stderr_path);
+                let _ = std::fs::remove_file(&stdout_path);
+                let _ = std::fs::remove_file(&stderr_path);
+                return (status.success(), stdout, stderr);
+            }
+            None if started.elapsed() >= timeout => {
+                #[cfg(unix)]
+                kill_plugin_resource_process_group(child.id());
+                let _ = child.kill();
+                let _ = child.wait();
+                let stdout = bounded_plugin_capture(&stdout_path);
+                let stderr = bounded_plugin_capture(&stderr_path);
+                let _ = std::fs::remove_file(&stdout_path);
+                let _ = std::fs::remove_file(&stderr_path);
+                panic!(
+                    "isolated plugin {tier} child timed out after {timeout:?}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+                );
+            }
+            None => thread::sleep(Duration::from_millis(10)),
+        }
+    }
+}
+
+fn assert_plugin_failure_on_all_hosted_tiers(
+    test_name: &str,
+    source: &str,
+    failure_marker: &str,
+) {
+    let mut tiers = vec!["jit", "interpreter"];
+    if common::have_rustc() {
+        tiers.push("aot");
+    } else {
+        eprintln!("note: skipping AOT plugin resource witness (need rustc)");
+    }
+    for tier in tiers {
+        let (success, stdout, stderr) = run_plugin_resource_child(test_name, tier, source);
+        assert!(
+            success,
+            "isolated plugin {tier} child failed for {failure_marker}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        assert!(
+            stdout.contains(PLUGIN_CHILD_OK_MARKER),
+            "isolated plugin {tier} child did not execute the selected test"
+        );
+        assert!(
+            stdout.len() <= PLUGIN_CHILD_CAPTURE_LIMIT
+                && stderr.len() <= PLUGIN_CHILD_CAPTURE_LIMIT,
+            "isolated plugin {tier} child capture exceeded the bound"
+        );
+    }
+}
+
+const PLUGIN_NON_TERMINATING_COMPONENT_WAT: &str = r#"
+(component
+  (core module $m
+    (func $spin (export "spin") (result i64)
+      (loop
+        (br 0))
+      (i64.const 0)))
+  (core instance $i (instantiate $m))
+  (type $t (func (result s64)))
+  (func $spin (type $t)
+    (canon lift (core func $i "spin")))
+  (export "spin" (func $spin)))
+"#;
+
+// One initial 64 KiB page plus 256 requested pages exceeds the 16 MiB cap.
+
+const PLUGIN_LINEAR_MEMORY_COMPONENT_WAT: &str = r#"
+(component
+  (core module $m
+    (memory (export "memory") 1 512)
+    (func $grow (export "grow") (result i64)
+      (local $old i32)
+      (local.set $old (memory.grow (i32.const 256)))
+      (if
+        (i32.eq (local.get $old) (i32.const -1))
+        (then (unreachable)))
+      (i64.const 7)))
+  (core instance $i (instantiate $m))
+  (type $t (func (result s64)))
+  (func $grow (type $t)
+    (canon lift (core func $i "grow")))
+  (export "grow" (func $grow)))
+"#;
+
+// One initial table slot plus 10,000 requested elements exceeds the table cap.
+
+const PLUGIN_TABLE_COMPONENT_WAT: &str = r#"
+(component
+  (core module $m
+    (table 1 20000 funcref)
+    (func $grow (export "grow") (result i64)
+      (local $old i32)
+      (local.set $old (table.grow (ref.null func) (i32.const 10000)))
+      (if
+        (i32.eq (local.get $old) (i32.const -1))
+        (then (unreachable)))
+      (i64.const 7)))
+  (core instance $i (instantiate $m))
+  (type $t (func (result s64)))
+  (func $grow (type $t)
+    (canon lift (core func $i "grow")))
+  (export "grow" (func $grow)))
+"#;
+
+#[test]
+fn plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers() {
+    const TEST_NAME: &str = "plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers";
+    if run_plugin_resource_child_if_selected(TEST_NAME) {
+        return;
+    }
+    let scratch = common::Scratch::new("plugin_call_non_terminating");
+    let path = write_plugin_component(
+        &scratch,
+        "non_terminating.wasm",
+        PLUGIN_NON_TERMINATING_COMPONENT_WAT,
+    );
+    let source = plugin_failure_source(
+        &path,
+        "spin",
+        "execution-bound-failure",
+        "guest-returned",
+    );
+    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "execution-bound-failure");
+}
+
+#[test]
+fn plugin_call_rejects_linear_memory_growth_beyond_the_cap_on_all_hosted_tiers() {
+    const TEST_NAME: &str =
+        "plugin_call_rejects_linear_memory_growth_beyond_the_cap_on_all_hosted_tiers";
+    if run_plugin_resource_child_if_selected(TEST_NAME) {
+        return;
+    }
+    let scratch = common::Scratch::new("plugin_call_linear_memory");
+    let path = write_plugin_component(
+        &scratch,
+        "linear_memory.wasm",
+        PLUGIN_LINEAR_MEMORY_COMPONENT_WAT,
+    );
+    let source = plugin_failure_source(
+        &path,
+        "grow",
+        "memory-bound-failure",
+        "guest-returned",
+    );
+    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "memory-bound-failure");
+}
+
+#[test]
+fn plugin_call_rejects_table_growth_beyond_the_cap_on_all_hosted_tiers() {
+    const TEST_NAME: &str = "plugin_call_rejects_table_growth_beyond_the_cap_on_all_hosted_tiers";
+    if run_plugin_resource_child_if_selected(TEST_NAME) {
+        return;
+    }
+    let scratch = common::Scratch::new("plugin_call_table");
+    let path = write_plugin_component(&scratch, "table.wasm", PLUGIN_TABLE_COMPONENT_WAT);
+    let source = plugin_failure_source(&path, "grow", "table-bound-failure", "guest-returned");
+    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "table-bound-failure");
+}
+
 
 #[test]
 fn authority_process_boundary_runs_on_all_hosted_tiers() {
@@ -646,5 +1053,104 @@ fn authority_web_accepts_the_same_value() {
     assert!(
         !web.wasm_rust.contains("struct Authority"),
         "web handle leaked into emission"
+    );
+}
+
+const PLUGIN_ZERO_PARAM_COMPONENT_WAT: &str = r#"
+(component
+  (core module $m
+    (func $zero (export "zero") (result i64)
+      (i64.const 7)))
+  (core instance $i (instantiate $m))
+  (type $t (func (result s64)))
+  (func $zero (type $t)
+    (canon lift (core func $i "zero")))
+  (export "zero" (func $zero)))
+"#;
+
+#[test]
+fn plugin_call_rejects_an_overlarge_frame_for_a_zero_param_export() {
+    let scratch = common::Scratch::new("plugin_zero_param_frame");
+    let plugin_path = write_plugin_component(
+        &scratch,
+        "zero_param.wasm",
+        PLUGIN_ZERO_PARAM_COMPONENT_WAT,
+    )
+    .to_string_lossy()
+    .replace('\\', "\\\\")
+    .replace('"', "\\\"");
+    let params = std::iter::repeat("1")
+        .take(1025)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!(
+        r#"
+use core.plugin as plugin
+
+fn run() {{
+    hostile :: plugin.load("{plugin_path}")
+    _result :: hostile.call_int("zero", [{params}]) ?? {{
+        print("rejected")
+        return
+    }}
+    print("guest-executed")
+    print(_result)
+}}
+"#,
+        plugin_path = plugin_path,
+        params = params,
+    );
+    tir_support::assert_tiers_agree(
+        "plugin_zero_param_overlarge_frame",
+        &source,
+        "rejected\n",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn plugin_load_rejects_a_symlink_outside_the_granted_read_root() {
+    use std::os::unix::fs::symlink;
+
+    let outside = common::Scratch::new("plugin_outside_read_root");
+    let allowed = common::Scratch::new("plugin_allowed_read_root");
+    let target = write_plugin_component(
+        &outside,
+        "target.wasm",
+        PLUGIN_ZERO_PARAM_COMPONENT_WAT,
+    );
+    let link = allowed.join("link.wasm");
+    symlink(&target, &link).expect("create hostile plugin symlink");
+    let plugin_path = link
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let root = allowed
+        .path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let source = format!(
+        r#"
+use core.plugin as plugin
+
+fn run() {{
+    policy :: Authority.from_rights(["FS.Read:{root}"])
+    hostile :: plugin.load("{plugin_path}", policy)
+    _result :: hostile.call_int("zero", []) ?? {{
+        print("rejected")
+        return
+    }}
+    print("guest-executed")
+    print(_result)
+}}
+"#,
+        plugin_path = plugin_path,
+        root = root,
+    );
+    tir_support::assert_tiers_agree(
+        "plugin_symlink_outside_read_root",
+        &source,
+        "rejected\n",
     );
 }

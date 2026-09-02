@@ -496,15 +496,14 @@ fn eval_session_method(
                         span,
                     ));
                 }
-                let imported = match LegacyWrapperSpec::from_project_file(
-                    &session.project_root,
-                    wrapper.kind,
-                ) {
-                    Ok(imported) => imported,
-                    Err(error) => {
-                        return Ok(CtValue::failed(Box::new(build_error_value(&error, span))))
-                    }
-                };
+                let imported =
+                    match LegacyWrapperSpec::from_project_file(&session.project_root, wrapper.kind)
+                    {
+                        Ok(imported) => imported,
+                        Err(error) => {
+                            return Ok(CtValue::failed(Box::new(build_error_value(&error, span))))
+                        }
+                    };
                 validate_legacy_import_contract(&wrapper, &imported, span)?;
                 for (label, value) in imported.labels {
                     if !matches!(label.as_str(), "legacy.import" | "legacy.project-file") {
@@ -1060,10 +1059,7 @@ fn build_error_jet_error(error: &BuildError, span: Span) -> jet_foundation::Outc
         Err(jet_foundation::Outcome::JetAbsent),
         format!("BuildError::{}", build_error_variant(error)),
     );
-    jet_foundation::Outcome::jet_err_set_details(
-        &mut jet_error,
-        build_error_details(error, span),
-    );
+    jet_foundation::Outcome::jet_err_set_details(&mut jet_error, build_error_details(error, span));
     jet_error
 }
 
@@ -1104,9 +1100,7 @@ fn build_error_variant(error: &BuildError) -> &'static str {
         BuildError::EmptyProbeName => "EmptyProbeName",
         BuildError::DuplicateTargetName(_) => "DuplicateTargetName",
         BuildError::DuplicateActionName(_) => "DuplicateActionName",
-        BuildError::CompilerPackageDependencyMissing { .. } => {
-            "CompilerPackageDependencyMissing"
-        }
+        BuildError::CompilerPackageDependencyMissing { .. } => "CompilerPackageDependencyMissing",
         BuildError::DuplicateToolchainName(_) => "DuplicateToolchainName",
         BuildError::DuplicateSigningIdentityName(_) => "DuplicateSigningIdentityName",
         BuildError::DuplicateProbeName(_) => "DuplicateProbeName",
@@ -1150,10 +1144,7 @@ fn build_error_variant(error: &BuildError) -> &'static str {
     }
 }
 
-fn build_error_details(
-    error: &BuildError,
-    span: Span,
-) -> jet_foundation::Outcome::JetErrorDetails {
+fn build_error_details(error: &BuildError, span: Span) -> jet_foundation::Outcome::JetErrorDetails {
     let fields = match error {
         BuildError::EmptyTargetName
         | BuildError::EmptyActionName
@@ -1255,19 +1246,20 @@ fn build_error_details(
             build_error_text_field("module", module),
             build_error_text_field("path", path),
         ],
-        BuildError::TargetDependencyCycle(cycle)
-        | BuildError::ActionDependencyCycle(cycle) => vec![build_error_json_field(
-            "nodes",
-            format!(
-                "[{}]",
-                cycle
-                    .nodes()
-                    .iter()
-                    .map(|node| build_error_json_string(node))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-        )],
+        BuildError::TargetDependencyCycle(cycle) | BuildError::ActionDependencyCycle(cycle) => {
+            vec![build_error_json_field(
+                "nodes",
+                format!(
+                    "[{}]",
+                    cycle
+                        .nodes()
+                        .iter()
+                        .map(|node| build_error_json_string(node))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+            )]
+        }
     };
     jet_foundation::Outcome::JetErrorDetails {
         variant: build_error_variant(error).to_string(),
@@ -1287,10 +1279,7 @@ fn build_error_number_field(name: &str, value: usize) -> jet_foundation::Outcome
     build_error_json_field(name, value.to_string())
 }
 
-fn build_error_bool_field(
-    name: &str,
-    value: bool,
-) -> jet_foundation::Outcome::JetErrorField {
+fn build_error_bool_field(name: &str, value: bool) -> jet_foundation::Outcome::JetErrorField {
     build_error_json_field(name, value.to_string())
 }
 
@@ -1382,6 +1371,15 @@ fn build_error_text(error: &BuildError) -> String {
 }
 
 fn build_diag(detail: &str, span: Span) -> Diagnostic {
+    if let Some(detail) = detail.strip_prefix("E3511: ") {
+        return Diagnostic::error(
+            "E3511",
+            format!("build plan is invalid: {detail}"),
+            "generated source must reach a bounded deterministic order, not loop until quiescent".to_string(),
+            "break the dependency between these generators or give each generated module one owner".to_string(),
+            Some(span),
+        );
+    }
     Diagnostic::error(
         "E3502",
         format!("build plan is invalid: {detail}"),
@@ -1418,28 +1416,16 @@ mod tests {
             ]
         };
 
-        let first = eval_program_build_method(
-            &context,
-            "add_executable",
-            args(),
-            None,
-            span,
-            false,
-        )
-        .expect("build context")
-        .expect("first target declaration");
+        let first =
+            eval_program_build_method(&context, "add_executable", args(), None, span, false)
+                .expect("build context")
+                .expect("first target declaration");
         assert!(first.is_present());
 
-        let mut failed = eval_program_build_method(
-            &context,
-            "add_executable",
-            args(),
-            None,
-            span,
-            false,
-        )
-        .expect("build context")
-        .expect("duplicate target result");
+        let mut failed =
+            eval_program_build_method(&context, "add_executable", args(), None, span, false)
+                .expect("build context")
+                .expect("duplicate target result");
         assert!(matches!(failed, CtValue::Failed(CtReport::Told(_))));
         assert!(failed.add_error_context(
             "while declaring app".to_string(),
@@ -1454,7 +1440,10 @@ mod tests {
         let jet_error = failed.to_jet_err().expect("default error carrier");
         let report = jet_foundation::Outcome::jet_error_report(&jet_error);
 
-        assert_eq!(report.typed_identity.as_deref(), Some("BuildError::DuplicateTargetName"));
+        assert_eq!(
+            report.typed_identity.as_deref(),
+            Some("BuildError::DuplicateTargetName")
+        );
         let details = report.details.as_ref().expect("typed build details");
         assert_eq!(details.variant, "DuplicateTargetName");
         assert_eq!(details.fields.len(), 1);

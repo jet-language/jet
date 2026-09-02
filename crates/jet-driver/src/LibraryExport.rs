@@ -28,38 +28,11 @@ fn e1341(what: impl Into<String>, why: impl Into<String>, fix: impl Into<String>
     Diagnostic::error("E1341", what.into(), why.into(), fix.into(), None)
 }
 
-/// Keep the closed foreign symbol namespace collision-free before Codegen
-/// publishes the header or native artifact. This is the same ASCII C spelling
-/// used by the native emitter and named bindings.
-fn c_symbol(name: &str) -> String {
-    let mut symbol = name
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if symbol.is_empty() || symbol.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-        symbol.insert(0, '_');
-    }
-    symbol
-}
 
 fn package_facts(
     bundle: &ProgramBundle,
 ) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
-    match crate::Package::PackageFacts::load(&bundle.project_root) {
-        None => Ok(None),
-        Some(Ok(facts)) => Ok(Some(facts)),
-        Some(Err(error)) => Err(vec![e1341(
-            "package manifest is not valid",
-            error.to_string(),
-            "fix `package.jet` before compiling the Library output",
-        )]),
-    }
+    crate::Loader::package_facts_for_bundle(bundle)
 }
 
 /// Resolve the selected `Library` output. A manifest with one Library uses it
@@ -209,7 +182,7 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
             continue;
         };
         has_text_export |= shape == crate::Sema::GuestScalar::Text;
-        let symbol = c_symbol(&export.name);
+        let symbol = crate::Sema::guest_export_native_symbol(&export.name);
         if let Some(previous) = symbols.insert(symbol.clone(), export.name.clone()) {
             diagnostics.push(e1341(
                 format!(
@@ -243,9 +216,10 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
 }
 
 fn resolve_version(bundle: &ProgramBundle) -> String {
-    crate::Manifest::load(&bundle.project_root)
-        .and_then(|result| result.ok())
-        .map(|manifest| manifest.package.version)
+    crate::Loader::package_facts_for_bundle(bundle)
+        .ok()
+        .flatten()
+        .and_then(|facts| facts.version)
         .unwrap_or_else(|| "0.0.0".to_string())
 }
 

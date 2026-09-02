@@ -830,47 +830,15 @@ pub(super) fn compose_env_scoped_with_warm(
     }
     for dotenv in &plan.environment.lifecycle.dotenv {
         let path = &dotenv.file;
-        let relative = std::path::Path::new(path);
-        if relative.is_absolute()
-            || relative
-                .components()
-                .any(|component| component == std::path::Component::ParentDir)
-        {
-            live.clear();
-            theme.error(
-                "couldn't load dotenv file",
-                &format!("`{path}` is not a project-relative path"),
-                "keep dotenv files inside the project and remove absolute or `..` paths.",
-            );
-            return Err(2);
-        }
-        let dotenv_path =
-            match jet_env_model::ModuleEval::checked_dotenv_path(&plan.project_root, path) {
-                Ok(path) => path,
-                Err(error) => {
-                    live.clear();
-                    theme.error(
-                        "couldn't load dotenv file",
-                        &format!("`{path}`: {error}"),
-                        "keep dotenv files inside the project and remove symlink escapes.",
-                    );
-                    return Err(2);
-                }
-            };
-        match read_dotenv(&dotenv_path) {
+        match read_dotenv_snapshot(&plan.project_root, path, &dotenv.allow) {
             Ok(values) => {
-                for (name, value) in values {
-                    if !dotenv.allow.is_empty() && !dotenv.allow.iter().any(|item| item == &name) {
-                        continue;
-                    }
-                    composed_vars.insert(name, value);
-                }
+                composed_vars.extend(values);
             }
             Err(error) => {
                 live.clear();
                 theme.error(
                     "couldn't load dotenv file",
-                    &format!("{}: {error}", dotenv_path.display()),
+                    &format!("{path}: {error}"),
                     "fix the dotenv path and keep each assignment in KEY=value form.",
                 );
                 return Err(2);
@@ -1147,10 +1115,26 @@ fn validate_integration_host_check(check: &str, target: &str) -> Result<(), Stri
     }
 }
 
-fn read_dotenv(
-    path: &std::path::Path,
+fn read_dotenv_snapshot(
+    root: &std::path::Path,
+    relative: &str,
+    allow: &[String],
 ) -> Result<std::collections::BTreeMap<String, String>, String> {
-    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let bytes = ModuleEval::checked_dotenv_snapshot(root, relative)?;
+    let values = read_dotenv(&bytes)?;
+    if allow.is_empty() {
+        return Ok(values);
+    }
+    Ok(values
+        .into_iter()
+        .filter(|(name, _)| allow.iter().any(|allowed| allowed == name))
+        .collect())
+}
+
+fn read_dotenv(
+    bytes: &[u8],
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let text = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
     let mut values = std::collections::BTreeMap::new();
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();
@@ -1228,6 +1212,8 @@ fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::{build_sandbox_outcome, resolve_provider_paths, validate_task_secret_allowlist};
+    #[cfg(unix)]
+    use super::read_dotenv_snapshot;
     use jet_env_model::ModuleEval;
 
     #[test]
@@ -1325,6 +1311,60 @@ mod tests {
             error.contains("lost secret `database_password` before activation"),
             "unexpected activation denial"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn allowlisted_dotenv_snapshot_keeps_declared_key_only() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-dotenv-allowlist-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join(".env"),
+            "ALLOWED=from-dotenv\nUNLISTED=must-not-load\n",
+        )
+        .unwrap();
+
+        let values =
+            read_dotenv_snapshot(&root, ".env", &["ALLOWED".to_string()]).unwrap();
+        assert_eq!(
+            values,
+            std::collections::BTreeMap::from([("ALLOWED".to_string(), "from-dotenv".to_string())])
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hardlinked_dotenv_never_exports_allowlisted_outside_value() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-dotenv-hardlink-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jetpack-dotenv-hardlink-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&outside, "ALLOWED=outside\nUNLISTED=outside\n").unwrap();
+        std::fs::hard_link(&outside, root.join(".env")).unwrap();
+
+        let error = read_dotenv_snapshot(&root, ".env", &["ALLOWED".to_string()])
+            .expect_err("hardlinked dotenv must not reach environment composition");
+        assert!(error.contains("hard link"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "ALLOWED=outside\nUNLISTED=outside\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
     }
 }
 

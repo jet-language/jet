@@ -587,7 +587,7 @@ fn run() {
     print(net.ready_writable(write_ready))
     interest :: NetReadyInterest.Read
     (wait_tx, wait_rx) :: channel<Int>()
-    ready_wait :: task {
+    ready_wait :: task ^ready_server {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
             .Ok(_) -> print("ready unexpectedly succeeded")
@@ -791,7 +791,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
 
 fn send_four<T: Writer>(&stream: T) Int !IOError -[IO]> {
     stream.write_all([1, 2, 3, 4])
-    return .Ok(4)
+    return Ok(4)
 }
 
 fn run() {
@@ -845,7 +845,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {{
 fn send_four<T: Writer>(&stream: T) Int !IOError -[IO]> {{
     first :: stream.write([1, 2])
     stream.write_all([3, 4])
-    return .Ok(first)
+    return Ok(first)
 }}
 
 fn run() {{
@@ -955,7 +955,7 @@ fn core_net_udp_and_unix_waits_use_typed_scheduler_interrupts() {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let socket = jet_string_path(&dir.join("interrupt.sock"));
+    let socket = jet_string_path(&dir.join("i.sock"));
     let source = format!(
         r#"
 use core.net as net
@@ -1111,6 +1111,11 @@ fn run() {
     assert_eq!(stdout, expected);
     let file = dir.join("ioerror_tree.jet");
     fs::write(&file, source).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"ioerror_tree\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, FS, IO, Mem.Alloc, Net, Panic] } }\n",
+    )
+    .unwrap();
     match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
@@ -1135,7 +1140,7 @@ fn activate_core() String -[IO]> {
 }
 
 fn fail() Int !IOError -[]> {
-    return .Err(IOError.InvalidInput(IOContext{
+    return Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
         os_code: None,
@@ -1144,7 +1149,7 @@ fn fail() Int !IOError -[]> {
 }
 
 fn fail_other() Int !IOError -[]> {
-    return .Err(IOError.Other(IOContext{
+    return Err(IOError.Other(IOContext{
         cause: Val("denied"),
         os_code: Val(13),
         resource: Val("out.txt"),
@@ -1222,6 +1227,103 @@ fn run() {
         }
         other => panic!("IOError Show/Debug did not run in forced interpreter: {other:?}"),
     };
+    assert_eq!(default_jit_stdout, aot_stdout);
+    assert_eq!(forced_interpreter_stdout, aot_stdout);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = root.join("tests/ui/ioerror_display_migration.jet");
+    let source = fs::read_to_string(&fixture).expect("Card #2417 IOError fixture");
+    assert!(
+        source.contains("IOError.Other(IOContext"),
+        "Card #2417 fixture must exercise ordinary IOError, not BuildError"
+    );
+    assert!(
+        source.contains("print(\"{error}\")"),
+        "Card #2417 fixture must exercise bare Display interpolation"
+    );
+
+    let shown = fixture.to_string_lossy();
+    let checked = jet::compile_with_path(&source, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "Card #2417 IOError fixture was rejected:\n{}",
+            jet::render_diagnostics(&shown, &source, &diags)
+        )
+    });
+    assert_eq!(
+        checked
+            .lints
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "L0520")
+            .count(),
+        1,
+        "Card #2417 fixture must retain exactly one L0520 witness"
+    );
+
+    let snapshot = fs::read_to_string(root.join("tests/ui/ioerror_display_migration.stderr"))
+        .expect("Card #2417 IOError snapshot");
+    for expected in [
+        "Warning [L0520] (display_migration): `IOError` has no `Display` impl",
+        "Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`",
+        "Fix: add `impl IOError.Display { fn display(self) String -> { … } }`",
+    ] {
+        assert!(
+            snapshot.contains(expected),
+            "Card #2417 snapshot lost {expected:?}"
+        );
+    }
+    let build_snapshot = fs::read_to_string(root.join("tests/ui_lint/build_entry_liveness.warn"))
+        .expect("BuildError exclusion snapshot");
+    assert!(
+        build_snapshot.contains("MissingDisplay"),
+        "BuildError exclusion snapshot lost its ordinary neighboring L0520 witness"
+    );
+    assert!(
+        !build_snapshot.contains("BuildError"),
+        "BuildError must remain excluded from the display migration snapshot"
+    );
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_card_2417_ioerror_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let expected = "I/O error during read: missing input\n";
+    let (code, aot_stdout, stderr) =
+        build_and_run(&dir, "ioerror_display_migration", &source, &[], None);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(aot_stdout, expected);
+
+    let file = dir.join("ioerror_display_migration.jet");
+    fs::write(&file, &source).unwrap();
+    let default_jit_stdout =
+        match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!((exit_code, stderr.as_str()), (0, ""));
+                stdout
+            }
+            other => panic!("Card #2417 IOError fixture failed in default JIT: {other:?}"),
+        };
+    let forced_interpreter_stdout =
+        match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!((exit_code, stderr.as_str()), (0, ""));
+                stdout
+            }
+            other => panic!("Card #2417 IOError fixture failed in forced interpreter: {other:?}"),
+        };
     assert_eq!(default_jit_stdout, aot_stdout);
     assert_eq!(forced_interpreter_stdout, aot_stdout);
     let _ = fs::remove_dir_all(&dir);
@@ -1461,7 +1563,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
 fn send<T: Writer>(&stream: T, bytes: [U8]) Int !IOError -[IO]> {
     empty_count :: stream.write([])
     stream.write_all(bytes)
-    return .Ok(empty_count)
+    return Ok(empty_count)
 }
 
 fn zero_rejected<T: Reader>(&stream: T) Bool -[IO]> {

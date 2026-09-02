@@ -12,6 +12,9 @@ use crate::AST::{ComptimeInput, Expr, Func, ProgramBundle, Stmt, StructDef, Type
 pub struct ExprEvalRequest<'a> {
     pub expr: &'a Expr,
     pub funcs: &'a HashMap<String, &'a Func>,
+    /// Authoritative static types for names in the active interpreter frame.
+    /// Fragment lowering must use these instead of guessing from erased values.
+    pub binding_types: &'a HashMap<String, Type>,
     /// Checked `impl Source -> Target` bodies available to fragment lowering.
     /// The evaluator lowers these through the same TIR conversion path as AOT.
     pub error_conversions: &'a [crate::AST::ErrorConvDef],
@@ -49,7 +52,9 @@ pub struct ExprEvalRequest<'a> {
 pub struct BlockEvalRequest<'a, 'debug> {
     pub stmts: &'a [Stmt],
     pub funcs: &'a HashMap<String, &'a Func>,
-    /// Checked `impl Source -> Target` bodies available to fragment lowering.
+    /// Authoritative static types for names in the active interpreter frame.
+    /// Fragment lowering must use these instead of guessing from erased values.
+    pub binding_types: &'a HashMap<String, Type>,
     pub error_conversions: &'a [crate::AST::ErrorConvDef],
     pub methods: &'a HashMap<(String, String), &'a Func>,
     pub extern_names: &'a HashSet<String>,

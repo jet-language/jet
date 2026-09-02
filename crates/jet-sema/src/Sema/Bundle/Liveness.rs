@@ -44,6 +44,7 @@ pub(super) fn check_liveness(
     app_graph: Option<&AppGraph>,
 ) -> Vec<Diagnostic> {
     let mut candidates = Vec::new();
+    record_materialized_comptime_alias_uses(bundle, ledger);
     collect_unused_imports(bundle, ledger, &mut candidates);
     collect_unused_private_functions(bundle, ledger, app_graph, &mut candidates);
     collect_unreachable_exports(bundle, ledger, app_graph, &mut candidates);
@@ -63,6 +64,55 @@ pub(super) fn check_liveness(
             candidate.diagnostic()
         })
         .collect()
+}
+
+/// Re-project successful top-level comptime expressions whose value was
+/// materialized before this bundle pass. A reused bundle can carry `ConstDef::ct`
+/// from an earlier evaluation, bypassing `eval_comptime_items`'s callback after
+/// `clear_sema_facts`; the original expression still owns the semantic alias
+/// reads, so feed it through the same identity recorder before liveness projects
+/// warnings.
+fn record_materialized_comptime_alias_uses(bundle: &ProgramBundle, ledger: &mut NameLedger) {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let imports = module
+            .imports
+            .iter()
+            .filter_map(|import| {
+                import
+                    .core_module_path()
+                    .map(|path| (import.import_alias(), path))
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        if imports.is_empty() {
+            continue;
+        }
+        let globals = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Const(constant) if constant.is_comptime => constant
+                    .ct
+                    .as_ref()
+                    .map(|value| (constant.name.clone(), value.clone())),
+                _ => None,
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        for item in &module.items {
+            let Item::Const(constant) = item else {
+                continue;
+            };
+            if !constant.is_comptime || constant.ct.is_none() {
+                continue;
+            }
+            crate::Sema::record_comptime_import_alias_uses(
+                ledger,
+                module_idx,
+                &constant.value,
+                &imports,
+                &globals,
+            );
+        }
+    }
 }
 
 fn collect_unused_imports(

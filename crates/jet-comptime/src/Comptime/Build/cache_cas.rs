@@ -2951,9 +2951,7 @@ fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheE
             if !value.is_empty() {
                 let bytes = hex_decode(value)?;
                 let text = String::from_utf8(bytes).map_err(|_| {
-                    RemoteCacheError::InvalidRecord(
-                        "cache failure report is not UTF-8".to_string(),
-                    )
+                    RemoteCacheError::InvalidRecord("cache failure report is not UTF-8".to_string())
                 })?;
                 failure_report = Some(
                     jet_foundation::Outcome::JetErrorReport::from_json(&text).map_err(|error| {

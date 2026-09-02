@@ -1098,6 +1098,47 @@ fn repl_run_consistency_with_interpreter() {
     assert!(direct_out.contains("ping"), "got: {:?}", direct_out);
 }
 
+#[test]
+fn repl_native_run_uses_stdin_snapshot_not_replaced_temp_path() {
+    use std::io::Write as _;
+
+    let state = std::env::temp_dir().join(format!(
+        "jet_repl_native_run_{}",
+        std::process::id()
+    ));
+    std::fs::remove_dir_all(&state).ok();
+    let mut child = spawn_repl_process(&state);
+    wait_for_history_dir(&state);
+
+    let hostile_path = std::env::temp_dir().join(format!(
+        "__jet_repl_run_{}_0.jet",
+        child.id()
+    ));
+    std::fs::write(&hostile_path, "fn run() { print(\"replaced\") }\n").unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    stdin
+        .write_all(
+            b"fn answer() Int -[]> { return 41 }\nprint(\"authoritative\")\nprint(answer())\n:run\n:quit\n",
+        )
+        .unwrap();
+    drop(stdin);
+    let output = child.wait_with_output().expect("finish native REPL");
+    std::fs::remove_file(&hostile_path).ok();
+    std::fs::remove_dir_all(&state).ok();
+
+    assert!(output.status.success(), "native REPL: {:?}", output.status);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("authoritative"),
+        "native :run must execute the stdin snapshot, got: {stdout:?}"
+    );
+    assert!(
+        !stdout.contains("replaced"),
+        "native :run must not consume a replaced temp pathname, got: {stdout:?}"
+    );
+}
+
 // Probe test — not a real test, only used during dev to see exact output.
 // Kept for reference but skipped in CI.
 #[test]

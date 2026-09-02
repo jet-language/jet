@@ -151,20 +151,17 @@ fn run_squash(before: Option<&str>) {
 
     let root = project_root();
 
-    // Read the package version (the current published shape's version).
-    let pack_path =
-        jet::Loader::manifest_path(&root).unwrap_or_else(|| root.join(Syntax::PACKAGE_FILE));
-    let version = match std::fs::read_to_string(&pack_path) {
-        Ok(raw) => match jet::Manifest::parse(&pack_path, &raw) {
-            Ok(mf) => mf.package.version,
-            Err(_) => "0.0.0".to_string(),
-        },
-        Err(_) => "0.0.0".to_string(),
-    };
+    // Read the canonical Package version from the selected entry. Inline
+    // package carriers and package.jet use the same facts path.
+    let entry = find_project_entry(&root);
+    let version = jet::Loader::package_facts_for_entry(&entry)
+        .ok()
+        .flatten()
+        .and_then(|facts| facts.version)
+        .unwrap_or_else(|| "0.0.0".to_string());
 
     // Load the current working-tree #PublishedSchema structs so we re-baseline to
     // the *current* shape (not whatever the old snapshot held).
-    let entry = find_project_entry(&root);
     let entry_str = entry.to_string_lossy().to_string();
     let bundle = match jet::Loader::load_entry_with_overlay(&entry_str, None, true) {
         Ok(b) => b,

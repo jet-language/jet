@@ -28,6 +28,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_auth = etype == Some("AuthError");
     let is_delivery_state = etype == Some("DeliveryState");
     let is_service_error = etype == Some("ServiceError");
+    let is_http_error = etype == Some("HTTPError");
     // D-CONC-FAIL1=A: task failures are published by the shared Prelude, not
     // emitted as the Prelude task-failure enum.
     let is_task_failure = etype == Some(crate::Syntax::TYPE_TASK_FAILURE);
@@ -99,8 +100,13 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 // index -> the real Rust field name (mangle(&f.name), matching enum
                 // definition codegen in Items.rs) rather than always assuming a
                 // tuple variant. `VariantPayload::Single` is the only real tuple case.
-                let real_names = variant_field_names(cx, variant).map(|names| {
-                    if is_email || is_auth || is_delivery_state || is_service_error {
+                let real_names = variant_field_names_for_enum(cx, etype, variant).map(|names| {
+                    if is_email
+                        || is_auth
+                        || is_delivery_state
+                        || is_service_error
+                        || is_http_error
+                    {
                         names
                             .into_iter()
                             .map(|name| {
@@ -170,8 +176,12 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
 /// variant, used to map positional pattern slots onto the struct-variant shape
 /// that Items.rs emits for `VariantPayload::Named`. `None` when `variant` isn't
 /// a known user enum with a named payload (JSON/Key variants, single/unit).
-fn variant_field_names(cx: &Cx, variant: &str) -> Option<Vec<String>> {
-    let owner = cx.variant_owner.get(variant)?;
+fn variant_field_names_for_enum(
+    cx: &Cx,
+    enum_type: Option<&str>,
+    variant: &str,
+) -> Option<Vec<String>> {
+    let owner = enum_type.or_else(|| cx.variant_owner.get(variant).map(String::as_str))?;
     let variants = cx.enum_variants.get(owner)?;
     let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
     match payload {
@@ -194,12 +204,13 @@ pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
             "Int" => Some(vec![Type::Int]),
             "Float" => Some(vec![Type::Float]),
             "Text" => Some(vec![Type::String]),
-            "Array" => Some(vec![Type::List(Box::new(data))]),
+            "Array" => Some(vec![Type::List(Box::new(data.clone()))]),
             "Object" => Some(vec![Type::Map {
                 key: Box::new(Type::String),
                 key_span: None,
                 value: Box::new(data),
             }]),
+            "Number" => Some(vec![Type::String]),
             _ => None,
         };
     }
@@ -254,23 +265,50 @@ pub(crate) fn variant_binding_types_for_enum(
     }
 }
 
-pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
+pub(crate) fn emit_if_let_pattern(
+    cx: &Cx,
+    pattern: &Pattern,
+    enum_type: Option<&str>,
+) -> String {
     use crate::AST::PatSlot;
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
         } => {
-            let prefix = enum_type_prefix(cx, variant);
-            let rv = variant_rust_name(cx, variant);
+            let (prefix, raw_variants) = match enum_type {
+                Some(owner) => crate::Codegen::TIR::tir_enum_rust_path(cx, owner),
+                None => {
+                    let prefix = enum_type_prefix(cx, variant);
+                    let raw = cx
+                        .variant_owner
+                        .get(variant)
+                        .map(|owner| crate::Codegen::TIR::tir_enum_rust_path(cx, owner).1)
+                        .unwrap_or_else(|| is_json_variant(variant) || is_key_variant(variant));
+                    (prefix, raw)
+                }
+            };
+            let rv = crate::Codegen::TIR::tir_enum_variant_rust_name(variant, raw_variants);
             if bindings.is_empty() {
                 // D-TAG1: a group name matches its whole subtree.
-                let owner = cx.variant_owner.get(variant).map(String::as_str);
+                let owner = enum_type.or_else(|| cx.variant_owner.get(variant).map(String::as_str));
                 let leaves = group_leaves(cx, owner, variant);
                 if !leaves.is_empty() {
                     return leaves
                         .iter()
                         .map(|(n, p)| {
-                            let head = format!("{}::{}", prefix, variant_rust_name(cx, n));
+                            let leaf_raw = enum_type
+                                .map(|owner| crate::Codegen::TIR::tir_enum_rust_path(cx, owner).1)
+                                .unwrap_or_else(|| {
+                                    cx.variant_owner
+                                        .get(*n)
+                                        .map(|owner| crate::Codegen::TIR::tir_enum_rust_path(cx, owner).1)
+                                        .unwrap_or_else(|| is_json_variant(n) || is_key_variant(n))
+                                });
+                            let head = format!(
+                                "{}::{}",
+                                prefix,
+                                crate::Codegen::TIR::tir_enum_variant_rust_name(n, leaf_raw)
+                            );
                             match p {
                                 VariantPayload::Unit => head,
                                 VariantPayload::Single(..) => format!("{head}(_)"),
@@ -291,10 +329,12 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                         PatSlot::Range { .. } => jet_format!("{jet_prefix}range_{}", i),
                     })
                     .collect();
-                if let Some(names) = variant_field_names(cx, variant) {
-                    let plain = cx.variant_owner.get(variant).is_some_and(|owner| {
+                if let Some(names) = variant_field_names_for_enum(cx, enum_type, variant) {
+                    let owner =
+                        enum_type.or_else(|| cx.variant_owner.get(variant).map(String::as_str));
+                    let plain = owner.is_some_and(|owner| {
                         matches!(
-                            owner.as_str(),
+                            owner,
                             "EmailError"
                                 | "SMTPAuth"
                                 | "TLSTrust"
@@ -336,7 +376,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
         // Or/Range in if-let position: fall back to a safe default.
         Pattern::Or(alts, _) => alts
             .first()
-            .map(|a| emit_if_let_pattern(cx, a))
+            .map(|a| emit_if_let_pattern(cx, a, enum_type))
             .unwrap_or_default(),
         // D-PARSESTR1: str-match, like struct patterns, isn't reachable here —
         // it has its own dedicated lowering (TIR/lower.rs).
@@ -374,12 +414,29 @@ fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: b
     let middleware = params.len() == 1
         && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
         && matches!(ret.as_deref(), Some(Type::Named(name)) if name == "HTTPHandler");
+    // HTTP mux handlers are the one function-value ABI whose callback input is
+    // consumed by the host. Keep ordinary Jet fn values read-borrowed, but
+    // marshal this host boundary to the Prelude's owned, shared handler type.
+    let http_handler = send_sync
+        && params.len() == 1
+        && matches!(&params[0], Type::Named(name) if name == "HTTPRequest")
+        && matches!(
+            ret.as_deref(),
+            Some(Type::Result { ok, err })
+                if matches!(ok.as_ref(), Type::Named(name) if name == "HTTPResponse")
+                    && matches!(err.as_ref(), Type::Named(name) if name == "HTTPError")
+        );
     let wrap = if middleware || send_sync {
         "std::sync::Arc::new"
     } else {
         "std::rc::Rc::new"
     };
-    let rust_type = if send_sync && !middleware {
+    let rust_type = if http_handler {
+        format!(
+            "std::sync::Arc<dyn Fn({}JetHTTPRequest) -> Result<{}JetHTTPResponse, {}JetHTTPError> + Send + Sync>",
+            cx.root_prefix, cx.root_prefix, cx.root_prefix
+        )
+    } else if send_sync && !middleware {
         let ordinary = cx.rust_type(fn_type);
         ordinary
             .strip_prefix("std::rc::Rc<")
@@ -421,7 +478,9 @@ fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: b
             jet_format!(
                 "{jet_prefix}a{}: {}",
                 i,
-                if middleware {
+                if http_handler {
+                    format!("{}JetHTTPRequest", cx.root_prefix)
+                } else if middleware {
                     cx.rust_type(p)
                 } else {
                     rust_param_type(cx, AccessConvention::Read, p)
@@ -433,7 +492,9 @@ fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: b
         .iter()
         .enumerate()
         .map(|(i, _)| {
-            if middleware {
+            if http_handler {
+                jet_format!("&{jet_prefix}a{i}")
+            } else if middleware {
                 jet_format!("&{jet_prefix}a{i}")
             } else {
                 jet_format!("{jet_prefix}a{i}")

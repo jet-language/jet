@@ -283,6 +283,58 @@ fn run() {
 }
 
 #[test]
+fn repeated_regex_queries_keep_exact_matches() {
+    let src = r#"fn run() {
+    rx :: Regex{"(?<word>[A-Za-z]+)-\d+"}
+    print(rx.is_match("Jet-2026"))
+    print(rx.is_match("Jet"))
+    print(rx.find("prefix Rust-2025 suffix") ?? "none")
+    print(rx.find("no match") ?? "none")
+    print(rx.find_all("Jet-1 Rust-2").len())
+}
+"#;
+    let expected = "true\nfalse\nRust-2025\nnone\n2\n";
+    if have_toolchain() {
+        assert_eq!(
+            run_regex(src),
+            expected,
+            "AOT regex queries returned unexpected matches"
+        );
+    }
+    tir_support::assert_tiers_agree("repeated_regex_queries", src, expected);
+}
+
+#[test]
+fn anchored_required_literal_prefilter_preserves_controls() {
+    let src = r#"use core.regex as re
+
+fn run() {
+    anchored :: Regex{"^(?:needle)"}
+    print(anchored.is_match("needle suffix"))
+    print(anchored.is_match("prefix needle"))
+    print(anchored.find("prefix needle") ?? "none")
+
+    multiline :: re.compile_with("^(?:needle)", re.flags(false, true, false)) ?? panic("bad pattern")
+    print(multiline.is_match("prefix\nneedle suffix"))
+    print(multiline.is_match("prefix\nxneedle suffix"))
+
+    unanchored :: Regex{"(?:needle)"}
+    print(unanchored.is_match("prefix needle"))
+    print(unanchored.is_match("prefix absent"))
+}
+"#;
+    let expected = "true\nfalse\nnone\ntrue\nfalse\ntrue\nfalse\n";
+    if have_toolchain() {
+        assert_eq!(
+            run_regex(src),
+            expected,
+            "AOT anchored regex queries returned unexpected matches"
+        );
+    }
+    tir_support::assert_tiers_agree("anchored_required_literal_prefilter", src, expected);
+}
+
+#[test]
 fn typed_head_raw_escapes_agree_across_tiers() {
     let src = r#"fn run() {
     digits :: Regex{"\d+"}

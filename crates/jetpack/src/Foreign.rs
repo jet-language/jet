@@ -113,7 +113,12 @@ fn realize_one(
             "foreign dependency {name} must pin its provider package with `#version=...`"
         )));
     };
-    let source_fingerprint = SHA256::tree_hash(&source);
+    let source_fingerprint = SHA256::try_tree_hash(&source).map_err(|error| {
+        ProviderError::ForeignProjection(format!(
+            "foreign dependency {name} source tree `{}` could not be hashed: {error}",
+            source.display()
+        ))
+    })?;
     let identity = CacheIdentity {
         source_fingerprint,
         recipe_fingerprint: SHA256::sha256_hex(b"foreign-binding-projection-v1"),
@@ -387,4 +392,112 @@ fn write_verified_file(destination: &Path, bytes: &[u8]) -> Result<(), ProviderE
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{realize_one, Syntax};
+    use crate::Provider::{Ctx, ProviderError};
+    use crate::Store;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "jet-foreign-{tag}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
+
+    fn write_binding(root: &Path, name: &str) -> PathBuf {
+        let source = root.join("provider");
+        let language = crate::AST::ForeignLanguage::Py;
+        let descriptor = crate::AST::binder_descriptor(language).unwrap();
+        let binding = source
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(language.bindings_subdir())
+            .join(format!("{name}.{}", Syntax::FILE_EXT));
+        fs::create_dir_all(binding.parent().unwrap()).unwrap();
+        fs::write(
+            binding,
+            format!("// jet-ffi-descriptor={}\n", descriptor.stamp()),
+        )
+        .unwrap();
+        source
+    }
+
+    fn projection_error(root: &Path, name: &str) -> ProviderError {
+        let store_root = root.join("store");
+        let roots = Store::Roots::at(store_root.clone());
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store_root,
+            offline: true,
+            project_dir: None,
+            nix_index: None,
+            nix_roots: None,
+        };
+        realize_one(
+            &roots,
+            root,
+            name,
+            crate::AST::ForeignLanguage::Py,
+            "./provider#version=1.0.0",
+            &ctx,
+        )
+        .unwrap_err()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn realization_rejects_recursive_symlink_as_foreign_projection_error() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_root("symlink");
+        fs::create_dir_all(&root).unwrap();
+        let source = write_binding(&root, "hostile");
+        fs::create_dir_all(source.join("visible")).unwrap();
+        fs::write(source.join("visible/value"), b"stable\n").unwrap();
+        symlink(".", source.join("visible/loop")).unwrap();
+
+        let error = projection_error(&root, "hostile");
+        assert!(matches!(
+            error,
+            ProviderError::ForeignProjection(reason)
+                if reason.contains("source tree")
+                    && reason.contains("could not be hashed")
+                    && reason.contains("symlink")
+                    && reason.contains("visible/loop")
+        ));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn realization_rejects_oversized_recursive_source_as_foreign_projection_error() {
+        let root = temp_root("depth");
+        fs::create_dir_all(&root).unwrap();
+        let source = write_binding(&root, "hostile");
+        let mut current = source;
+        for index in 0..=(crate::SHA256::MAX_TREE_DEPTH + 1) {
+            current.push(format!("d{index}"));
+            fs::create_dir(&current).unwrap();
+        }
+        fs::write(current.join("payload"), b"stable\n").unwrap();
+
+        let error = projection_error(&root, "hostile");
+        assert!(matches!(
+            error,
+            ProviderError::ForeignProjection(reason)
+                if reason.contains("source tree")
+                    && reason.contains("could not be hashed")
+                    && reason.contains("tree hashing bound")
+        ));
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }

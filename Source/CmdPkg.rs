@@ -2,12 +2,165 @@
 //! handlers (M12.1).
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet::ExitCodes;
 
 use crate::flag_value;
+struct PackageInput {
+    path: PathBuf,
+    raw: String,
+    inline: Option<jet::Package::InlinePackageBlock>,
+    manifest: jet::Manifest::Manifest,
+}
+
+fn package_input(root: &Path) -> PackageInput {
+    let entry = crate::find_project_entry(root);
+    let entry_raw = fs::read_to_string(&entry).unwrap_or_else(|error| {
+        crate::cli_error!("E2105", "couldn't read {}: {}", entry.display(), error);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let inline = jet::Package::extract_inline_package(&entry_raw).unwrap_or_else(|error| {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(
+                &entry.display().to_string(),
+                &entry_raw,
+                &[error.diagnostic()],
+            )
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
+    let facts = jet::Loader::package_facts_for_entry(&entry)
+        .unwrap_or_else(|diagnostics| {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(
+                    &entry.display().to_string(),
+                    &entry_raw,
+                    &diagnostics,
+                )
+            );
+            exit(ExitCodes::USER_ERROR);
+        })
+        .unwrap_or_else(|| {
+            crate::cli_error!(
+                "E2105",
+                "couldn't resolve package facts for {}",
+                entry.display()
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+    if let Some(block) = inline {
+        let raw = block.body(&entry_raw).to_string();
+        let manifest = jet::Package::to_manifest(&facts, &raw).unwrap_or_else(|diagnostic| {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(&entry.display().to_string(), &raw, &[diagnostic])
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+        return PackageInput {
+            path: entry,
+            raw: entry_raw,
+            inline: Some(block),
+            manifest,
+        };
+    }
+    let path = jet::Loader::manifest_path(root).unwrap_or_else(|| {
+        crate::cli_error!("E2105", "couldn't locate {}", jet::Syntax::PACKAGE_FILE);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let raw = fs::read_to_string(&path).unwrap_or_else(|error| {
+        crate::cli_error!("E2105", "couldn't read {}: {}", path.display(), error);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let manifest = jet::Package::to_manifest(&facts, &raw).unwrap_or_else(|diagnostic| {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&path.display().to_string(), &raw, &[diagnostic])
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
+    PackageInput {
+        path,
+        raw,
+        inline: None,
+        manifest,
+    }
+}
+
+fn edited_package_source(input: &PackageInput, updated_body: impl FnOnce(&str) -> String) -> String {
+    let Some(block) = input.inline else {
+        return updated_body(&input.raw);
+    };
+    let mut source = input.raw.clone();
+    let updated = updated_body(block.body(&input.raw));
+    source.replace_range(block.body_span.start..block.body_span.end, &updated);
+    source
+}
+/// Replace a package carrier only after re-reading the same checked source
+/// object used to build the edit. This keeps inline package edits atomic and
+/// prevents a concurrent writer from losing an unrelated source change.
+fn write_package_source(input: &PackageInput, updated: &str) -> Result<(), String> {
+    let parent = input
+        .path
+        .parent()
+        .ok_or_else(|| "package source has no parent directory".to_string())?;
+    let name = input
+        .path
+        .file_name()
+        .ok_or_else(|| "package source has no file name".to_string())?;
+    let resolver = jet::Authority::AuthorityResolver::open(parent)
+        .map_err(|error| format!("could not open package source authority: {error}"))?;
+    let checked = resolver
+        .checked_file(Path::new(name))
+        .map_err(|error| format!("could not check {}: {error}", input.path.display()))?;
+    let current = checked
+        .text()
+        .map_err(|error| format!("could not read {}: {error}", input.path.display()))?;
+    if current != input.raw {
+        return Err(format!(
+            "{} changed while the package edit was prepared",
+            input.path.display()
+        ));
+    }
+    resolver
+        .revalidate_file(&checked)
+        .map_err(|error| format!("package source changed before writing: {error}"))?;
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("could not create package edit nonce: {error}"))?
+        .as_nanos();
+    let temporary = parent.join(format!(
+        ".{}.jet-package-edit-{}-{nonce}",
+        name.to_string_lossy(),
+        std::process::id()
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| format!("could not stage {}: {error}", input.path.display()))?;
+        file.write_all(updated.as_bytes())
+            .map_err(|error| format!("could not stage {}: {error}", input.path.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("could not sync {}: {error}", input.path.display()))?;
+        resolver
+            .revalidate_file(&checked)
+            .map_err(|error| format!("package source changed before publishing: {error}"))?;
+        fs::rename(&temporary, &input.path)
+            .map_err(|error| format!("could not publish {}: {error}", input.path.display()))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
 
 pub(crate) fn run_add(raw_args: &[String]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -60,25 +213,15 @@ pub(crate) fn run_add(raw_args: &[String]) {
         exit(ExitCodes::USER_ERROR);
     };
 
-    // Load the manifest, add the dep, write back.
-    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
-    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
+    let input = package_input(&root);
+    let updated = edited_package_source(&input, |raw| {
+        jet::Manifest::add_dependency(raw, dep_name, &spec)
     });
-    jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
-        );
+    if let Err(error) = write_package_source(&input, &updated) {
+        crate::cli_error!("E2105", "couldn't write {}: {}", input.path.display(), error);
         exit(ExitCodes::USER_ERROR);
-    });
-    let updated = jet::Manifest::add_dependency(&raw, dep_name, &spec);
-    fs::write(&pack_path, updated).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't write {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    println!("added `{}` to {}", dep_name, pack_path.display());
+    }
+    println!("added `{}` to {}", dep_name, input.path.display());
 
     // Auto-fetch.
     do_fetch(&root, false);
@@ -88,19 +231,8 @@ pub(crate) fn run_remove(dep_name: &str) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(&cwd, "error: no package.jet found");
 
-    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
-    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    let manifest = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
-    if !manifest.dependencies.contains_key(dep_name) {
+    let input = package_input(&root);
+    if !input.manifest.dependencies.contains_key(dep_name) {
         crate::cli_error!(
             @fix "E2104",
             format!("dependency `{dep_name}` is not present in {}", jet::Syntax::PACKAGE_FILE),
@@ -108,17 +240,18 @@ pub(crate) fn run_remove(dep_name: &str) {
         );
         exit(ExitCodes::USER_ERROR);
     }
-    let updated = jet::Manifest::remove_dependency(&raw, dep_name);
-    fs::write(&pack_path, updated).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't write {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
+    let updated = edited_package_source(&input, |raw| {
+        jet::Manifest::remove_dependency(raw, dep_name)
     });
-    println!("removed `{}` from {}", dep_name, pack_path.display());
+    if let Err(error) = write_package_source(&input, &updated) {
+        crate::cli_error!("E2105", "couldn't write {}: {}", input.path.display(), error);
+        exit(ExitCodes::USER_ERROR);
+    }
+    println!("removed `{}` from {}", dep_name, input.path.display());
 
     // Re-fetch to update lock.
     do_fetch(&root, false);
 }
-
 pub(crate) fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
@@ -132,18 +265,10 @@ pub(crate) fn run_update(dep: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(&cwd, "error: no package.jet found");
 
-    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
-    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprintln!(
-            "{}",
-            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
+    let input = package_input(&root);
+    let pack_path = input.path;
+    let raw = input.raw;
+    let mf = input.manifest;
     let existing_lock = jet::Lock::load(&root);
     let opts = jet::Fetch::FetchOptions {
         locked: false,
@@ -161,7 +286,7 @@ pub(crate) fn run_update(dep: Option<&str>) {
             }
         }
         Err(diags) => {
-            let src = String::new();
+            let src = raw;
             eprint!(
                 "{}",
                 jet::render_diagnostics(&pack_path.display().to_string(), &src, &diags)
@@ -172,18 +297,10 @@ pub(crate) fn run_update(dep: Option<&str>) {
 }
 
 fn do_fetch(root: &Path, locked: bool) {
-    let pack_path = jet::Loader::manifest_path(root).expect("manifest root has a Package file");
-    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
+    let input = package_input(root);
+    let pack_path = input.path;
+    let raw = input.raw;
+    let mf = input.manifest;
     let existing_lock = jet::Lock::load(root);
     let opts = jet::Fetch::FetchOptions {
         locked,

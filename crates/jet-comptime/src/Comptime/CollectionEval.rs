@@ -90,6 +90,14 @@ mod collection_semantics {
         jet_list_pop_kernel(values).ok()
     }
 
+    pub(super) fn list_insert<T>(
+        values: &mut Vec<T>,
+        index: i64,
+        value: T,
+    ) -> Result<(), JetListInsertError> {
+        jet_list_insert_kernel(values, index, value)
+    }
+
     pub(super) fn list_replace<T: Clone>(values: &[T], index: i64, new: T) -> Vec<T> {
         jet_list_replace(values, index, new)
     }
@@ -203,6 +211,32 @@ pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
     collection_semantics::list_pop(values)
 }
 
+pub(super) fn list_insert(
+    values: &mut Vec<CtValue>,
+    index: i64,
+    value: CtValue,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    collection_semantics::list_insert(values, index, value).map_err(|error| {
+        let message = error.message();
+        Diagnostic::from_row(error.code(), &[("msg", message.as_str())], Some(span))
+    })
+}
+
+pub(super) fn list_insert_args(
+    values: &mut Vec<CtValue>,
+    args: &[CtValue],
+    span: Span,
+) -> Result<(), Diagnostic> {
+    let [index, item] = args else {
+        return Err(unsupported(
+            "the method `.insert` with these arguments",
+            span,
+        ));
+    };
+    list_insert(values, as_int(index, span)?, item.clone(), span)
+}
+
 pub(super) fn list_replace<T: Clone>(values: &[T], index: i64, new: T) -> Vec<T> {
     collection_semantics::list_replace(values, index, new)
 }
@@ -303,13 +337,15 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
 
 fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
-    items.sort_by(|left, right| match cmp_for_sort(left.clone(), right.clone(), span) {
-        Ok(order) => order,
-        Err(error) => {
-            sort_error.get_or_insert(error);
-            std::cmp::Ordering::Equal
-        }
-    });
+    items.sort_by(
+        |left, right| match cmp_for_sort(left.clone(), right.clone(), span) {
+            Ok(order) => order,
+            Err(error) => {
+                sort_error.get_or_insert(error);
+                std::cmp::Ordering::Equal
+            }
+        },
+    );
     if let Some(error) = sort_error {
         return Err(error);
     }
@@ -319,13 +355,15 @@ fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Di
 
 fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
-    items.sort_by(|left, right| match cmp_for_sort(right.clone(), left.clone(), span) {
-        Ok(order) => order,
-        Err(error) => {
-            sort_error.get_or_insert(error);
-            std::cmp::Ordering::Equal
-        }
-    });
+    items.sort_by(
+        |left, right| match cmp_for_sort(right.clone(), left.clone(), span) {
+            Ok(order) => order,
+            Err(error) => {
+                sort_error.get_or_insert(error);
+                std::cmp::Ordering::Equal
+            }
+        },
+    );
     match sort_error {
         Some(error) => Err(error),
         None => Ok(items),

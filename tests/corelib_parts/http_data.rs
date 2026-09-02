@@ -1074,6 +1074,64 @@ fn run() {
 }
 
 #[test]
+fn core_data_group_fields_survive_core_name_registration_across_tiers() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping core.data group field test (need rustc)");
+        return;
+    }
+    let dir = common::unique_tmp("jet_corelib_data_group_tiers");
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.data as data
+
+struct Ticket {
+    region: String
+    amount: Float
+}
+
+fn run() {
+    rows :: [Ticket]{Ticket{region: "West", amount: 2.5}}
+    groups :: data.group_sum(rows, sale -> sale.region, sale -> sale.amount) ?? panic("group")
+    print("{groups[0].key}:{groups[0].count}:{groups[0].sum}")
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "data_group_collision", src, &[], None);
+    assert_eq!(code, 0, "AOT core.data group program failed: {stderr}");
+    assert_eq!(stdout, "West:1:2.5\n");
+
+    let source = dir.join("data_group_collision.jet");
+    fs::write(&source, src).unwrap();
+    let jit = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--trace-tiers", source.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .env("JET_CACHE_DIR", dir.join("jit-cache"))
+        .env("JET_RUN_CACHE_DIR", dir.join("jit-run-cache"))
+        .output()
+        .unwrap();
+    assert!(
+        jit.status.success(),
+        "default `jet run` core.data group program failed: {}",
+        String::from_utf8_lossy(&jit.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&jit.stdout), stdout);
+
+    match jet::Interpreter::dev_iteration(source.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: dev_stdout,
+            stderr: dev_stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "dev core.data group program failed: {dev_stderr}");
+            assert_eq!(dev_stdout, stdout);
+            assert!(dev_stderr.is_empty(), "dev stderr: {dev_stderr}");
+        }
+        other => panic!("dev core.data group program did not run: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_data_stream_limits_and_typed_errors() {
     let have_rustc = common::have_rustc();
     if !have_rustc {

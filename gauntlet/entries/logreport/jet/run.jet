@@ -1,49 +1,24 @@
 use core.[files, time]
-
-struct LogLine { timestamp: String, level: String, component: String, millis: Int }
-
 #CLI
-struct Args {
-    input: String
-}
-
-fn parse_line(line: String) LogLine -> {
-    fields :: line.split(" ").take(3).to_list()
-    timestamp_text :: fields.get(0) ?? panic("bad log line")
-    level :: fields.get(1) ?? panic("bad log line")
-    component :: fields.get(2) ?? panic("bad log line")
-    timestamp :: time.parse_rfc3339(timestamp_text) ?? panic("bad timestamp")
-    LogLine{timestamp: timestamp_text, level, component, millis: timestamp.to_unix_ms()}
-}
-
+struct Args { input: String }
 fn run(args: Args) !IOError -> {
-    input :: (files.open(~args.input) ?? panic("open log"))
-    level_counts := [String:Int]{}
-    error_components := [String:Int]{}
-    first_timestamp := ""
-    last_timestamp := ""
-    first_millis := 0
-    last_millis := 0
-    total := 0
+    input :: files.open(~args.input) ?? return
+    levels := [String:Int]{}
+    errors := [String:Int]{}
+    first := ""; last := ""; first_ms := 0;last_ms := 0
     loop line in input.lines() {
-        record :: parse_line(line) ?? panic("bad log line")
-        last_timestamp = record.timestamp
-        last_millis = record.millis
-        if total == 0 {
-            first_timestamp = ~last_timestamp
-            first_millis = last_millis
-        }
-        level_counts[record.level] = (level_counts.get(record.level) ?? 0) + 1
-        if record.level == "ERROR" {
-            error_components[record.component] = (error_components.get(record.component) ?? 0) + 1
-        }
-        total += 1
+        fields :: line.split(" ").to_list()
+        stamp :: fields[0]
+        level :: fields[1]
+        component :: fields[2]
+        millis :: (time.parse_rfc3339(stamp) ?? panic("bad timestamp")).to_unix_ms()
+        if first == "" { first = stamp; first_ms = millis }
+        last = stamp; last_ms = millis
+        levels[level] = (levels.get(level) ?? 0) + 1
+        if level == "ERROR" { errors[component] = (errors.get(component) ?? 0) + 1 }
     }
-
-    loop level in ["DEBUG", "INFO", "WARN", "ERROR"] {
-        print("{level} {level_counts.get(level) ?? 0}")
-    }
+    loop level in ["DEBUG", "INFO", "WARN", "ERROR"] -> print("{level} {levels.get(level) ?? 0}")
     print("top-error-components:")
-    loop item in error_components.top_n(3) -> print("{item.value} {item.key}")
-    print("span {first_timestamp} .. {last_timestamp} ({(last_millis - first_millis) / 1000}s)")
+    loop item in errors.top_n(3) -> print("{item.value} {item.key}")
+    print("span {first} .. {last} ({(last_ms - first_ms) / 1000}s)")
 }

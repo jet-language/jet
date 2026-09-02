@@ -42,6 +42,11 @@
 (loop_label) @label
 (next_stmt "next" @keyword.control)
 
+; D-ECO-INLINEPACKAGE1=A: the contextual carrier word is highlighted only
+; inside the structural inline_package node, so `pub(package)` remains ordinary
+; visibility syntax everywhere else.
+(inline_package "package" @keyword)
+
 ; Definitions
 (function_def name: (identifier) @function)
 (extern_fn name: (identifier) @function)
@@ -92,6 +97,7 @@
   "remove"
   "rename"
   "rust"
+  "state"
   "struct"
   "tag"
   "trait"
@@ -132,10 +138,6 @@
 ] @type.builtin
 
 ; builtin: assert assert_eq channel check freeze input join print
-[
-  "check"
-] @function.builtin
-
 ; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated Discriminant Doc Encode Env Equatable Error Every Extern FFI FX Flag Flatten HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
 ; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= { | |= || ~| ~|=

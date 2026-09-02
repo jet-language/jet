@@ -112,6 +112,10 @@ pub(crate) fn method_call_in_subset(
         cx.current_type_params.borrow().contains(name.as_str())
             || cx.trait_names.contains(name)
             || crate::Generics::is_builtin_trait(name)
+            || matches!(
+                name.as_str(),
+                crate::Generics::IO_READER | crate::Generics::IO_WRITER
+            )
     }) && matches!(
         method,
         "read"
@@ -1618,8 +1622,8 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "split" | "starts_with" | "ends_with" | "replace" | "to_upper"
         | "to_lower" | "to_ascii_upper" | "to_ascii_lower" | "repeat" | "slice" | "keys" | "values" | "has_key" | "add" | "add_new"
         | "merge"
-        | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all"
-        | "sort_by" | "sort_by_desc" | "reduce"
+        | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all" | "count_where"
+        | "sort_by" | "sort_by_desc" | "reduce" | "update_first"
         | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "normalize"
         | "remove_prefix" | "remove_suffix" | "rsplit" | "equal" | "copy"
         // D-ITER1: lazy iterator adapters.
@@ -1728,9 +1732,14 @@ pub(crate) fn closure_method_in_subset(
                     _ => args.len() == 1,
                 }
         }
-        // (lambda). map/filter/each/find/any/all/sort_by + D-ITER1 +
+        // (lambda). map/filter/each/find/any/all/count_where/sort_by + D-ITER1 +
         // D-PARCAPTURE1 closure adapters.
         "map" => args.len() == 1 && map_callback(&args[0].expr),
+        "update_first" => {
+            args.len() == 2
+                && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
+                && expr_in_subset(&args[1].expr, cx, locals)
+        }
         _ => {
             args.len() == 1
                 && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))

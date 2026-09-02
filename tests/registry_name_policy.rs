@@ -108,7 +108,7 @@ fn hostile_lookalike_publish_is_rejected_with_teaching_error() {
         .current_dir(&project)
         .env("JET_REGISTRY_URL", &url)
         .env("JET_REGISTRY_CACHE_DIR", &cache)
-        .env("JET_STORE_DIR", &store)
+        .env("JET_PACKAGE_STORE_DIR", &store)
         .env("JET_KEYS_DIR", &keys)
         .env("NO_COLOR", "1")
         .output()

@@ -78,6 +78,9 @@ VARIANCE_BUDGET_PCT=100
 OUTLIER_BUDGET_COUNT=5
 TAB=$(printf '\t')
 ROW_HEADER=$(printf 'program\tstate\tstage\tlatency_ns\tmemory_bytes\tvariance_pct\toutput_sha256:stderr_sha256\tphases')
+PEER_META_PREFIX='compiler-speed-peer version='
+PEER_ROW_HEADER=$(printf 'peer\tlanguage\tprogram\tstate\tmetric\tvalue\tworkload_sha256\tsource_sha256\texpected_sha256\tmanifest_sha256\ttoolchain_sha256')
+PEER_METRICS=latency_ns,memory_bytes
 REPORT_VERSION=4
 PARITY_RECEIPT=unverified
 PARITY_CASE_COUNT=0
@@ -138,8 +141,10 @@ runtime_cache_dir="$run_dir/runtime-cache"
 mkdir -p "$runtime_cache_dir"
 export JET_RUNTIME_CACHE_DIR="$runtime_cache_dir"
 rows_file="$run_dir/rows.tsv"
+peer_rows_file="$run_dir/peer-rows.tsv"
 outputs_dir="$run_dir/outputs"
 ACTIVE_PID=
+baseline_tmp=
 ACTIVE_GROUP=0
 cleanup_run() {
     cleanup_status=$?
@@ -173,6 +178,9 @@ cleanup_run() {
         wait "$ACTIVE_PID" 2>/dev/null || true
         ACTIVE_PID=
         ACTIVE_GROUP=0
+    fi
+    if [ -n "${baseline_tmp:-}" ]; then
+        rm -f -- "$baseline_tmp"
     fi
     rm -rf "$run_dir"
     exit "$cleanup_status"
@@ -235,6 +243,30 @@ sha256_text() {
         shasum -a 256 | awk '{print $1}'
     fi
 }
+is_sha256() {
+    hash_value=$1
+    case "$hash_value" in
+        ''|*[!0-9a-fA-F]*) return 1 ;;
+    esac
+    [ "${#hash_value}" -eq 64 ]
+}
+
+is_positive_integer() {
+    integer_value=$1
+    case "$integer_value" in
+        ''|0|*[!0-9]*) return 1 ;;
+    esac
+    return 0
+}
+
+is_nonnegative_integer() {
+    integer_value=$1
+    case "$integer_value" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    return 0
+}
+
 
 json_q() {
     json_value=$1
@@ -468,6 +500,206 @@ check_corpus() {
     done < "$CORPUS"
     [ "$corpus_count" -gt 0 ] || { echo "empty compiler-speed corpus" >&2; exit 1; }
     echo "$corpus_count"
+}
+peer_contract_sha256=
+peer_run_id=
+peer_machine=
+peer_target=
+peer_keys=
+peer_count=0
+peer_rows=0
+
+prepare_peer_report() {
+    peer_report_file=${JET_PERF_PEER_REPORT:-}
+    [ -n "$peer_report_file" ] || {
+        echo "missing compiler-speed peer report: set JET_PERF_PEER_REPORT" >&2
+        exit 1
+    }
+    [ -f "$peer_report_file" ] || {
+        echo "missing compiler-speed peer report: $peer_report_file" >&2
+        exit 1
+    }
+    peer_metadata=$(sed -n '1p' "$peer_report_file")
+    [ -n "$peer_metadata" ] || {
+        echo "empty compiler-speed peer report: $peer_report_file" >&2
+        exit 1
+    }
+    [ "$(sed -n '2p' "$peer_report_file")" = "$PEER_ROW_HEADER" ] || {
+        echo "invalid compiler-speed peer row header" >&2
+        exit 1
+    }
+    printf '%s\n' "$peer_metadata" | awk '
+        NF != 12 ||
+        $1 != "compiler-speed-peer" ||
+        $2 !~ /^version=[0-9]+$/ ||
+        $3 !~ /^run_id=[^[:space:]=]+$/ ||
+        $4 !~ /^corpus_sha256=[^[:space:]=]+$/ ||
+        $5 !~ /^manifest_sha256=[^[:space:]=]+$/ ||
+        $6 !~ /^target=[^[:space:]=]+$/ ||
+        $7 !~ /^machine=[^[:space:]]+$/ ||
+        $8 !~ /^peers=[^[:space:]=]+$/ ||
+        $9 !~ /^metrics=[^[:space:]=]+$/ ||
+        $10 !~ /^contract_sha256=[^[:space:]=]+$/ ||
+        $11 !~ /^peer_count=[0-9]+$/ ||
+        $12 !~ /^rows=[0-9]+$/ { invalid = 1 }
+        END { exit invalid }
+    ' || {
+        echo "invalid compiler-speed peer metadata" >&2
+        exit 1
+    }
+    peer_version=$(printf '%s\n' "$peer_metadata" | sed -n 's/^compiler-speed-peer version=\([^ ]*\).*$/\1/p')
+    [ "$peer_version" = 1 ] || {
+        echo "unsupported compiler-speed peer report version: ${peer_version:-missing}" >&2
+        exit 1
+    }
+    peer_run_id=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* run_id=\([^ ]*\).*/\1/p')
+    peer_corpus=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* corpus_sha256=\([^ ]*\).*/\1/p')
+    peer_manifest=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* manifest_sha256=\([^ ]*\).*/\1/p')
+    peer_target=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* target=\([^ ]*\).*/\1/p')
+    peer_machine=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* machine=\([^ ]*\).*/\1/p')
+    peer_keys=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* peers=\([^ ]*\).*/\1/p')
+    peer_metrics=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* metrics=\([^ ]*\).*/\1/p')
+    peer_report_contract=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* contract_sha256=\([^ ]*\).*/\1/p')
+    peer_declared_count=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* peer_count=\([^ ]*\).*/\1/p')
+    peer_declared_rows=$(printf '%s\n' "$peer_metadata" | sed -n 's/.* rows=\([^ ]*\).*/\1/p')
+    for peer_identity in "$peer_run_id" "$peer_target" "$peer_machine" "$peer_keys" "$peer_metrics"; do
+        [ -n "$peer_identity" ] || {
+            echo "compiler-speed peer report has incomplete contract identity" >&2
+            exit 1
+        }
+    done
+    for peer_hash in "$peer_corpus" "$peer_manifest" "$peer_report_contract"; do
+        is_sha256 "$peer_hash" || {
+            echo "invalid compiler-speed peer contract identity" >&2
+            exit 1
+        }
+    done
+    is_positive_integer "$peer_declared_count" || {
+        echo "invalid compiler-speed peer declaration count" >&2
+        exit 1
+    }
+    is_positive_integer "$peer_declared_rows" || {
+        echo "invalid compiler-speed peer coverage count" >&2
+        exit 1
+    }
+    [ "$peer_corpus" = "$corpus_sha" ] || {
+        echo "compiler-speed peer corpus changed: $corpus_sha -> $peer_corpus" >&2
+        exit 1
+    }
+    [ "$peer_manifest" = "$manifest_sha256" ] || {
+        echo "compiler-speed peer manifest changed: $manifest_sha256 -> $peer_manifest" >&2
+        exit 1
+    }
+    [ "$peer_target" = "$machine_target" ] || {
+        echo "compiler-speed peer target changed: $machine_target -> $peer_target" >&2
+        exit 1
+    }
+    [ "$peer_machine" = "$machine" ] || {
+        echo "compiler-speed peer machine changed: $machine -> $peer_machine" >&2
+        exit 1
+    }
+    [ "$peer_metrics" = "$PEER_METRICS" ] || {
+        echo "unsupported compiler-speed peer metrics: $peer_metrics" >&2
+        exit 1
+    }
+    peer_count=$(printf '%s\n' "$peer_keys" | awk -F, '
+        {
+            if (NF == 0) { invalid = 1 }
+            for (i = 1; i <= NF; i++) {
+                if (split($i, pair, ":") != 2 ||
+                    pair[1] !~ /^[A-Za-z0-9_.-]+$/ ||
+                    pair[2] !~ /^[A-Za-z0-9_.-]+$/ ||
+                    seen_peer[pair[1]]++) {
+                    invalid = 1
+                }
+                if (pair[2] == "rust") rust_peer = 1
+            }
+        }
+        END {
+            if (invalid || !rust_peer) exit 1
+            print NF
+        }
+    ') || {
+        echo "compiler-speed peer contract must name unique peers and a rust peer" >&2
+        exit 1
+    }
+    [ "$peer_count" -eq "$peer_declared_count" ] || {
+        echo "compiler-speed peer declaration count mismatch: declared $peer_declared_count, named $peer_count" >&2
+        exit 1
+    }
+    peer_contract_sha256=$(printf 'jet.compiler-speed.peer.v1\ncorpus_sha256=%s\nmanifest_sha256=%s\ntarget=%s\nmachine=%s\npeers=%s\nmetrics=%s\n' \
+        "$peer_corpus" "$peer_manifest" "$peer_target" "$peer_machine" "$peer_keys" "$peer_metrics" | sha256_text)
+    [ "$peer_report_contract" = "$peer_contract_sha256" ] || {
+        echo "compiler-speed peer contract digest mismatch" >&2
+        exit 1
+    }
+    expected_peer_rows=$((corpus_count * 6 * peer_count * 2))
+    [ "$peer_declared_rows" -eq "$expected_peer_rows" ] || {
+        echo "incomplete compiler-speed peer coverage: declared $peer_declared_rows rows, expected $expected_peer_rows" >&2
+        exit 1
+    }
+    sed -n '3,$p' "$peer_report_file" > "$peer_rows_file"
+    peer_rows=$(awk -F "$TAB" '
+        NF != 11 { invalid = 1 }
+        {
+            for (i = 1; i <= NF; i++) if ($i == "") invalid = 1
+        }
+        END {
+            if (invalid) exit 1
+            print NR + 0
+        }
+    ' "$peer_rows_file") || {
+        echo "invalid compiler-speed peer row format" >&2
+        exit 1
+    }
+    [ "$peer_rows" -eq "$expected_peer_rows" ] || {
+        echo "incomplete compiler-speed peer coverage: expected $expected_peer_rows rows, got $peer_rows" >&2
+        exit 1
+    }
+    peer_toolchains_file="$run_dir/peer-toolchains.tsv"
+    : > "$peer_toolchains_file"
+    while IFS="$TAB" read -r peer_name peer_language peer_program peer_state peer_metric peer_value \
+        peer_workload peer_source peer_expected peer_manifest_row peer_toolchain; do
+        if ! printf '%s\n' "$peer_keys" | awk -F, -v wanted="$peer_name:$peer_language" '
+            { for (i = 1; i <= NF; i++) if ($i == wanted) found = 1 }
+            END { exit !found }
+        '; then
+            echo "compiler-speed peer row names undeclared peer: $peer_name/$peer_language" >&2
+            exit 1
+        fi
+        case "$peer_program:$peer_state" in
+            *[!A-Za-z0-9_./:-]*) echo "invalid compiler-speed peer workload key" >&2; exit 1 ;;
+        esac
+        case "$peer_metric" in
+            latency_ns|memory_bytes) ;;
+            *) echo "invalid compiler-speed peer metric: $peer_metric" >&2; exit 1 ;;
+        esac
+        is_positive_integer "$peer_value" || {
+            echo "invalid compiler-speed peer value: $peer_name/$peer_program/$peer_state/$peer_metric" >&2
+            exit 1
+        }
+        for peer_hash in "$peer_workload" "$peer_source" "$peer_expected" "$peer_manifest_row" "$peer_toolchain"; do
+            is_sha256 "$peer_hash" || {
+                echo "invalid compiler-speed peer input identity" >&2
+                exit 1
+            }
+        done
+        [ "$peer_manifest_row" = "$peer_manifest" ] || {
+            echo "compiler-speed peer row manifest mismatch: $peer_program/$peer_state" >&2
+            exit 1
+        }
+        printf '%s:%s\t%s\n' "$peer_name" "$peer_language" "$peer_toolchain" >> "$peer_toolchains_file"
+    done < "$peer_rows_file"
+    awk -F "$TAB" '
+        {
+            if (toolchain[$1] == "") toolchain[$1] = $2
+            else if (toolchain[$1] != $2) invalid = 1
+        }
+        END { exit invalid }
+    ' "$peer_toolchains_file" || {
+        echo "compiler-speed peer toolchain identity changed within a peer" >&2
+        exit 1
+    }
 }
 
 timing_field() {
@@ -764,6 +996,9 @@ run_jit_trial() {
     mkdir -p "$trial_work/timing" "$trial_cache"
     if run_timed "$trial_stats" "$trial_output.stdout" "$trial_output.stderr" \
         env \
+        -u JET_DEBUG_NATIVE_CACHE_LOG \
+        -u JET_RUNTIME_CACHE_STATS \
+        JET_RECEIPT_BYPASS=1 \
         JET_RUN_CACHE_DIR="$trial_cache/run" \
         JET_CACHE_DIR="$trial_cache/build" \
         JET_TIMING=1 \
@@ -801,6 +1036,9 @@ run_aot_trial() {
     mkdir -p "$trial_work/timing" "$trial_cache"
     if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
         env \
+        -u JET_DEBUG_NATIVE_CACHE_LOG \
+        -u JET_RUNTIME_CACHE_STATS \
+        JET_RECEIPT_BYPASS=1 \
         JET_CACHE_DIR="$trial_cache/build" \
         JET_ROOT="$trial_work" \
         JET_TIMING=1 \
@@ -815,14 +1053,22 @@ run_aot_trial() {
     [ -x "$trial_work/build/run" ] || { echo "missing AOT artifact: $trial_work/build/run" >&2; exit 1; }
     if [ -n "$trial_job" ]; then
         if run_bounded_process "$trial_work" "$trial_output.stdout" "$trial_output.stderr" \
-            env NO_COLOR=1 "$trial_work/build/run" "$trial_job"; then
+            env \
+            -u JET_DEBUG_NATIVE_CACHE_LOG \
+            -u JET_RUNTIME_CACHE_STATS \
+            JET_RECEIPT_BYPASS=1 \
+            NO_COLOR=1 "$trial_work/build/run" "$trial_job"; then
             trial_status=0
         else
             trial_status=$?
         fi
     else
         if run_bounded_process "$trial_work" "$trial_output.stdout" "$trial_output.stderr" \
-            env NO_COLOR=1 "$trial_work/build/run"; then
+            env \
+            -u JET_DEBUG_NATIVE_CACHE_LOG \
+            -u JET_RUNTIME_CACHE_STATS \
+            JET_RECEIPT_BYPASS=1 \
+            NO_COLOR=1 "$trial_work/build/run"; then
             trial_status=0
         else
             trial_status=$?
@@ -1089,6 +1335,42 @@ parity_require_tier() {
     esac
 }
 
+check_native_jit() {
+    native_id=$1
+    native_program=$2
+    native_expected=$3
+    native_root="$run_dir/native-$native_id"
+    rm -rf "$native_root"
+    mkdir -p "$native_root"
+    prepare_fixture "$native_root" "$native_program" "$native_expected"
+    native_job=$(job_argument_for_program "$native_program")
+    if [ -n "$native_job" ]; then
+        parity_run_process "$native_root/status" "$native_root/stdout" "$native_root/stderr" "$native_root" \
+            env \
+            -u JET_DEBUG_NATIVE_CACHE_LOG \
+            -u JET_RUNTIME_CACHE_STATS \
+            JET_RECEIPT_BYPASS=1 \
+            JET_RUN_CACHE_DIR="$native_root/run-cache" \
+            JET_CACHE_DIR="$native_root/build-cache" \
+            NO_COLOR=1 \
+            "$JET_BIN" run run.jet --trace-tiers -- "$native_job"
+    else
+        parity_run_process "$native_root/status" "$native_root/stdout" "$native_root/stderr" "$native_root" \
+            env \
+            -u JET_DEBUG_NATIVE_CACHE_LOG \
+            -u JET_RUNTIME_CACHE_STATS \
+            JET_RECEIPT_BYPASS=1 \
+            JET_RUN_CACHE_DIR="$native_root/run-cache" \
+            JET_CACHE_DIR="$native_root/build-cache" \
+            NO_COLOR=1 \
+            "$JET_BIN" run run.jet --trace-tiers
+    fi
+    parity_require_status "$(sed -n '1p' "$native_root/status")" "$native_id/native"
+    parity_compare "$native_root/expected.out" "$native_root/stdout" "$native_id/native-stdout"
+    native_tier=$(parity_tier_mode "$native_root/stderr")
+    parity_require_tier "$native_tier" native
+}
+
 parity_run_case() {
     parity_id=$1
     parity_program=$2
@@ -1282,7 +1564,7 @@ parity_check_diagnostic() {
         "$JET_BIN" dev "$parity_source" --watch=off --quiet
     parity_run_process "$parity_root/aot.status" "$parity_root/aot.stdout" "$parity_root/aot.stderr" "$ROOT" \
         env JET_CACHE_DIR="$parity_root/aot-build-cache" NO_COLOR=1 \
-        "$JET_ENV" bash -c "cd '$ROOT' && exec '$JET_BIN' build --profile=release '$parity_source'"
+        "$JET_ENV" bash -c "cd '$ROOT' && exec '$JET_BIN' build --quiet --profile=release '$parity_source'"
     for parity_tier in jit dev aot; do
         parity_status=$(sed -n '1p' "$parity_root/$parity_tier.status")
         [ "$parity_status" -ne 0 ] || { echo "diagnostic unexpectedly passed: $parity_tier" >&2; exit 1; }
@@ -1389,6 +1671,15 @@ measure_state() {
     fi
     # Warmup proves that the path can run. Phase totals below describe only
     # the measured samples, so cache priming cannot dilute their timing.
+    if [ "$state_stage" = "jit-fast" ]; then
+        state_native_program=$state_program
+        state_native_expected=$state_expected
+        if [ "$state_kind" = "edit" ]; then
+            state_native_program=$state_edit_program
+            state_native_expected=$state_edit_expected
+        fi
+        check_native_jit "$state_id" "$state_native_program" "$state_native_expected"
+    fi
     : > "$state_phases"
 
     sample_index=1
@@ -1787,6 +2078,7 @@ if [ "${1:-}" = "--environment" ]; then
     print_environment_json
     exit 0
 fi
+prepare_peer_report
 : > "$rows_file"
 while IFS="$TAB" read -r program expected source_hash expected_hash edit_program edit_expected edit_hash edit_expected_hash; do
     case "$program" in
@@ -1834,27 +2126,137 @@ while IFS="$TAB" read -r program expected source_hash expected_hash edit_program
     done
 done < "$CORPUS"
 
-run_parity_checks
-record_machine_load
+check_peer_rows() {
+    expected_peer_rows=$((corpus_count * 6 * peer_count * 2))
+    [ "$peer_rows" -eq "$expected_peer_rows" ] || {
+        echo "incomplete compiler-speed peer coverage: expected $expected_peer_rows rows, got $peer_rows" >&2
+        exit 1
+    }
+    peer_keys_seen="$run_dir/peer-keys.tsv"
+    : > "$peer_keys_seen"
+    while IFS="$TAB" read -r peer_name peer_language peer_program peer_state peer_metric peer_value \
+        peer_workload peer_source peer_expected peer_manifest_row peer_toolchain; do
+        peer_row_key=$(printf '%s\t%s\t%s\t%s\t%s' "$peer_name" "$peer_language" "$peer_program" "$peer_state" "$peer_metric")
+        if grep -Fqx -- "$peer_row_key" "$peer_keys_seen"; then
+            echo "duplicate compiler-speed peer row: $peer_row_key" >&2
+            exit 1
+        fi
+        printf '%s\n' "$peer_row_key" >> "$peer_keys_seen"
+        if ! printf '%s\n' "$peer_keys" | awk -F, -v wanted="$peer_name:$peer_language" '
+            { for (i = 1; i <= NF; i++) if ($i == wanted) found = 1 }
+            END { exit !found }
+        '; then
+            echo "compiler-speed peer row names undeclared peer: $peer_name/$peer_language" >&2
+            exit 1
+        fi
+        jet_stage=$(row_field "$peer_program" "$peer_state" 3)
+        [ -n "$jet_stage" ] || {
+            echo "compiler-speed peer row names unknown Jet row: $peer_program/$peer_state" >&2
+            exit 1
+        }
+        is_positive_integer "$peer_value" || {
+            echo "invalid compiler-speed peer value: $peer_name/$peer_program/$peer_state/$peer_metric" >&2
+            exit 1
+        }
+        for peer_hash in "$peer_workload" "$peer_source" "$peer_expected" "$peer_manifest_row" "$peer_toolchain"; do
+            is_sha256 "$peer_hash" || {
+                echo "invalid compiler-speed peer input identity" >&2
+                exit 1
+            }
+        done
+        [ "$peer_manifest_row" = "$peer_manifest" ] || {
+            echo "compiler-speed peer row manifest mismatch: $peer_program/$peer_state" >&2
+            exit 1
+        }
+        jet_workload=$(row_phase_value "$peer_program" "$peer_state" workload_sha256)
+        jet_source=$(row_phase_value "$peer_program" "$peer_state" source_sha256)
+        jet_expected=$(row_phase_value "$peer_program" "$peer_state" expected_sha256)
+        [ "$peer_workload" = "$jet_workload" ] || {
+            echo "compiler-speed peer workload identity mismatch: $peer_name/$peer_program/$peer_state" >&2
+            exit 1
+        }
+        [ "$peer_source" = "$jet_source" ] && [ "$peer_expected" = "$jet_expected" ] || {
+            echo "compiler-speed peer input identity mismatch: $peer_name/$peer_program/$peer_state" >&2
+            exit 1
+        }
+        case "$peer_metric" in
+            latency_ns) jet_value=$(row_field "$peer_program" "$peer_state" 4) ;;
+            memory_bytes) jet_value=$(row_field "$peer_program" "$peer_state" 5) ;;
+            *) echo "invalid compiler-speed peer metric: $peer_metric" >&2; exit 1 ;;
+        esac
+        is_positive_integer "$jet_value" || {
+            echo "invalid Jet compiler-speed cell: $peer_program/$peer_state/$peer_metric" >&2
+            exit 1
+        }
+        if [ "$peer_language" = rust ]; then
+            if ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer <= 1.05) }'; then
+                echo "compiler-speed peer loss: $peer_name/$peer_program/$peer_state/$peer_metric Jet=$jet_value peer=$peer_value" >&2
+                exit 1
+            fi
+        elif ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer < 1.00) }'; then
+            echo "compiler-speed peer loss: $peer_name/$peer_program/$peer_state/$peer_metric Jet=$jet_value peer=$peer_value" >&2
+            exit 1
+        fi
+    done < "$peer_rows_file"
+
+    expected_peer_keys="$run_dir/expected-peer-keys.tsv"
+    awk -F "$TAB" -v declarations="$peer_keys" '
+        BEGIN {
+            peer_count = split(declarations, peers, ",")
+            metric_count = split("latency_ns,memory_bytes", metrics, ",")
+        }
+        {
+            row_key = $1 SUBSEP $2
+            if (seen[row_key]++) invalid = 1
+            for (peer_index = 1; peer_index <= peer_count; peer_index++) {
+                split(peers[peer_index], pair, ":")
+                for (metric_index = 1; metric_index <= metric_count; metric_index++) {
+                    printf "%s\t%s\t%s\t%s\t%s\n", pair[1], pair[2], $1, $2, metrics[metric_index]
+                }
+            }
+        }
+        END {
+            if (invalid || NR == 0) exit 1
+        }
+    ' "$rows_file" > "$expected_peer_keys" || {
+        echo "duplicate or missing Jet compiler-speed rows" >&2
+        exit 1
+    }
+    sort "$expected_peer_keys" > "$run_dir/expected-peer-keys.sorted"
+    sort "$peer_keys_seen" > "$run_dir/peer-keys.sorted"
+    cmp "$run_dir/expected-peer-keys.sorted" "$run_dir/peer-keys.sorted" || {
+        echo "incomplete compiler-speed peer coverage: peer cells do not exactly match the Jet matrix" >&2
+        exit 1
+    }
+}
+
+check_peer_rows
 
 print_table() {
-    printf 'compiler-speed version=%s corpus=%s corpus_sha256=%s manifest_sha256=%s stage=matrix machine=%s target=%s rustc=%s llvm=%s rustc_vv_sha256=%s rustc_sha256=%s compiler_sha256=%s jet_env_sha256=%s libc_sha256=%s allocator_sha256=%s allocator_environment_sha256=%s hardware_sha256=%s topology_sha256=%s toolchain_sha256=%s kernel=%s governor=%s load1_start_milli=%s load1_peak_milli=%s load1_end_milli=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s outliers_discarded=%s parity=%s parity_cases=%s\n' \
+    printf 'compiler-speed version=%s corpus=%s corpus_sha256=%s manifest_sha256=%s stage=matrix machine=%s target=%s rustc=%s llvm=%s rustc_vv_sha256=%s rustc_sha256=%s compiler_sha256=%s jet_env_sha256=%s libc_sha256=%s allocator_sha256=%s allocator_environment_sha256=%s hardware_sha256=%s topology_sha256=%s toolchain_sha256=%s kernel=%s governor=%s load1_start_milli=%s load1_peak_milli=%s load1_end_milli=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s outliers_discarded=%s parity=%s parity_cases=%s peer_contract_sha256=%s peer_run_id=%s peer_machine=%s peer_target=%s peer_keys=%s peer_metrics=%s peer_count=%s peer_rows=%s\n' \
         "$REPORT_VERSION" \
         "$corpus_count" "$corpus_sha" "$manifest_sha256" "$machine" "$machine_target" "$machine_rustc" \
         "$machine_llvm" "$machine_rustc_vv_sha" "$machine_rustc_sha256" "$compiler_sha256" "$machine_jet_env_sha256" \
         "$machine_libc_sha256" "$machine_allocator_source_sha256" "$machine_allocator_environment_sha256" \
         "$machine_hardware_sha256" "$machine_topology_sha256" "$machine_toolchain_sha256" "$machine_kernel" \
-        "$machine_governor" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli" "$machine_memory" "$WARMUPS" "$SAMPLES" "$OUTLIER_TOTAL" "$PARITY_RECEIPT" "$PARITY_CASE_COUNT"
+        "$machine_governor" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli" "$machine_memory" "$WARMUPS" "$SAMPLES" "$OUTLIER_TOTAL" "$PARITY_RECEIPT" "$PARITY_CASE_COUNT" \
+        "$peer_contract_sha256" "$peer_run_id" "$peer_machine" "$peer_target" "$peer_keys" "$peer_metrics" "$peer_count" "$peer_rows"
     printf '%s\n' "$ROW_HEADER"
     while IFS="$TAB" read -r row_program row_state row_stage row_latency row_memory row_variance row_stdout_sha row_stderr_sha row_phases; do
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s:%s\tphases=%s\n' \
             "$row_program" "$row_state" "$row_stage" "$row_latency" "$row_memory" "$row_variance" \
             "$row_stdout_sha" "$row_stderr_sha" "$row_phases"
     done < "$rows_file"
+    printf 'compiler-speed-peer version=1 run_id=%s corpus_sha256=%s manifest_sha256=%s target=%s machine=%s peers=%s metrics=%s contract_sha256=%s peer_count=%s rows=%s\n' \
+        "$peer_run_id" "$corpus_sha" "$manifest_sha256" "$machine_target" "$machine" "$peer_keys" "$peer_metrics" "$peer_contract_sha256" "$peer_count" "$peer_rows"
+    printf '%s\n' "$PEER_ROW_HEADER"
+    cat "$peer_rows_file"
 }
 
 as_json() {
-    printf '{"schema":"jet.compiler-speed","version":%s,"corpus_sha256":%s,"manifest_sha256":%s,"stage":"matrix",' "$REPORT_VERSION" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")"
+    printf '{"schema":"jet.compiler-speed","version":%s,"corpus_sha256":%s,"manifest_sha256":%s,"stage":"matrix","peer_version":1,"peer_contract_sha256":%s,"peer_run_id":%s,"peer_keys":%s,"peer_metrics":%s,"peer_count":%s,"peer_rows":%s,' \
+        "$REPORT_VERSION" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")" "$(json_q "$peer_contract_sha256")" \
+        "$(json_q "$peer_run_id")" "$(json_q "$peer_keys")" "$(json_q "$peer_metrics")" "$peer_count" "$peer_rows"
     printf '"parity":{"status":%s,"cases":%s,"semantic":%s,"diagnostics":%s,"effects":%s,"tiers":%s,"dev_profile":"dev","aot_profile":"release"},' \
         "$(json_q "$PARITY_RECEIPT")" "$PARITY_CASE_COUNT" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")"
     printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"llvm":%s,"rustc":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s,"load1_start_milli":%s,"load1_peak_milli":%s,"load1_end_milli":%s},' \
@@ -1867,7 +2269,9 @@ as_json() {
         "$(json_q "$machine_llvm")" "$(json_q "$machine_rustc")" "$(json_q "$machine_rustc_path")" "$(json_q "$machine_rustc_sha256")" \
         "$(json_q "$machine_rustc_vv_sha")" "$(json_q "$machine_target")" "$(json_q "$machine_toolchain_sha256")" \
         "$(json_q "$machine_topology_sha256")" "$(json_q "$machine_affinity")" "$(json_q "$machine_jet_env_sha256")" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli"
-    printf '"budgets":{"latency_regression_pct":%s,"memory_regression_pct":%s,"samples":%s,"variance_pct":%s,"warmups":%s},"outliers_discarded":%s,"runs":[' \
+    printf '"peer_contract":{"version":1,"sha256":%s,"run_id":%s,"corpus_sha256":%s,"manifest_sha256":%s,"target":%s,"machine":%s,"peers":%s,"metrics":%s,"rows":%s},"budgets":{"latency_regression_pct":%s,"memory_regression_pct":%s,"samples":%s,"variance_pct":%s,"warmups":%s},"outliers_discarded":%s,"runs":[' \
+        "$(json_q "$peer_contract_sha256")" "$(json_q "$peer_run_id")" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")" \
+        "$(json_q "$peer_target")" "$(json_q "$peer_machine")" "$(json_q "$peer_keys")" "$(json_q "$peer_metrics")" "$peer_rows" \
         "$LATENCY_REGRESSION_PCT" "$MEMORY_REGRESSION_PCT" "$SAMPLES" "$VARIANCE_BUDGET_PCT" "$WARMUPS" "$OUTLIER_TOTAL"
     first=1
     while IFS="$TAB" read -r row_program row_state row_stage row_latency row_memory row_variance row_stdout_sha row_stderr_sha row_phases; do
@@ -1900,6 +2304,17 @@ as_json() {
             "$(json_q "$row_full_artifact")" "$row_latency" "$row_memory" "$row_variance" "$row_outliers" \
             "$(json_q "$row_stdout_sha")" "$(json_q "$row_stderr_sha")" "$(json_q "$row_phases")"
     done < "$rows_file"
+    printf '],"peers":['
+    first=1
+    while IFS="$TAB" read -r peer_name peer_language peer_program peer_state peer_metric peer_value \
+        peer_workload peer_source peer_expected peer_manifest_row peer_toolchain; do
+        [ "$first" -eq 1 ] || printf ','
+        first=0
+        printf '{"peer":%s,"language":%s,"program":%s,"state":%s,"metric":%s,"value":%s,"workload_sha256":%s,"source_sha256":%s,"expected_sha256":%s,"manifest_sha256":%s,"toolchain_sha256":%s}' \
+            "$(json_q "$peer_name")" "$(json_q "$peer_language")" "$(json_q "$peer_program")" "$(json_q "$peer_state")" \
+            "$(json_q "$peer_metric")" "$peer_value" "$(json_q "$peer_workload")" "$(json_q "$peer_source")" \
+            "$(json_q "$peer_expected")" "$(json_q "$peer_manifest_row")" "$(json_q "$peer_toolchain")"
+    done < "$peer_rows_file"
     printf ']}\n'
 }
 
@@ -1911,7 +2326,15 @@ case "${1:-}" in
         as_json
         ;;
     --baseline)
-        as_json > "$BASELINE"
+        baseline_tmp="$BASELINE.tmp.$$"
+        rm -f -- "$baseline_tmp"
+        as_json > "$baseline_tmp"
+        [ -s "$baseline_tmp" ] || {
+            echo "compiler-speed baseline generation produced no data" >&2
+            exit 1
+        }
+        mv -f -- "$baseline_tmp" "$BASELINE"
+        baseline_tmp=
         print_table
         echo "baseline written to $BASELINE"
         ;;

@@ -1,0 +1,17 @@
+Error [E0149]: a runtime `String` can't be used as `SQL`
+  --> tests/ui/db_typed_sql_migrations_plain_string.jet:8:41
+    |
+  8 |     _tx := db.transaction(scope, "tx", [tx_text]) ?? panic("transaction")
+    |                                         ^^^^^^^
+ Why: interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Fix: write `SQL{"..."}` with `{value}` holes, or use `SQL.raw("…")` if you have audited the text
+More: jet-lang.dev/e/E0149
+
+Error [E0149]: a runtime `String` can't be used as `SQL`
+  --> tests/ui/db_typed_sql_migrations_plain_string.jet:10:49
+    |
+ 10 |     _migrate := db.migrate(scope, "migration", [migrate_text]) ?? panic("migrate")
+    |                                                 ^^^^^^^^^^^^
+ Why: interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Fix: write `SQL{"..."}` with `{value}` holes, or use `SQL.raw("…")` if you have audited the text
+More: jet-lang.dev/e/E0149

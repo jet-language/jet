@@ -736,8 +736,18 @@ impl<'a> Checker<'a> {
         // in sema.
         if same_subject
             && raw.len() == 2
-            && matches!(raw.first(), Some(Pattern::Ok { .. }))
-            && matches!(raw.get(1), Some(Pattern::Err { .. }))
+            && raw.first().is_some_and(|pattern| {
+                matches!(pattern, Pattern::Ok { .. })
+                    || matches!(pattern, Pattern::Variant { variant, bindings, .. }
+                        if bindings.len() == 1
+                            && contextual_literal(variant) == Some(ContextualLiteral::Ok))
+            })
+            && raw.get(1).is_some_and(|pattern| {
+                matches!(pattern, Pattern::Err { .. })
+                    || matches!(pattern, Pattern::Variant { variant, bindings, .. }
+                        if bindings.len() == 1
+                            && contextual_literal(variant) == Some(ContextualLiteral::Err))
+            })
         {
             return;
         }

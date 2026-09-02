@@ -47,6 +47,24 @@ export const RED_TEAM_WAVE_COUNT = 4;
 export const RED_TEAM_MAX_ACTIVE = 2;
 export const RED_TEAM_MODEL = "gpt-5.6-luna";
 export const RED_TEAM_REASONING = "max";
+export const RED_TEAM_EXECUTION_GATE = "OWNER_AUTHORIZED_REAL_EIGHT_LANE_EXECUTION";
+
+const RESOURCE_LAW = Object.freeze({
+  cpu_quota_percent: 200,
+  memory_high_gib: 6,
+  memory_max_gib: 8,
+  memory_swap_max_gib: 2,
+  tasks_max: 64,
+  io_weight: 10,
+  nice: 10,
+  runtime_max_sec: 95 * 60,
+  min_free_gib: 16,
+  target_cap_gib: 80,
+  cache_cap_gib: 4,
+  interesting_cap_mib: 512,
+  log_cap_mib: 1,
+  incremental: 0,
+});
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = resolve(SCRIPT_DIR, "../..");
@@ -131,8 +149,8 @@ const WAVE_LANES = Object.freeze([
   Object.freeze(["lane-5", "lane-6"]),
   Object.freeze(["lane-7", "lane-8"]),
 ]);
-export const RED_TEAM_LANE_BRIEFS = Object.freeze(LANE_BRIEFS.map(clone));
-export const RED_TEAM_WAVES = Object.freeze(WAVE_LANES.map((lanes, index) => ({ wave: index + 1, lanes: [...lanes] })));
+export const RED_TEAM_LANE_BRIEFS = deepFreeze(LANE_BRIEFS.map(clone));
+export const RED_TEAM_WAVES = deepFreeze(WAVE_LANES.map((lanes, index) => ({ wave: index + 1, lanes: [...lanes] })));
 
 export class RedTeamProtocolError extends Error {
   constructor(message, code = "E_RED_TEAM") {
@@ -212,9 +230,12 @@ function validateRigConfig(config) {
   requiredObject(config, "manifest rig_config");
   boundedInteger(config.schema_version, "manifest rig_config.schema_version", 1, 1);
   boundedInteger(config.suite_concurrency, "manifest rig_config.suite_concurrency", 1, RED_TEAM_MAX_ACTIVE);
-  boundedInteger(config.cargo_build_jobs, "manifest rig_config.cargo_build_jobs", 1, 64);
+  boundedInteger(config.cargo_build_jobs, "manifest rig_config.cargo_build_jobs", 1, 4);
   requiredString(config.seed, "manifest rig_config.seed");
   requiredString(config.variants, "manifest rig_config.variants");
+  for (const [key, expected] of Object.entries(RESOURCE_LAW)) {
+    if (config[key] !== expected) fail(`manifest rig_config.${key} must preserve the ratified resource law`, "E_MANIFEST");
+  }
   for (const key of ["proof_targets", "deterministic_shards"]) {
     if (config[key] === undefined) continue;
     if (!Array.isArray(config[key]) || config[key].some((item) => typeof item !== "string" || !item.trim())) {
@@ -369,6 +390,7 @@ function defaultRigConfig() {
     schema_version: 1,
     suite_concurrency: 2,
     cargo_build_jobs: 4,
+    ...RESOURCE_LAW,
     seed: process.env.JET_HARDENING_SEED || "2336",
     variants: process.env.JET_HARDENING_VARIANTS || "50",
     proof_targets: String(process.env.JET_HARDENING_PROOF_TARGETS || "dev_corpus_gate")
@@ -401,10 +423,7 @@ function defaultResourceLimits(rigConfig = {}) {
     max_active_lanes: RED_TEAM_MAX_ACTIVE,
     lane_timeout_ms: Number(rigConfig.red_team_lane_timeout_ms || DEFAULT_LANE_TIMEOUT_MS),
     capture_bytes: MAX_CAPTURE_BYTES,
-    target_cap_gib: 80,
-    cache_cap_gib: 4,
-    interesting_cap_mib: 512,
-    log_cap_mib: 1,
+    ...RESOURCE_LAW,
     scratch: "disk-backed cache scratch only",
     cleanup: "process-group, agent, alternate-target, scratch, and bounded-log cleanup is mandatory",
   };
@@ -434,14 +453,44 @@ export function sessionManifestDigest(manifest) {
   return digest(canonicalJson(unsignedManifest(manifest)));
 }
 
+function expectedLaneIds() {
+  return WAVE_LANES.flat();
+}
+
+function laneOrderProblems(lanes) {
+  const expected = expectedLaneIds();
+  const problems = [];
+  let previous = -1;
+  for (const lane of lanes || []) {
+    const index = expected.indexOf(lane?.lane_id);
+    if (index < 0) {
+      problems.push(`red-team lane ${lane?.lane_id || "?"} is not in the frozen wave order`);
+      continue;
+    }
+    if (index <= previous) {
+      problems.push(`red-team lanes are not in frozen wave order at ${lane.lane_id}`);
+    }
+    previous = Math.max(previous, index);
+  }
+  return problems;
+}
+
+function validateLaneOrder(lanes, strict = true) {
+  const problems = laneOrderProblems(lanes);
+  if (strict && problems.length) fail(problems[0], "E_VERDICT");
+  return problems;
+}
+
 function validateLaneBriefs(briefs) {
   if (!Array.isArray(briefs) || briefs.length !== RED_TEAM_LANE_COUNT) fail("manifest must contain all eight lane briefs", "E_MANIFEST");
   const seen = new Set();
-  for (const brief of briefs) {
+  for (const [index, brief] of briefs.entries()) {
     if (!brief || !LANE_ID_PATTERN.test(brief.lane_id) || seen.has(brief.lane_id)) fail("manifest lane briefs must name each lane once", "E_MANIFEST");
     seen.add(brief.lane_id);
-    const expected = LANE_BRIEFS.find((item) => item.lane_id === brief.lane_id);
-    if (!expected || canonicalJson(brief) !== canonicalJson(expected)) fail(`lane ${brief.lane_id} does not match its ratified attack slice`, "E_MANIFEST");
+    const expected = LANE_BRIEFS[index];
+    if (!expected || brief.lane_id !== expected.lane_id || canonicalJson(brief) !== canonicalJson(expected)) {
+      fail(`lane ${brief?.lane_id || "?"} does not match its ratified attack slice or wave order`, "E_MANIFEST");
+    }
   }
   if (seen.size !== RED_TEAM_LANE_COUNT) fail("manifest lane briefs omit a lane", "E_MANIFEST");
 }
@@ -492,11 +541,10 @@ export function validateSessionManifest(manifest) {
     || limits.lane_timeout_ms < 1 || limits.lane_timeout_ms > MAX_LANE_TIMEOUT_MS) {
     fail("manifest resource limits must cap active lanes at two", "E_MANIFEST");
   }
+  for (const [key, expected] of Object.entries(RESOURCE_LAW)) {
+    if (limits[key] !== expected) fail(`manifest resource_limits.${key} must preserve the ratified resource law`, "E_MANIFEST");
+  }
   boundedInteger(limits.capture_bytes, "manifest resource_limits.capture_bytes", 1, MAX_CAPTURE_BYTES);
-  boundedInteger(limits.target_cap_gib, "manifest resource_limits.target_cap_gib", 1, 80);
-  boundedInteger(limits.cache_cap_gib, "manifest resource_limits.cache_cap_gib", 1, 4);
-  boundedInteger(limits.interesting_cap_mib, "manifest resource_limits.interesting_cap_mib", 1, 512);
-  boundedInteger(limits.log_cap_mib, "manifest resource_limits.log_cap_mib", 1, 1);
   requiredString(limits.scratch, "manifest resource_limits.scratch");
   requiredString(limits.cleanup, "manifest resource_limits.cleanup");
   if (manifest.current_defect_cards_hidden !== true) fail("manifest must hide current defect cards before discovery", "E_MANIFEST");
@@ -533,8 +581,8 @@ export function createSessionManifest({
   const hash = binary_sha256 || binaryHash(targetPath);
   if (!validDigest(hash)) fail("manifest binary_sha256 must be a sha256 digest", "E_TARGET");
   const registry = registry_snapshot || registrySnapshot(resolvedRoot, process.env.JET_HARDENING_REGISTRY);
-  const config = clone(rig_config || defaultRigConfig());
-  const publicSnapshot = clone(registry);
+  const config = { ...defaultRigConfig(), ...clone(rig_config || {}) };
+  const publicSnapshot = clone(public_surface_snapshot || registry);
   const manifest = {
     schema: RED_TEAM_SESSION_SCHEMA,
     schema_version: RED_TEAM_SCHEMA_VERSION,
@@ -558,7 +606,7 @@ export function createSessionManifest({
     lane_briefs: clone(requestedBriefs || laneBriefs()),
     waves: WAVE_LANES.map((lanes, index) => ({ wave: index + 1, lanes: [...lanes] })),
     quota: quota(),
-    resource_limits: clone(resource_limits || defaultResourceLimits(config)),
+    resource_limits: { ...defaultResourceLimits(config), ...clone(resource_limits || {}) },
     agent_policy: {
       model: RED_TEAM_MODEL,
       reasoning_effort: RED_TEAM_REASONING,
@@ -819,9 +867,19 @@ export function validateLaneReceipt(report, manifest) {
   if (!LANE_ID_PATTERN.test(report.lane_id)) fail("lane receipt lane_id is invalid", "E_LANE");
   const expectedBrief = manifest.lane_briefs.find((brief) => brief.lane_id === report.lane_id);
   if (!expectedBrief || report.wave !== expectedBrief.wave) fail(`lane ${report.lane_id} has the wrong wave`, "E_LANE");
+  if (report.attack_surface !== expectedBrief.attack_surface || report.brief !== expectedBrief.brief) {
+    fail(`lane ${report.lane_id} does not attest its frozen attack slice`, "E_LANE");
+  }
   requiredString(report.context_id, "lane receipt context_id");
   if (!CONTEXT_ID_PATTERN.test(report.context_id)) fail("lane receipt context_id is invalid", "E_LANE");
   requiredString(report.agent_id, "lane receipt agent_id");
+  for (const key of ["started_at", "finished_at"]) {
+    requiredString(report[key], `lane receipt ${key}`);
+    if (Number.isNaN(Date.parse(report[key]))) fail(`lane receipt ${key} is not an ISO timestamp`, "E_LANE");
+  }
+  if (Date.parse(report.finished_at) < Date.parse(report.started_at)) {
+    fail(`lane ${report.lane_id} finished before it started`, "E_LANE");
+  }
   if (report.fresh_context !== true || String(report.model || "").toLowerCase() !== RED_TEAM_MODEL
     || report.reasoning_effort !== RED_TEAM_REASONING) {
     fail(`lane ${report.lane_id} is not a fresh Luna-max context`, "E_LANE");
@@ -840,8 +898,8 @@ export function validateLaneReceipt(report, manifest) {
     || report.target.binary_path !== manifest.target.binary_path
     || report.target.platform !== manifest.target.platform
     || report.target.arch !== manifest.target.arch
-    || (report.registry_snapshot?.sha256 !== undefined && report.registry_snapshot.sha256 !== manifest.registry_snapshot.sha256)
-    || (report.public_surface_snapshot?.sha256 !== undefined && report.public_surface_snapshot.sha256 !== manifest.public_surface_snapshot.sha256)) {
+    || report.target.registry_snapshot?.sha256 !== manifest.registry_snapshot.sha256
+    || report.target.public_surface_snapshot?.sha256 !== manifest.public_surface_snapshot.sha256) {
     fail(`lane ${report.lane_id} target does not match the frozen binary`, "E_LANE");
   }
   const cleanup = validateCleanupRecord(report.cleanup, `lane ${report.lane_id}`);
@@ -913,6 +971,7 @@ export function makeLaneReceipt(manifest, input = {}) {
   const laneId = input.lane_id || input.laneId;
   if (!LANE_ID_PATTERN.test(laneId || "")) fail("lane receipt lane_id is required", "E_LANE");
   const packet = makeContextPacket(manifest, laneId);
+  const brief = manifest.lane_briefs.find((item) => item.lane_id === laneId);
   const source = input.source || `fn run() { value :: 1\n    print(value)\n}\n`;
   const sourcePrograms = input.source_programs || [{
     id: "program-1",
@@ -933,14 +992,20 @@ export function makeLaneReceipt(manifest, input = {}) {
     session_id: manifest.session_id,
     packet_digest: packet.context_digest,
     lane_id: laneId,
-    wave: manifest.lane_briefs.find((brief) => brief.lane_id === laneId).wave,
+    wave: brief.wave,
+    attack_surface: brief.attack_surface,
+    brief: brief.brief,
     context_id: input.context_id || `${manifest.session_id}/${laneId}/fresh`,
     agent_id: input.agent_id || `${laneId}-agent`,
     model: input.model || RED_TEAM_MODEL,
     reasoning_effort: input.reasoning_effort || RED_TEAM_REASONING,
     fresh_context: true,
     known_defects_visible: false,
-    target: clone(manifest.target),
+    target: {
+      ...clone(manifest.target),
+      registry_snapshot: clone(manifest.registry_snapshot),
+      public_surface_snapshot: clone(manifest.public_surface_snapshot),
+    },
     started_at: input.started_at || manifest.created_at,
     finished_at: input.finished_at || manifest.created_at,
     complete: input.complete !== false,
@@ -989,6 +1054,7 @@ function currentTarget(root, binaryPath, registryConfigured, publicSurfaceConfig
   const publicSurface = registrySnapshot(root, publicSurfaceConfigured);
   return {
     commit: identity.commit,
+    root: safeRelative(root, root) === "." ? "." : root,
     binary_sha256: binaryHash(targetPath),
     binary_path: safeRelative(root, targetPath),
     registry_snapshot: registry,
@@ -1002,35 +1068,86 @@ export function targetDrift(manifest, snapshot) {
   const reasons = [];
   if (!snapshot || snapshot.commit !== manifest.target.commit) reasons.push("target commit changed");
   if (!snapshot || snapshot.binary_sha256 !== manifest.target.binary_sha256) reasons.push("target binary changed");
+  if (!snapshot || snapshot.root !== manifest.target.root) reasons.push("target root changed");
+  if (!snapshot || snapshot.binary_path !== manifest.target.binary_path) reasons.push("target binary path changed");
   if (!snapshot || snapshot.registry_snapshot?.sha256 !== manifest.registry_snapshot.sha256) reasons.push("registry snapshot changed");
-  if (snapshot?.public_surface_snapshot && snapshot.public_surface_snapshot.sha256 !== manifest.public_surface_snapshot.sha256) {
-    reasons.push("public surface snapshot changed");
-  }
-  if (snapshot?.binary_path !== undefined && snapshot.binary_path !== manifest.target.binary_path) reasons.push("target binary path changed");
+  if (!snapshot || snapshot.public_surface_snapshot?.sha256 !== manifest.public_surface_snapshot.sha256) reasons.push("public surface snapshot changed");
   if (!snapshot || snapshot.platform !== manifest.target.platform || snapshot.arch !== manifest.target.arch) reasons.push("target platform changed");
   return reasons;
 }
 
 function laneFindings(lanes) {
-  const byBundle = new Map();
+  const byDedupKey = new Map();
   const duplicates = [];
   const severityRank = { P0: 0, P1: 1, P2: 2, P3: 3 };
   for (const lane of lanes) {
     for (const finding of lane.unique_findings) {
-      if (byBundle.has(finding.bundle_identity)) {
-        duplicates.push({ bundle_identity: finding.bundle_identity, lane_id: lane.lane_id, finding_id: finding.finding_id });
-        const existing = byBundle.get(finding.bundle_identity);
+      const dedupKey = hardeningDedupKey(finding);
+      if (byDedupKey.has(dedupKey)) {
+        const existing = byDedupKey.get(dedupKey);
+        duplicates.push({
+          hardening_dedup_key: dedupKey,
+          bundle_identity: finding.bundle_identity,
+          lane_id: lane.lane_id,
+          finding_id: finding.finding_id,
+        });
         if ((severityRank[finding.severity] ?? 99) < (severityRank[existing.severity] ?? 99)) existing.severity = finding.severity;
         existing.load_bearing ||= finding.load_bearing;
         existing.silent_wrong_data ||= finding.silent_wrong_data === true;
         existing.default_jet_run_divergence ||= finding.default_jet_run_divergence === true;
         continue;
       }
-      byBundle.set(finding.bundle_identity, { ...finding, discovered_by: lane.lane_id });
+      byDedupKey.set(dedupKey, {
+        ...finding,
+        hardening_dedup_key: dedupKey,
+        discovered_by: lane.lane_id,
+      });
     }
   }
-  return { findings: [...byBundle.values()], duplicates };
+  return { findings: [...byDedupKey.values()], duplicates };
 }
+function findingEvidenceIdentity(finding) {
+  return canonicalJson({
+    hardening_dedup_key: hardeningDedupKey(finding),
+    finding_id: finding.finding_id || finding.id,
+    bundle_identity: finding.bundle_identity,
+    discovered_by: finding.discovered_by || null,
+  });
+}
+
+function duplicateEvidenceIdentity(duplicate) {
+  return canonicalJson({
+    hardening_dedup_key: duplicate.hardening_dedup_key,
+    bundle_identity: duplicate.bundle_identity,
+    lane_id: duplicate.lane_id,
+    finding_id: duplicate.finding_id,
+  });
+}
+
+function validateDedupEvidence(receipt) {
+  const collected = laneFindings(receipt.lanes);
+  if (collected.findings.length !== receipt.findings.length) {
+    fail("red-team verdict findings do not match canonical deduplication", "E_VERDICT");
+  }
+  for (const [index, finding] of receipt.findings.entries()) {
+    const key = hardeningDedupKey(finding);
+    if (finding.hardening_dedup_key !== key) {
+      fail("red-team verdict finding has a non-canonical dedup key", "E_VERDICT");
+    }
+    if (findingEvidenceIdentity(finding) !== findingEvidenceIdentity(collected.findings[index])) {
+      fail("red-team verdict findings do not match lane deduplication", "E_VERDICT");
+    }
+  }
+  if (collected.duplicates.length !== receipt.finding_duplicates.length) {
+    fail("red-team verdict duplicate evidence is incomplete", "E_VERDICT");
+  }
+  for (const [index, duplicate] of receipt.finding_duplicates.entries()) {
+    if (duplicateEvidenceIdentity(duplicate) !== duplicateEvidenceIdentity(collected.duplicates[index])) {
+      fail("red-team verdict duplicate evidence does not match lane deduplication", "E_VERDICT");
+    }
+  }
+}
+
 
 function p0Finding(finding) {
   return finding.severity === "P0"
@@ -1066,13 +1183,26 @@ async function defaultReplayFinding(finding, manifest, options) {
       program: targetPath,
       args: ["run", ...tierFlags, sourcePath],
       root,
-      cwd: root,
-      env: { NO_COLOR: "1", JETPACK_ENV: "1", ...(options.env || {}) },
+      env: {
+        ...(options.env || {}),
+        NO_COLOR: "1",
+        JETPACK_ENV: "1",
+        JET_HARDENING_CACHE: scratch,
+        JET_TEST_SCRATCH: scratch,
+        JET_TEST_SCRATCH_DIR: scratch,
+        TMPDIR: scratch,
+        TMP: scratch,
+        TEMP: scratch,
+        CARGO_INCREMENTAL: "0",
+      },
       stdin: finding.stdin || "",
       timeout_ms: manifest.resource_limits.lane_timeout_ms,
       capture_limit: manifest.resource_limits.capture_bytes,
       label: `replay:${finding.finding_id}:${bundle.tier}`,
     });
+    if (result.stdout_truncated || result.stderr_truncated) {
+      fail(`finding ${finding.finding_id} replay exceeded the capture bound`, "E_REPLAY");
+    }
     const expectedStdout = bytesFrom(bundle.stdout_bytes);
     const expectedStderr = bytesFrom(bundle.stderr_bytes);
     const confirmed = result.stdout.equals(expectedStdout)
@@ -1103,15 +1233,16 @@ function normalizeReplay(replay, finding, manifest) {
   if (target.commit !== manifest.target.commit || target.binary_sha256 !== manifest.target.binary_sha256) {
     fail(`finding ${finding.finding_id} replay used a different target`, "E_REPLAY");
   }
-  if (target.binary_path !== undefined && target.binary_path !== manifest.target.binary_path) {
-    fail(`finding ${finding.finding_id} replay used a different binary path`, "E_REPLAY");
+  if (target.root !== manifest.target.root
+    || target.binary_path !== manifest.target.binary_path
+    || target.platform !== manifest.target.platform
+    || target.arch !== manifest.target.arch) {
+    fail(`finding ${finding.finding_id} replay used a different target identity`, "E_REPLAY");
   }
-  if (target.registry_snapshot?.sha256 !== undefined
-    && target.registry_snapshot.sha256 !== manifest.registry_snapshot.sha256) {
+  if (target.registry_snapshot?.sha256 !== manifest.registry_snapshot.sha256) {
     fail(`finding ${finding.finding_id} replay used a different registry snapshot`, "E_REPLAY");
   }
-  if (target.public_surface_snapshot?.sha256 !== undefined
-    && target.public_surface_snapshot.sha256 !== manifest.public_surface_snapshot.sha256) {
+  if (target.public_surface_snapshot?.sha256 !== manifest.public_surface_snapshot.sha256) {
     fail(`finding ${finding.finding_id} replay used a different public surface snapshot`, "E_REPLAY");
   }
   if (replay.tier !== undefined && replay.tier !== finding.bundle.tier) {
@@ -1298,7 +1429,7 @@ export async function assimilateFindings(findings, manifest, {
       capture_limit: manifest.resource_limits.capture_bytes,
       label: `red-team:tower:${finding.finding_id}`,
     });
-    if (!result.ok || result.stdout_truncated) fail(`Tower assimilation failed for ${finding.finding_id}`, "E_ASSIMILATION");
+    if (!result.ok || result.stdout_truncated || result.stderr_truncated) fail(`Tower assimilation failed for ${finding.finding_id}`, "E_ASSIMILATION");
     let response;
     try {
       response = JSON.parse(result.stdout.toString("utf8"));
@@ -1401,9 +1532,19 @@ function validateSignedLaneShape(lane, receipt, manifest = undefined) {
     fail("red-team verdict lane identity is invalid", "E_VERDICT");
   }
   const brief = LANE_BRIEFS.find((item) => item.lane_id === lane.lane_id);
-  if (!brief || lane.wave !== brief.wave) fail("red-team verdict lane wave is invalid", "E_VERDICT");
+  if (!brief || lane.wave !== brief.wave
+    || lane.attack_surface !== brief.attack_surface || lane.brief !== brief.brief) {
+    fail(`red-team verdict lane ${lane.lane_id} does not attest its frozen attack slice`, "E_VERDICT");
+  }
   requiredString(lane.context_id, "red-team verdict lane context_id");
   requiredString(lane.agent_id, "red-team verdict lane agent_id");
+  for (const key of ["started_at", "finished_at"]) {
+    requiredString(lane[key], `red-team verdict lane ${lane.lane_id} ${key}`);
+    if (Number.isNaN(Date.parse(lane[key]))) fail(`red-team verdict lane ${lane.lane_id} ${key} is not an ISO timestamp`, "E_VERDICT");
+  }
+  if (Date.parse(lane.finished_at) < Date.parse(lane.started_at)) {
+    fail(`red-team verdict lane ${lane.lane_id} finished before it started`, "E_VERDICT");
+  }
   if (lane.fresh_context !== true || String(lane.model || "").toLowerCase() !== RED_TEAM_MODEL
     || lane.reasoning_effort !== RED_TEAM_REASONING || lane.known_defects_visible !== false
     || lane.complete !== true || lane.stopped_early === true) {
@@ -1411,8 +1552,14 @@ function validateSignedLaneShape(lane, receipt, manifest = undefined) {
   }
   if (!validDigest(lane.packet_digest)) fail(`red-team verdict lane ${lane.lane_id} packet digest is invalid`, "E_VERDICT");
   const session = receipt.session;
-  if (!lane.target || lane.target.commit !== session.commit || lane.target.binary_sha256 !== session.binary_sha256) {
-    fail(`red-team verdict lane ${lane.lane_id} targets a different binary`, "E_VERDICT");
+  if (!lane.target || lane.target.commit !== session.commit || lane.target.binary_sha256 !== session.binary_sha256
+    || lane.target.registry_snapshot?.sha256 !== session.registry_sha256
+    || lane.target.public_surface_snapshot?.sha256 !== session.public_surface_sha256
+    || (session.root !== undefined && lane.target.root !== session.root)
+    || (session.binary_path !== undefined && lane.target.binary_path !== session.binary_path)
+    || (session.platform !== undefined && lane.target.platform !== session.platform)
+    || (session.arch !== undefined && lane.target.arch !== session.arch)) {
+    fail(`red-team verdict lane ${lane.lane_id} targets a different frozen binary`, "E_VERDICT");
   }
   for (const key of ["source_programs", "attempts", "valid_cases", "duplicates", "false_positives", "minimized_reproducers", "unique_findings"]) {
     if (!Array.isArray(lane[key])) fail(`red-team verdict lane ${lane.lane_id} is missing ${key}`, "E_VERDICT");
@@ -1457,37 +1604,10 @@ function validateSignedLaneShape(lane, receipt, manifest = undefined) {
       fail(`red-team verdict finding ${finding.finding_id} has no minimized reproducer`, "E_VERDICT");
     }
   }
-  const counts = lane.counts;
-  if (!counts || typeof counts !== "object" || Array.isArray(counts)) fail(`red-team verdict lane ${lane.lane_id} counts are missing`, "E_VERDICT");
-  const expectedCounts = {
-    source_programs: sourcePrograms.length,
-    attempts: attempts.length,
-    valid_cases: validCases.length,
-    duplicates: duplicates.length,
-    false_positives: falsePositives.length,
-    minimized_reproducers: reproducers.length,
-    unique_findings: findings.length,
-  };
-  for (const [key, expected] of Object.entries(expectedCounts)) {
-    if (counts[key] !== expected) fail(`red-team verdict lane ${lane.lane_id} count ${key} is inconsistent`, "E_VERDICT");
-  }
 }
-
 function validateSignedVerdictShape(receipt, manifest = undefined) {
   if (receipt.receipt_kind !== "fresh-context-red-team-verdict") return;
   if (!["PASS", "FAILED", "STALE"].includes(receipt.status)) fail("red-team verdict status is invalid", "E_VERDICT");
-  const strict = manifest !== undefined || Object.hasOwn(receipt, "manifest_sha256");
-  if (!strict) {
-    if (Array.isArray(receipt.findings)) {
-      const p0Count = receipt.findings.filter(p0Finding).length;
-      if (receipt.p0_count !== undefined && receipt.p0_count !== p0Count) fail("red-team verdict P0 count is inconsistent", "E_VERDICT");
-      if (receipt.status === "PASS" && p0Count !== 0) fail("red-team verdict cannot pass with a new P0", "E_VERDICT");
-      if (receipt.unique_finding_count !== undefined && receipt.unique_finding_count !== receipt.findings.length) {
-        fail("red-team verdict finding count is inconsistent", "E_VERDICT");
-      }
-    }
-    return;
-  }
   if (!validDigest(receipt.manifest_sha256) || !receipt.session_id || !receipt.session) {
     fail("red-team verdict is missing frozen session identity", "E_VERDICT");
   }
@@ -1498,60 +1618,105 @@ function validateSignedVerdictShape(receipt, manifest = undefined) {
     }
   }
   const session = receipt.session;
+  requiredObject(session, "red-team verdict session");
   if (!validCommit(session.commit) || !validDigest(session.binary_sha256)
     || !validDigest(session.registry_sha256) || !validDigest(session.public_surface_sha256)) {
     fail("red-team verdict frozen session identity is invalid", "E_VERDICT");
   }
+  for (const key of ["root", "binary_path", "platform", "arch"]) {
+    requiredString(session[key], `red-team verdict session ${key}`);
+  }
+  if (receipt.execution_gate !== EXECUTION_GATE && receipt.execution_gate !== RED_TEAM_EXECUTION_GATE) {
+    fail("red-team verdict execution gate is invalid", "E_VERDICT");
+  }
   if (manifest && (session.commit !== manifest.target.commit || session.binary_sha256 !== manifest.target.binary_sha256
     || session.registry_sha256 !== manifest.registry_snapshot.sha256
-    || session.public_surface_sha256 !== manifest.public_surface_snapshot.sha256)) {
+    || session.public_surface_sha256 !== manifest.public_surface_snapshot.sha256
+    || session.root !== manifest.target.root || session.binary_path !== manifest.target.binary_path
+    || session.platform !== manifest.target.platform || session.arch !== manifest.target.arch)) {
     fail("red-team verdict target does not match its manifest", "E_VERDICT");
   }
-  if (!receipt.execution_gate || !Array.isArray(receipt.lanes) || !Array.isArray(receipt.findings)
+  if (!Array.isArray(receipt.lanes) || !Array.isArray(receipt.findings)
     || !Array.isArray(receipt.finding_duplicates) || !Array.isArray(receipt.replayed_findings)
     || !Array.isArray(receipt.assimilation) || !Array.isArray(receipt.stale_reasons)
     || !Array.isArray(receipt.failure_reasons) || !receipt.quota || !receipt.cleanup
     || !receipt.independent_discovery) {
     fail("red-team verdict is missing complete session evidence", "E_VERDICT");
   }
+  const discovery = receipt.independent_discovery;
+  if (discovery.current_defect_cards_hidden_until !== "all-eight-independent-receipts"
+    || discovery.revealed_after_discovery !== (receipt.lanes.length === RED_TEAM_LANE_COUNT)) {
+    fail("red-team verdict discovery evidence is inconsistent", "E_VERDICT");
+  }
   if (receipt.quota.lanes !== RED_TEAM_LANE_COUNT || receipt.quota.waves !== RED_TEAM_WAVE_COUNT
     || receipt.quota.lanes_per_wave !== RED_TEAM_MAX_ACTIVE || receipt.quota.full_quota_required !== true) {
     fail("red-team verdict quota is not eight lanes in four waves of two", "E_VERDICT");
   }
   boundedInteger(receipt.max_active_lanes, "red-team verdict max_active_lanes", 0, RED_TEAM_MAX_ACTIVE);
-  if (typeof receipt.started_at !== "string" || typeof receipt.finished_at !== "string") fail("red-team verdict timestamps are missing", "E_VERDICT");
+  for (const key of ["started_at", "finished_at"]) {
+    requiredString(receipt[key], `red-team verdict ${key}`);
+    if (Number.isNaN(Date.parse(receipt[key]))) fail(`red-team verdict ${key} is not an ISO timestamp`, "E_VERDICT");
+  }
+  if (Date.parse(receipt.finished_at) < Date.parse(receipt.started_at)) {
+    fail("red-team verdict finished before it started", "E_VERDICT");
+  }
   const laneIds = new Set();
   for (const lane of receipt.lanes) {
     validateSignedLaneShape(lane, receipt, manifest);
-    if (laneIds.has(lane.lane_id)) fail("red-team verdict repeats a lane", "E_VERDICT");
+    if (laneIds.has(lane.lane_id) && receipt.status === "PASS") fail("red-team verdict repeats a lane", "E_VERDICT");
     laneIds.add(lane.lane_id);
   }
+  validateLaneOrder(receipt.lanes, receipt.status === "PASS");
   if (!Array.isArray(receipt.lane_agents) || receipt.lane_agents.length !== receipt.lanes.length) {
     fail("red-team verdict lane agent evidence is incomplete", "E_VERDICT");
   }
   const laneAgentIds = new Set();
   const laneContexts = new Set();
-  for (const laneAgent of receipt.lane_agents) {
-    const lane = receipt.lanes.find((item) => item.lane_id === laneAgent.lane_id);
-    if (!lane || lane.agent_id !== laneAgent.agent_id || lane.context_id !== laneAgent.context_id) {
+  for (const [index, laneAgent] of receipt.lane_agents.entries()) {
+    const lane = receipt.lanes[index];
+    if (!lane || lane.lane_id !== laneAgent.lane_id || lane.agent_id !== laneAgent.agent_id || lane.context_id !== laneAgent.context_id) {
       fail("red-team verdict lane agent evidence does not match lanes", "E_VERDICT");
     }
-    if (laneAgentIds.has(laneAgent.agent_id) || laneContexts.has(laneAgent.context_id)) fail("red-team verdict repeats a lane identity", "E_VERDICT");
+    if (laneAgentIds.has(laneAgent.agent_id) || laneContexts.has(laneAgent.context_id)) {
+      if (receipt.status === "PASS") fail("red-team verdict repeats a lane identity", "E_VERDICT");
+    }
     laneAgentIds.add(laneAgent.agent_id);
     laneContexts.add(laneAgent.context_id);
   }
   const pseudoManifest = {
-    target: { commit: session.commit, binary_sha256: session.binary_sha256 },
+    target: {
+      commit: session.commit,
+      binary_sha256: session.binary_sha256,
+      root: session.root,
+      binary_path: session.binary_path,
+      platform: session.platform,
+      arch: session.arch,
+    },
     registry_snapshot: { sha256: session.registry_sha256 },
+    public_surface_snapshot: { sha256: session.public_surface_sha256 },
   };
   const findings = receipt.findings.map((item, index) => validateFinding(item, index, pseudoManifest));
+  const findingIds = new Set();
+  const bundleIds = new Set();
+  for (const finding of findings) {
+    if (findingIds.has(finding.finding_id) || bundleIds.has(finding.bundle_identity)) {
+      if (receipt.status === "PASS") fail("red-team verdict repeats a unique finding", "E_VERDICT");
+    }
+    findingIds.add(finding.finding_id);
+    bundleIds.add(finding.bundle_identity);
+  }
+  validateDedupEvidence(receipt);
   const p0Count = findings.filter(p0Finding).length;
   if (receipt.p0_count !== p0Count || receipt.unique_finding_count !== findings.length) {
     fail("red-team verdict finding counts are inconsistent", "E_VERDICT");
   }
+  if (receipt.status === "PASS" && receipt.execution_gate !== RED_TEAM_EXECUTION_GATE) {
+    fail("red-team PASS verdict lacks owner-authorized execution gate", "E_VERDICT");
+  }
   if (receipt.status === "PASS") {
     if (receipt.lanes.length !== RED_TEAM_LANE_COUNT || laneIds.size !== RED_TEAM_LANE_COUNT) fail("red-team verdict quota is incomplete", "E_VERDICT");
-    for (const laneId of LANE_BRIEFS.map((item) => item.lane_id)) if (!laneIds.has(laneId)) fail(`red-team verdict is missing ${laneId}`, "E_VERDICT");
+    for (const laneId of expectedLaneIds()) if (!laneIds.has(laneId)) fail(`red-team verdict is missing ${laneId}`, "E_VERDICT");
+    if (receipt.max_active_lanes < 1) fail("red-team PASS verdict has no observed active lane", "E_VERDICT");
     if (p0Count !== 0) fail("red-team verdict cannot pass with a new P0", "E_VERDICT");
     if (receipt.stale_reasons.length || receipt.failure_reasons.length) fail("red-team PASS verdict has failure or stale reasons", "E_VERDICT");
     const loadBearing = findings.filter((finding) => finding.load_bearing !== false).length;
@@ -1676,6 +1841,10 @@ function resultPayload({
     session: {
       commit: manifest.target.commit,
       binary_sha256: manifest.target.binary_sha256,
+      binary_path: manifest.target.binary_path,
+      root: manifest.target.root,
+      platform: manifest.target.platform,
+      arch: manifest.target.arch,
       registry_sha256: manifest.registry_snapshot.sha256,
       public_surface_sha256: manifest.public_surface_snapshot.sha256,
     },
@@ -1808,6 +1977,10 @@ export async function runRedTeamSession({
       if (agentIdentities.has(lane.agent_id)) errors.push(`${lane.lane_id}: duplicate lane agent`);
       agentIdentities.add(lane.agent_id);
     }
+    errors.push(...laneOrderProblems(lanes));
+    if (lane_receipts !== undefined && lanes.length === RED_TEAM_LANE_COUNT && state.max_active === 0) {
+      errors.push("red-team session has no observed active lane");
+    }
     if (state.active !== 0) errors.push("red-team lanes remain active");
     if (state.max_active > RED_TEAM_MAX_ACTIVE) errors.push("red-team runner exceeded two active lanes");
     ensureDistinctReview(lanes, reviewer_id, signer_id);
@@ -1870,6 +2043,10 @@ export async function runRedTeamSession({
     }
     errors.push(...cleanupProblems(cleanupResult));
   }
+  if (!staleReasons.length && lanes.length === RED_TEAM_LANE_COUNT
+    && execution_gate !== RED_TEAM_EXECUTION_GATE) {
+    errors.push("real eight-lane execution lacks owner authorization");
+  }
   const status = staleReasons.length
     ? "STALE"
     : errors.length || findings.some(p0Finding) || lanes.length !== RED_TEAM_LANE_COUNT
@@ -1929,23 +2106,59 @@ function commandLaneRunner(options, paths, manifest) {
   if (!runner) fail("real red-team execution needs JET_HARDENING_RED_TEAM_RUNNER", "E_RUNNER");
   const runnerArgs = String(options.runner_args || process.env.JET_HARDENING_RED_TEAM_RUNNER_ARGS || "")
     .split(" ").filter(Boolean);
-  return async (packet) => {
-    const result = await executeCommand({
-      program: runner,
-      args: runnerArgs,
-      cwd: paths.root,
-      stdin: JSON.stringify(packet),
-      timeout_ms: manifest.resource_limits.lane_timeout_ms,
-      capture_limit: manifest.resource_limits.capture_bytes,
-      label: `red-team:${packet.lane_id}`,
-    });
-    if (!result.ok || result.stdout_truncated) fail(`${packet.lane_id} runner failed or exceeded capture bound`, "E_RUNNER");
+  mkdirSync(paths.cache, { recursive: true, mode: 0o700 });
+  const sessionScratch = mkdtempSync(join(paths.cache, "red-team-session-"));
+  const laneRunner = async (packet) => {
+    let scratch;
     try {
-      return JSON.parse(result.stdout.toString("utf8"));
-    } catch (error) {
-      fail(`${packet.lane_id} runner did not return JSON: ${error.message}`, "E_RUNNER");
+      scratch = mkdtempSync(join(sessionScratch, `${packet.lane_id}-`));
+      const result = await executeCommand({
+        program: runner,
+        args: runnerArgs,
+        cwd: paths.root,
+        env: {
+          JET_HARDENING_ROOT: paths.root,
+          JET_HARDENING_CACHE: paths.cache,
+          JET_TEST_SCRATCH: scratch,
+          JET_TEST_SCRATCH_DIR: scratch,
+          TMPDIR: scratch,
+          TMP: scratch,
+          TEMP: scratch,
+          CARGO_BUILD_JOBS: String(manifest.rig_config.cargo_build_jobs),
+          CARGO_INCREMENTAL: "0",
+          CARGO_TARGET_DIR: join(paths.root, "target"),
+          JET_MIN_FREE_GB: String(manifest.rig_config.min_free_gib),
+          JET_TARGET_CAP_GB: String(manifest.rig_config.target_cap_gib),
+        },
+        stdin: JSON.stringify(packet),
+        timeout_ms: manifest.resource_limits.lane_timeout_ms,
+        capture_limit: manifest.resource_limits.capture_bytes,
+        label: `red-team:${packet.lane_id}`,
+      });
+      if (!result.ok || result.stdout_truncated || result.stderr_truncated) {
+        fail(`${packet.lane_id} runner failed or exceeded capture bound`, "E_RUNNER");
+      }
+      try {
+        return JSON.parse(result.stdout.toString("utf8"));
+      } catch (error) {
+        fail(`${packet.lane_id} runner did not return JSON: ${error.message}`, "E_RUNNER");
+      }
+    } finally {
+      if (scratch) rmSync(scratch, { recursive: true, force: true });
     }
   };
+  laneRunner.cleanup = () => {
+    rmSync(sessionScratch, { recursive: true, force: true });
+    return {
+      active_agents: 0,
+      active_processes: 0,
+      scratch_paths: [],
+      alternate_targets: [],
+      unbounded_logs: false,
+      complete: true,
+    };
+  };
+  return laneRunner;
 }
 
 export async function redTeamMain(argv = process.argv.slice(2)) {
@@ -1995,9 +2208,10 @@ export async function redTeamMain(argv = process.argv.slice(2)) {
       manifest,
       root,
       lane_runner: runner,
+      cleanup: async () => runner.cleanup(),
       replay_finding: undefined,
       assimilate: (findings, frozen) => assimilateFindings(findings, frozen, { root }),
-      execution_gate: "OWNER_AUTHORIZED_REAL_EIGHT_LANE_EXECUTION",
+      execution_gate: RED_TEAM_EXECUTION_GATE,
     });
     writeJson(options.receipt || paths.receipt, receipt);
     machineOutput({ status: receipt.status, receipt_path: options.receipt || paths.receipt, receipt }, json);

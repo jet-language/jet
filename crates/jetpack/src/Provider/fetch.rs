@@ -667,6 +667,9 @@ fn which(tool: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn pax_logical_size_cannot_bypass_stored_payload_limit() {
@@ -835,6 +838,132 @@ authority: {
         ]);
         assert_eq!(removed, expected);
         assert!(!command.get_args().any(|value| value == "--netrc"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn authority_to_path_rejects_redirect_before_second_curl_request() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-provider-redirect-boundary-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let log = root.join("curl.log");
+        let curl = root.join("curl");
+        fs::write(
+            &curl,
+            format!(
+                r#"#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "{}"
+headers=
+body=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --dump-header)
+        headers="$2"
+        shift 2
+        ;;
+    --output)
+        body="$2"
+        shift 2
+        ;;
+    --write-out|--resolve|--max-time|--max-filesize|--proto|--proto-redir|--noproxy)
+        shift 2
+        ;;
+    --*)
+        shift
+        ;;
+        *)
+            url="$1"
+            shift
+            ;;
+    esac
+done
+printf 'HTTP/1.1 302 Found\r\nLocation: https://127.0.0.1/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' > "$headers"
+: > "$body"
+printf '302'
+"#,
+                log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&curl).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&curl, permissions).unwrap();
+
+        let authority = Authority {
+            provider: "ruby".into(),
+            registry: "https://8.8.8.8".into(),
+            allow: BTreeSet::from(["8.8.8.8".into()]),
+            deny: BTreeSet::new(),
+            curl,
+        };
+        let destination = root.join("destination");
+        let error = authority
+            .to_path(
+                "https://8.8.8.8/start",
+                &destination,
+                &root,
+            )
+            .expect_err("denied redirect must stop before a second curl request");
+        assert!(
+            error.contains("does not authorize") || error.contains("non-public"),
+            "unexpected redirect rejection: {error}"
+        );
+        let invocations = fs::read_to_string(&log).unwrap();
+        let lines = invocations.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines.len(),
+            1,
+            "redirect policy must prevent a second curl invocation: {invocations}"
+        );
+        assert!(lines[0].contains("--max-redirs 0"));
+        assert!(lines[0].contains("--proto =https"));
+        assert!(lines[0].contains("--proto-redir =https"));
+        assert!(lines[0].contains("--noproxy *"));
+        assert!(lines[0].contains("--resolve 8.8.8.8:443:8.8.8.8"));
+        assert!(lines[0].contains("https://8.8.8.8/start"));
+        assert!(!destination.exists(), "denied redirect created a destination");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn configured_provider_credentials_fail_before_curl_execution() {
+        let dir =
+            std::env::temp_dir().join(format!("jet-provider-credential-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            crate::Manifest::manifest_path_in(&dir),
+            r#"name: "p"
+version: "0.1.0"
+authority: {
+    providers: {
+        ruby: {
+            registry: "https://user:secret@8.8.8.8",
+        },
+    },
+}
+"#,
+        )
+        .unwrap();
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &dir,
+            offline: false,
+            project_dir: Some(&dir),
+            nix_index: None,
+            nix_roots: None,
+        };
+        let error = Authority::load(&ctx, "ruby", "https://8.8.8.8", &["8.8.8.8"])
+            .expect_err("configured provider credentials must be rejected before curl lookup");
+        assert!(
+            error.contains("credentialed authority"),
+            "unexpected credential rejection: {error}"
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -168,19 +168,73 @@ fn read_dbvalue(handle: i64) -> Option<wire::DBValue> {
     })
 }
 
-fn values_from_list(list: i64) -> Vec<wire::DBValue> {
-    let handles: Vec<i64> = Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
+fn value_handles_from_list(list: i64) -> Option<Vec<i64>> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list)?;
         let mut out = Vec::with_capacity(len as usize);
         for i in 0..len {
-            out.push(rt.heap.list_get_int(list, i).unwrap_or(0));
+            out.push(rt.heap.list_get_int(list, i)?);
         }
-        out
-    });
-    handles
+        Some(out)
+    })
+}
+
+pub(crate) fn values_from_list_checked(list: i64) -> Option<Vec<wire::DBValue>> {
+    value_handles_from_list(list)?
         .into_iter()
-        .map(|h| read_dbvalue(h).unwrap_or(wire::DBValue::Null))
+        .map(read_dbvalue)
         .collect()
+}
+
+pub(crate) fn values_from_list(list: i64) -> Vec<wire::DBValue> {
+    values_from_list_checked(list).unwrap_or_default()
+}
+
+pub(crate) fn alloc_dbvalue_list(values: Vec<wire::DBValue>) -> i64 {
+    let handles = values
+        .into_iter()
+        .map(|value| match value {
+            wire::DBValue::Null => alloc_dbvalue_record(DV_NULL, 0),
+            wire::DBValue::Int(value) => alloc_dbvalue_record(DV_INT, value),
+            wire::DBValue::Float(value) => alloc_dbvalue_float(value),
+            wire::DBValue::Text(value) => {
+                let text = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
+                alloc_dbvalue_record(DV_TEXT, text)
+            }
+            wire::DBValue::Bool(value) => alloc_dbvalue_record(DV_BOOL, i64::from(value)),
+        })
+        .collect::<Vec<_>>();
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for handle in handles {
+            let _ = rt.heap.list_push_int(list, handle);
+        }
+        list
+    })
+}
+
+pub(crate) fn alloc_sql_value(value: wire::SQL) -> i64 {
+    let (template, params) = value;
+    let template = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(template));
+    let params_list = alloc_dbvalue_list(params);
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(record, 0, template);
+        let _ = rt.heap.record_set_int(record, 1, params_list);
+        record
+    })
+}
+
+pub(crate) fn clone_sql_value(value: i64) -> Option<wire::SQL> {
+    let (template, params_list) = Concurrency::with_runtime_mut(|rt| {
+        let template = rt
+            .heap
+            .record_get_int(value, 0)
+            .and_then(|id| rt.heap.clone_string(id))?;
+        let params_list = rt.heap.record_get_int(value, 1)?;
+        Some((template, params_list))
+    })?;
+    Some((template, values_from_list_checked(params_list)?))
 }
 
 fn jet_jit_db_policy(table: i64, expression: i64) -> i64 {
@@ -281,56 +335,31 @@ fn jet_jit_db_rollback(handle: i64) -> i8 {
     i8::from(runtime::jet_db_rollback(base_handle(handle as u64)))
 }
 
-fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
-    let Some((base, table, compiled, user)) = scope_parts(handle as u64) else {
-        return result_err_msg("database row operations require a policy scope");
+fn jet_jit_db_execute(handle: i64, sql: i64) -> i64 {
+    let Some(sql) = clone_sql_value(sql) else {
+        return result_err_msg("malformed SQL value");
     };
-    let values = values_from_list(params);
-    let sql = clone_string(sql);
-    let (sql, values) =
-        match wire::jet_db_apply_compiled_policy_with_proof(&sql, &values, &table, compiled, &user)
-        {
-            Ok(application) => match application.into_parts() {
-                Ok(value) => value,
-                Err(error) => return result_err_msg(&error.message),
-            },
-            Err(error) => return result_err_msg(&error.message),
-        };
-    let wire_s = wire::jet_db_encode_params(&values);
-    let out = runtime::jet_db_execute(base, &sql, &wire_s);
-    match wire::jet_db_decode_execute_result(&out) {
+    match scoped_execute(handle as u64, &sql, false) {
         Ok(n) => result_ok(n as u64),
-        Err(e) => result_err_msg(&e.message),
+        Err(error) => result_err_msg(&error.message),
     }
 }
 
-fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
-    let Some((base, table, compiled, user)) = scope_parts(handle as u64) else {
-        return result_err_msg("database row operations require a policy scope");
+fn jet_jit_db_query(handle: i64, sql: i64) -> i64 {
+    let Some(sql) = clone_sql_value(sql) else {
+        return result_err_msg("malformed SQL value");
     };
-    let values = values_from_list(params);
-    let sql = clone_string(sql);
-    let (sql, values) =
-        match wire::jet_db_apply_compiled_policy_with_proof(&sql, &values, &table, compiled, &user)
-        {
-            Ok(application) => match application.into_parts() {
-                Ok(value) => value,
-                Err(error) => return result_err_msg(&error.message),
-            },
-            Err(error) => return result_err_msg(&error.message),
-        };
-    let wire_s = wire::jet_db_encode_params(&values);
-    let out = runtime::jet_db_query(base, &sql, &wire_s);
-    match wire::jet_db_decode_query_result(&out) {
+    match scoped_query(handle as u64, &sql, false) {
         Ok(rows) => result_ok(rows_to_list_of_maps(rows) as u64),
-        Err(e) => result_err_msg(&e.message),
+        Err(error) => result_err_msg(&error.message),
     }
 }
 
-fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
-    let values = values_from_list(params);
-    let sql = clone_string(sql);
-    match scoped_query(handle as u64, &sql, &values, false).map(wire::jet_db_first_row) {
+fn jet_jit_db_query_one(handle: i64, sql: i64) -> i64 {
+    let Some(sql) = clone_sql_value(sql) else {
+        return result_err_msg("malformed SQL value");
+    };
+    match scoped_query(handle as u64, &sql, false).map(wire::jet_db_first_row) {
         Ok(Ok(row)) => {
             let list = rows_to_list_of_maps(vec![row]);
             let map =
@@ -338,26 +367,20 @@ fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
             result_ok(map.wrapping_add(1) as u64)
         }
         Ok(Err(_)) => result_ok(0),
-        Err(e) => result_err_msg(&e.message),
+        Err(error) => result_err_msg(&error.message),
     }
 }
 
-fn list_of_strings(list: i64) -> Vec<String> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            let sid = rt.heap.list_get_int(list, i).unwrap_or(0);
-            out.push(rt.heap.clone_string(sid).unwrap_or_default());
-        }
-        out
-    })
+fn list_of_sql(list: i64) -> Option<Vec<wire::SQL>> {
+    value_handles_from_list(list)?
+        .into_iter()
+        .map(clone_sql_value)
+        .collect()
 }
 
 fn scoped_execute(
     scope: u64,
-    sql: &str,
-    params: &Vec<wire::DBValue>,
+    sql: &wire::SQL,
     allow_schema: bool,
 ) -> Result<i64, wire::DBError> {
     let Some((base, table, compiled, user)) = scope_parts(scope) else {
@@ -365,23 +388,23 @@ fn scoped_execute(
             message: "database row operations require a policy scope".to_string(),
         });
     };
-    let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy_with_proof(
-            sql, params, &table, compiled, &user,
-        )?
-        .into_parts()?
+    let sql = if allow_schema {
+        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, &table, compiled, &user)?
+            .into_sql()?
     } else {
-        wire::jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, &user)?
-            .into_parts()?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, &table, compiled, &user)?.into_sql()?
     };
-    let result = runtime::jet_db_execute(base, &sql, &wire::jet_db_encode_params(&values));
+    let result = runtime::jet_db_execute(
+        base,
+        &sql.0,
+        &wire::jet_db_encode_params(&sql.1),
+    );
     wire::jet_db_decode_execute_result(&result)
 }
 
 fn scoped_query(
     scope: u64,
-    sql: &str,
-    params: &Vec<wire::DBValue>,
+    sql: &wire::SQL,
     allow_schema: bool,
 ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
     let Some((base, table, compiled, user)) = scope_parts(scope) else {
@@ -389,16 +412,17 @@ fn scoped_query(
             message: "database row operations require a policy scope".to_string(),
         });
     };
-    let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy_with_proof(
-            sql, params, &table, compiled, &user,
-        )?
-        .into_parts()?
+    let sql = if allow_schema {
+        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, &table, compiled, &user)?
+            .into_sql()?
     } else {
-        wire::jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, &user)?
-            .into_parts()?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, &table, compiled, &user)?.into_sql()?
     };
-    let result = runtime::jet_db_query(base, &sql, &wire::jet_db_encode_params(&values));
+    let result = runtime::jet_db_query(
+        base,
+        &sql.0,
+        &wire::jet_db_encode_params(&sql.1),
+    );
     wire::jet_db_decode_query_result(&result)
 }
 
@@ -421,20 +445,18 @@ impl wire::JetDBBackend for JitDbBackend {
 
     fn execute(
         &mut self,
-        sql: &String,
-        params: &Vec<wire::DBValue>,
+        sql: &wire::SQL,
         allow_schema: bool,
     ) -> Result<i64, wire::DBError> {
-        scoped_execute(self.scope, sql, params, allow_schema)
+        scoped_execute(self.scope, sql, allow_schema)
     }
 
     fn query(
         &mut self,
-        sql: &String,
-        params: &Vec<wire::DBValue>,
+        sql: &wire::SQL,
         allow_schema: bool,
     ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
-        scoped_query(self.scope, sql, params, allow_schema)
+        scoped_query(self.scope, sql, allow_schema)
     }
 }
 
@@ -444,7 +466,9 @@ fn jet_jit_db_migrate(conn: i64, name: i64, steps: i64) -> i64 {
         return result_err_msg("database migration requires a policy scope");
     }
     let name_s = clone_string(name);
-    let steps_v = list_of_strings(steps);
+    let Some(steps_v) = list_of_sql(steps) else {
+        return result_err_msg("database migration steps must be SQL values");
+    };
     let mut backend = JitDbBackend { scope };
     match wire::jet_db_migrate(&mut backend, &name_s, &steps_v) {
         Ok(done) => result_ok(done as u64),
@@ -458,29 +482,14 @@ fn jet_jit_db_transaction(conn: i64, label: i64, steps: i64) -> i64 {
         return result_err_msg("database transaction requires a policy scope");
     }
     let label_s = clone_string(label);
-    let steps_v = list_of_strings(steps);
+    let Some(steps_v) = list_of_sql(steps) else {
+        return result_err_msg("database transaction steps must be SQL values");
+    };
     let mut backend = JitDbBackend { scope };
     match wire::jet_db_transaction(&mut backend, &label_s, &steps_v) {
         Ok(done) => result_ok(done as u64),
         Err(error) => result_err_msg(&error.message),
     }
-}
-
-/// `db.params(sql)` — SQL is a 2-slot record `(template, params_list)`.
-fn jet_jit_db_params(sql: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let params_list = rt.heap.record_get_int(sql, 1).unwrap_or(0);
-        let len = rt.heap.list_len(params_list).unwrap_or(0);
-        let list = rt.heap.alloc_empty_list();
-        for i in 0..len {
-            let sid = rt.heap.list_get_int(params_list, i).unwrap_or(0);
-            let h = rt.heap.alloc_record(2);
-            let _ = rt.heap.record_set_int(h, 0, DV_TEXT);
-            let _ = rt.heap.record_set_int(h, 1, sid);
-            let _ = rt.heap.list_push_int(list, h);
-        }
-        list
-    })
 }
 
 fn jet_jit_db_row_int(row: i64, key: i64) -> i64 {
@@ -641,12 +650,11 @@ host_fns! {
     begin: "jet_jit_db_begin" => jet_jit_db_begin: unary_i8;
     commit: "jet_jit_db_commit" => jet_jit_db_commit: unary_i8;
     rollback: "jet_jit_db_rollback" => jet_jit_db_rollback: unary_i8;
-    execute: "jet_jit_db_execute" => jet_jit_db_execute: ternary;
-    query: "jet_jit_db_query" => jet_jit_db_query: ternary;
-    query_one: "jet_jit_db_query_one" => jet_jit_db_query_one: ternary;
+    execute: "jet_jit_db_execute" => jet_jit_db_execute: binary;
+    query: "jet_jit_db_query" => jet_jit_db_query: binary;
+    query_one: "jet_jit_db_query_one" => jet_jit_db_query_one: binary;
     migrate: "jet_jit_db_migrate" => jet_jit_db_migrate: ternary;
     transaction: "jet_jit_db_transaction" => jet_jit_db_transaction: ternary;
-    params: "jet_jit_db_params" => jet_jit_db_params: unary;
     row_int: "jet_jit_db_row_int" => jet_jit_db_row_int: binary;
     row_text: "jet_jit_db_row_text" => jet_jit_db_row_text: binary;
     dbvalue_pack: "jet_jit_dbvalue_pack" => jet_jit_dbvalue_pack: binary;

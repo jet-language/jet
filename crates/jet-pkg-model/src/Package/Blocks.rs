@@ -10,6 +10,7 @@
 //! `package.jet` never again has two parsers for one fact.
 
 use super::PackageParseError;
+use crate::Diagnostics::{Diagnostic, Span};
 use crate::RefSpec::{self, Source};
 use crate::Syntax;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -2333,32 +2334,55 @@ fn balanced_block_end(text: &str, open: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut depth = 0usize;
     let mut i = open;
-    let mut in_string = false;
-    let mut escaped = false;
+    let mut quote = None;
+    let mut triple = false;
     while i < bytes.len() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if bytes[i] == b'\\' {
-                escaped = true;
-            } else if bytes[i] == b'"' {
-                in_string = false;
+        if let Some(delimiter) = quote {
+            if bytes[i] == b'\\' {
+                i = i.saturating_add(2);
+                continue;
+            }
+            if triple {
+                if bytes.get(i..i + 3) == Some(b"\"\"\"") {
+                    quote = None;
+                    triple = false;
+                    i += 3;
+                    continue;
+                }
+            } else if bytes[i] == delimiter {
+                quote = None;
             }
             i += 1;
             continue;
         }
         if bytes[i] == b'"' {
-            in_string = true;
-        } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            if bytes.get(i..i + 3) == Some(b"\"\"\"") {
+                quote = Some(b'"');
+                triple = true;
+                i += 3;
+            } else {
+                quote = Some(b'"');
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'\'' {
+            quote = Some(b'\'');
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
             i += 2;
             while i < bytes.len() && bytes[i] != b'\n' {
                 i += 1;
             }
             continue;
-        } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
             i = skip_block_comment(bytes, i);
             continue;
-        } else if bytes[i] == b'{' {
+        }
+        if bytes[i] == b'{' {
             depth += 1;
         } else if bytes[i] == b'}' {
             depth = depth.checked_sub(1)?;
@@ -2463,6 +2487,266 @@ fn word_at(bytes: &[u8], at: usize, word: &[u8]) -> bool {
 fn is_ident_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
+/// D-ECO-INLINEPACKAGE1=A: the exact source spans of one contextual leading
+/// `package { … }` block. The body is fed to `PackageFacts`; this carrier
+/// never parses package fields itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InlinePackageBlock {
+    /// Span covering `package { … }`, including the keyword and braces.
+    pub span: Span,
+    /// Span covering the contextual `package` word.
+    pub keyword_span: Span,
+    /// Span covering the opening brace.
+    pub open_span: Span,
+    /// Span covering only the bytes between the braces.
+    pub body_span: Span,
+    /// Span covering the closing brace.
+    pub close_span: Span,
+}
+
+impl InlinePackageBlock {
+    /// Borrow the exact package body from the original source.
+    pub fn body<'a>(&self, source: &'a str) -> &'a str {
+        source
+            .get(self.body_span.start..self.body_span.end)
+            .unwrap_or("")
+    }
+
+    /// Borrow the exact source carrier from the original source.
+    pub fn source<'a>(&self, source: &'a str) -> &'a str {
+        source.get(self.span.start..self.span.end).unwrap_or("")
+    }
+
+    /// Mask the package carrier while retaining every byte offset and line
+    /// ending for the ordinary lexer/parser.
+    pub fn mask_source(&self, source: &str) -> String {
+        let mut masked = source.as_bytes().to_vec();
+        blank_range(&mut masked, self.span.start, self.span.end);
+        String::from_utf8(masked).unwrap_or_else(|_| source.to_string())
+    }
+}
+
+/// Structural failures in the contextual package carrier. Package field
+/// failures remain `PackageParseError`: `PackageFacts` owns that grammar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InlinePackageError {
+    /// A package declaration appears after another top-level declaration.
+    NotFirst { span: Span },
+    /// More than one top-level package declaration appears in the source.
+    Duplicate { first: Span, duplicate: Span },
+    /// The leading package carrier has no balanced closing brace.
+    Unbalanced { span: Span },
+    /// The carrier has a structural shape that cannot be masked safely.
+    Malformed { span: Span, detail: String },
+}
+
+impl InlinePackageError {
+    /// Render the stable registered diagnostic for this structural failure.
+    pub fn diagnostic(&self) -> Diagnostic {
+        match self {
+            Self::NotFirst { span } => Diagnostic::from_row("E1360", &[], Some(*span)),
+            Self::Duplicate { duplicate, .. } => {
+                Diagnostic::from_row("E1361", &[], Some(*duplicate))
+            }
+            Self::Unbalanced { span } => Diagnostic::from_row("E1362", &[], Some(*span)),
+            Self::Malformed { span, .. } => Diagnostic::from_row("E1362", &[], Some(*span)),
+        }
+    }
+}
+
+impl std::fmt::Display for InlinePackageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFirst { .. } => {
+                f.write_str("the inline Package declaration must be first")
+            }
+            Self::Duplicate { .. } => {
+                f.write_str("only one inline Package declaration is allowed")
+            }
+            Self::Unbalanced { .. } => {
+                f.write_str("the inline Package declaration is missing its closing `}`")
+            }
+            Self::Malformed { detail, .. } => f.write_str(detail),
+        }
+    }
+}
+
+impl std::error::Error for InlinePackageError {}
+
+/// Find the one contextual leading package block and preserve its spans.
+///
+/// Only whitespace and Jet comments may precede the block. A `package` word
+/// inside a string, comment, nested delimiter, or ordinary function body is
+/// not a declaration. The returned block has no package-field semantics; its
+/// body must be passed to `PackageFacts::parse`.
+pub fn extract_inline_package(
+    source: &str,
+) -> Result<Option<InlinePackageBlock>, InlinePackageError> {
+    let bytes = source.as_bytes();
+    let first = skip_inline_trivia(bytes, 0);
+    if let Some((keyword, open)) = inline_package_start(bytes, first) {
+        let end = balanced_block_end(source, open).ok_or_else(|| {
+            InlinePackageError::Unbalanced {
+                span: Span::new(keyword, bytes.len()),
+            }
+        })?;
+        let block = inline_package_block(keyword, open, end);
+        if let Some((duplicate, duplicate_open)) =
+            find_top_level_inline_package(bytes, end)
+        {
+            let duplicate_end = balanced_block_end(source, duplicate_open)
+                .unwrap_or(bytes.len());
+            return Err(InlinePackageError::Duplicate {
+                first: block.span,
+                duplicate: Span::new(duplicate, duplicate_end),
+            });
+        }
+        return Ok(Some(block));
+    }
+
+    if let Some((start, open)) = find_top_level_inline_package(bytes, first) {
+        let end = balanced_block_end(source, open).unwrap_or(bytes.len());
+        return Err(InlinePackageError::NotFirst {
+            span: Span::new(start, end),
+        });
+    }
+    Ok(None)
+}
+
+/// Return source suitable for the ordinary lexer/parser plus the preserved
+/// inline package carrier. Masking uses spaces and original line endings, so
+/// every AST/diagnostic span remains an offset into the user's source.
+pub fn mask_inline_package_source(
+    source: &str,
+) -> Result<(String, Option<InlinePackageBlock>), InlinePackageError> {
+    let block = extract_inline_package(source)?;
+    let masked = block
+        .map(|block| block.mask_source(source))
+        .unwrap_or_else(|| source.to_string());
+    Ok((masked, block))
+}
+
+fn inline_package_block(keyword: usize, open: usize, end: usize) -> InlinePackageBlock {
+    InlinePackageBlock {
+        span: Span::new(keyword, end),
+        keyword_span: Span::new(keyword, keyword + Syntax::INLINE_PACKAGE_DECL.len()),
+        open_span: Span::new(open, open + 1),
+        body_span: Span::new(open + 1, end.saturating_sub(1)),
+        close_span: Span::new(end.saturating_sub(1), end),
+    }
+}
+
+fn inline_package_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
+    let keyword = Syntax::INLINE_PACKAGE_DECL.as_bytes();
+    if !word_at(bytes, at, keyword) {
+        return None;
+    }
+    let mut cursor = at + keyword.len();
+    cursor = skip_inline_trivia(bytes, cursor);
+    (bytes.get(cursor) == Some(&b'{')).then_some((at, cursor))
+}
+
+fn find_top_level_inline_package(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
+    let mut i = from;
+    let mut braces = 0usize;
+    let mut brackets = 0usize;
+    let mut parens = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'"' || bytes[i] == b'\'' {
+            i = skip_inline_string(bytes, i);
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i = skip_inline_line_comment(bytes, i);
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i = skip_block_comment(bytes, i);
+            continue;
+        }
+        if braces == 0
+            && brackets == 0
+            && parens == 0
+            && inline_package_start(bytes, i).is_some()
+        {
+            return inline_package_start(bytes, i);
+        }
+        match bytes[i] {
+            b'{' => braces += 1,
+            b'}' => braces = braces.saturating_sub(1),
+            b'[' => brackets += 1,
+            b']' => brackets = brackets.saturating_sub(1),
+            b'(' => parens += 1,
+            b')' => parens = parens.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn skip_inline_trivia(bytes: &[u8], mut at: usize) -> usize {
+    loop {
+        if at == 0 && bytes.starts_with(b"#!/") {
+            at = skip_inline_line_comment(bytes, at);
+            continue;
+        }
+        while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+            at += 1;
+        }
+        if bytes.get(at..at + 2) == Some(b"//") {
+            at = skip_inline_line_comment(bytes, at);
+            continue;
+        }
+        if bytes.get(at..at + 2) == Some(b"/*") {
+            let next = skip_block_comment(bytes, at);
+            if next == at {
+                return at;
+            }
+            at = next;
+            continue;
+        }
+        return at;
+    }
+}
+
+fn skip_inline_line_comment(bytes: &[u8], mut at: usize) -> usize {
+    at = at.saturating_add(2);
+    while at < bytes.len() && bytes[at] != b'\n' {
+        at += 1;
+    }
+    at
+}
+
+fn skip_inline_string(bytes: &[u8], start: usize) -> usize {
+    let triple = bytes.get(start..start + 3) == Some(b"\"\"\"");
+    let quote = bytes[start];
+    let width = if triple { 3 } else { 1 };
+    let mut i = start + width;
+    let mut escaped = false;
+    while i < bytes.len() {
+        if escaped {
+            escaped = false;
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'\\' {
+            escaped = true;
+            i += 1;
+            continue;
+        }
+        if triple {
+            if bytes.get(i..i + 3) == Some(b"\"\"\"") {
+                return i + 3;
+            }
+        } else if bytes[i] == quote {
+            return i + 1;
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
 
 #[cfg(test)]
 mod security_tests {
@@ -2475,4 +2759,50 @@ mod security_tests {
             "retired build-profile environment data must not reach rustc"
         );
     }
+    #[test]
+    fn inline_package_spans_and_mask_preserve_offsets() {
+        let source = "// header\npackage /* carrier */ {\nname: \"demo\"\n}\nfn run() {}\n";
+        let block = super::extract_inline_package(source)
+            .unwrap()
+            .expect("leading inline Package");
+        assert_eq!(&source[block.keyword_span.start..block.keyword_span.end], "package");
+        assert_eq!(source.as_bytes().len(), block.mask_source(source).as_bytes().len());
+        assert!(block.mask_source(source)[block.span.start..block.span.end]
+            .bytes()
+            .all(|byte| byte == b' ' || byte == b'\n' || byte == b'\r'));
+    }
+    #[test]
+    fn inline_package_scanner_ignores_nested_words() {
+        let source = "fn run() { print(\"package { not a declaration }\") }\n";
+        assert!(super::extract_inline_package(source).unwrap().is_none());
+        let source = "package { description: \"\"\"package { still text }\"\"\" }\nfn run() {}\n";
+        let block = super::extract_inline_package(source)
+            .unwrap()
+            .expect("triple-quoted Package values stay inside the carrier");
+        assert!(block.body(source).contains("still text"));
+    }
+    #[test]
+    fn inline_package_allows_byte_zero_shebang_header() {
+        let source = "#!/usr/bin/env jet\npackage { name: \"demo\" }\nfn run() {}\n";
+        assert!(super::extract_inline_package(source).unwrap().is_some());
+    }
+
+    #[test]
+    fn inline_package_rejects_not_first_duplicate_and_unbalanced() {
+        assert!(matches!(
+            super::extract_inline_package("fn run() {}\npackage { name: \"demo\" }\n"),
+            Err(super::InlinePackageError::NotFirst { .. })
+        ));
+        assert!(matches!(
+            super::extract_inline_package(
+                "package { name: \"one\" }\npackage { name: \"two\" }\nfn run() {}\n"
+            ),
+            Err(super::InlinePackageError::Duplicate { .. })
+        ));
+        assert!(matches!(
+            super::extract_inline_package("package { name: \"demo\"\nfn run() {}\n"),
+            Err(super::InlinePackageError::Unbalanced { .. })
+        ));
+    }
+
 }

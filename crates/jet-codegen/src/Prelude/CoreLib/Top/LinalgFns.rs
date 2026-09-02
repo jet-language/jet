@@ -127,6 +127,19 @@ fn jet_math_F64x4_lane(v: &jet_std::F64x4, i: i64, file: &str, line: u32) -> f64
 fn jet_math_F64x4_lane_const<const INDEX: usize>(v: &jet_std::F64x4) -> f64 {
     crate::jet_simd_f64x4_lane_const_native::<INDEX>(v.0)
 }
+#[inline(always)]
+fn jet_math_F64x4_mul_lane_scale<const INDEX: usize>(
+    value: &jet_std::F64x4,
+    scale: f64,
+    lane_source: &jet_std::F64x4,
+) -> jet_std::F64x4 {
+    jet_std::F64x4(crate::jet_simd_f64x4_mul_lane_scale_native::<INDEX>(
+        value.0,
+        scale,
+        lane_source.0,
+    ))
+}
+
 
 #[inline(always)]
 fn jet_math_F64x4_gather_lane<const INDEX: usize>(

@@ -744,7 +744,7 @@ impl<'a> Fmt<'a> {
 
     fn fmt_c_module(&mut self, module: &crate::AST::CModule) {
         self.write(match module.kind {
-            CModuleKind::Extern => "#Extern module c.",
+            CModuleKind::Extern => "#Import module c.",
             CModuleKind::Bindgen => "#Bindgen module c.",
         });
         self.write(&module.lib);

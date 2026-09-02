@@ -424,6 +424,12 @@ impl<'a> Checker<'a> {
             self.check_inline_foreign_fn(f);
             return;
         }
+        // D-ADOPT-GUEST1=A: a per-callable `#Import(c)` has no Jet body. Its
+        // signature and C-safe type law are checked by sema's guest-surface
+        // pass; do not reinterpret the declaration as an empty value body.
+        if crate::Sema::is_guest_import(f) {
+            return;
+        }
         // D-UNSAFE2 / D-LIN1-DROP: an `#Unsafe fn` body is an audited region just
         // like an `#Unsafe { … }` block — its reason is the audit note. Mark the
         // whole body unsafe so `drop(x)` of a `#SingleUse` value is permitted

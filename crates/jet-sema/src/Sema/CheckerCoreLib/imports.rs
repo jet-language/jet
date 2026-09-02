@@ -185,7 +185,7 @@ impl<'a> Checker<'a> {
             for arg in args.iter_mut() {
                 self.infer(&mut arg.expr);
             }
-            return sig.return_type.clone();
+            return Some(sig.effective_return_type());
         }
         self.register_binder_refs(args);
         // Homogeneous rest parameters are lowered as one list slot after
@@ -354,9 +354,9 @@ impl<'a> Checker<'a> {
             }
             self.check_write_arg_change(arg);
         }
-        sig.return_type
-            .as_ref()
-            .map(|ty| self.trait_reg.instantiate_type(ty, &subst))
+        let ret = sig.effective_return_type();
+        let ret = self.trait_reg.instantiate_type(&ret, &subst);
+        Some(self.resolve_type(ret))
     }
 
     pub(crate) fn infer_import_call(
@@ -466,7 +466,7 @@ impl<'a> Checker<'a> {
                     for arg in args.iter_mut() {
                         self.infer(&mut arg.expr);
                     }
-                    return sig.return_type.clone();
+                    return Some(sig.effective_return_type());
                 }
                 self.register_binder_refs(args);
             }
@@ -780,9 +780,10 @@ impl<'a> Checker<'a> {
                 }
                 self.check_write_arg_change(arg);
             }
-            return sig.return_type.as_ref().map(|ty| {
-                qualify_unit(self.resolve_type(self.trait_reg.instantiate_type(ty, &subst)))
-            });
+            let ret = sig.effective_return_type();
+            return Some(qualify_unit(
+                self.resolve_type(self.trait_reg.instantiate_type(&ret, &subst)),
+            ))
         }
         if target.registry.contains(&semantic_name) {
             let is_pub = self.type_is_pub_in(mod_idx, &semantic_name);

@@ -1853,9 +1853,10 @@ pub(crate) struct Checker<'a> {
     /// (chain span starts) — every level shares one span, the outermost wins.
     noelse_chains_checked: HashSet<usize>,
     /// D-RESULT-DECON2=B: the parser keeps one receiver in both fixed Result
-    /// pattern tests. Cache its checked type by source span so sema checks the
-    /// receiver, effects, and ownership once, like the lowered carrier.
-    result_handler_subject_types: HashMap<usize, Type>,
+    /// pattern tests. Cache its checked type and elaborated expression by source
+    /// span so sema checks effects and ownership once while both lowered copies
+    /// retain the same resolved call metadata.
+    result_handler_subject_types: HashMap<usize, (Type, Expr)>,
     /// Loop bindings that lend one `ViewMut<T>` element from a collection.
     /// These values may edit during the iteration but may not be retained.
     lending_view_loop_vars: HashSet<String>,
@@ -1910,10 +1911,20 @@ pub(crate) struct Checker<'a> {
     /// The carrier discovered for the current open callback, if its body has
     /// reached a fallible callee.
     failure_carrier: Option<Type>,
+    /// Source-nesting depth of an untyped binding initializer. That root is an
+    /// ordinary value position, so a fallible call auto-propagates even when
+    /// the enclosing function returns Result. Nested inference must not inherit
+    /// this exception.
+    ordinary_binding_root_depth: Option<usize>,
     /// True while the root expression is being checked as a statement. A
     /// dispatch nested in a value expression must keep value-tail checking;
     /// only the statement root may make a braced arm's tail Unit.
     statement_expr_inference: bool,
+    /// Source-nesting depth at which the root expression passed to
+    /// `infer_statement_expr` is being inferred. Nested value expressions
+    /// (for example an `if` passed to `print`) must not inherit the
+    /// statement root's Unit result policy.
+    statement_expr_root_depth: Option<usize>,
     /// True while checking the callback stored by `core.sys.on_interrupt`.
     /// This boundary retains a callback for asynchronous signal delivery and
     /// therefore needs stricter capture facts than an ordinary higher-order call.
@@ -1959,8 +1970,8 @@ pub(crate) struct Checker<'a> {
     ct_scopes: Vec<HashMap<String, crate::Comptime::CtValue>>,
     /// Active generic type parameters while checking a generic item.
     type_param_scope: Vec<crate::AST::TypeParam>,
-    /// E2-M15: reject OS-dependent std APIs in `--freestanding` builds (E3301).
-    freestanding: bool,
+    /// E2-M15: reject OS-dependent APIs on a selected no-OS target (E3301).
+    no_os: bool,
     /// D-CTEFFECT1: `--gate impure=allow` was passed — `#Impure` blocks may execute
     /// Tier-2 ambient comptime effects (FS/Env/Exec/IO) at compile time.
     gates: crate::Policy::GateSet,
@@ -2590,6 +2601,8 @@ mod State;
 mod Taint;
 mod TargetSurface;
 mod WebPartition;
+pub(crate) use CheckerReferences::record_comptime_import_alias_uses;
+
 
 pub(crate) use KnowledgeLoss::{
     allows_gate as knowledge_gate_allows, requires_gate as knowledge_loss_requires_gate,
@@ -2627,7 +2640,7 @@ pub use Registration::*;
 pub(crate) use Taint::check_func_taint;
 pub use TargetSurface::check_target_surface;
 pub(crate) use FFI::*;
-pub(crate) use Guest::{check_guest_export_surface, check_guest_import_surface};
+pub(crate) use Guest::{check_guest_export_surface, check_guest_import_surface, check_guest_symbol_collisions};
 // D-STATE1: typestate pass — wrong-state operation (E0150).
 pub(crate) use State::{checked_state_graphs, check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
@@ -2641,11 +2654,11 @@ pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 pub use Bundle::{
     build_entry_signature_is_valid, bundle_has_comptime_evaluation, check_bundle,
     check_bundle_for_output, check_bundle_for_output_opts,
-    check_bundle_for_output_opts_with_effect_facts, check_bundle_freestanding,
-    check_bundle_freestanding_with_gates, check_bundle_gates, check_bundle_with_effect_facts,
+    check_bundle_for_output_opts_with_effect_facts, check_bundle_no_os,
+    check_bundle_no_os_with_gates, check_bundle_gates, check_bundle_with_effect_facts,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
-    is_build_entry, specialize_function_types, strip_build_only_entries, IncrementalSemaCache,
-    IncrementalSemaStats,
+    check_target_machine, is_build_entry, specialize_function_types, strip_build_only_entries,
+    target_machine_use, IncrementalSemaCache, IncrementalSemaStats,
 };
 pub use Effects::{AuthorityDelegation, EffectSummary, SemIndexEffectFacts};
 pub use MemoryFacts::{
@@ -2677,8 +2690,9 @@ pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub use Registration::effect_key;
 pub use FFI::{e3202, e3301, e3302, e3303};
 pub use Guest::{
-    guest_export_signature, guest_export_surface, guest_import_function_signature,
-    guest_import_signature, guest_import_surface, guest_import_symbol, guest_surface,
+    guest_export_native_symbol, guest_export_signature, guest_export_surface,
+    guest_import_bridge_compatible, guest_import_function_signature, guest_import_signature,
+    guest_import_surface, guest_import_symbol, guest_import_wrapper_name, guest_surface,
     is_guest_export, is_guest_export_marker, is_guest_import, is_guest_import_marker,
     sandbox_export_signature, sandbox_export_surface, GuestDirection, GuestFunction, GuestScalar,
 };

@@ -114,6 +114,8 @@ fn archive_bridge_embeds_the_canonical_ring_source() {
 }
 
 mod common;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
 use common::have_rustc;
 
 fn have_toolchain() -> bool {
@@ -242,20 +244,132 @@ fn zstd_rle_frame(output_len: usize, byte: u8) -> Vec<u8> {
     frame
 }
 
-#[test]
-fn runtime_compressors_reject_output_over_the_shared_budget() {
-    if !have_toolchain() {
-        eprintln!("note: cargo/rustc not found; skipping hostile codec integration test");
-        return;
+struct GzipBits {
+    bytes: Vec<u8>,
+    bit: u8,
+}
+
+impl GzipBits {
+    fn write(&mut self, value: u32, bits: u8) {
+        for offset in 0..bits {
+            if self.bit == 0 {
+                self.bytes.push(0);
+            }
+            if value & (1 << offset) != 0 {
+                let last = self.bytes.len() - 1;
+                self.bytes[last] |= 1 << self.bit;
+            }
+            self.bit = (self.bit + 1) % 8;
+        }
+    }
+}
+
+fn gzip_reverse_bits(mut code: u32, bits: u8) -> u32 {
+    let mut reversed = 0;
+    for _ in 0..bits {
+        reversed = (reversed << 1) | (code & 1);
+        code >>= 1;
+    }
+    reversed
+}
+
+fn gzip_fixed_code(symbol: usize) -> (u32, u8) {
+    let (code, bits) = match symbol {
+        0..=143 => (0x30 + symbol as u32, 8),
+        144..=255 => (0x190 + (symbol - 144) as u32, 9),
+        256..=279 => ((symbol - 256) as u32, 7),
+        280..=287 => (0xc0 + (symbol - 280) as u32, 8),
+        _ => unreachable!("fixed DEFLATE symbol"),
+    };
+    (gzip_reverse_bits(code, bits), bits)
+}
+
+fn gzip_length_code(length: usize) -> (usize, u32, u8) {
+    const BASE: [usize; 29] = [
+        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83,
+        99, 115, 131, 163, 195, 227, 258,
+    ];
+    const EXTRA: [u8; 29] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5,
+        5, 5, 0,
+    ];
+    for (index, (&base, &extra)) in BASE.iter().zip(EXTRA.iter()).enumerate() {
+        let max = base + ((1usize << extra) - 1);
+        if length <= max {
+            return (257 + index, (length - base) as u32, extra);
+        }
+    }
+    unreachable!("DEFLATE match length")
+}
+
+fn gzip_crc32_repeated(byte: u8, length: usize) -> u32 {
+    let mut table = [0u32; 256];
+    for (index, slot) in table.iter_mut().enumerate() {
+        let mut crc = index as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+        *slot = crc;
     }
 
+    let mut crc = !0u32;
+    for _ in 0..length {
+        crc = (crc >> 8) ^ table[((crc as u8) ^ byte) as usize];
+    }
+    !crc
+}
+
+/// A compact fixed-DEFLATE stream that expands through the shared codec cap.
+fn gzip_fixed_repeat_bomb(output_len: usize, byte: u8) -> Vec<u8> {
+    assert!(output_len > 0);
+    let mut frame = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+    let mut bits = GzipBits {
+        bytes: Vec::new(),
+        bit: 0,
+    };
+    bits.write(1, 1); // final block
+    bits.write(1, 2); // fixed Huffman block
+
+    let (literal, literal_bits) = gzip_fixed_code(byte as usize);
+    bits.write(literal, literal_bits);
+    let mut remaining = output_len - 1;
+    while remaining >= 3 {
+        let length = remaining.min(258);
+        let (symbol, extra, extra_bits) = gzip_length_code(length);
+        let (code, code_bits) = gzip_fixed_code(symbol);
+        bits.write(code, code_bits);
+        bits.write(extra, extra_bits);
+        bits.write(0, 5); // distance symbol 0: one byte backwards
+        remaining -= length;
+    }
+    for _ in 0..remaining {
+        bits.write(literal, literal_bits);
+    }
+    let (end, end_bits) = gzip_fixed_code(256);
+    bits.write(end, end_bits);
+    frame.extend_from_slice(&bits.bytes);
+    let checksum = gzip_crc32_repeated(byte, output_len);
+    frame.extend_from_slice(&checksum.to_le_bytes());
+    frame.extend_from_slice(&(output_len as u32).to_le_bytes());
+    frame
+}
+
+#[test]
+fn runtime_compressors_reject_output_over_the_shared_budget() {
     const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
     let temp = TempTree::new("jet_archive_codec_limits");
     let gzip_path = temp.0.join("oversized.gz");
     let zstd_path = temp.0.join("oversized.zst");
-    let gzip = jet_foundation::GzipKernel::jet_compress_gzip_compress(&vec![b'x'; OUTPUT_LIMIT + 1]);
+    let gzip = gzip_fixed_repeat_bomb(OUTPUT_LIMIT + 1, b'x');
+    let zstd = zstd_rle_frame(OUTPUT_LIMIT + 1, b'x');
+    assert!(gzip.len() < 1024 * 1024, "gzip bomb must stay compact");
+    assert!(zstd.len() < 1024 * 1024, "zstd bomb must stay compact");
     fs::write(&gzip_path, gzip).unwrap();
-    fs::write(&zstd_path, zstd_rle_frame(OUTPUT_LIMIT + 1, b'x')).unwrap();
+    fs::write(&zstd_path, zstd).unwrap();
 
     let escape = |path: &Path| path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
     let source = r#"
@@ -271,18 +385,22 @@ fn run() {
         else -> print("gzip unexpected")
     }
     zstd_bytes :: files.read_bytes("__ZSTD__") ?? panic("zstd fixture")
-    if zstd.decompress(zstd_bytes) == {
-        .Ok(_) -> print("zstd accepted")
-        .Err(_) -> print("zstd rejected")
-        else -> print("zstd unexpected")
+    _ :: zstd.decompress(zstd_bytes) ?? {
+        print("zstd rejected")
+        return
     }
+    print("zstd accepted")
 }
 "#
     .replace("__GZIP__", &escape(&gzip_path))
     .replace("__ZSTD__", &escape(&zstd_path));
-    let out = run_core_bridge(&source);
-    assert_eq!(out, "gzip rejected\nzstd rejected\n", "codec budget regression: {out:?}");
+    tir_support::assert_tiers_agree(
+        "runtime_compressors_output_budget",
+        &source,
+        "gzip rejected\nzstd rejected\n",
+    );
 }
+
 
 #[test]
 fn archive_zip_and_tar_round_trip_bytes() {
@@ -359,6 +477,111 @@ fn push_archive_u16(output: &mut Vec<u8>, value: usize) {
 
 fn push_archive_u32(output: &mut Vec<u8>, value: usize) {
     output.extend_from_slice(&(value as u32).to_le_bytes());
+}
+
+fn zip_limit_bomb(
+    name: &[u8],
+    entry_count: usize,
+    method: u16,
+    compressed: &[u8],
+    uncompressed_len: usize,
+    checksum: u32,
+) -> Vec<u8> {
+    let mut local = Vec::new();
+    let mut central = Vec::new();
+    for _ in 0..entry_count {
+        let local_offset = local.len();
+        push_archive_u32(&mut local, 0x0403_4b50);
+        push_archive_u16(&mut local, 20);
+        push_archive_u16(&mut local, 0);
+        push_archive_u16(&mut local, method as usize);
+        push_archive_u16(&mut local, 0);
+        push_archive_u16(&mut local, 0);
+        push_archive_u32(&mut local, checksum as usize);
+        push_archive_u32(&mut local, compressed.len());
+        push_archive_u32(&mut local, uncompressed_len);
+        push_archive_u16(&mut local, name.len());
+        push_archive_u16(&mut local, 0);
+        local.extend_from_slice(name);
+        local.extend_from_slice(compressed);
+
+        push_archive_u32(&mut central, 0x0201_4b50);
+        push_archive_u16(&mut central, 20);
+        push_archive_u16(&mut central, 20);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, method as usize);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u32(&mut central, checksum as usize);
+        push_archive_u32(&mut central, compressed.len());
+        push_archive_u32(&mut central, uncompressed_len);
+        push_archive_u16(&mut central, name.len());
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u16(&mut central, 0);
+        push_archive_u32(&mut central, 0);
+        push_archive_u32(&mut central, local_offset);
+        central.extend_from_slice(name);
+    }
+
+    let central_offset = local.len();
+    let central_size = central.len();
+    let mut archive = local;
+    archive.extend_from_slice(&central);
+    push_archive_u32(&mut archive, 0x0605_4b50);
+    push_archive_u16(&mut archive, 0);
+    push_archive_u16(&mut archive, 0);
+    push_archive_u16(&mut archive, entry_count);
+    push_archive_u16(&mut archive, entry_count);
+    push_archive_u32(&mut archive, central_size);
+    push_archive_u32(&mut archive, central_offset);
+    push_archive_u16(&mut archive, 0);
+    archive
+}
+
+fn zip_entry_count_bomb() -> Vec<u8> {
+    zip_limit_bomb(b"x", 4097, 0, &[], 0, 0)
+}
+
+fn zip_declared_output_bomb() -> Vec<u8> {
+    const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
+    let gzip = gzip_fixed_repeat_bomb(OUTPUT_LIMIT + 1, b'x');
+    let checksum = u32::from_le_bytes([
+        gzip[gzip.len() - 8],
+        gzip[gzip.len() - 7],
+        gzip[gzip.len() - 6],
+        gzip[gzip.len() - 5],
+    ]);
+    zip_limit_bomb(
+        b"x",
+        1,
+        8,
+        &gzip[10..gzip.len() - 8],
+        OUTPUT_LIMIT + 1,
+        checksum,
+    )
+}
+
+fn zip_materialization_bomb() -> Vec<u8> {
+    const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
+    const NAME_LEN: usize = 512;
+    let name = vec![b'n'; NAME_LEN];
+    let gzip = gzip_fixed_repeat_bomb(OUTPUT_LIMIT - NAME_LEN + 1, b'x');
+    let checksum = u32::from_le_bytes([
+        gzip[gzip.len() - 8],
+        gzip[gzip.len() - 7],
+        gzip[gzip.len() - 6],
+        gzip[gzip.len() - 5],
+    ]);
+    zip_limit_bomb(
+        &name,
+        1,
+        8,
+        &gzip[10..gzip.len() - 8],
+        OUTPUT_LIMIT - NAME_LEN + 1,
+        checksum,
+    )
 }
 
 fn zip_names_json_materialization_bomb() -> Vec<u8> {
@@ -459,6 +682,17 @@ fn tar_names_json_materialization_bomb() -> Vec<u8> {
     archive
 }
 
+fn tar_entry_count_bomb() -> Vec<u8> {
+    const TOO_MANY_ENTRIES: usize = 4097;
+    let mut archive = Vec::new();
+    for index in 0..TOO_MANY_ENTRIES {
+        let name = format!("entry-{index}");
+        append_tar_bomb_record(&mut archive, name.as_bytes(), b"x", b'0');
+    }
+    archive.extend_from_slice(&[0; 1024]);
+    archive
+}
+
 #[test]
 fn archive_public_zip_names_json_rejects_aggregate_materialization_bomb() {
     let archive = zip_names_json_materialization_bomb();
@@ -490,13 +724,7 @@ fn archive_public_tar_names_json_rejects_aggregate_materialization_bomb() {
 
 #[test]
 fn archive_public_tar_reader_rejects_an_entry_count_bomb() {
-    const TOO_MANY_ENTRIES: usize = 4097;
-    let mut archive = Vec::new();
-    for index in 0..TOO_MANY_ENTRIES {
-        let name = format!("entry-{index}");
-        append_tar_bomb_record(&mut archive, name.as_bytes(), b"x", b'0');
-    }
-    archive.extend_from_slice(&[0; 1024]);
+    let archive = tar_entry_count_bomb();
     assert!(archive.len() < 8 * 1024 * 1024);
     assert_eq!(
         jet_foundation::CoreArchive::jet_archive_tar_get(&archive, "entry-0"),
@@ -546,6 +774,136 @@ data :: [U8]{ 1, 2, 3 }
         complete.status.success(),
         "target + host dependency directories must link:\n{}",
         String::from_utf8_lossy(&complete.stderr)
+    );
+}
+
+#[test]
+fn archive_hostile_materialization_limits_match_all_execution_tiers() {
+    let zip_names = zip_names_json_materialization_bomb();
+    let zip_entries = zip_entry_count_bomb();
+    let zip_output = zip_declared_output_bomb();
+    let zip_materialization = zip_materialization_bomb();
+    let tar_names = tar_names_json_materialization_bomb();
+    let tar_entries = tar_entry_count_bomb();
+
+    assert!(zip_names.len() < 64 * 1024 * 1024);
+    assert!(
+        !jet_foundation::CoreArchive::jet_archive_zip_open(&zip_names).is_empty(),
+        "ZIP materialization bomb fixture must parse before JSON sizing"
+    );
+    assert!(zip_entries.len() < 8 * 1024 * 1024);
+    assert!(
+        jet_foundation::CoreArchive::jet_archive_zip_open(&zip_entries).is_empty(),
+        "ZIP entry-count bomb must be rejected by the public reader"
+    );
+    assert!(zip_output.len() < 8 * 1024 * 1024);
+    assert!(
+        jet_foundation::CoreArchive::jet_archive_zip_open(&zip_output).is_empty(),
+        "ZIP declared-output bomb must be rejected by the public reader"
+    );
+    assert!(zip_materialization.len() < 8 * 1024 * 1024);
+    assert!(
+        jet_foundation::CoreArchive::jet_archive_zip_open(&zip_materialization).is_empty(),
+        "ZIP aggregate materialization bomb must be rejected before allocation"
+    );
+
+    assert!(tar_names.len() < 64 * 1024 * 1024);
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_get(&tar_names, &"\u{0001}".repeat(8192)),
+        b"x"
+    );
+    assert!(tar_entries.len() < 8 * 1024 * 1024);
+    assert_eq!(
+        jet_foundation::CoreArchive::jet_archive_tar_get(&tar_entries, "entry-0"),
+        Vec::<u8>::new()
+    );
+
+    let temp = TempTree::new("jet_archive_hostile_limits");
+    let zip_names_path = temp.0.join("zip_names.bin");
+    let zip_entries_path = temp.0.join("zip_entries.bin");
+    let zip_output_path = temp.0.join("zip_output.bin");
+    let zip_materialization_path = temp.0.join("zip_materialization.bin");
+    let tar_names_path = temp.0.join("tar_names.bin");
+    let tar_entries_path = temp.0.join("tar_entries.bin");
+    fs::write(&zip_names_path, zip_names).unwrap();
+    fs::write(&zip_entries_path, zip_entries).unwrap();
+    fs::write(&zip_output_path, zip_output).unwrap();
+    fs::write(&tar_names_path, tar_names).unwrap();
+    fs::write(&zip_materialization_path, zip_materialization).unwrap();
+    fs::write(&tar_entries_path, tar_entries).unwrap();
+
+    let escape = |path: &Path| path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+use core.archive as ar
+use core.files as files
+
+fn zip_names_case(path: String) {
+    bytes :: files.read_bytes(path) ?? panic("zip names fixture")
+    if {
+        ar.zip_names_json(bytes) == "" -> print("zip-names:rejected")
+        else -> print("zip-names:accepted")
+    }
+}
+
+fn zip_entries_case(path: String) {
+    bytes :: files.read_bytes(path) ?? panic("zip entries fixture")
+    if {
+        ar.zip_open(bytes).len() == 0 -> print("zip-entries:rejected")
+        else -> print("zip-entries:accepted")
+    }
+}
+
+fn zip_output_case(path: String) {
+    bytes :: files.read_bytes(path) ?? panic("zip output fixture")
+    if {
+        ar.zip_decompress(bytes).len() == 0 -> print("zip-output:rejected")
+        else -> print("zip-output:accepted")
+    }
+}
+
+fn zip_materialization_case(path: String) {
+    bytes :: files.read_bytes(path) ?? panic("zip materialization fixture")
+    if {
+        ar.zip_decompress(bytes).len() == 0 -> print("zip-materialization:rejected")
+        else -> print("zip-materialization:accepted")
+    }
+}
+
+fn tar_names_case(path: String) {
+    bytes :: files.read_bytes(path) ?? panic("tar names fixture")
+    if {
+        ar.tar_names_json(bytes) == "" -> print("tar-names:rejected")
+        else -> print("tar-names:accepted")
+    }
+}
+
+fn tar_entries_case(path: String) {
+    bytes :: files.read_bytes(path) ?? panic("tar entries fixture")
+    if {
+        ar.tar_get(bytes, "entry-0").len() == 0 -> print("tar-entries:rejected")
+        else -> print("tar-entries:accepted")
+    }
+}
+
+fn run() {
+    zip_names_case("__ZIP_NAMES__")
+    zip_entries_case("__ZIP_ENTRIES__")
+    zip_output_case("__ZIP_OUTPUT__")
+    zip_materialization_case("__ZIP_MATERIALIZATION__")
+    tar_names_case("__TAR_NAMES__")
+    tar_entries_case("__TAR_ENTRIES__")
+}
+"#
+    .replace("__ZIP_NAMES__", &escape(&zip_names_path))
+    .replace("__ZIP_ENTRIES__", &escape(&zip_entries_path))
+    .replace("__ZIP_OUTPUT__", &escape(&zip_output_path))
+    .replace("__ZIP_MATERIALIZATION__", &escape(&zip_materialization_path))
+    .replace("__TAR_NAMES__", &escape(&tar_names_path))
+    .replace("__TAR_ENTRIES__", &escape(&tar_entries_path));
+    tir_support::assert_tiers_agree(
+        "archive_hostile_materialization_limits",
+        &source,
+        "zip-names:rejected\nzip-entries:rejected\nzip-output:rejected\nzip-materialization:rejected\ntar-names:rejected\ntar-entries:rejected\n",
     );
 }
 

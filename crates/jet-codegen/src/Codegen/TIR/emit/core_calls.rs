@@ -1491,9 +1491,13 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "lerp") => {
             format!("(({}) + (({}) - ({})) * ({}))", arg(0), arg(1), arg(0), arg(2))
         }
-        ("core.math", "is_nan") => format!("({}).is_nan()", arg(0)),
-        ("core.math", "is_inf") => format!("({}).is_infinite()", arg(0)),
-        ("core.math", "is_finite") => format!("({}).is_finite()", arg(0)),
+        ("core.math", "is_nan") => format!("{}({})", helper("jet_std_math_is_nan"), arg(0)),
+        ("core.math", "is_inf") => {
+            format!("{}({})", helper("jet_std_math_is_infinite"), arg(0))
+        }
+        ("core.math", "is_finite") => {
+            format!("{}({})", helper("jet_std_math_is_finite"), arg(0))
+        }
         ("core.math", "sign") => format!(
             "if ({0}) > 0.0 {{ 1i64 }} else if ({0}) < 0.0 {{ -1i64 }} else {{ 0i64 }}",
             arg(0)
@@ -3386,11 +3390,9 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         // D-DBDRIVER1: core.db — SQLite via the FFI bridge crate. `open`/`open_memory`
-        // are the only module-level entry points; they wrap the bridge's raw u64
-        // handle in the Jet-visible `DBConnection` handle (`JetDbConnection`), so
-        // every other operation dispatches by receiver TYPE as an instance method
-        // (`THandleOp::DBQuery`/… in the `HandleMethod` arm below), not a second
-        // module-call surface.
+        // are the module-level connection entry points; policy, transaction, and
+        // migration are module calls over a `DBScope`, while row operations dispatch
+        // by receiver TYPE as instance methods (`THandleOp::DBQuery`/… below).
         ("core.db", "open") => {
             format!(
                 "{}JetDbConnection {{ handle: {}(&({})) }}",
@@ -3416,6 +3418,22 @@ pub(crate) fn emit_tir_core_call(
             "{}jet_db_policy_audit(&({}))",
             cx.root_prefix,
             arg(0)
+        ),
+        // D-TYPEDSQL-SINK1=A: ordered SQL values stay paired with their
+        // bindings through the transaction/migration wrapper.
+        ("core.db", "transaction") => format!(
+            "{}jet_db_scope_transaction(&({}), &({}), &({}))",
+            cx.root_prefix,
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.db", "migrate") => format!(
+            "{}jet_db_scope_migrate(&({}), &({}), &({}))",
+            cx.root_prefix,
+            arg(0),
+            arg(1),
+            arg(2)
         ),
         ("core.process", "workspace") => {
             format!("{}jet_std_process_workspace()", cx.root_prefix)

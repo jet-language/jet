@@ -1,0 +1,33 @@
+// D-PACKAGE-MODEL1=A / Tower #2390: the non-Jetpack witness reads the
+// compiler's package model during compile time. Runtime code only prints the
+// resulting constants; it never receives a filesystem capability.
+use core.compiler as compiler
+
+@manifest :: compiler.manifest() ?? panic("manifest view failed")
+@package :: compiler.package() ?? panic("package view failed")
+@lock :: compiler.lock() ?? panic("lock view failed")
+@profiles :: compiler.profiles() ?? panic("profile view failed")
+
+@manifest_outputs :: @manifest.outputs().len()
+@package_outputs :: @package.outputs().len()
+@lock_version :: @lock.version()
+@lock_packages :: @lock.packages().len()
+@profile_count :: @profiles.profiles().len()
+@package_name :: @build.package.name
+@package_version :: @build.package.version
+
+fn build(b: BuildContext) BuildPlan -> {
+    if @manifest_outputs != 0 -> panic("manifest view must stay uncomposed")
+    if @package_outputs != 1 -> panic("package view must include Config output")
+    if @lock_packages != 1 -> panic("lock view lost its package")
+    if @profile_count != 2 -> panic("profile view lost its profiles")
+    app :: b.add_executable("compiler_api_package", ["run.jet"], [])
+    return b.plan(app)
+}
+
+fn run() {
+    print("identity: {@package_name}@{@package_version}")
+    print("outputs: {@manifest_outputs}->{@package_outputs}")
+    print("lock: v{@lock_version} ({@lock_packages})")
+    print("profiles: {@profile_count}")
+}

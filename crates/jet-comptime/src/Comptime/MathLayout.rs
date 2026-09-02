@@ -704,10 +704,7 @@ fn to_int_array_list(type_name: &str, lanes: &[i64]) -> CtValue {
 fn reduce_op(name: &str, lanes: &[f64], op: &str) -> Option<f64> {
     let op = simd_reduce_op(op)?;
     if is_f32_lanes(name) {
-        let lanes = lanes
-            .iter()
-            .map(|value| *value as f32)
-            .collect::<Vec<_>>();
+        let lanes = lanes.iter().map(|value| *value as f32).collect::<Vec<_>>();
         return simd_lanes::jet_simd_reduce_slice(&lanes, op).map(f64::from);
     }
     simd_lanes::jet_simd_reduce_slice(lanes, op)
@@ -718,12 +715,7 @@ fn reduce_int_op(name: &str, lanes: &[i64], op: &str) -> Option<i64> {
     simd_lanes::jet_simd_integer_reduce(lanes, simd_reduce_op(op)?, signed, bits)
 }
 
-fn reduce_value(
-    name: &str,
-    lanes: &[f64],
-    int_lanes: Option<&[i64]>,
-    op: &str,
-) -> Option<CtValue> {
+fn reduce_value(name: &str, lanes: &[f64], int_lanes: Option<&[i64]>, op: &str) -> Option<CtValue> {
     if let Some(int_lanes) = int_lanes {
         return reduce_int_op(name, int_lanes, op).map(CtValue::Int);
     }
@@ -739,9 +731,10 @@ pub(super) fn apply_method(
     let (name, vals) = lanes(recv)?;
     let int_vals = integer_lanes(recv).map(|(_, values)| values);
     Some(match (method, args.len()) {
-        ("to_array", 0) => Ok(int_vals
-            .as_deref()
-            .map_or_else(|| to_array_list(name, &vals), |values| to_int_array_list(name, values))),
+        ("to_array", 0) => Ok(int_vals.as_deref().map_or_else(
+            || to_array_list(name, &vals),
+            |values| to_int_array_list(name, values),
+        )),
         ("sum", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "sum")
             .unwrap_or_else(|| lane_value(name, 0.0))),
         // AOT exposes product/min/max as named methods; same reduce_op as
@@ -870,9 +863,7 @@ pub fn lane_at(recv: &CtValue, index: i64, span: Span) -> Option<Result<CtValue,
     if !(Syntax::is_simd_lane_type(name)
         || matches!(
             name,
-            Syntax::LINALG_VEC2_TYPE
-                | Syntax::LINALG_VEC3_TYPE
-                | Syntax::LINALG_VEC4_TYPE
+            Syntax::LINALG_VEC2_TYPE | Syntax::LINALG_VEC3_TYPE | Syntax::LINALG_VEC4_TYPE
         ))
     {
         return None;

@@ -6,7 +6,9 @@ use core.testing as testing
 fn run() {
     root :: testing.temp_dir("term-binwrite")
     path :: Path.from(root).join("fixture.bin")
-    result :: term.binwrite(path, [U8]{65, 66, 67})
-    print(result)
+    print((() -> {
+        term.binwrite(path, [U8]{65, 66, 67})
+        true
+    })())
     files.remove_all(root) ?? panic("cleanup")
 }

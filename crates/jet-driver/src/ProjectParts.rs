@@ -278,7 +278,19 @@ pub fn scan_with_diagnostics(
                 }
             }
         };
-        let (tokens, lex_diags) = Lexer::lex(&source);
+        let source_for_parse = match crate::Package::mask_inline_package_source(&source) {
+            Ok((masked, _)) => masked,
+            Err(error) => {
+                failures.push(ProjectPartScanFailure {
+                    path,
+                    module_names: Vec::new(),
+                    problem: error.diagnostic(),
+                    authority: false,
+                });
+                continue;
+            }
+        };
+        let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
         if !lex_diags.is_empty() {
             failures.push(ProjectPartScanFailure {
                 path,

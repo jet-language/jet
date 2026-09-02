@@ -123,6 +123,27 @@ fn http_get_response_with_session(
     }).unwrap_or_default();
     Some((status, content_type, raw[split..].to_vec()))
 }
+fn raw_http_exchange(port: u16, request: &[u8]) -> Option<Vec<u8>> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .ok()?;
+    stream.write_all(request).ok()?;
+    stream.shutdown(std::net::Shutdown::Write).ok()?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok()?;
+    Some(raw)
+}
+
+fn raw_get_request(target: &str, headers: &[String]) -> Vec<u8> {
+    let mut request = format!("GET {target} HTTP/1.1\r\n").into_bytes();
+    for header in headers {
+        request.extend_from_slice(header.as_bytes());
+        request.extend_from_slice(b"\r\n");
+    }
+    request.extend_from_slice(b"\r\n");
+    request
+}
 
 fn http_post(port: u16, path: &str, body: &str) -> Option<(u16, Vec<u8>)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
@@ -607,6 +628,38 @@ fn jet_dev_web_rejects_windows_absolute_static_paths() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+struct WebTestStaticServer(std::process::Child);
+
+impl Drop for WebTestStaticServer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn start_web_test_static_server(root: &Path) -> (u16, WebTestStaticServer) {
+    let port = unused_local_port();
+    let child = Command::new("node")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/web-test/serve.mjs"))
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--root")
+        .arg(root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start web-test static server");
+    let guard = WebTestStaticServer(child);
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(10) {
+        if let Some((200, _)) = http_get_without_session(port, "/") {
+            return (port, guard);
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("web-test static server did not become ready");
+}
+
 #[cfg(unix)]
 #[test]
 fn web_test_static_server_rejects_symlink_escape() {
@@ -664,6 +717,251 @@ fn web_test_static_server_rejects_symlink_escape() {
 
     let _ = fs::remove_dir_all(&root);
     let _ = fs::remove_file(&outside);
+}
+
+#[test]
+fn web_test_static_server_rejects_sibling_prefix_traversal() {
+    if !have_tool("node") {
+        eprintln!("note: skipping web_test_static_server_rejects_sibling_prefix_traversal (need node)");
+        return;
+    }
+
+    let base = std::env::temp_dir().join(format!(
+        "jet-web-test-static-sibling-prefix-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&base);
+    let root = base.join("root");
+    let sibling = base.join("root-sibling");
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&sibling).unwrap();
+    fs::write(root.join("index.html"), "safe\n").unwrap();
+    fs::write(sibling.join("secret.js"), "sibling-secret\n").unwrap();
+
+    let (port, guard) = start_web_test_static_server(&root);
+    let (status, content_type, _) =
+        http_get_with_content_type(port, "/").expect("GET / from static server");
+    assert_eq!(status, 200);
+    assert_eq!(content_type, "text/html; charset=utf-8");
+    let (status, body) = http_get_without_session(port, "/../root-sibling/secret.js")
+        .expect("sibling-prefix traversal request");
+    assert_eq!(status, 400);
+    assert!(
+        !body
+            .windows(b"sibling-secret".len())
+            .any(|window| window == b"sibling-secret"),
+        "sibling-prefix traversal returned outside bytes"
+    );
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn web_test_static_server_rejects_hardlinked_file() {
+    if !have_tool("node") {
+        eprintln!("note: skipping web_test_static_server_rejects_hardlinked_file (need node)");
+        return;
+    }
+
+    let base = std::env::temp_dir().join(format!(
+        "jet-web-test-static-hardlink-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&base);
+    let root = base.join("root");
+    let outside = base.join("outside.js");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("index.html"), "safe\n").unwrap();
+    fs::write(&outside, "hardlink-secret\n").unwrap();
+    fs::hard_link(&outside, root.join("hard.js")).unwrap();
+
+    let (port, guard) = start_web_test_static_server(&root);
+    let (status, body) =
+        http_get_without_session(port, "/hard.js").expect("hardlink request");
+    assert_eq!(status, 400);
+    assert!(
+        !body
+            .windows(b"hardlink-secret".len())
+            .any(|window| window == b"hardlink-secret"),
+        "hardlinked outside bytes were served"
+    );
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "hardlink-secret\n");
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn web_test_static_server_final_swap_stays_inside_root() {
+    if !have_tool("node") {
+        eprintln!("note: skipping web_test_static_server_final_swap_stays_inside_root (need node)");
+        return;
+    }
+
+    use std::os::unix::fs::symlink;
+
+    let base = std::env::temp_dir().join(format!(
+        "jet-web-test-static-final-swap-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&base);
+    let root = base.join("root");
+    let target = root.join("race.js");
+    let parked = root.join("race.js.parked");
+    let outside = base.join("outside.js");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("index.html"), "safe\n").unwrap();
+    fs::write(&target, "inside-final\n").unwrap();
+    fs::write(&outside, "outside-final\n").unwrap();
+
+    let (port, guard) = start_web_test_static_server(&root);
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let leaked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let swaps = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let swap_stop = std::sync::Arc::clone(&stop);
+    let swap_target = target.clone();
+    let swap_parked = parked.clone();
+    let swap_outside = outside.clone();
+    let swap_count = std::sync::Arc::clone(&swaps);
+    let swapper = std::thread::spawn(move || {
+        while !swap_stop.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = fs::remove_file(&swap_parked);
+            if fs::rename(&swap_target, &swap_parked).is_ok() {
+                if symlink(&swap_outside, &swap_target).is_ok() {
+                    swap_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                let _ = fs::remove_file(&swap_target);
+                let _ = fs::rename(&swap_parked, &swap_target);
+                std::thread::sleep(Duration::from_micros(50));
+            }
+        }
+    });
+
+    let mut requests = Vec::new();
+    for _ in 0..4 {
+        let request_leaked = std::sync::Arc::clone(&leaked);
+        let request_served = std::sync::Arc::clone(&served);
+        requests.push(std::thread::spawn(move || {
+            for _ in 0..256 {
+                let Some((status, body)) = http_get_without_session(port, "/race.js") else {
+                    continue;
+                };
+                if status == 200 {
+                    request_served.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                if body
+                    .windows(b"outside-final".len())
+                    .any(|window| window == b"outside-final")
+                {
+                    request_leaked.store(true, std::sync::atomic::Ordering::Relaxed);
+                    break;
+                }
+            }
+        }));
+    }
+    for request in requests {
+        request.join().unwrap();
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    swapper.join().unwrap();
+
+    assert!(!leaked.load(std::sync::atomic::Ordering::Relaxed));
+    assert!(swaps.load(std::sync::atomic::Ordering::Relaxed) > 0);
+    assert!(served.load(std::sync::atomic::Ordering::Relaxed) > 0);
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn web_test_static_server_ancestor_swap_stays_inside_root() {
+    if !have_tool("node") {
+        eprintln!("note: skipping web_test_static_server_ancestor_swap_stays_inside_root (need node)");
+        return;
+    }
+
+    use std::os::unix::fs::symlink;
+
+    let base = std::env::temp_dir().join(format!(
+        "jet-web-test-static-ancestor-swap-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&base);
+    let root = base.join("root");
+    let nested = root.join("nested");
+    let parked = root.join("nested.parked");
+    let outside = base.join("outside-parent");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(root.join("index.html"), "safe\n").unwrap();
+    fs::write(nested.join("race.js"), "inside-ancestor\n").unwrap();
+    fs::write(outside.join("race.js"), "outside-ancestor\n").unwrap();
+
+    let (port, guard) = start_web_test_static_server(&root);
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let leaked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let swaps = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let swap_stop = std::sync::Arc::clone(&stop);
+    let swap_nested = nested.clone();
+    let swap_parked = parked.clone();
+    let swap_outside = outside.clone();
+    let swap_count = std::sync::Arc::clone(&swaps);
+    let swapper = std::thread::spawn(move || {
+        while !swap_stop.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = fs::remove_dir_all(&swap_parked);
+            if fs::rename(&swap_nested, &swap_parked).is_ok() {
+                if symlink(&swap_outside, &swap_nested).is_ok() {
+                    swap_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                let _ = fs::remove_file(&swap_nested);
+                let _ = fs::rename(&swap_parked, &swap_nested);
+                std::thread::sleep(Duration::from_micros(50));
+            }
+        }
+    });
+
+    let mut requests = Vec::new();
+    for _ in 0..4 {
+        let request_leaked = std::sync::Arc::clone(&leaked);
+        let request_served = std::sync::Arc::clone(&served);
+        requests.push(std::thread::spawn(move || {
+            for _ in 0..256 {
+                let Some((status, body)) =
+                    http_get_without_session(port, "/nested/race.js")
+                else {
+                    continue;
+                };
+                if status == 200 {
+                    request_served.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                if body
+                    .windows(b"outside-ancestor".len())
+                    .any(|window| window == b"outside-ancestor")
+                {
+                    request_leaked.store(true, std::sync::atomic::Ordering::Relaxed);
+                    break;
+                }
+            }
+        }));
+    }
+    for request in requests {
+        request.join().unwrap();
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    swapper.join().unwrap();
+
+    assert!(!leaked.load(std::sync::atomic::Ordering::Relaxed));
+    assert!(swaps.load(std::sync::atomic::Ordering::Relaxed) > 0);
+    assert!(served.load(std::sync::atomic::Ordering::Relaxed) > 0);
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&base);
 }
 
 #[test]
@@ -2865,6 +3163,341 @@ fn embedded_devserver_slow_header_does_not_block_other_clients() {
     assert_eq!(status, 200);
 
     drop(slow);
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn embedded_devserver_http_line_and_header_bounds_are_exact() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_http_line_and_header_bounds_are_exact (need rustc)"
+        );
+        return;
+    }
+
+    const MAX_LINE_BYTES: usize = 8 * 1024;
+    const MAX_HEADER_BYTES: usize = 32 * 1024;
+    const MAX_HEADER_COUNT: usize = 100;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_http_bounds_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap();
+    let guard = start_embedded_devserver(&dir, port);
+
+    let line_prefix = "GET ";
+    let line_suffix = " HTTP/1.1\r\n";
+    let target_prefix = "/__jet_dev_version?";
+    let target_len = MAX_LINE_BYTES - line_prefix.len() - line_suffix.len();
+    assert!(target_len > target_prefix.len());
+    let exact_target = format!(
+        "{target_prefix}{}",
+        "q".repeat(target_len - target_prefix.len())
+    );
+    assert_eq!(
+        format!("{line_prefix}{exact_target}{line_suffix}").len(),
+        MAX_LINE_BYTES
+    );
+    let exact_response = raw_http_exchange(port, &raw_get_request(&exact_target, &[]))
+        .expect("request line at the 8 KiB boundary was not served");
+    assert!(
+        exact_response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "request line at the exact cap should remain valid"
+    );
+
+    let over_target = format!(
+        "{target_prefix}{}",
+        "q".repeat(target_len + 1 - target_prefix.len())
+    );
+    assert_eq!(
+        format!("{line_prefix}{over_target}{line_suffix}").len(),
+        MAX_LINE_BYTES + 1
+    );
+    let over_response = raw_http_exchange(port, &raw_get_request(&over_target, &[]));
+    assert!(
+        match over_response {
+            None => true,
+            Some(response) => !response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        },
+        "a request line over 8 KiB was accepted"
+    );
+
+    let header_prefix = "X-Pad: ";
+    let exact_header = format!(
+        "{header_prefix}{}",
+        "x".repeat(MAX_LINE_BYTES - header_prefix.len() - 2)
+    );
+    assert_eq!(exact_header.len() + 2, MAX_LINE_BYTES);
+    let exact_response = raw_http_exchange(
+        port,
+        &raw_get_request("/__jet_dev_version", &[exact_header.clone()]),
+    )
+    .expect("header line at the 8 KiB boundary was not served");
+    assert!(
+        exact_response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "header line at the exact cap should remain valid"
+    );
+
+    let over_header = format!("{header_prefix}{}", "x".repeat(MAX_LINE_BYTES - header_prefix.len() - 1));
+    assert_eq!(over_header.len() + 2, MAX_LINE_BYTES + 1);
+    let over_response = raw_http_exchange(
+        port,
+        &raw_get_request("/__jet_dev_version", &[over_header]),
+    );
+    assert!(
+        match over_response {
+            None => true,
+            Some(response) => !response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        },
+        "a header line over 8 KiB was accepted"
+    );
+
+    let exact_headers = vec![exact_header; MAX_HEADER_BYTES / MAX_LINE_BYTES];
+    let exact_header_bytes: usize = exact_headers.iter().map(|header| header.len() + 2).sum();
+    assert_eq!(exact_header_bytes, MAX_HEADER_BYTES);
+    let exact_response = raw_http_exchange(
+        port,
+        &raw_get_request("/__jet_dev_version", &exact_headers),
+    )
+    .expect("aggregate headers at the 32 KiB boundary were not served");
+    assert!(
+        exact_response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "aggregate headers at the exact cap should remain valid"
+    );
+
+    let mut over_headers = exact_headers.clone();
+    over_headers.push("X: y".to_string());
+    assert!(over_headers.iter().all(|header| header.len() + 2 <= MAX_LINE_BYTES));
+    let over_header_bytes: usize = over_headers.iter().map(|header| header.len() + 2).sum();
+    assert!(over_header_bytes > MAX_HEADER_BYTES);
+    let over_response = raw_http_exchange(
+        port,
+        &raw_get_request("/__jet_dev_version", &over_headers),
+    );
+    assert!(
+        match over_response {
+            None => true,
+            Some(response) => !response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        },
+        "aggregate headers over 32 KiB were accepted"
+    );
+
+    let exact_count_headers: Vec<String> = (0..MAX_HEADER_COUNT)
+        .map(|index| format!("X-{index}: y"))
+        .collect();
+    assert_eq!(exact_count_headers.len(), MAX_HEADER_COUNT);
+    let exact_response = raw_http_exchange(
+        port,
+        &raw_get_request("/__jet_dev_version", &exact_count_headers),
+    )
+    .expect("100 headers at the count boundary were not served");
+    assert!(
+        exact_response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "100 headers at the exact cap should remain valid"
+    );
+
+    let mut over_count_headers = exact_count_headers.clone();
+    over_count_headers.push("X-extra: y".to_string());
+    assert_eq!(over_count_headers.len(), MAX_HEADER_COUNT + 1);
+    let over_response = raw_http_exchange(
+        port,
+        &raw_get_request("/__jet_dev_version", &over_count_headers),
+    );
+    assert!(
+        match over_response {
+            None => true,
+            Some(response) => !response.starts_with(b"HTTP/1.1 200 OK\r\n"),
+        },
+        "more than 100 headers were accepted"
+    );
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn embedded_devserver_admission_cap_drops_the_65th_connection() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_admission_cap_drops_the_65th_connection (need rustc)"
+        );
+        return;
+    }
+
+    const MAX_CONNECTIONS: usize = 64;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_connection_cap_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap();
+    let guard = start_embedded_devserver(&dir, port);
+
+    // Each holder sends an incomplete request, keeping its admitted worker
+    // blocked in the request-line reader. `connect` alone only proves that
+    // the listener backlog accepted a socket, so retry the probe until all
+    // 64 holders have reached the admission gate.
+    let mut holders = Vec::with_capacity(MAX_CONNECTIONS);
+    for _ in 0..MAX_CONNECTIONS {
+        let mut holder = TcpStream::connect(("127.0.0.1", port))
+            .expect("failed to connect an admission-cap holder");
+        holder
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        holder.write_all(b"G").unwrap();
+        holders.push(holder);
+    }
+
+    let probe_request = b"GET /__jet_dev_version HTTP/1.1\r\n\r\n";
+    let probe_deadline = Instant::now() + Duration::from_secs(5);
+    let mut dropped = false;
+    while Instant::now() < probe_deadline {
+        let mut probe = match TcpStream::connect(("127.0.0.1", port)) {
+            Ok(probe) => probe,
+            Err(_) => {
+                dropped = true;
+                break;
+            }
+        };
+        probe
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .unwrap();
+        if probe.write_all(probe_request).is_err() {
+            dropped = true;
+            break;
+        }
+        let _ = probe.shutdown(std::net::Shutdown::Write);
+        let mut response = Vec::new();
+        let result = probe.read_to_end(&mut response);
+        let closed = response.is_empty()
+            && match result {
+                Ok(_) => true,
+                Err(error) => matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::UnexpectedEof
+                ),
+            };
+        if closed {
+            dropped = true;
+            break;
+        }
+        std::thread::yield_now();
+    }
+
+    drop(holders);
+    assert!(
+        dropped,
+        "the connection after 64 occupied admission slots was not dropped or refused"
+    );
+    wait_for_server_up(port, Duration::from_secs(3));
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn embedded_devserver_deadline_is_absolute_under_successful_byte_trickle() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping embedded_devserver_deadline_is_absolute_under_successful_byte_trickle (need rustc)"
+        );
+        return;
+    }
+
+    const TRICKLE_BYTES: usize = 32;
+    const TRICKLE_INTERVAL: Duration = Duration::from_millis(200);
+    let dir = std::env::temp_dir().join(format!(
+        "jet_embedded_devserver_absolute_deadline_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let port = unused_local_port();
+    fs::write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap();
+    let guard = start_embedded_devserver(&dir, port);
+
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(12)))
+        .unwrap();
+    client
+        .write_all(b"GET /__jet_dev_version HTTP/1.1\r\nHost: localhost")
+        .unwrap();
+    client.flush().unwrap();
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let start_barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let writer_stop = std::sync::Arc::clone(&stop);
+    let writer_barrier = std::sync::Arc::clone(&start_barrier);
+    let mut trickle = client.try_clone().unwrap();
+    let (sent_tx, sent_rx) = mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        writer_barrier.wait();
+        let mut sent = 0;
+        for index in 0..TRICKLE_BYTES {
+            if writer_stop.load(std::sync::atomic::Ordering::Acquire)
+                || trickle.write_all(b"x").is_err()
+                || trickle.flush().is_err()
+            {
+                break;
+            }
+            sent += 1;
+            if index + 1 < TRICKLE_BYTES {
+                std::thread::sleep(TRICKLE_INTERVAL);
+            }
+        }
+        let _ = sent_tx.send(sent);
+        while !writer_stop.load(std::sync::atomic::Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+    });
+
+    let started = Instant::now();
+    start_barrier.wait();
+    let mut response = Vec::new();
+    let read_result = client.read_to_end(&mut response);
+    let elapsed = started.elapsed();
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    drop(client);
+    writer.join().unwrap();
+    let sent = sent_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("trickle writer did not report its successful bytes");
+
+    let deadline_closed = match &read_result {
+        Ok(_) => true,
+        Err(error) => matches!(
+            error.kind(),
+            std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::UnexpectedEof
+        ),
+    };
+    assert_eq!(
+        sent, TRICKLE_BYTES,
+        "the client must deliver successful bytes before the absolute deadline"
+    );
+    assert!(
+        deadline_closed && response.is_empty(),
+        "the incomplete request must close without a response: read={read_result:?}, response={response:?}"
+    );
+    assert!(
+        elapsed >= Duration::from_secs(9),
+        "the deadline proof must allow the successful trickle to run: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(11_500),
+        "successful bytes renewed the request deadline: {elapsed:?}"
+    );
+
     drop(guard);
     let _ = fs::remove_dir_all(&dir);
 }

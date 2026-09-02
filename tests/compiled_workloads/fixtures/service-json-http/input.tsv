@@ -1,5 +1,12 @@
+# The beginner rail uses safe loopback bind and bounded defaults.
+CONFIG|beginner|127.0.0.1:0|4|200|100|64|200
 GET|/health|
 GET|/ready|
-POST|/sum|1,2,3
-POST|/sum|1,2,bad
-GET|/missing|
+WAIT|250|
+GET|/ready|
+POST|/sum|{"numbers":[1,2,3]}
+CONCURRENT|/sum|{"numbers":[2,4,6]}|3
+MALFORMED|/sum|{
+OVERSIZE|/sum|
+SLOW|/sum|{"numbers":[9]}
+SHUTDOWN||

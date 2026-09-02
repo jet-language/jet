@@ -68,6 +68,7 @@ pub(crate) fn clear_net_http_handles() {
     };
     let grace = jet_std::Duration { ns: 0 };
     for server in servers {
+        Concurrency::notify_http_test_shutdown_started();
         let _ = jet_http_server_shutdown(&server, &grace);
     }
     Concurrency::with_http_runtime_quiesced(|| {
@@ -588,6 +589,28 @@ fn invalid_http_handler() -> JetHTTPHandler {
         })
     })
 }
+pub(crate) struct TestHttpHandler(JetHTTPHandler);
+
+pub(crate) fn test_capture_http_handler(callable: i64) -> TestHttpHandler {
+    TestHttpHandler(wrap_http_handler(callable))
+}
+
+pub(crate) fn test_invoke_captured_http_handler(
+    handler: &TestHttpHandler,
+) -> Result<(), String> {
+    let request = JetHTTPRequest::server(
+        "GET",
+        "/".to_string(),
+        Vec::new(),
+        JetHTTPHeaders::new(),
+    );
+    match (handler.0)(request) {
+        Ok(_) => Ok(()),
+        Err(JetHTTPError::IO { operation }) => Err(operation),
+        Err(_) => Err("HTTP handler returned an error".to_string()),
+    }
+}
+
 
 fn wrap_http_handler(callable: i64) -> JetHTTPHandler {
     let Some((epoch, slot)) = resident_http_callable(callable) else {
@@ -596,6 +619,7 @@ fn wrap_http_handler(callable: i64) -> JetHTTPHandler {
     Arc::new(move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
         Concurrency::try_with_http_jet_runtime_at(epoch, || {
             let req_h = push_handle(NetHttpHandle::HTTPRequest(req));
+            Concurrency::notify_http_test_handler_entry();
             let res_h = unsafe {
                 if slot.has_env {
                     let f: HTTPHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
@@ -1086,6 +1110,22 @@ fn jet_jit_tcp_stream_write_all_bytes(stream: i64, data: i64) -> i64 {
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_tcp_write_all_bytes(&mut guard, &bytes))
 }
+fn jet_jit_tcp_stream_shutdown(stream: i64, how: i64) -> i64 {
+    let Some(how) = (match how {
+        0 => Some(JetNetShutdown::Read),
+        1 => Some(JetNetShutdown::Write),
+        2 => Some(JetNetShutdown::Both),
+        _ => None,
+    }) else {
+        return net_invalid("tcp shutdown", "NetShutdown");
+    };
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp shutdown", "TcpStream");
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_tcp_shutdown(&mut guard, how))
+}
+
 
 fn jet_jit_tcp_stream_close(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
@@ -2204,6 +2244,9 @@ fn native_http_response(
 }
 
 fn native_http_request(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {
+    if let Some(error) = req.header_error.as_ref() {
+        return Err(error.clone());
+    }
     let body = if req.body_set {
         Some(req.body.bytes(8 * 1024 * 1024)?)
     } else {
@@ -2791,6 +2834,7 @@ host_fns! {
     tcp_local_addr: "jet_jit_tcp_listener_local_addr" => jet_jit_tcp_listener_local_addr: sig1;
     tcp_read_text: "jet_jit_tcp_stream_read_text" => jet_jit_tcp_stream_read_text: sig2;
     tcp_write_all_bytes: "jet_jit_tcp_stream_write_all_bytes" => jet_jit_tcp_stream_write_all_bytes: sig2;
+    tcp_shutdown: "jet_jit_tcp_stream_shutdown" => jet_jit_tcp_stream_shutdown: sig2;
     tcp_close: "jet_jit_tcp_stream_close" => jet_jit_tcp_stream_close: sig1;
     tcp_ready: "jet_jit_tcp_stream_ready" => jet_jit_tcp_stream_ready: sig3;
     tls_client_config_default: "jet_jit_tls_client_config_default" => jet_jit_tls_client_config_default: sig0;
@@ -3098,6 +3142,22 @@ pub(crate) fn runtime_http_server_shutdown(
 pub(crate) fn runtime_http_mux() -> i64 {
     push_handle(NetHttpHandle::HTTPMux(Arc::new(jet_http_mux_new())))
 }
+pub(crate) fn test_http_mux_add_handler(
+    mux: i64,
+    method: &str,
+    pattern: &str,
+    handler: &TestHttpHandler,
+) -> Result<(), String> {
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    jet_http_mux_add_handler(&mux, method, pattern, handler.0.clone());
+    Ok(())
+}
+
+pub(crate) fn test_http_server_local_addr(server: i64) -> Result<String, String> {
+    let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
+    jet_http_server_local_addr(&server)
+}
+
 
 // ── I9 UDP ambient adapters ───────────────────────────────────────────────
 
@@ -3776,6 +3836,42 @@ pub(crate) fn runtime_tcp_stream_read_io(stream: i64, limit: i64) -> CtValue {
                 Some("TcpStream".to_string()),
                 None,
                 Some("invalid TcpStream handle".to_string()),
+            ),
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match JetIOReader::read(&mut *stream, limit) {
+        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+#[cfg(unix)]
+pub(crate) fn runtime_unix_stream_read_io(stream: i64, limit: i64) -> CtValue {
+    let Some(stream) = unix_stream(stream) else {
+        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
+            jet_std::IOContext::new(
+                jet_std::IOOperation::Read,
+                Some("UnixStream".to_string()),
+                None,
+                Some("invalid UnixStream handle".to_string()),
+            ),
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match JetIOReader::read(&mut *stream, limit) {
+        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tls_stream_read_io(stream: i64, limit: i64) -> CtValue {
+    let Some(stream) = tls_stream(stream) else {
+        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
+            jet_std::IOContext::new(
+                jet_std::IOOperation::Read,
+                Some("TLSStream".to_string()),
+                None,
+                Some("invalid TLSStream handle".to_string()),
             ),
         ))));
     };
@@ -4980,6 +5076,18 @@ pub(crate) fn runtime_http_request_send(
         .map_err(http_error_value))
 }
 
+pub(crate) fn runtime_http_client_get(url: String) -> Result<i64, CtValue> {
+    native_http_response(native_http::jet_http_client_get_impl(&url))
+        .map(|response| push_handle(NetHttpHandle::HTTPResponse(response)))
+        .map_err(http_error_value)
+}
+
+pub(crate) fn runtime_http_client_post(url: String, body: String) -> Result<i64, CtValue> {
+    native_http_response(native_http::jet_http_client_post_impl(&url, &body))
+        .map(|response| push_handle(NetHttpHandle::HTTPResponse(response)))
+        .map_err(http_error_value)
+}
+
 pub(crate) fn runtime_http_request_new(method: String, url: String) -> i64 {
     push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_new(
         &method, &url,
@@ -5236,4 +5344,79 @@ mod http_i9_adapter_tests {
         assert_eq!(defaulted.max_age_secs, 86_400);
         assert_eq!(explicit.max_age_secs, i64::MIN);
     }
+}
+struct Http2DrainGate {
+    cancelled: std::sync::mpsc::Sender<()>,
+    release: Option<std::sync::mpsc::Receiver<()>>,
+}
+
+impl Drop for Http2DrainGate {
+    fn drop(&mut self) {
+        let _ = self.cancelled.send(());
+        if let Some(release) = self.release.take() {
+            let _ = release.recv();
+        }
+    }
+}
+
+/// Exercise the exact HTTP/2 dispatch ownership used by `jet_http2_serve`.
+/// The queued scheduler task announces cancellation from its unwind cleanup,
+/// then holds that cleanup until the caller releases it. Therefore a cleanup
+/// completion observed before release is impossible while `drain()` still
+/// owns every queued task.
+pub(crate) fn test_http2_dispatch_drain() -> Result<(), String> {
+    let (cancelled_tx, cancelled_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let control = JetTaskControl::new();
+    let task_control = control.clone();
+    let task = jet_scheduler_spawn_blocking_with_control(
+        move || {
+            let _gate = Http2DrainGate {
+                cancelled: cancelled_tx,
+                release: Some(release_rx),
+            };
+            let park = jet_codegen::scheduler::ParkSlot::new();
+            loop {
+                jet_codegen::scheduler::jet_scheduler_yield(
+                    "HTTP/2 dispatch lifetime proof",
+                    &park,
+                    None,
+                );
+            }
+        },
+        task_control,
+    );
+    let mut dispatch_tasks = JetHTTP2DispatchTasks::default();
+    dispatch_tasks.push(task, control);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let cleanup = std::thread::spawn(move || {
+        let _ = started_tx.send(());
+        Concurrency::with_http_runtime_quiesced(|| {
+            dispatch_tasks.drain();
+            clear_net_http_handles();
+        });
+        let _ = done_tx.send(());
+    });
+    started_rx
+        .recv()
+        .map_err(|_| "HTTP/2 cleanup did not start".to_string())?;
+    cancelled_rx
+        .recv()
+        .map_err(|_| "HTTP/2 dispatch was not cancelled by drain".to_string())?;
+    if done_rx.try_recv().is_ok() {
+        let _ = release_tx.send(());
+        let _ = cleanup.join();
+        return Err("HTTP/2 cleanup completed before queued dispatch release".to_string());
+    }
+    release_tx
+        .send(())
+        .map_err(|_| "HTTP/2 dispatch release failed".to_string())?;
+    done_rx
+        .recv()
+        .map_err(|_| "HTTP/2 cleanup did not complete after dispatch release".to_string())?;
+    cleanup
+        .join()
+        .map_err(|_| "HTTP/2 cleanup thread panicked".to_string())?;
+    Ok(())
 }

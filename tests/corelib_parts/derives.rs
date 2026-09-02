@@ -185,17 +185,17 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) DataTree {
+    fn encode(self) DataTree -> {
         m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) Email ![FieldError] {
+    fn decode(tree: DataTree) Email ![FieldError] -> {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
-        return .Ok(Email{addr: s})
+        return Ok(Email{addr: s})
     }
 }
 
@@ -243,7 +243,7 @@ impl HandEmail.Encode {
     fn encode(self) DataTree -> DataTree.Object(["address": DataTree.Text(~self.address)])
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) HandEmail ![FieldError] {
+    fn decode(tree: DataTree) HandEmail ![FieldError] -> {
         field :: tree.field("address") ?? DataTree.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail{ address: address })
@@ -333,9 +333,9 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) Email ![FieldError] {
+    fn decode(tree: DataTree) Email ![FieldError] -> {
         value := tree.field("address") ?? DataTree.Text("")
-        return .Ok(Email{ addr: value.text() ?? "" })
+        return Ok(Email{ addr: value.text() ?? "" })
     }
 }
 
@@ -510,12 +510,12 @@ struct Inner { note: ?String }
 struct Envelope {
     inner: Inner
 
-    fn borrowed(self) String {
+    fn borrowed(self) String -> {
         if self.inner.note == Val(value) { return value }
         return "none"
     }
 
-    fn owned(^self) String {
+    fn owned(^self) String -> {
         if self.inner.note == Val(value) { return value }
         return "none"
     }
@@ -630,11 +630,13 @@ use core.encoding.json as json
 struct Strict { name: String }
 
 fn run() {
-    result := json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}")
-    if result == .Err(errors) {
+    if json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
             loop error in errors {
-            print(error.path)
-            print(error.reason)
+                print(error.path)
+                print(error.reason)
+            }
         }
     }
 }
@@ -671,15 +673,19 @@ struct Account {
 }
 
 fn run() {
-    malformed := json.decode<Outer>("{{\"inner\":{{\"left\":\"bad\",\"right\":\"bad\"}},\"count\":\"bad\"}}")
-    if malformed == .Err(errors) {
-        print(errors.len())
-        loop error in errors { print(error.path) }
+    if json.decode<Outer>("{{\"inner\":{{\"left\":\"bad\",\"right\":\"bad\"}},\"count\":\"bad\"}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
+            print(errors.len())
+            loop error in errors { print(error.path) }
+        }
     }
-    invalid := json.decode<Account>("{{\"email\":\"missing-at\",\"age\":12}}")
-    if invalid == .Err(errors) {
-        print(errors.len())
-        loop error in errors { print(error.path) }
+    if json.decode<Account>("{{\"email\":\"missing-at\",\"age\":12}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
+            print(errors.len())
+            loop error in errors { print(error.path) }
+        }
     }
 }
 "#;
@@ -745,7 +751,7 @@ derive T.RemoteLabel {
 #LocalLabel
 pub struct RemoteType { pub value: Int }
 
-pub fn remote_type_label() String {
+pub fn remote_type_label() String -> {
     value := RemoteType{ value: 2 }
     return value.local_label()
 }
@@ -1092,11 +1098,11 @@ use core.encoding.json as json
 struct Address { text: String }
 struct Email { addr: String, nested: Address, items: [Address] }
 
-fn pick() Int {
+fn pick() Int -> {
     return 0
 }
 
-fn encoded(e: Email, i: Int) String {
+fn encoded(e: Email, i: Int) String -> {
     shallow := DataTree.Text(~e.addr)
     nested := DataTree.Text(~e.nested.text)
     indexed := DataTree.Text(~e.items[0].text)
@@ -1107,7 +1113,7 @@ fn encoded(e: Email, i: Int) String {
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-fn slice_data(xs: [DataTree]) DataTree {
+fn slice_data(xs: [DataTree]) DataTree -> {
     return DataTree.Array(xs[0..1])
 }
 
@@ -1203,16 +1209,17 @@ fn yaml_hostile_alias_and_depth_match_all_execution_tiers() {
 use core.encoding.yaml as yaml
 
 fn run() {
-    alias_raw :: "base: &a\n  value: x\nitems:\n" + "  - *a\n".repeat(32768)
-    alias :: yaml.parse(alias_raw)
-    if alias == {
+    alias_items :: "  - *a\n".repeat(32768)
+    alias_raw :: "base: &a\n  value: x\nitems:\n{alias_items}"
+    if yaml.parse(alias_raw) == {
         .Ok(_) -> { print("alias:accepted") }
         .Err(_) -> { print("alias:rejected") }
     }
 
-    depth_raw :: "[".repeat(65) + "0" + "]".repeat(65)
-    depth :: yaml.parse(depth_raw)
-    if depth == {
+    open :: "[".repeat(65)
+    close :: "]".repeat(65)
+    depth_raw :: "{open}0{close}"
+    if yaml.parse(depth_raw) == {
         .Ok(_) -> { print("depth:accepted") }
         .Err(_) -> { print("depth:rejected") }
     }
@@ -1222,6 +1229,48 @@ fn run() {
         "yaml_hostile_alias_and_depth",
         src,
         "alias:rejected\ndepth:rejected\n",
+    );
+}
+
+#[test]
+fn json_and_toml_hostile_depth_match_all_execution_tiers() {
+    let src = r#"
+use core.encoding.json as json
+use core.encoding.toml as toml
+
+fn run() {
+    open64 :: "[".repeat(64)
+    close64 :: "]".repeat(64)
+    if json.parse("{open64}{close64}") == {
+        .Ok(_) -> { print("json64:accepted") }
+        .Err(error) -> { print("json64:{error.line}:{error.message}") }
+    }
+
+    open65 :: "[".repeat(65)
+    close65 :: "]".repeat(65)
+    if json.parse("{open65}{close65}") == {
+        .Ok(_) -> { print("json65:accepted") }
+        .Err(error) -> { print("json65:{error.line}:{error.message}") }
+    }
+
+    if toml.parse("value = {open64}{close64}") == {
+        .Ok(_) -> { print("toml64:accepted") }
+        .Err(error) -> { print("toml64:{error.line}:{error.message}") }
+    }
+
+    if toml.parse("value = {open65}{close65}") == {
+        .Ok(_) -> { print("toml65:accepted") }
+        .Err(error) -> { print("toml65:{error.line}:{error.message}") }
+    }
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "json_toml_hostile_depth",
+        src,
+        "json64:accepted\n\
+json65:1:JSON value is nested too deeply\n\
+toml64:accepted\n\
+toml65:1:TOML value is nested too deeply\n",
     );
 }
 
@@ -1286,7 +1335,7 @@ use core.encoding.json as json
 struct User { id: Int  name: String }
 
 migration User {
-    rename old_name => name
+    rename old_name -> name
 }
 
 fn run() {
@@ -1294,10 +1343,7 @@ fn run() {
     print(user.name)
 }
 "#;
-    let shown = "decode_contract_api.jet";
-    let out = jet::compile_with_path(src, shown).unwrap_or_else(|diags| {
-        panic!("front end rejected fixture:\n{}", jet::render_diagnostics(shown, src, &diags))
-    });
+    let out = compile_temp("decode_contract_api.jet", src);
     assert!(out.rust.contains("fn jet_decode("));
     assert!(!out.rust.contains("jet_decode_with_status"));
 }

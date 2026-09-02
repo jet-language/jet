@@ -22,12 +22,7 @@ use std::path::Path;
 /// caller because a stale or partial workspace lock must never masquerade as
 /// a valid index.
 pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> {
-    let lock_path = workspace_root.join(WORKSPACE_LOCK);
-    let Some(lock_dir) = lock_path.parent().map(Path::to_path_buf) else {
-        return Err("workspace lock has no parent directory".to_string());
-    };
     super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
-        std::fs::create_dir_all(&lock_dir)?;
         let resolver = AuthorityResolver::open(workspace_root).map_err(|error| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -219,7 +214,7 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
             }
         }
         Lock::ensure_build_stamp(workspace_root, &mut lock);
-        Lock::write_lock_atomically(&lock_path, &Lock::write(&lock))
+        Lock::write_lock_atomically(workspace_root, Lock::write(&lock).as_bytes())
             .map_err(std::io::Error::other)
     })
     .map_err(|error| format!("could not write workspace lock: {error}"))

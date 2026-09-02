@@ -26,6 +26,7 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
         "memory/parameter_modes",
         "patterns/struct_destructure",
         "syntax/trailing_block",
+        "syntax/byte_literals",
         "types/anonymous_unions",
         "types/generic_types",
         "types/measurement",

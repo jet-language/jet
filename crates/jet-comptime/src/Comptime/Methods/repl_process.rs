@@ -10,12 +10,7 @@ use crate::AST::{CtValue, Type};
 use jet_foundation::Authority::{answer, Holds, Verdict};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 
-fn repl_effect_roles(
-    required: &str,
-    granted: &Holds,
-    denied: &Holds,
-    authority: &str,
-) -> String {
+fn repl_effect_roles(required: &str, granted: &Holds, denied: &Holds, authority: &str) -> String {
     let render = |effects: &Holds| {
         if effects.is_empty() {
             "none".to_string()
@@ -403,9 +398,7 @@ fn drain_repl_output(
             overflowed.store(true, std::sync::atomic::Ordering::Release);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!(
-                    "process.run output exceeded {REPL_PROCESS_OUTPUT_LIMIT_BYTES} bytes"
-                ),
+                format!("process.run output exceeded {REPL_PROCESS_OUTPUT_LIMIT_BYTES} bytes"),
             ));
         }
         output.extend_from_slice(&buffer[..count]);
@@ -465,10 +458,16 @@ pub(super) fn run_repl_process(
         Err(e) => return Err(e),
     };
     let stdout = child.stdout.take().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "process.run stdout pipe unavailable")
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "process.run stdout pipe unavailable",
+        )
     });
     let stderr = child.stderr.take().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "process.run stderr pipe unavailable")
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "process.run stderr pipe unavailable",
+        )
     });
     let (stdout, stderr) = match (stdout, stderr) {
         (Ok(stdout), Ok(stderr)) => (stdout, stderr),
@@ -482,14 +481,12 @@ pub(super) fn run_repl_process(
     let output_overflowed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stdout_used = output_used.clone();
     let stdout_overflowed = output_overflowed.clone();
-    let stdout_thread = std::thread::spawn(move || {
-        drain_repl_output(stdout, &stdout_used, &stdout_overflowed)
-    });
+    let stdout_thread =
+        std::thread::spawn(move || drain_repl_output(stdout, &stdout_used, &stdout_overflowed));
     let stderr_used = output_used;
     let stderr_overflowed = output_overflowed.clone();
-    let stderr_thread = std::thread::spawn(move || {
-        drain_repl_output(stderr, &stderr_used, &stderr_overflowed)
-    });
+    let stderr_thread =
+        std::thread::spawn(move || drain_repl_output(stderr, &stderr_used, &stderr_overflowed));
     #[cfg(unix)]
     let _signal_forward = pinned_executable.map(|_| ReplSignalForward::install(child.id() as i32));
     #[cfg(unix)]
@@ -539,10 +536,16 @@ pub(super) fn run_repl_process(
         kill_repl_process_group(child.id() as i32);
     }
     let stdout = stdout_thread.join().map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::Other, "process.run stdout reader panicked")
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "process.run stdout reader panicked",
+        )
     });
     let stderr = stderr_thread.join().map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::Other, "process.run stderr reader panicked")
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "process.run stderr reader panicked",
+        )
     });
     let status = status?;
     Ok(std::process::Output {

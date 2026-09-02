@@ -1,48 +1,50 @@
 use core.[net, time]
 
-#CLI
-struct Args {
-    port: String
-}
 
-fn work(value: Int) Int -> {
-    time.sleep(1ms)
-    value * value
-}
+#CLI struct Args { port: String{"18080"} }
 
-fn run_batch(count: Int) Int -> {
-    (sender, receiver) :: channel<Int>()
-    total := 0
-    task.group _workers(limit: 4) {
-        loop value in 1..count {
-            job :: ~value
-            tx :: ~sender
-            child :: task { tx.send(work(job)) }
-            child.detach()
-        }
-        loop _ in 0..<count -> total += receiver.receive() ?? 0
+fn worker(receiver: Receiver<Int>, sender: Sender<Int>) {
+    loop value in receiver -> {
+        time.sleep(1ms)
+        sender.send(value * value)
     }
-    sender.close()
+}
+
+fn run_batch(count: Int, jobs: Sender<Int>, results: Receiver<Int>) Int -> {
+    loop value in 1..count -> jobs.send(value)
+    total := 0
+    loop _ in 0..<count -> total += results.receive() ?? 0
     total
 }
 
-fn response(command: String) String -> {
+fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) String -> {
     if command == "ready" -> return "ready"
     if command == "shutdown" -> return "bye"
     if command.starts_with("batch ") {
         count :: Int.parse(command.after("batch ")) ?? 0
-        if count > 0 && count <= 32 -> return "batch {count} total {run_batch(count)}"
+        if count > 0 && count <= 32 -> return "batch {count} total {run_batch(count, jobs, results)}"
     }
     return "error"
 }
 
 fn run(args: Args) {
-    listener :: net.tcp_listen("127.0.0.1:{args.port}")
-    loop {
-        stream :: listener.accept()
-        command :: "{stream.read_text(1024).trim()}"
-        stream.write_text("{response(command)}\n")
-        stream.close()
-        if command == "shutdown" -> break
+    (jobs_sender, jobs_receiver) :: channel<Int>(capacity: 32)
+    (results_sender, results_receiver) :: channel<Int>(capacity: 32)
+    task.group _workers(limit: 4) {
+        @[ worker1..worker4 ]@ :: task worker(~jobs_receiver, ~results_sender)
+        listener :: net.tcp_listen("127.0.0.1:{args.port}")
+        loop {
+            stream :: listener.accept()
+            command :: "{stream.read_text(1024).trim()}"
+            reply :: response(command, ~jobs_sender, ~results_receiver)
+            stream.write_text("{reply}\n")
+            stream.close()
+            if command == "shutdown" {
+                jobs_sender.close()
+                break
+            }
+        }
+        @[ worker1..worker4 ]@.join() ?? panic("worker failed")
     }
+    results_sender.close()
 }

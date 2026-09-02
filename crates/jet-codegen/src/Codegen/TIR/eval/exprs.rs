@@ -652,7 +652,7 @@ fn sentry_allocator_owner(value: &CtValue) -> Option<usize> {
         })
 }
 
-/// TIR-eval representation of the erased `SQL = (String, Vec<String>)`
+/// TIR-eval representation of the checked `SQL = (String, Vec<DBValue>)`
 /// runtime value. The AOT emitter uses a Rust tuple; keeping named fields in
 /// the evaluator makes the same representation inspectable without adding a
 /// second semantic type or a host-only shortcut.
@@ -663,6 +663,36 @@ fn typed_sql_value(template: String, params: Vec<CtValue>) -> CtValue {
             ("template".to_string(), CtValue::Str(template)),
             ("params".to_string(), CtValue::List(params)),
         ],
+    }
+}
+
+fn ct_sql_binding(
+    value: &CtValue,
+    span: crate::Diagnostics::Span,
+) -> Result<CtValue, crate::Diagnostics::Diagnostic> {
+    let db_value = |variant: &str, value: Option<CtValue>| CtValue::Enum {
+        type_name: crate::Syntax::TYPE_DB_VALUE.to_string(),
+        variant: variant.to_string(),
+        args: value.map_or_else(Vec::new, |value| vec![(None, value)]),
+    };
+    match value {
+        CtValue::Enum { type_name, .. } if type_name == crate::Syntax::TYPE_DB_VALUE => {
+            Ok(value.clone())
+        }
+        CtValue::Int(value) => Ok(db_value("Int", Some(CtValue::Int(*value)))),
+        CtValue::Float(value) => Ok(db_value(
+            "Float",
+            Some(CtValue::Float(CtFloat::f64(value.clone().as_f64()))),
+        )),
+        CtValue::Bool(value) => Ok(db_value("Bool", Some(CtValue::Bool(*value)))),
+        CtValue::Str(value) => Ok(db_value("Text", Some(CtValue::Str(value.clone())))),
+        _ => {
+            let rendered = crate::Comptime::render_typed_holes(std::slice::from_ref(value), span)?
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            Ok(db_value("Text", Some(CtValue::Str(rendered))))
+        }
     }
 }
 
@@ -1268,7 +1298,8 @@ fn view_op_line(op: &crate::Codegen::TIR::TBuiltinOp) -> Option<u32> {
 fn sequence_argument_op(op: &crate::Codegen::TIR::TBuiltinOp) -> bool {
     matches!(
         op,
-        crate::Codegen::TIR::TBuiltinOp::Take
+        crate::Codegen::TIR::TBuiltinOp::InsertList
+            | crate::Codegen::TIR::TBuiltinOp::Take
             | crate::Codegen::TIR::TBuiltinOp::Skip
             | crate::Codegen::TIR::TBuiltinOp::StepBy
             | crate::Codegen::TIR::TBuiltinOp::Chunks
@@ -1427,8 +1458,12 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         TExprKind::ClosureMethod { recv, args, .. } => std::iter::once(recv.as_ref())
             .chain(eval_closure_children(args))
             .collect(),
-        TExprKind::HandleMethod { recv, args, .. } => {
-            std::iter::once(recv.as_ref()).chain(args.iter()).collect()
+        TExprKind::HandleMethod { recv, op, args } => {
+            if args.is_empty() && reader_handle_without_args(op) {
+                Vec::new()
+            } else {
+                std::iter::once(recv.as_ref()).chain(args.iter()).collect()
+            }
         }
         TExprKind::CoreClosureCall { kind } => eval_core_closure_children(kind),
         TExprKind::SelectRecv { builder, channel } => vec![builder.as_ref(), channel.as_ref()],
@@ -1886,6 +1921,81 @@ pub(super) fn handle_index(value: &CtValue, type_name: &str) -> Option<usize> {
             ("index", CtValue::Int(index)) => Some(*index as usize),
             _ => None,
         })
+}
+fn reader_handle_without_args(op: &crate::Codegen::TIR::THandleOp) -> bool {
+    use crate::Codegen::TIR::THandleOp;
+    matches!(
+        op,
+        THandleOp::ReaderReadU8
+            | THandleOp::ReaderReadI8
+            | THandleOp::ReaderReadU16Le
+            | THandleOp::ReaderReadU16Be
+            | THandleOp::ReaderReadI16Le
+            | THandleOp::ReaderReadI16Be
+            | THandleOp::ReaderReadU32Le
+            | THandleOp::ReaderReadU32Be
+            | THandleOp::ReaderReadI32Le
+            | THandleOp::ReaderReadI32Be
+            | THandleOp::ReaderReadU64Le
+            | THandleOp::ReaderReadU64Be
+            | THandleOp::ReaderReadI64Le
+            | THandleOp::ReaderReadI64Be
+            | THandleOp::ReaderReadF32Le
+            | THandleOp::ReaderReadF32Be
+            | THandleOp::ReaderReadF64Le
+            | THandleOp::ReaderReadF64Be
+            | THandleOp::ReaderPeek
+            | THandleOp::ReaderRemaining
+            | THandleOp::ReaderAtEnd
+            | THandleOp::ReaderTakePattern { .. }
+    )
+}
+fn reader_local_name<'a>(
+    recv: &'a TExpr,
+    scope: &HashMap<String, CtValue>,
+) -> Option<&'a str> {
+    let recv = match &recv.kind {
+        TExprKind::Borrow { place, .. } => place.as_ref(),
+        _ => recv,
+    };
+    let TExprKind::Local(local) = &recv.kind else {
+        return None;
+    };
+    if local.is_persistent() || local.deref || local.uninit_fixed {
+        return None;
+    }
+    matches!(
+        scope.get(&local.name),
+        Some(CtValue::Struct { type_name, .. }) if type_name == "Reader"
+    )
+    .then_some(local.name.as_str())
+}
+
+
+fn take_reader_local(
+    recv: &TExpr,
+    scope: &mut HashMap<String, CtValue>,
+) -> Option<CtValue> {
+    let recv = match &recv.kind {
+        TExprKind::Borrow { place, .. } => place.as_ref(),
+        _ => recv,
+    };
+    let TExprKind::Local(local) = &recv.kind else {
+        return None;
+    };
+    if local.is_persistent() || local.deref || local.uninit_fixed {
+        return None;
+    }
+    let value = scope.remove(&local.name)?;
+    if matches!(
+        &value,
+        CtValue::Struct { type_name, .. } if type_name == "Reader"
+    ) {
+        Some(value)
+    } else {
+        scope.insert(local.name.clone(), value);
+        None
+    }
 }
 
 fn struct_int(value: &CtValue, field: &str) -> Option<i64> {
@@ -2968,18 +3078,38 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     /// owner is named, generic, or an enum. Keep those registered bodies in
     /// TIR so deopt uses the same Encode/Decode implementation as resident
     /// execution; ordinary calls may still use the native bridge.
-    fn is_canonical_serde_body(func: &crate::Codegen::TIR::TFunc) -> bool {
-        match &func.kind {
+    fn is_canonical_serde_body(&self, func: &crate::Codegen::TIR::TFunc) -> bool {
+        if matches!(
+            &func.kind,
             crate::Codegen::TIR::TFuncKind::TraitMethod {
                 serde: Some(crate::Codegen::TIR::SerdeCodec::Encode),
                 ..
-            }
-            | crate::Codegen::TIR::TFuncKind::TraitMethod {
+            } | crate::Codegen::TIR::TFuncKind::TraitMethod {
                 serde: Some(crate::Codegen::TIR::SerdeCodec::Decode),
                 ..
-            } => true,
-            _ => false,
+            }
+        ) {
+            return true;
         }
+        // A demanded generic generated Encode is lowered through the concrete
+        // owner method path so its `self` slot carries `Owner<Args>`; that path
+        // cannot retain the trait marker. Use the sema-generated provenance and
+        // the exact owner-qualified codec key instead of treating every
+        // `encode`/`decode` method as a codec.
+        let crate::Codegen::TIR::TFuncKind::Method { owner_type, .. } = &func.kind else {
+            return false;
+        };
+        if !func.synthetic {
+            return false;
+        }
+        let Some((_, method)) = func.name.rsplit_once("::") else {
+            return false;
+        };
+        if !matches!(method, "encode" | "decode") {
+            return false;
+        }
+        self.serde_codec(owner_type, method)
+            .is_some_and(|candidate| std::ptr::eq(candidate, func))
     }
 
     /// #2252: project a TIR nominal spelling onto the canonical identity every
@@ -3008,8 +3138,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     /// of trying members until one happens to accept a coercion.
     fn union_wire_shapes(&self, ty: &Type) -> Vec<&'static str> {
         let mut shapes = match ty {
-            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => vec!["Int"],
-            Type::Float | Type::Float32 => vec!["Float"],
+            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => {
+                vec!["Int", "Number"]
+            }
+            Type::Float | Type::Float32 => vec!["Float", "Number"],
             Type::Bool => vec!["Bool"],
             Type::String | Type::Char => vec!["Text"],
             Type::Named(name) if matches!(name.as_str(), "Decimal" | "Secret") => vec!["Text"],
@@ -3527,14 +3659,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         (0..=(1_i128 << u32::from(*bits)) - 1).contains(&i128::from(*int_value))
                     };
                     if !in_range {
-                        let found = if !*signed && *bits == 8 {
-                            "Int"
-                        } else {
-                            "out-of-range Int"
-                        };
                         return Ok(CtValue::failed(Box::new(decode_error(
                             "",
-                            format!("expected {}, found {found}", ty.name()),
+                            format!("expected {}, found out-of-range Int", ty.name()),
                         ))));
                     }
                 }
@@ -4538,28 +4665,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         let value = eval_expr_cache_take(state.value).ok_or_else(|| {
                             unreachable!("fallback value missing from evaluator worklist")
                         })?;
-                        // `?T !E` is one Result carrier whose success role is
-                        // itself optional: `Ok(Val(x))` is a nested Present,
-                        // while `Ok(None)` is a Present-wrapped clean failure.
-                        // Normalize that inner role before applying the one
-                        // fallback path used by plain Result and Option.
-                        let optional_success = matches!(
-                            &state.value.ty,
-                            Type::Result { ok, .. }
-                                if matches!(ok.as_ref(), Type::Option(_))
-                        );
-                        let value = if optional_success {
-                            match value {
-                                CtValue::Present(inner) => match *inner {
-                                    CtValue::Present(payload) => *payload,
-                                    CtValue::Failed(report) => CtValue::Failed(report),
-                                    other => other,
-                                },
-                                other => other,
-                            }
-                        } else {
-                            value
-                        };
+                        // `??` consumes exactly one carrier. For
+                        // Result<Option<T>, E>, unwrap the outer Present and
+                        // leave the inner Option carrier for a later `??`.
                         let miss = matches!(
                             &value,
                             CtValue::Failed(CtReport::Clean(_))
@@ -5022,7 +5130,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         &mut self,
         fault: jet_foundation::MemSentry::JetSentryFault,
     ) -> Diagnostic {
-        let report = jet_foundation::Outcome::jet_render_runtime_sentry(
+        let report = jet_foundation::Outcome::jet_render_runtime_sentry_with_context(
             fault.code,
             &fault.file,
             fault.line,
@@ -5030,6 +5138,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             &fault.operation,
             &fault.obligation,
             &fault.detail,
+            fault.obligation_status.as_str(),
+            fault.foreign_component.as_deref(),
+            fault.foreign_fenced,
         );
         if let Some(sink) = self.sink.as_ref() {
             let mut sink = sink.lock().expect("evaluator sink poisoned");
@@ -5062,9 +5173,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             return Ok(());
         }
         let (bytes, alignment) = sentry_layout(ty);
-        if let Some(fault) = jet_foundation::MemSentry::jet_sentry_check(
+        let fault = jet_foundation::MemSentry::jet_sentry_check(
             address, bytes, alignment, operation, obligation,
-        ) {
+        );
+        if let Some(fault) = fault {
             return Err(self.runtime_sentry_failure(fault));
         }
         Ok(())
@@ -5280,11 +5392,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         ))
     }
 
-    /// Run one native HTTP server operation while the evaluator services the
-    /// shared callback queue. Native HTTP parsing, routing, and response
-    /// framing stay in the Prelude; this loop only invokes the Jet callable
-    /// that the host callback marshaller cannot invoke itself.
-    fn run_http_server_job(&mut self, job: CtValue) -> Result<CtValue, Diagnostic> {
+    /// Run one blocking native HTTP operation while the evaluator services the
+    /// shared callback queue. Native HTTP parsing, routing, client I/O, and
+    /// response framing stay in the Prelude; this loop only invokes the Jet
+    /// callable that the host callback marshaller cannot invoke itself.
+    fn run_http_job(&mut self, job: CtValue) -> Result<CtValue, Diagnostic> {
         loop {
             let mut receiver = job.clone();
             let mut no_args = Vec::new();
@@ -5343,7 +5455,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     })
                     .unwrap_or(false);
                 if ok {
-                    return Ok(CtValue::Present(Box::new(CtValue::Unit)));
+                    return fields
+                        .iter()
+                        .find_map(|(name, value)| (name == "value").then_some(value.clone()))
+                        .ok_or_else(|| unsupported("HTTP host job result", self.span()));
                 }
                 let error = fields
                     .iter()
@@ -5662,8 +5777,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             argv[1] = CtValue::Str(crate::Comptime::render_datatree_for_tir(&tree));
         }
         if self.runtime_execution
-            && module == "core.http.server"
-            && matches!(method, "serve_once_listener" | "serve_once" | "serve")
+            && ((module == "core.http.server"
+                && matches!(method, "serve_once_listener" | "serve_once" | "serve"))
+                || (matches!(module, "core.http" | "core.http.client")
+                    && matches!(method, "get" | "post")))
         {
             let value = self.apply_core_call_with_policy(
                 module,
@@ -5676,7 +5793,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 &value,
                 CtValue::Struct { type_name, .. } if type_name == "__JetInterpHttpJob"
             ) {
-                return self.run_http_server_job(value);
+                return self.run_http_job(value);
             }
             return Ok(value);
         }
@@ -5685,16 +5802,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 unsupported("core.encoding.cbor encoder missing its value", source_span)
             })?;
             let value_ty = args.first().map(|arg| &arg.ty).ok_or_else(|| {
-                unsupported("core.encoding.cbor encoder missing its value type", source_span)
+                unsupported(
+                    "core.encoding.cbor encoder missing its value type",
+                    source_span,
+                )
             })?;
             let tree = self.eval_serde_encode_value(value.clone(), value_ty)?;
-            return Ok(match crate::Comptime::cbor_encode_for_tir(
-                &tree,
-                method == "to_bytes_canonical",
-            ) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::failed(Box::new(error)),
-            });
+            return Ok(
+                match crate::Comptime::cbor_encode_for_tir(&tree, method == "to_bytes_canonical") {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(error) => CtValue::failed(Box::new(error)),
+                },
+            );
         }
         // D-MIGRATE3=A: typed text-codec decode uses the resolved return type.
         // The UNTYPED lenient `json.decode(text)` form is NOT that call: AOT
@@ -6532,7 +6651,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             TExprKind::CompareChain { operands, ops, .. } => {
                 let mut vals = Vec::with_capacity(operands.len());
                 for o in operands {
-                    vals.push(self.eval_expr_child(o, scope)?);
+                    let value = self.eval_expr_child(o, scope)?;
+                    vals.push(Self::normalize_eval_value(value, &o.ty));
                 }
                 for (i, op) in ops.iter().enumerate() {
                     let part = if let Type::IntN { signed, bits } = &operands[i].ty {
@@ -6566,7 +6686,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
                 Ok(CtValue::Bool(true))
             }
-            TExprKind::Call { name, args, .. } => self.eval_call(name, args, &expr.ty, scope),
+            TExprKind::Call { name, args, .. } => {
+                self.eval_call(name, args, &expr.ty, scope)
+            }
             TExprKind::IfExpr { .. } => {
                 unreachable!("if expression bypassed its evaluator continuation")
             }
@@ -6834,7 +6956,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 let runtime_line = view_op_line(op)
                     .or_else(|| sequence_argument_op(op).then(|| self.span_line(self.span())));
                 let mut result = match runtime_line {
-                    Some(line) => self.route_runtime_panic(raw, "E3001", line)?,
+                    Some(line) => match raw {
+                        Err(diagnostic)
+                            if self.runtime_execution
+                                && matches!(
+                                    op,
+                                    crate::Codegen::TIR::TBuiltinOp::InsertList
+                                )
+                                && diagnostic.code == "E3010" =>
+                        {
+                            let message = diagnostic
+                                .what
+                                .strip_prefix('`')
+                                .and_then(|message| message.split_once('`').map(|(message, _)| message))
+                                .unwrap_or(&diagnostic.what)
+                                .to_owned();
+                            return Err(self.runtime_stop("E3010", line, &message));
+                        }
+                        raw => self.route_runtime_panic(raw, "E3001", line)?,
+                    },
                     None => raw?,
                 };
                 if let Some((
@@ -6849,10 +6989,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 )) = progress
                 {
                     if progress_lazy_builtin(op) {
-                        // A lazy adapter may hand back either a plain List or
-                        // the evaluator's erased Iter carrier — `zip` builds
-                        // one (`eval_zip_family` -> `progress_iter_value`), and
-                        // the receiver paths above already unwrap it. Demanding
                         // a bare List here refused `io.progress(…).zip(…)` with
                         // an E2201 boundary for a chain the evaluator runs.
                         let carrier = progress_iter_parts(&result);
@@ -6892,7 +7028,28 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 Ok(result)
             }
             TExprKind::HandleMethod { recv, op, args } => {
-                let mut r = self.eval_expr_child(recv, scope)?;
+                // Reader reads are mutable place operations. Moving a direct
+                // local through the resolved scope slot avoids cloning its
+                // entire byte buffer on every interpreter read. Keep the
+                // optimization to argument-free Reader operations: moving
+                // before argument evaluation must not hide the receiver from
+                // an aliased argument.
+                let move_reader = args.is_empty() && reader_handle_without_args(op);
+                let mut reader_was_moved = false;
+                let mut r = if move_reader && reader_local_name(recv, scope).is_some() {
+                    // The skipped strict child still costs one evaluator step;
+                    // retain that budget charge before moving the place.
+                    self.burn()?;
+                    match take_reader_local(recv, scope) {
+                        Some(value) => {
+                            reader_was_moved = true;
+                            value
+                        }
+                        None => self.eval_expr_child(recv, scope)?,
+                    }
+                } else {
+                    self.eval_expr_child(recv, scope)?
+                };
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr_child(a, scope)?);
@@ -7157,7 +7314,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         _ => {}
                     }
                 }
-                let mut result = match eval_handle_with_type_and_sink(
+                let dispatch_result = match eval_handle_with_type_and_sink(
                     op,
                     &mut r,
                     &mut argv,
@@ -7171,14 +7328,32 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         let message = diagnostic
                             .what
                             .strip_prefix('`')
-                            .and_then(|message| message.strip_suffix('`'))
+                            .and_then(|message| message.split_once('`').map(|(message, _)| message))
                             .unwrap_or(&diagnostic.what)
                             .to_owned();
                         let line = self.span_line(self.span());
                         Err(self.runtime_stop("E3010", line, &message))
                     }
                     result => result,
-                }?;
+                };
+                let mut result = match dispatch_result {
+                    Ok(result) => result,
+                    Err(diagnostic) => {
+                        if reader_was_moved {
+                            self.write_back_place(recv, r, scope)?;
+                        }
+                        return Err(diagnostic);
+                    }
+                };
+                if self.runtime_execution
+                    && matches!(
+                        &result,
+                        CtValue::Struct { type_name, .. }
+                            if type_name == "__JetInterpHttpJob"
+                    )
+                {
+                    result = self.run_http_job(result)?;
+                }
                 let http_json = matches!(
                     op,
                     crate::Codegen::TIR::THandleOp::HTTPClientMethod { method, .. }
@@ -7255,7 +7430,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 args,
                 source_span,
                 ..
-            } => self.eval_core_call_expr(expr, module, method, args, *source_span, scope),
+            } => {
+                self.eval_core_call_expr(expr, module, method, args, *source_span, scope)
+            }
             TExprKind::StructLit {
                 fields, as_trait, ..
             } => {
@@ -7435,37 +7612,21 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             return Err(unsupported("field on multi-element view", self.span()));
                         }
                         match &xs[0] {
-                            CtValue::Struct { fields, .. } => {
-                                let mangled = crate::Codegen::mangle(field);
-                                fields
-                                    .iter()
-                                    .find(|(n, _)| {
-                                        n == field
-                                            || n == &mangled
-                                            || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                                                == Some(field.as_str())
-                                    })
-                                    .map(|(_, v)| v.clone())
-                                    .ok_or_else(|| {
-                                        unsupported(&format!("field `{field}`"), self.span())
-                                    })
-                            }
+                            CtValue::Struct { fields, .. } => fields
+                                .iter()
+                                .find(|(n, _)| super::field_name_matches(n, field))
+                                .map(|(_, v)| v.clone())
+                                .ok_or_else(|| {
+                                    unsupported(&format!("field `{field}`"), self.span())
+                                }),
                             _ => Err(unsupported("field recv", self.span())),
                         }
                     }
-                    CtValue::Struct { fields, .. } => {
-                        let mangled = crate::Codegen::mangle(field);
-                        fields
-                            .into_iter()
-                            .find(|(n, _)| {
-                                n == field
-                                    || n == &mangled
-                                    || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                                        == Some(field.as_str())
-                            })
-                            .map(|(_, v)| v)
-                            .ok_or_else(|| unsupported(&format!("field `{field}`"), self.span()))
-                    }
+                    CtValue::Struct { fields, .. } => fields
+                        .into_iter()
+                        .find(|(n, _)| super::field_name_matches(n, field))
+                        .map(|(_, v)| v)
+                        .ok_or_else(|| unsupported(&format!("field `{field}`"), self.span())),
                     _ => Err(unsupported("field recv", self.span())),
                 }
             }
@@ -7766,6 +7927,30 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         continue;
                     }
                     argv.push(self.eval_expr_child(&a.value, scope)?);
+                }
+                // D-NETIO-CONTRACT2=B: a generic `Reader.read` keeps the
+                // nominal stream's canonical IOError semantics. The ambient
+                // hook only marshals the value; the installed host calls the
+                // shared JetIOReader Prelude implementation.
+                if method.name == "read"
+                    && argv.len() == 1
+                    && matches!(
+                        &r,
+                        CtValue::Struct { type_name, .. }
+                            if matches!(
+                                type_name.as_str(),
+                                "TcpStream" | "UnixStream" | "TLSStream"
+                            )
+                    )
+                {
+                    if let Some(result) = crate::Comptime::try_ambient_handle(
+                        "IOReaderRead",
+                        &mut r,
+                        &mut argv,
+                        self.span(),
+                    ) {
+                        return result;
+                    }
                 }
                 if method.name == "clone" {
                     return self.clone_structural_value(r, &recv.ty);
@@ -8480,12 +8665,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     match kind {
                         TTypedTextForm::SQLRaw => match value {
                             CtValue::Str(template) => {
-                                let (template, params) =
-                                    crate::typed_text::jet_typed_sql_raw(template);
-                                Ok(typed_sql_value(
-                                    template,
-                                    params.into_iter().map(CtValue::Str).collect(),
-                                ))
+                                let (template, _params) =
+                                    crate::typed_text::jet_typed_sql_raw::<String>(template);
+                                Ok(typed_sql_value(template, Vec::new()))
                             }
                             _ => Err(unsupported("SQL.raw expects String", self.span())),
                         },
@@ -8532,13 +8714,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         TTypedTextInterpKind::SQL => {
                             let literal_refs =
                                 literals.iter().map(String::as_str).collect::<Vec<_>>();
-                            let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
-                            let (template, params) =
-                                crate::typed_text::jet_typed_sql_interpolate(&literal_refs, shown);
-                            Ok(typed_sql_value(
-                                template,
-                                params.into_iter().map(CtValue::Str).collect(),
-                            ))
+                            let shown =
+                                crate::Comptime::render_typed_holes(&values, self.span())?;
+                            let (template, _shown_params) =
+                                crate::typed_text::jet_typed_sql_interpolate::<String>(
+                                    &literal_refs,
+                                    shown,
+                                );
+                            let params = values
+                                .iter()
+                                .map(|value| ct_sql_binding(value, self.span()))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            Ok(typed_sql_value(template, params))
                         }
                         TTypedTextInterpKind::Sh => {
                             let literal_refs =
@@ -8552,9 +8739,19 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             let literal_refs =
                                 literals.iter().map(String::as_str).collect::<Vec<_>>();
                             let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
+                            let trusted_html = holes
+                                .iter()
+                                .map(|hole| {
+                                    matches!(
+                                        &hole.ty,
+                                        Type::Named(name) if name == jet_foundation::Syntax::TYPE_HTML
+                                    )
+                                })
+                                .collect::<Vec<_>>();
                             Ok(CtValue::Str(crate::typed_text::jet_typed_html_interpolate(
                                 &literal_refs,
                                 shown,
+                                &trusted_html,
                             )))
                         }
                         TTypedTextInterpKind::URL
@@ -9534,12 +9731,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             }
             TExprKind::PtrFromAddr { addr, .. } => {
                 let address = self.eval_expr_child(addr, scope)?;
-                if std::env::var_os("JET_DEBUG_RAW").is_some() {
-                    eprintln!(
-                        "[raw-debug] from_addr address={address:?} span={:?}",
-                        self.span()
-                    );
-                }
                 let address = match address {
                     CtValue::Int(address) => address,
                     // Radix-prefixed literals use the exact Int spill carrier
@@ -9564,13 +9755,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             }
             TExprKind::Deref(inner) => {
                 let pointer = self.eval_expr_child(inner, scope)?;
-                if std::env::var_os("JET_DEBUG_RAW").is_some() {
-                    eprintln!(
-                        "[raw-debug] deref pointer={pointer:?} ty={:?} span={:?}",
-                        expr.ty,
-                        self.span()
-                    );
-                }
                 let CtValue::Struct { type_name, fields } = pointer else {
                     return Err(unsupported("raw pointer carrier", self.span()));
                 };
@@ -11354,7 +11538,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         }
         let func = self.funcs.get(name).copied();
         let codec_body = match func {
-            Some(func) => Self::is_canonical_serde_body(func),
+            Some(func) => self.is_canonical_serde_body(func),
             None => false,
         };
         // Codec-sensitive named deopts must retain the canonical migration
@@ -11662,6 +11846,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<String, Diagnostic> {
         let ty = ty.without_user_tags();
+        if matches!(&ty, Type::Named(name) if matches!(name.as_str(), "DataTree" | "JSON")) {
+            return Ok(crate::Comptime::render_datatree_for_tir(value));
+        }
         if let Some(text) = prelude_error_render(value) {
             return Ok(text);
         }
@@ -11741,10 +11928,13 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     }
 
     fn render_debug_value(&mut self, value: &CtValue, ty: &Type) -> Result<String, Diagnostic> {
+        let ty = ty.without_user_tags();
+        if matches!(&ty, Type::Named(name) if matches!(name.as_str(), "DataTree" | "JSON")) {
+            return Ok(crate::Comptime::render_datatree_for_tir(value));
+        }
         if let Some(text) = prelude_error_render(value) {
             return Ok(text);
         }
-        let ty = ty.without_user_tags();
         if let Some(text) = self.text_method(value, ty, "debug")? {
             return Ok(text);
         }

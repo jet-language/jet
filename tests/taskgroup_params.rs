@@ -10,7 +10,7 @@ use tir_support::{build_and_run, build_and_run_full, have_rustc, run_default_mul
 const OUTER_GROUP_HELPER: &str = r#"
 struct Gate { step: Int }
 
-fn spawn_later(group: Group) Shared<Gate> {
+fn spawn_later(_group: Group) Shared<Gate> -> {
     gate :: shared Gate{ step: 0 }
     task {
         gate.step += 1
@@ -34,6 +34,23 @@ fn run() {
     print("after")
 }
 "#;
+const TASKGROUP_TEST_PACKAGE: &str = r#"name: "taskgroup_params"
+version: "0.1.0"
+authority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Mem.Rc, Net, Rand, Secret, Time] } }
+"#;
+
+fn taskgroup_project(prefix: &str, name: &str, source: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_taskgroup_{prefix}_{name}_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("package.jet"), TASKGROUP_TEST_PACKAGE).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, source).unwrap();
+    (dir, path)
+}
 
 fn error_codes(source: &str) -> Vec<String> {
     jet::compile(source)
@@ -44,10 +61,10 @@ fn error_codes(source: &str) -> Vec<String> {
 }
 
 fn interpreter_outcome(name: &str, source: &str) -> RunOutcome {
-    let path =
-        std::env::temp_dir().join(format!("jet_taskgroup_{name}_{}.jet", std::process::id()));
-    fs::write(&path, source).unwrap();
-    dev_iteration(path.to_str().unwrap(), false, true)
+    let (dir, path) = taskgroup_project("interp", name, source);
+    let outcome = dev_iteration(path.to_str().unwrap(), false, true);
+    let _ = fs::remove_dir_all(dir);
+    outcome
 }
 
 fn assert_jit_compiles(name: &str, source: &str) {
@@ -59,11 +76,7 @@ fn assert_jit_compiles(name: &str, source: &str) {
         .name(format!("jet-taskgroup-jit-{name}"))
         .stack_size(8 * 1024 * 1024)
         .spawn(move || {
-            let path = std::env::temp_dir().join(format!(
-                "jet_taskgroup_jit_{name}_{}.jet",
-                std::process::id()
-            ));
-            fs::write(&path, &source).unwrap();
+            let (dir, path) = taskgroup_project("jit", &name, &source);
             let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
             let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
                 .into_iter()
@@ -74,10 +87,12 @@ fn assert_jit_compiles(name: &str, source: &str) {
             assert!(errors.is_empty(), "{errors:?}");
             jet_jit::try_compile_bundle(&bundle)
                 .expect("Group source must compile for resident JIT");
+            let _ = fs::remove_dir_all(dir);
         })
         .expect("spawn JIT compile thread");
     join.join().expect("JIT compile thread");
 }
+
 
 #[test]
 fn named_function_parameters_spawn_copy_and_owned_captures() {
@@ -135,6 +150,22 @@ fn lexical_group_joins_anonymous_helper_spawn() {
 }
 
 #[test]
+fn nested_anonymous_spawn_is_group_owned() {
+    let source = r#"
+fn run() {
+    task.group group {
+        if true {
+            task { print("child") }
+        }
+    }
+    print("after")
+}
+"#;
+    assert_group_close_success("nested_taskgroup_spawn", source, "child\nafter\n");
+}
+
+
+#[test]
 fn default_run_joins_helper_spawn_before_outer_exit() {
     match interpreter_outcome("parameter_join", OUTER_GROUP_HELPER) {
         RunOutcome::Ran {
@@ -152,7 +183,10 @@ fn default_run_joins_helper_spawn_before_outer_exit() {
     let (code, stdout, stderr) = run_default_multi(
         "taskgroup_parameter_join",
         "main.jet",
-        &[("main.jet", OUTER_GROUP_HELPER)],
+        &[
+            ("main.jet", OUTER_GROUP_HELPER),
+            ("package.jet", TASKGROUP_TEST_PACKAGE),
+        ],
     );
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "inside\ntask\nafter\n", "{stderr}");
@@ -187,11 +221,11 @@ fn taskgroup_type_is_second_class() {
         // that stay banned must teach with the E1110 family instead of the bare
         // "there is no type called `Group`" fall-through (E0119).
         (
-            "fn bad() Group { return 0 }\nfn run() {}\n",
+            "fn bad() Group -> { return 0 }\nfn run() {}\n",
             &["E1110", "E0113"][..],
         ),
         (
-            "struct Bad { step: Int\n    fn bad(self) Group { return 0 }\n}\nfn run() {}\n",
+            "struct Bad { step: Int\n    fn bad(self) Group -> { return 0 }\n}\nfn run() {}\n",
             &["E1110", "E0113"][..],
         ),
         ("fn run() { group: Group :: 0 }\n", &["E0003"][..]),
@@ -222,31 +256,27 @@ fn taskgroup_cannot_escape_in_a_closure() {
     let source = r#"
 fn use_group(group: Group) Int -> 1
 
-fn escape(group: Group) fn() Int {
-    return () -> use_group(group)
-}
+fn escape(group: Group) fn() Int -> { return () -> use_group(group) }
 
 fn run() {}
 "#;
-    assert_eq!(error_codes(source), ["E1110"]);
+    assert_eq!(error_codes(source), ["E1110", "E0403"]);
 
     // D-CONC-GROUP1=A widened the parameter positions only. A method's group
     // parameter is admitted, and the lambda escape door it could otherwise open
-    // stays shut with the same teaching error.
+    // stays shut with the same escape and fallibility diagnostics.
     let method_escape = r#"
 fn use_group(group: Group) Int -> 1
 
 struct Crawler {
     step: Int
 
-    fn escape(self, group: Group) fn() Int {
-        return () -> use_group(group)
-    }
+    fn escape(self, group: Group) fn() Int -> { return () -> use_group(group) }
 }
 
 fn run() {}
 "#;
-    assert_eq!(error_codes(method_escape), ["E1110"]);
+    assert_eq!(error_codes(method_escape), ["E1110", "E0403"]);
 }
 
 /// D-CONC-GROUP1=A: a group is a borrow of its scope, so it may be named in
@@ -263,7 +293,7 @@ fn method_parameters_spawn_owned_captures() {
 struct Crawler {
     step: Int
 
-    fn drain(self, group: Group, values: ^[Int]) {
+    fn drain(self, _group: Group, values: ^[Int]) {
         step :: self.step
         handle :: task values[0] + step
         print(handle.join() ?? 0)
@@ -303,12 +333,12 @@ fn evaluator_supports_taskgroup_combinators() {
     let source = r#"
 use core.time as time
 
-fn slow_seven() Int {
+fn slow_seven() Int -> {
     time.sleep(30ms)
     return 7
 }
 
-fn slow_eleven() Int {
+fn slow_eleven() Int -> {
     time.sleep(30ms)
     return 11
 }
@@ -396,11 +426,7 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
         .name(format!("jet-taskgroup-resident-{probe_name}"))
         .stack_size(8 * 1024 * 1024)
         .spawn(move || {
-            let jit_path = std::env::temp_dir().join(format!(
-                "jet_taskgroup_resident_{probe_name}_{}.jet",
-                std::process::id()
-            ));
-            fs::write(&jit_path, probe_source).unwrap();
+            let (dir, jit_path) = taskgroup_project("resident", &probe_name, &probe_source);
             let mut bundle = jet::Loader::load_entry(jit_path.to_str().unwrap()).unwrap();
             let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
                 .into_iter()
@@ -417,12 +443,18 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
                 jet_jit::resident_jit_safe_bundle(&bundle),
                 "{probe_name} must stay resident-JIT safe: {detail}"
             );
-            let _ = fs::remove_file(&jit_path);
+            let _ = fs::remove_dir_all(dir);
         })
         .expect("spawn resident JIT probe");
     probe.join().expect("resident JIT probe panicked");
-
-    let (code, stdout, stderr) = run_default_multi(name, "main.jet", &[("main.jet", source)]);
+    let (code, stdout, stderr) = run_default_multi(
+        name,
+        "main.jet",
+        &[
+            ("main.jet", source),
+            ("package.jet", TASKGROUP_TEST_PACKAGE),
+        ],
+    );
     assert_eq!(code, 0, "resident JIT: {stderr}");
     assert!(
         stderr
@@ -443,7 +475,6 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
 #[test]
 fn native_cancellation_closes_group_before_caller_continues() {
     let source = r#"
-use core.tasks as tasks
 use core.time as time
 
 fn wait_in_group(sender: Sender<Int>) {
@@ -463,8 +494,7 @@ fn run() {
     outer :: task wait_in_group(sender)
     ready.receive() ?? panic("child did not start")
     outer.cancel()
-    result :: outer.join()
-    if result == {
+    if outer.join() == {
         .Err(_) -> { print("cancelled") }
         .Ok(_) -> { print("ok") }
     }
@@ -506,7 +536,7 @@ fn native_panicked_wait_closes_group_before_caller_continues() {
     let source = r#"
 struct Gate { step: Int }
 
-fn slow_value(gate: Shared<Gate>) Int {
+fn slow_value(gate: Shared<Gate>) Int -> {
     gate.step = 1
     total := 0
     loop n in 0..<2000000 { total += n }
@@ -514,7 +544,7 @@ fn slow_value(gate: Shared<Gate>) Int {
     return 1
 }
 
-fn fail_after_start(gate: Shared<Gate>) Int {
+fn fail_after_start(gate: Shared<Gate>) Int -> {
     loop gate.step == 0 {}
     panic("wait failed")
     return 0
@@ -524,7 +554,7 @@ fn leave_on_wait_panic() {
     gate :: shared Gate{ step: 0 }
     task.group group {
         slow :: task slow_value(gate)
-        ignored :: task.any { fail_after_start(gate) }
+        _ignored :: (task.any { fail_after_start(gate) }) ?? 0
         slow.join() ?? panic("slow child failed")
     }
 }
@@ -581,11 +611,11 @@ fn run() {
 #[test]
 fn early_return_closes_group_before_caller_continues() {
     let source = r#"
-fn spawn_bad(group: Group) {
-    bad :: task panic("child")
+fn spawn_bad(_group: Group) {
+    _bad :: task panic("child")
 }
 
-fn leave() Int {
+fn leave() Int -> {
     task.group group {
         spawn_bad(group)
         total := 0

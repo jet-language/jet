@@ -1,6 +1,51 @@
-// #1414 embedded workload host replay. This is deliberately hosted: the
-// freestanding firmware rows remain owner-gated by #2300.
+// #1414 embedded sensor-ring host replay.
+// Provenance: Embassy revision e6ac13bad5787f57fd76ee1e22e5cc15351105a7.
+// The ring algorithm is written here directly for the fixed embedded boundary.
+// Ring storage is a four-element fixed list, not a growable collection.
 use core.files as fs
+
+struct RingBuffer {
+    slots: [Int#4]
+    head: Int
+    tail: Int
+    count: Int
+}
+
+impl RingBuffer {
+    fn enqueue(&self, value: Int) Bool -> {
+        if self.count == 4 -> return false
+        index :: self.tail
+        self.slots[index] = value
+        self.tail = (self.tail + 1) % 4
+        self.count += 1
+        return true
+    }
+
+    fn dequeue(&self) Int -> {
+        index :: self.head
+        value :: self.slots[index]
+        self.head = (self.head + 1) % 4
+        self.count -= 1
+        return value
+    }
+}
+
+fn fold_digest(digest: Int, step: Int, code: Int, value: Int, head: Int, tail: Int, count: Int) Int -> {
+    value_part := value % 1000003
+    if value_part < 0 -> value_part += 1000003
+    return (digest * 131 + step * 17 + code * 257 + value_part * 3 + head * 5 + tail * 7 + count * 11) % 1000003
+}
+
+fn print_state(step: Int, op: String, result: String, value: Int, has_value: Bool, ring: &RingBuffer) {
+    head :: ring.head
+    tail :: ring.tail
+    count :: ring.count
+    if has_value {
+        print("step={step}|op={op}|value={value}|result={result}|head={head}|tail={tail}|count={count}")
+    } else {
+        print("step={step}|op={op}|result={result}|head={head}|tail={tail}|count={count}")
+    }
+}
 
 #CLI
 struct WorkloadArgs {
@@ -8,32 +53,67 @@ struct WorkloadArgs {
 }
 
 fn run(args: WorkloadArgs) {
-    input :: args.input
-    raw :: fs.read(input) ?? panic("read input")
-    if raw.contains("bad") {
-        print("frames=0")
-        print("sum=0")
-        print("ring=0")
-        print("reject=1")
-        return
-    }
-    frames := 0
-    sum := 0
+    raw :: fs.read(args.input) ?? panic("read input")
+    ring := RingBuffer{slots: [Int#4]{0, 0, 0, 0}, head: 0, tail: 0, count: 0}
+    step := 0
+    accepted_enqueues := 0
+    accepted_dequeues := 0
+    rejects := 0
+    digest := 17
+    print("capacity=4")
+
     loop line in raw.lines() {
-        if line == "" -> next
-        fields :: line.split(",").to_list()
-        if fields.len() != 2 -> next
-        if Int.parse(fields[1]) == {
-            .Ok(value) -> {
-                frames += 1
-                sum += value
+        if line == "" || line.starts_with("#") -> next
+        step += 1
+        field_count := 0
+        first := ""
+        second := ""
+        loop field in line.split("|") {
+            if field_count == 0 -> first = field
+            if field_count == 1 -> second = field
+            field_count += 1
+        }
+        if field_count == 2 && first == "ENQ" {
+            parsed :: Int.parse(second)
+            if parsed == {
+                .Ok(value) -> {
+                    if ring.enqueue(value) {
+                        accepted_enqueues += 1
+                        digest = fold_digest(digest, step, 1, value, ring.head, ring.tail, ring.count)
+                        print_state(step, "enqueue", "accepted", value, true, &ring)
+                    } else {
+                        rejects += 1
+                        digest = fold_digest(digest, step, 3, value, ring.head, ring.tail, ring.count)
+                        print_state(step, "enqueue", "reject-overflow", value, true, &ring)
+                    }
+                }
+                .Err(_) -> {
+                    rejects += 1
+                    digest = fold_digest(digest, step, 5, 0, ring.head, ring.tail, ring.count)
+                    print_state(step, "malformed", "reject-malformed", 0, false, &ring)
+                }
             }
-            .Err(_) -> next
+        } else if field_count == 1 && first == "DEQ" {
+            if ring.count == 0 {
+                rejects += 1
+                digest = fold_digest(digest, step, 4, 0, ring.head, ring.tail, ring.count)
+                print_state(step, "dequeue", "reject-underflow", 0, false, &ring)
+            } else {
+                value :: ring.dequeue()
+                accepted_dequeues += 1
+                digest = fold_digest(digest, step, 2, value, ring.head, ring.tail, ring.count)
+                print_state(step, "dequeue", "accepted", value, true, &ring)
+            }
+        } else {
+            rejects += 1
+            digest = fold_digest(digest, step, 5, 0, ring.head, ring.tail, ring.count)
+            print_state(step, "malformed", "reject-malformed", 0, false, &ring)
         }
     }
-    ring := 0
-    if frames > 0 -> ring = sum /% frames
-    print("frames={frames}")
-    print("sum={sum}")
-    print("ring={ring}")
+
+    head :: ring.head
+    tail :: ring.tail
+    count :: ring.count
+    print("summary|accepted_enqueues={accepted_enqueues}|accepted_dequeues={accepted_dequeues}|rejects={rejects}|head={head}|tail={tail}|count={count}")
+    print("digest={digest}")
 }

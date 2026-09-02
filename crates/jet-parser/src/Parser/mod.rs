@@ -1370,10 +1370,10 @@ fn build(b: BuildContext) {
             } if method == Syntax::INTERNAL_TASK_SPAWN_METHOD
                 && matches!(
                     args.first().map(|arg| &arg.expr),
-                    Some(Expr::Lambda(Lambda {
-                        body: LambdaBody::Expr(inner),
-                        ..
-                    })) if matches!(inner.as_ref(), Expr::MethodCall { method, .. } if method == Syntax::INTERNAL_TASK_ALL_METHOD)
+                    Some(Expr::Lambda(lambda))
+                        if matches!(&lambda.body, LambdaBody::Expr(inner)
+                            if matches!(inner.as_ref(), Expr::MethodCall { method, .. }
+                                if method == Syntax::INTERNAL_TASK_ALL_METHOD))
                 )
         ));
         assert!(matches!(
@@ -1385,10 +1385,8 @@ fn build(b: BuildContext) {
             } if method == Syntax::INTERNAL_TASK_SPAWN_METHOD
                 && matches!(
                     args.first().map(|arg| &arg.expr),
-                    Some(Expr::Lambda(Lambda {
-                        body: LambdaBody::Block(_),
-                        ..
-                    }))
+                    Some(Expr::Lambda(lambda))
+                        if matches!(&lambda.body, LambdaBody::Block(_))
                 )
         ));
     }
@@ -1723,7 +1721,7 @@ fn build(b: BuildContext) {
     #[test]
     fn abi_lowers_to_the_c_declaration_field_and_groups_reject_extra_rules() {
         let program = program(
-            "#Extern module c.demo {\n    #ABI(sysv64) fn ping(x: I32) I32 = \"ping\"\n}\n",
+            "#Import module c.demo {\n    #ABI(sysv64) fn ping(x: I32) I32 = \"ping\"\n}\n",
         );
         let function = program
             .items
@@ -1738,7 +1736,7 @@ fn build(b: BuildContext) {
             Some("sysv64")
         );
 
-        let src = "#Extern module c.demo {\n    #[ABI(sysv64), MustUse] fn ping() = \"ping\"\n}\n";
+        let src = "#Import module c.demo {\n    #[ABI(sysv64), MustUse] fn ping() = \"ping\"\n}\n";
         let (tokens, lex_diagnostics) = lex(src);
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
         let diagnostics =

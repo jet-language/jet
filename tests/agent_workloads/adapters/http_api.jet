@@ -11,15 +11,9 @@ struct Request {
 }
 
 fn handle(req: HTTPRequest) HTTPResponse !HTTPError -> {
-    payload :: req.json<Request>()
-    if payload == {
-        .Ok(request) -> {
-            if request.name == "" -> return Ok(http_server.response(422, "invalid-name"))
-            return Ok(http_server.response(200, "accepted|{request.name}|{request.role}"))
-        }
-        .Err(_) -> return Ok(http_server.response(400, "invalid-json"))
-        else -> return Ok(http_server.response(400, "invalid-json"))
-    }
+    request :: req.json<Request>() ?? return Ok(http_server.response(400, "invalid-json"))
+    if request.name == "" -> return Ok(http_server.response(422, "invalid-name"))
+    return Ok(http_server.response(200, "accepted|{request.name}|{request.role}"))
 }
 
 #CLI
@@ -27,7 +21,7 @@ struct WorkloadArgs {
     input: String
 }
 
-fn run(args: WorkloadArgs) !(HTTPError | IOError | NetError | TaskFailure) -> {
+fn run(args: WorkloadArgs) !(HTTPError | IOError | NetError | TaskFailure) {
     input :: args.input
     body :: fs.read(input) ?? panic("cannot read input")
     payload :: json.decode<Request>(body) ?? panic("cannot parse input")

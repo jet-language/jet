@@ -487,8 +487,7 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // structural or-patterns and choice alternatives use OP_PIPE (single `|`).
 // `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
 // Value-position `|` is bitwise OR and binds above comparisons. No general bar
-// flow operator exists. `||` remains value-or / boolean-or; `|=` remains
-// bitwise-or-assign under S17.
+// flow operator exists. `||` remains value-or / boolean-or; `|=` remains bitwise-or-assign under S17.
 
 // D-ENUMDOT1 (ratified 2026-06-26, implemented): a leading `.` before a variant name in pattern
 // position (`.Circle(r)`, `.Empty`) is now accepted everywhere a variant pattern is written —
@@ -951,7 +950,6 @@ pub const JOB_RESERVED_CLI: &[&str] = &[
     "replay",
     "project",
     "pure",
-    "freestanding",
     "gate",
     "target",
     "preset",

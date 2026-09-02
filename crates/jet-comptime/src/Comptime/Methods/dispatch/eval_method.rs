@@ -701,22 +701,22 @@ impl<'a> Interp<'a> {
                     && matches!(method, "to_string" | "to_string_pretty")
                 {
                     if let Some(value) = argv.first() {
-                        if let Some(type_name) =
-                            super::super::super::TypedDecode::value_type_name(value)
-                        {
-                            if self
-                                .methods
-                                .contains_key(&(type_name, "encode".to_string()))
-                            {
-                                let tree = self.encode_value(value, span)?;
-                                return Ok(CtValue::Str(
-                                    super::super::super::JSONInterp::render_ordered_datatree(
-                                        &tree,
-                                        method == "to_string_pretty",
-                                        0,
-                                    ),
-                                ));
-                            }
+                        // Keep the dynamic JSON enum on its renderer path. Every
+                        // other value must enter the typed Encode adapter, even
+                        // when the outer value has no registered method: that
+                        // adapter recursively gives nested explicit codecs
+                        // precedence over structural fallback.
+                        let is_dynamic_json =
+                            matches!(value, CtValue::Enum { type_name, .. } if type_name == "JSON");
+                        if !is_dynamic_json {
+                            let tree = self.encode_value(value, span)?;
+                            return Ok(CtValue::Str(
+                                super::super::super::JSONInterp::render_ordered_datatree(
+                                    &tree,
+                                    method == "to_string_pretty",
+                                    0,
+                                ),
+                            ));
                         }
                     }
                 }
@@ -2196,12 +2196,7 @@ impl<'a> Interp<'a> {
             _ => {}
         }
         if is_build_context && method == "fetch" {
-            return eval_net_fetch(
-                &argv,
-                self.base_dir,
-                Some(&mut self.embed_inputs),
-                span,
-            )
+            return eval_net_fetch(&argv, self.base_dir, Some(&mut self.embed_inputs), span)
                 .map(|value| CtValue::Present(Box::new(value)));
         }
         if is_build_context && method == "embed" {

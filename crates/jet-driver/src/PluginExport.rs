@@ -20,21 +20,19 @@ use crate::Diagnostics::Diagnostic;
 use crate::Sema::ApiFreeze;
 use crate::AST::{Item, ProgramBundle};
 
-/// The manifest `export:` field, or the payload/package name, or (no manifest
-/// at all) the entry file's stem — in that priority order (D-PLUGIN-EXPORT1=A:
-/// "defaults to the package name when omitted").
+/// The canonical Package `export:` target, or the package name, or (no
+/// Package context at all) the entry file's stem. Inline and file-backed
+/// carriers use the same PackageFacts model (D-ECO-INLINEPACKAGE1=A).
 pub fn resolve_export_name(bundle: &ProgramBundle) -> String {
-    if let Some(Ok(mf)) = crate::Manifest::load(&bundle.project_root) {
-        if let Ok(facts) = crate::Package::PackageFacts::parse(&mf.raw, "package.jet") {
-            for pkg in &facts.packages {
-                for t in &pkg.targets {
-                    if let crate::Package::Target::Plugin { export } = t {
-                        return export.clone().unwrap_or_else(|| pkg.name.clone());
-                    }
+    if let Ok(Some(facts)) = crate::Loader::package_facts_for_bundle(bundle) {
+        for pkg in &facts.packages {
+            for t in &pkg.targets {
+                if let crate::Package::Target::Plugin { export } = t {
+                    return export.clone().unwrap_or_else(|| pkg.name.clone());
                 }
             }
         }
-        return mf.package.name.clone();
+        return facts.name;
     }
     bundle.modules[bundle.entry]
         .path
@@ -44,14 +42,13 @@ pub fn resolve_export_name(bundle: &ProgramBundle) -> String {
         .to_string()
 }
 
-/// The published-version identity used for the frozen snapshot header — the
-/// manifest's `payload.version`, or `"0.0.0"` with no manifest (single-file
-/// plugins have no version to track; the interface diff still works, it just
-/// always shows the same header).
+/// The published-version identity used for the frozen snapshot header. A
+/// missing version keeps the historical `"0.0.0"` fallback.
 fn resolve_version(bundle: &ProgramBundle) -> String {
-    crate::Manifest::load(&bundle.project_root)
-        .and_then(|r| r.ok())
-        .map(|mf| mf.package.version)
+    crate::Loader::package_facts_for_bundle(bundle)
+        .ok()
+        .flatten()
+        .and_then(|facts| facts.version)
         .unwrap_or_else(|| "0.0.0".to_string())
 }
 

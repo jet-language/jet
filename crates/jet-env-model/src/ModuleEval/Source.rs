@@ -90,10 +90,50 @@ impl SourceLoader for FileSystemSourceLoader {
     }
 
     fn package_facts(&mut self) -> Result<Option<PackageFacts>, Diagnostic> {
+        for relative in [
+            PathBuf::from(Syntax::DEFAULT_ENTRY_FILE),
+            Path::new("src").join(Syntax::DEFAULT_ENTRY_FILE),
+        ] {
+            let path = self.root.join(&relative);
+            let source = match std::fs::read_to_string(&path) {
+                Ok(source) => source,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(source_loader_error(&path, error.to_string()));
+                }
+            };
+            match jet_pkg_model::Package::extract_inline_package(&source) {
+                Ok(Some(block)) => {
+                    if PackageFacts::load(&self.root).is_some() {
+                        return Err(Diagnostic::error(
+                            "E1363",
+                            "an inline Package conflicts with package.jet".to_string(),
+                            "one project cannot carry both an inline Package block and a package.jet manifest"
+                                .to_string(),
+                            "remove package.jet or remove the inline Package block".to_string(),
+                            Some(block.span),
+                        ));
+                    }
+                    return PackageFacts::parse(block.body(&source), path.display().to_string())
+                        .map(Some)
+                        .map_err(|error| {
+                            Diagnostic::error(
+                                "E1362",
+                                "the inline Package body is malformed".to_string(),
+                                error.to_string(),
+                                "fix the inline Package fields, then retry".to_string(),
+                                Some(block.body_span),
+                            )
+                        });
+                }
+                Err(error) => return Err(error.diagnostic()),
+                Ok(None) => {}
+            }
+        }
         Ok(PackageFacts::load(&self.root).and_then(|result| result.ok()))
     }
-}
 
+}
 impl FileSystemSourceLoader {
     fn checked_path(&self, relative: &Path) -> Result<PathBuf, Diagnostic> {
         if relative.is_absolute()

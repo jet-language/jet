@@ -721,23 +721,39 @@ fn lower_if_cond_atom(
         // binding's type is the variant's first payload type from `variant_binding_types`
         // (the same total fact `add_pattern_bindings` reads on the AST path).
         if !is_json_variant(variant) {
+            let enum_type = match &subj.ty {
+                Type::Named(enum_name)
+                | Type::Apply {
+                    name: enum_name, ..
+                } => {
+                    let resolved = cx
+                        .core_qualified_rust_type_name(enum_name)
+                        .unwrap_or(enum_name.as_str());
+                    cx.enum_variants
+                        .get(resolved)
+                        .filter(|variants| {
+                            variants.iter().any(|(candidate, _)| candidate == variant)
+                        })
+                        .map(|_| resolved.to_string())
+                }
+                _ => None,
+            }
+            .or_else(|| cx.variant_owner.get(variant).cloned());
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
-                let ty = match &subj.ty {
-                    Type::Named(enum_name)
-                    | Type::Apply {
-                        name: enum_name, ..
-                    } => {
-                        let resolved = cx
-                            .core_qualified_rust_type_name(enum_name)
-                            .unwrap_or(enum_name.as_str());
-                        variant_binding_types_for_enum(cx, resolved, variant)
-                            .and_then(|ts| ts.into_iter().next())
-                    }
-                    _ => variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next()),
-                };
+                let ty = enum_type
+                    .as_deref()
+                    .and_then(|owner| variant_binding_types_for_enum(cx, owner, variant))
+                    .and_then(|ts| ts.into_iter().next())
+                    .or_else(|| {
+                        variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next())
+                    });
                 return (
                     TIfCond::IfLet {
-                        pattern: TPattern::binding(pattern.clone()),
+                        pattern: TPattern {
+                            pattern: pattern.clone(),
+                            enum_type,
+                            position: TPatternPosition::Binding,
+                        },
                         subj,
                     },
                     vec![(name.clone(), TLocal::user(name), ty)],
@@ -745,12 +761,15 @@ fn lower_if_cond_atom(
                 );
             }
             // c109 (D-PATW): a WILDCARD payload slot (`if w == Some(_)`). `_` binds
-            // nothing, so the if-let introduces NO then-branch binding; the pattern
-            // renders the slot as `_` (`emit_if_let_pattern`), byte-for-byte the AST.
+            // nothing, so the if-let introduces NO then-branch binding.
             if let Some(PatSlot::Wildcard) = bindings.first() {
                 return (
                     TIfCond::IfLet {
-                        pattern: TPattern::binding(pattern.clone()),
+                        pattern: TPattern {
+                            pattern: pattern.clone(),
+                            enum_type,
+                            position: TPatternPosition::Binding,
+                        },
                         subj,
                     },
                     Vec::new(),

@@ -64,7 +64,7 @@ card's plan and criteria and match the ballots' recommendations.
 | F11 isolated file checks carry context | tooling/check | Owned by `#2389`: file check resolves the owning graph or teaches the missing context. |
 | F12 public typed package/profile models | stdlib/Core | Owned by `#2390`; surface home is the owner's pick on D-PACKAGE-MODEL1. Reuses `#610`/`#425`/`#653`/`#1517`/`#2098`; precedent `#696`. |
 | F13 deterministic structured output | stdlib/Core | No new mechanism (I8): canonical JCS, typed writers, and framing handles are shipped. Teaching owned by `#2391`; default-run Codable parity owned by `#1310`. |
-| F14 demand-driven incremental graph | build-perf | Existing owners `#666`/`#1023`/`#1026`/`#2346` and the ratified DEVR cone/reuse laws. Extended `#1026` with a warm-canary criterion pinned to the 8.096 s METRICS baseline. |
+| F14 demand-driven incremental graph | build-perf | Existing owners `#666`/`#1023`/`#1026`/`#2346` and the ratified DEVR cone/reuse laws. Extended `#1026` with a warm-canary criterion. Current binary, latency, and cold/warm build rows in `METRICS.md` are `not measured`; no numeric performance baseline is asserted. |
 | F15 same-subject dispatch lint | lint/idiom | Owned by `#2395`: detector, graded rewrite, LSP action, quiet-cases. Extends `#1259`'s teaching without touching L0507 shapes. |
 | F16 table-driven CLI parsing | lint/idiom | Evidence for `#2395`; canonical replacement shown in the `#2391` dispatch suite. |
 | F17 one-pass CLI Result dispatch | lint/idiom | Canonical form exists (`#2173`, D-RESULT-DECON2). Teaching owned by `#2391`; nesting pressure evidence feeds `#2395`. |
@@ -84,11 +84,11 @@ card's plan and criteria and match the ballots' recommendations.
 | F31 imported-module AOT roots | bug | Resolved by closed `#2350`. |
 | F32 nested package output resolution | bug | Resolved by closed `#2352`. |
 | F33 struct-typed Result matching | bug | Resolved by closed `#2354`; canonical form `#2173`/D-RESULT-DECON2. |
-| F34 formatter preserves return arms | bug | Resolved by closed `#2355`. |
+| F34 formatter preserves return arms | bug | Resolved by closed `#2368`; the report bug table identifies the formatter defect at `:233`. |
 | F35 passthrough argv after `--` | bug | Resolved by closed `#2369`. |
 | F36 imported-module LSP symbols | bug | Resolved by closed `#2370`. |
-| F37 hidden FFI identity in cache keys | bug | Resolved by closed `#2371`; remaining warm cost is F14. |
-| F38 read-only oracle lock mutation | bug | Resolved in the shipped Rust jetpack (recorded in METRICS.md); no Jet-side card. |
+| F37 hidden FFI identity in cache keys | bug | Resolved by closed `#2371`; current cold and warm timings remain `not measured`, and F14 owns the proposed incremental work. |
+| F38 read-only oracle lock mutation | bug | Resolved in the shipped Rust jetpack as `#2355` (recorded in `METRICS.md`); no Jet-side card. |
 | F39 sovereign package boundaries | process | Standing constraint, recorded as explicit non-goals on `#2389` and `#2395`: automation optimizes inside declared packages, never redefines them. No card needed. |
 | F40 owner-gated parity resumption | process | Owned by the `#2327` hard gate (building, owner go required). The slate honors it: no card touches `dogfood/jetpack/**`. |
 | F41 modular AOT test codegen/discovery | tooling/check | Root defects resolved by closed `#2350` and `#2066`. No reproducible defect remains to card; the `#2393` rerun re-proves the workflow and reopens owners on failure. |
@@ -100,6 +100,10 @@ card's plan and criteria and match the ballots' recommendations.
 | F47 full provider/package-universe parity | rerun-protocol | Owner-gated: full parity is exactly the work paused by `#2327`. Not measurable until the owner reopens it; the rerun uses non-Jetpack matched tasks instead. |
 | F48 expert preference after defect removal | rerun-protocol | Owned by `#2393`: the blind preference question after both arms is this measurement. |
 | F49 repeatable rerun/missing-data protocol | rerun-protocol | Owned by `#2393`: the protocol adopts the METRICS.md matched-input and `not measured` laws verbatim. |
+| F50 ordinary IOError L0520 advisory | diagnostics/io | Owned by `#2417`: raw witness `docs/audits/raw/2393-r1/A03/T4/jet.json` (`diagnostics[0]`, `check T4.jet`, `JSONError` at source line 38); current-source fixture `tests/ui/ioerror_display_migration.jet` + `.stderr` (line 8) owns the ordinary IOError interpolation case. Tier witness: `tests/corelib_parts/net.rs::core_ioerror_debug_renders_in_aot_and_dev`; smoke: `target/debug/jet run tests/ui/ioerror_display_migration.jet`. State: `open` until #2417's focused proof closes; no fix claimed. |
+| F51 compound-assignment L0503 advisory | diagnostics/idiom | Closed by `#2416`: raw witness `docs/audits/raw/2393-r1/A01/T2/jet.json` (`diagnostics[0]`, `check T2.jet`); current-source fixture `tests/ui_lint/prefer_compound_assign.jet` + `.warn` pins subject span and What/Why/Fix. `tests/l0503_behavior.rs` proves policy behavior and byte-identical output across AOT, default run, default dev, and forced interpreter; `tests/hostile_closeout_ledger.rs` proves exact ledger ownership. |
+| F52 stale packaged Scheduler A01/T1 ICE and current exact-duplicate diagnostic regression | bug/compiler | Owned by `#2415`: raw/archived witness `docs/audits/raw/2393-r1/A01/T1/jet.json` preserves the stale packaged `fact registry law violation: \`Scheduler\` is registered twice; one table means one row per name` ICE; current durable regression is `tests/marker_declarations.rs::repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic`. Exact typed case: duplicate Scheduler fact registration, while distinct `Scheduler` and `Target.Scheduler` identities remain separate. Tier policy: `check` + AOT `build` + default `run` + dev + interpreter, with no ICE and byte-identical output. State: `open` pending the matched `#2393`/`#2394` rerun; no fix claimed. |
+| F53 malformed A10/T4 input handling | bug/hostile-input | Owned by `#2419`: raw witness `docs/audits/raw/2393-r1/A10/T4/jet.json`; durable fixture tree `tests/fixtures/fresh_agent_t4/**` and validator `tests/fresh_agent_t4.rs`. Exact typed cases: `truncated.tsv`, `empty-key.tsv`, `extra-column.tsv`, `unknown-key.tsv`, `duplicate-key.tsv`, `invalid-count.tsv`, and `missing-required-key.tsv`. Tier policy: valid output is byte-identical across default/dev/interpreter/AOT (AOT when `rustc` exists); every malformed case exits 1 with empty stdout and deterministic line-aware stderr on each applicable tier. State: `open` pending the matched Jet/Rust `#2393`/`#2394` rerun; no fix claimed. |
 
 ## Open decisions
 
@@ -110,11 +114,14 @@ card's plan and criteria and match the ballots' recommendations.
 
 ## Dependencies
 
-- `#2393` (rerun) is blocked by `#2395`, `#2387`, `#2388`, `#2389`, `#2390`,
-  `#2391`, `#2392`, and `#1310`.
+- `#2393` (rerun) is blocked by the two project/tooling owners
+  `#2389` and `#2390`, plus residual owners `#2415`, `#2417`, and
+  `#2419`; the original mechanism cards `#2395`, `#2387`, `#2388`,
+  `#2391`, `#2392`, and existing owner `#1310` are done. `#2416` is
+  done and is not a blocker.
 - `#2394` (hostile pass) is blocked by `#2393`.
-- `#2389` and `#2390` wait in decide on their ballots; everything else is
-  ready now.
+- `#2389` is building and `#2390` is ready after their ratified ballots;
+  residual owner cards `#2415`, `#2417`, and `#2419` remain open.
 
 ## #2393 rerun record (2026-08-30)
 
@@ -140,28 +147,86 @@ The separate cold-agent harness is also blocked. Its checked-in scoreboard has
 zero rows because the required OpenAI and Anthropic adapters have no configured
 credentials. That artifact is a preflight record, not a scorecard for this
 campaign.
+### 2026-08-31 execution (`2393-r1`)
+
+The frozen protocol was executed after the owner pause was lifted. The dated
+verdict is [`docs/audits/fresh-agent-5-of-5-rerun-2026-08-31.md`](../audits/fresh-agent-5-of-5-rerun-2026-08-31.md).
+The raw receipt manifest is
+[`docs/audits/raw/2393-r1/manifest.json`](../audits/raw/2393-r1/manifest.json).
+
+| Item | 2026-08-31 result | State |
+| --- | --- | --- |
+| Participants | 9 of 10 had both arms; A04 Jet exited 137 after 600.021 s and stopped the participant | incomplete |
+| Raw per-agent scorecards | 80 expected paths; 72 measured and 8 explicitly `not_measured` | recorded; campaign incomplete |
+| Jet project-green task receipts | 27/36 measured tasks green | fail |
+| Rust project-green task receipts | 36/36 measured tasks green | task evidence only; not the Jet gate |
+| Full seven-category campaign median | `not measured`; A04 is retained in the denominator | fail |
+| Blind preference | 9/9 measured blind choices were Rust; A04 had no measured choice | fail |
+| Testimony closure | Fresh run evidence added; implementation and experience rows remain open | open |
+| Campaign verdict | `FAIL — fixed 5/5 gate not met` | do not close #2393 |
+
+Score vectors use
+`reading/writing/reasoning/creating/modifying/diagnostics/tooling-docs`;
+each is the median of the four task ratings, followed by the lowest raw score:
+
+| Participant | Jet median / min | Rust median / min |
+| --- | --- | --- |
+| A01 | `5/5/5/5/4/5/4` / 4 | `5/5/5/5/4/5/5` / 4 |
+| A02 | `5/5/5/5/4.5/4/4` / 2 | `4/4/4/4/4/4/4` / 4 |
+| A03 | `5/4/4/4/4/4/3` / 3 | `4/5/5/5/4/5/4` / 4 |
+| A05 | `5/4/4/5/4/5/4` / 3 | `5/5/5/5/1/5/5` / 1 |
+| A06 | `4/3.5/4/3.5/3/4/4.5` / 2 | `4/4/4/4/4/4/3` / 3 |
+| A07 | `5/4/5/5/4/5/4` / 3 | `5/5/5/5/5/5/5` / 4 |
+| A08 | `4/4/4/4/4/3/4` / 2 | `4/4/4/4/4/4/3` / 3 |
+| A09 | `4/4/4/4/3.5/4/3` / 2 | `5/4/4/5/4/4/5` / 4 |
+| A10 | `4/4/4/3.5/3.5/4/3` / 3 | `5/5/4.5/4/4/4.5/3` / 3 |
+
+The nine completed blind answers were `A01 Rust`, `A02 Rust`, `A03 Rust`,
+`A05 Rust`, `A06 Rust`, `A07 Rust`, `A08 Rust`, `A09 Rust`, and `A10 Rust`.
+A04 has no preference row because the stop rule forbade a replacement. The
+exact opaque arm labels, answers, and reasons are in each participant's
+`raw/2393-r1/<participant>/comparison.json` receipt.
+
+Residual findings are: A01's PATH-corrected Jet native retry hit the
+`Scheduler` fact-registry ICE; A02, A06, A07, and A08 hit Jet T1 native/AOT
+failures; A03 T4 default execution hit E0956; the Rust check-mode wording used
+the standalone `rustc` wrapper because the fixture had no Cargo project; and
+A04 remains an unrecoverable tool failure. Seeded duplicate/unknown/rename
+diagnostics were named and resolved in the measured command set. Advisory
+Jet diagnostics and unseeded compiler failures remain open. These results do
+not close #2391, #2387, #2388, #2389, #2390, or #1310.
+
+F46 remains declined for this bounded campaign because it needs a longitudinal
+study. F47 remains owner-gated by #2327 and is not replaced by this run.
+
+### 2026-08-31 gate decision
+
+Criteria 2, 3, and 5 remain `open`: Jet has raw ratings below 4 and participant
+medians below 5; 9/9 measured blind choices were Rust, A04 had no answer; and
+the fixed ten-participant evidence plus residual testimony closure is incomplete.
+
 
 ### Testimony closure ledger
 
 The original testimony table is at
-`docs/audits/dogfood-jetpack-usage-experience-2026-08-30.md:280-291`.
+`docs/audits/dogfood-jetpack-usage-experience-2026-08-30.md:289-304`.
 Every friction and improvement statement has a row below. The preference
-qualifiers are recorded as `T-PREF`; they remain open until the blind question
-is answered.
+qualifiers are recorded as `T-PREF`; the sealed blind question produced 9/9
+measured Rust choices, while A04 remains unmeasured after the stop-rule failure.
 
 | ID | Original statement | Finding(s) | Owner or evidence | State at rerun gate |
 | --- | --- | --- | --- | --- |
 | T01 | Hand-written state machines and brace/interpolation confusion; teach canonical table-driven parsing. | F01, F09, F19, F24 | `#2391` finite-state, dispatch, and wire suites | `open` — no fresh-agent proof |
 | T02 | The 970-line scanner and renderer caused repeated ownership edits; add typed profile parsing and deterministic output. | F12, F13, F25, F26 | `#2390`, `#2391` | `open` — owner choice and suite proof remain |
 | T03 | Project-root imports and incomplete module checks; check from any source file with project context. | F07, F10, F11 | `#2389` | `open` — ballot and rerun proof remain |
-| T04 | Direct fallible-call matching propagated instead of binding; make Result matching reliable. | F33 | `#2354` is closed; the dogfood report records the fix at `:221` | `resolved in implementation; rerun confirmation open` |
+| T04 | Direct fallible-call matching propagated instead of binding; make Result matching reliable. | F33 | `#2354` is closed; the dogfood report records the fix at `:232` | `resolved in implementation; rerun confirmation open` |
 | T05 | Entry resolution needed adapters and several checks; follow the checked source graph. | F10, F31, F32 | `#2352` is closed; `#2389` owns project-check proof | `partial — implementation fixed; experience proof open` |
 | T06 | Reusing values across consuming Core APIs required many `~` copies; improve move diagnostics. | F08 | `#2387` | `open` — no diagnostic proof |
-| T07 | Cross-module AOT and test reachability needed correction; make modular AOT discovery reliable. | F31, F41 | `#2350` and `#2066`; dogfood report `:219` and `:288` | `resolved in implementation; rerun confirmation open` |
+| T07 | Cross-module AOT and test reachability needed correction; make modular AOT discovery reliable. | F31, F41 | `#2350` and `#2066`; dogfood report `:230` and `:301` | `resolved in implementation; rerun confirmation open` |
 | T08 | Error-domain mismatches appeared at call sites; give fix-its that name the source helper. | F03, F05 | `#2388` | `open` — no diagnostic proof |
 | T09 | View materialization and literal-brace syntax caused repair work; improve ownership guidance. | F08, F09 | `#2387`, `#2391` | `open` — no suite or diagnostic proof |
 | T10 | Helper error domains and public error visibility were hard to learn; give first-class guidance. | F03, F04, F05 | `#2388` | `open` — no diagnostic proof |
-| T-PREF | Agents gave only production-negative qualifiers: no production preference, cautious/conditional/guarded yes, or “not package tooling yet.” | F48 | `#2393` blind preference question | `open` — no preference answers |
+| T-PREF | Agents gave only production-negative qualifiers: no production preference, cautious/conditional/guarded yes, or “not package tooling yet.” | F48 | `#2393` blind preference question | `measured — 9/9 measured comparisons chose Rust; A04 has no answer; criterion 3 fails` |
 
 Two non-testable scope statements remain explicit. F46 is declined for this
 bounded campaign because long-term maintenance needs a longitudinal study. F47
@@ -170,8 +235,8 @@ is the paused Jetpack replacement work. Neither is silently dropped.
 
 ## Next burndown scope
 
-Once the two ballots are ratified: burn `#2395`, `#2387`, `#2388`, `#2392`,
-`#2391` (independent paths: parser/sema lint seam, ownership checker,
-fallible checker + registration, diagnostics projection, examples) plus
-`#2389` and `#2390` per their ratified outcomes, with `#1310` in the same
-wave. Then run `#2393`, and finish with `#2394`.
+The original mechanism cards `#2395`, `#2387`, `#2388`, `#2391`, `#2392`,
+and existing owner `#1310` are done. Implement the ratified outcomes on
+`#2389` and `#2390`, close residual owners `#2415`, `#2417`, and `#2419`
+(`#2416` is done), address the `#2393-r1` residuals, rerun the fixed
+ten-participant gate, and finish with `#2394`.

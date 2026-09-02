@@ -8,10 +8,12 @@
 //! authenticated, and re-hashed in quarantine.
 
 use super::Closure;
-use super::{parse_meta, Roots, StoreEntry};
+use super::{managed_dir, parse_meta, Roots, StoreEntry};
 use crate::RuntimePolicy;
-use crate::TrustRoot::{constant_time_eq, os_random_bytes, Signature as TrustSignature, TrustKey};
-use crate::{Envelope, JSON};
+use crate::TrustRoot::{
+    constant_time_eq, os_random_bytes, Signature as TrustSignature, TrustKey,
+};
+use crate::{Envelope, JSON, SHA256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
@@ -19,6 +21,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAGIC: &[u8] = b"jet-hangar-archive-v1\0";
+const NIX_MANIFEST_TRAILER: u8 = 2;
 pub const MAX_ARCHIVE_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_OBJECTS: usize = 16_384;
 const MAX_NODES_PER_OBJECT: usize = 1_000_000;
@@ -39,6 +42,7 @@ pub struct ArchiveReport {
 struct Archive {
     root_id: String,
     objects: Vec<ArchiveObject>,
+    nix_manifest: Option<NixClosureManifest>,
     signature: Option<ArchiveSignature>,
 }
 
@@ -68,6 +72,23 @@ enum ArchiveNodeKind {
 }
 
 #[derive(Debug, Clone)]
+struct NixClosureManifest {
+    output: String,
+    platform: String,
+    revision: String,
+    cache_key: String,
+    members: Vec<NixClosureMember>,
+}
+
+#[derive(Debug, Clone)]
+struct NixClosureMember {
+    key: String,
+    hash: String,
+    size: u64,
+    references: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 struct ArchiveSignature {
     key_id: String,
     algorithm: String,
@@ -88,6 +109,7 @@ pub fn export_archive(
         let signed = Archive {
             root_id: archive.root_id,
             objects: archive.objects,
+            nix_manifest: archive.nix_manifest,
             signature: Some(ArchiveSignature::from(key.sign(&payload))),
         };
         let bytes = signed.encode()?;
@@ -129,6 +151,326 @@ pub fn import_archive(
     import_verified_archive(roots, archive)
 }
 
+
+const PROJECT_NIX_CAS_DIR: &str = "nix-cas";
+
+/// Export the selected Hangar closure as a portable, unsigned CAS bundle.
+///
+/// The bundle contains only content-addressed object bytes and relative node
+/// names. It intentionally omits package metadata so no machine-local Hangar
+/// or Nix store path can enter the project artifact.
+pub fn export_nix_cas_bundle(
+    roots: &Roots,
+    target: &str,
+) -> io::Result<(Vec<u8>, String)> {
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let archive = build_nix_cas_archive_unlocked(roots, target)?;
+        let bytes = archive.encode()?;
+        let digest = format!("sha256-{}", SHA256::sha256_hex(&bytes));
+        Ok((bytes, digest))
+    })
+}
+
+/// Persist a portable Nix CAS bundle below the project's managed directory.
+pub fn publish_nix_cas_bundle(
+    project: &Path,
+    roots: &Roots,
+    target: &str,
+) -> io::Result<String> {
+    let (bytes, digest) = export_nix_cas_bundle(roots, target)?;
+    let directory = managed_dir(project).join(PROJECT_NIX_CAS_DIR);
+    super::Ingest::ensure_real_directory(&directory, "project Nix CAS directory")?;
+    let path = directory.join(&digest);
+    match fs::read(&path) {
+        Ok(existing) if existing == bytes => return Ok(digest),
+        Ok(_) => return Err(invalid("project Nix CAS bundle digest collides")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let temporary = directory.join(format!(".{digest}.partial-{}", unique_suffix()));
+    fs::write(&temporary, &bytes)?;
+    if let Err(error) = fs::rename(&temporary, &path) {
+        let _ = fs::remove_file(&temporary);
+        if error.kind() != io::ErrorKind::AlreadyExists {
+            return Err(error);
+        }
+        let existing = fs::read(&path)?;
+        if existing != bytes {
+            return Err(invalid("project Nix CAS bundle digest collides"));
+        }
+    }
+    Ok(digest)
+}
+
+/// Import a project Nix CAS bundle only after checking its declared digest.
+pub fn import_nix_cas_bundle(
+    project: &Path,
+    roots: &Roots,
+    digest: &str,
+) -> io::Result<(ArchiveReport, Vec<String>)> {
+    import_nix_cas_bundle_with_expectation(project, roots, digest, None)
+}
+
+/// Import a Nix CAS bundle against the lock's complete closure identity.
+///
+/// The manifest is decoded and checked before any Hangar staging or
+/// publication. The lock identity is therefore an admission precondition,
+/// not a post-import observation.
+pub fn import_nix_cas_bundle_checked(
+    project: &Path,
+    roots: &Roots,
+    digest: &str,
+    closure: &crate::Lock::NixClosureRecord,
+    envelope: &crate::Lock::LockEnvelope,
+) -> io::Result<(ArchiveReport, Vec<String>)> {
+    closure.validate().map_err(io::Error::other)?;
+    if envelope.output_hash != closure.output || envelope.platform != closure.system {
+        return Err(invalid(
+            "locked Nix envelope identity disagrees with its closure record",
+        ));
+    }
+    let expectation = NixReplayExpectation {
+        output: &closure.output,
+        platform: &envelope.platform,
+        revision: &closure.revision,
+        cache_key: &closure.cache_key,
+        references: &closure.references,
+    };
+    import_nix_cas_bundle_with_expectation(project, roots, digest, Some(expectation))
+}
+
+fn import_nix_cas_bundle_with_expectation(
+    project: &Path,
+    roots: &Roots,
+    digest: &str,
+    expectation: Option<NixReplayExpectation<'_>>,
+) -> io::Result<(ArchiveReport, Vec<String>)> {
+    validate_digest(digest)?;
+    let path = managed_dir(project).join(PROJECT_NIX_CAS_DIR).join(digest);
+    let bytes = fs::read(&path)?;
+    let actual = format!("sha256-{}", SHA256::sha256_hex(&bytes));
+    if actual != digest {
+        return Err(invalid("project Nix CAS bundle digest mismatch"));
+    }
+    if bytes.len() > MAX_ARCHIVE_BYTES {
+        return Err(invalid("archive exceeds the 1 GiB limit"));
+    }
+    let archive = Archive::decode(&bytes)?;
+    archive.verify_signature(roots, None, true)?;
+    validate_nix_bundle(&archive, expectation)?;
+    let digests = archive
+        .nix_manifest
+        .as_ref()
+        .map(|manifest| {
+            manifest
+                .members
+                .iter()
+                .map(|member| member.key.clone())
+                .collect::<Vec<_>>()
+        })
+        .ok_or_else(|| invalid("project Nix CAS bundle has no closure manifest"))?;
+    let report = import_verified_archive_with_policy(roots, archive, true)?;
+    Ok((report, digests))
+}
+
+struct NixReplayExpectation<'a> {
+    output: &'a str,
+    platform: &'a str,
+    revision: &'a str,
+    cache_key: &'a str,
+    references: &'a [String],
+}
+fn validate_nix_bundle(
+    archive: &Archive,
+    expectation: Option<NixReplayExpectation<'_>>,
+) -> io::Result<()> {
+    let manifest = archive
+        .nix_manifest
+        .as_ref()
+        .ok_or_else(|| invalid("project Nix CAS bundle has no closure manifest"))?;
+    validate_manifest_cas(&manifest.output, "manifest output")?;
+    validate_manifest_platform(&manifest.platform)?;
+    validate_manifest_hex(&manifest.revision, 40, "manifest revision")?;
+    validate_manifest_hex(&manifest.cache_key, 64, "manifest cache key")?;
+    if archive.root_id != manifest.output {
+        return Err(invalid(
+            "Nix closure manifest output disagrees with archive root",
+        ));
+    }
+    if manifest.members.is_empty() || manifest.members.len() > MAX_OBJECTS {
+        return Err(invalid("Nix closure manifest has an invalid member count"));
+    }
+
+    let mut object_keys = Vec::with_capacity(archive.objects.len());
+    let mut objects = BTreeMap::new();
+    for object in &archive.objects {
+        if !object.meta.is_empty() {
+            return Err(invalid("project Nix CAS bundle contains package metadata"));
+        }
+        if object.id != object.digest {
+            return Err(invalid(
+                "Nix CAS bundle object id disagrees with its digest",
+            ));
+        }
+        validate_manifest_cas(&object.digest, "Nix CAS member")?;
+        object_keys.push(object.digest.clone());
+        if objects.insert(object.digest.clone(), object).is_some() {
+            return Err(invalid("Nix CAS bundle contains duplicate members"));
+        }
+    }
+    let member_keys = manifest
+        .members
+        .iter()
+        .map(|member| member.key.clone())
+        .collect::<Vec<_>>();
+    if !is_sorted_unique(&object_keys) || !is_sorted_unique(&member_keys) {
+        return Err(invalid(
+            "Nix closure manifest members must be sorted and unique",
+        ));
+    }
+    if object_keys != member_keys {
+        return Err(invalid(
+            "Nix closure manifest member set disagrees with archive objects",
+        ));
+    }
+
+    let mut edges = BTreeMap::new();
+    for member in &manifest.members {
+        validate_manifest_cas(&member.key, "Nix closure member key")?;
+        validate_manifest_cas(&member.hash, "Nix closure member hash")?;
+        if member.size == 0 {
+            return Err(invalid("Nix closure manifest member has zero size"));
+        }
+        let object = objects
+            .get(&member.key)
+            .ok_or_else(|| invalid("Nix closure manifest names a missing member"))?;
+        let canonical = canonical_nix_object_bytes(object)?;
+        let actual_hash = format!("sha256-{}", SHA256::sha256_hex(&canonical));
+        if member.hash != actual_hash || member.size != canonical.len() as u64 {
+            return Err(invalid(&format!(
+                "Nix closure manifest member `{}` has incorrect key/hash/size",
+                member.key
+            )));
+        }
+        if !is_sorted_unique(&member.references) {
+            return Err(invalid(
+                "Nix closure manifest references must be sorted and unique",
+            ));
+        }
+        for reference in &member.references {
+            validate_manifest_cas(reference, "Nix closure reference")?;
+            if reference == &member.key {
+                return Err(invalid("Nix closure manifest contains a self-reference"));
+            }
+            if !objects.contains_key(reference) {
+                return Err(invalid(
+                    "Nix closure manifest reference is outside the member set",
+                ));
+            }
+        }
+        edges.insert(member.key.clone(), member.references.clone());
+    }
+
+    if let Some(expected) = expectation {
+        if manifest.output != expected.output
+            || manifest.platform != expected.platform
+            || manifest.revision != expected.revision
+            || manifest.cache_key != expected.cache_key
+        {
+            return Err(invalid(
+                "Nix closure manifest disagrees with the locked target identity",
+            ));
+        }
+        let root_refs = edges
+            .get(&manifest.output)
+            .ok_or_else(|| invalid("Nix closure manifest has no output member"))?;
+        if root_refs != expected.references {
+            return Err(invalid(
+                "Nix closure manifest root references disagree with the locked closure",
+            ));
+        }
+    }
+
+    let mut visiting = BTreeSet::new();
+    let mut reachable = BTreeSet::new();
+    visit_nix_manifest(
+        &manifest.output,
+        &edges,
+        &mut visiting,
+        &mut reachable,
+    )?;
+    if reachable.len() != member_keys.len()
+        || member_keys.iter().any(|key| !reachable.contains(key))
+    {
+        return Err(invalid(
+            "Nix closure manifest contains unreachable extra members",
+        ));
+    }
+    Ok(())
+}
+
+fn visit_nix_manifest(
+    key: &str,
+    edges: &BTreeMap<String, Vec<String>>,
+    visiting: &mut BTreeSet<String>,
+    reachable: &mut BTreeSet<String>,
+) -> io::Result<()> {
+    if reachable.contains(key) {
+        return Ok(());
+    }
+    if !visiting.insert(key.to_string()) {
+        return Err(invalid("Nix closure manifest contains a reference cycle"));
+    }
+    let references = edges
+        .get(key)
+        .ok_or_else(|| invalid("Nix closure manifest has a missing graph node"))?;
+    for reference in references {
+        visit_nix_manifest(reference, edges, visiting, reachable)?;
+    }
+    visiting.remove(key);
+    reachable.insert(key.to_string());
+    Ok(())
+}
+
+fn is_sorted_unique(values: &[String]) -> bool {
+    values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+fn validate_manifest_cas(value: &str, label: &str) -> io::Result<()> {
+    if !value.starts_with("sha256-")
+        || value.len() != 71
+        || !value[7..]
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(invalid(&format!("{label} is not a canonical CAS digest")));
+    }
+    Ok(())
+}
+
+fn validate_manifest_hex(value: &str, digits: usize, label: &str) -> io::Result<()> {
+    if value.len() != digits
+        || !value
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(invalid(&format!("{label} is not canonical lowercase hex")));
+    }
+    Ok(())
+}
+
+fn validate_manifest_platform(value: &str) -> io::Result<()> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value.is_ascii()
+        || value.bytes().any(|byte| byte.is_ascii_control())
+        || value.contains('/')
+        || value.contains('\\')
+    {
+        return Err(invalid("Nix closure manifest has an unsafe target platform"));
+    }
+    Ok(())
+}
 /// Import an archive returned by an authenticated shared-store broker.
 ///
 /// The broker has already authenticated the peer, checked writer authority,
@@ -148,6 +490,14 @@ pub fn import_broker_archive(roots: &Roots, bytes: &[u8]) -> io::Result<ArchiveR
 }
 
 fn import_verified_archive(roots: &Roots, archive: Archive) -> io::Result<ArchiveReport> {
+    import_verified_archive_with_policy(roots, archive, false)
+}
+
+fn import_verified_archive_with_policy(
+    roots: &Roots,
+    archive: Archive,
+    allow_nix_absolute_symlinks: bool,
+) -> io::Result<ArchiveReport> {
     let mut report = archive.report();
     if let Some(root) = archive
         .objects
@@ -159,7 +509,7 @@ fn import_verified_archive(roots: &Roots, archive: Archive) -> io::Result<Archiv
         report.root = portable_entry(roots, root, &meta)?.id;
     }
     RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        import_archive_unlocked(roots, archive)
+        import_archive_unlocked_with_policy(roots, archive, allow_nix_absolute_symlinks)
     })?;
     Ok(report)
 }
@@ -598,10 +948,140 @@ fn repair_output_path(roots: &Roots, entry: &StoreEntry) -> io::Result<PathBuf> 
     Ok(expected)
 }
 
+fn build_nix_cas_archive_unlocked(
+    roots: &Roots,
+    target: &str,
+) -> io::Result<Archive> {
+    let entry = select_entry_unlocked(roots, target)?;
+    let producer = super::ProducerRecord::decode(&entry.producer_record)
+        .map_err(|error| invalid(&format!("Nix CAS export has invalid producer record: {error}")))?;
+    if producer.provider != "nix" {
+        return Err(invalid(
+            "Nix CAS export requires a Nix producer record; generic Hangar entries use generic archives",
+        ));
+    }
+    let platform = entry.envelope.platform.clone();
+    if platform.is_empty() {
+        return Err(invalid("Nix CAS export has no target platform"));
+    }
+    let revision = producer
+        .facts
+        .get("nix.index.revision")
+        .cloned()
+        .ok_or_else(|| invalid("Nix CAS export has no locked index revision"))?;
+    let cache_key = producer
+        .facts
+        .get("nix.cache.key")
+        .cloned()
+        .ok_or_else(|| invalid("Nix CAS export has no cache identity key"))?;
+    if producer
+        .facts
+        .get("nix.index.system")
+        .is_some_and(|system| system != &platform)
+    {
+        return Err(invalid(
+            "Nix CAS export producer system disagrees with its target platform",
+        ));
+    }
+    let graph = Closure::closure_graph_structure_unlocked(roots)?;
+    let root_digest = entry.envelope.output_hash.clone();
+    let mut archive = build_archive_unlocked_with_policy(roots, target, true, true)?;
+    if !archive
+        .objects
+        .iter()
+        .any(|object| object.digest == root_digest && object.meta.is_empty())
+    {
+        return Err(invalid("Nix CAS bundle is missing its output object"));
+    }
+    archive.objects.retain(|object| object.meta.is_empty());
+    archive.root_id = root_digest.clone();
+    archive.nix_manifest = Some(build_nix_manifest(
+        &archive.objects,
+        &graph,
+        &root_digest,
+        &platform,
+        &revision,
+        &cache_key,
+    )?);
+    validate_nix_bundle(&archive, None)?;
+    Ok(archive)
+}
+
+fn build_nix_manifest(
+    objects: &[ArchiveObject],
+    graph: &Closure::ClosureGraph,
+    output: &str,
+    platform: &str,
+    revision: &str,
+    cache_key: &str,
+) -> io::Result<NixClosureManifest> {
+    let object_keys = objects
+        .iter()
+        .map(|object| object.digest.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut members = Vec::with_capacity(objects.len());
+    for object in objects {
+        let bytes = canonical_nix_object_bytes(object)?;
+        let mut references = graph.direct_references(&object.digest);
+        if references
+            .iter()
+            .any(|reference| !object_keys.contains(reference.as_str()))
+        {
+            return Err(invalid(
+                "Nix closure graph references an object outside the exported member set",
+            ));
+        }
+        references.sort();
+        references.dedup();
+        members.push(NixClosureMember {
+            key: object.digest.clone(),
+            hash: format!("sha256-{}", SHA256::sha256_hex(&bytes)),
+            size: bytes.len() as u64,
+            references,
+        });
+    }
+    members.sort_by(|left, right| left.key.cmp(&right.key));
+    Ok(NixClosureManifest {
+        output: output.to_string(),
+        platform: platform.to_string(),
+        revision: revision.to_string(),
+        cache_key: cache_key.to_string(),
+        members,
+    })
+}
+
+fn canonical_nix_object_bytes(object: &ArchiveObject) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    put_raw_u32(&mut bytes, object.root_mode);
+    for node in &object.nodes {
+        let kind = match node.kind {
+            ArchiveNodeKind::Directory => 0,
+            ArchiveNodeKind::File => 1,
+            ArchiveNodeKind::Symlink => 2,
+            ArchiveNodeKind::Hardlink => 3,
+        };
+        bytes.push(kind);
+        put_string(&mut bytes, &node.path)?;
+        put_raw_u32(&mut bytes, node.mode);
+        put_u64(&mut bytes, node.bytes.len() as u64)?;
+        bytes.extend_from_slice(&node.bytes);
+    }
+    Ok(bytes)
+}
+
 fn build_archive_unlocked(
     roots: &Roots,
     target: &str,
     include_closure: bool,
+) -> io::Result<Archive> {
+    build_archive_unlocked_with_policy(roots, target, include_closure, false)
+}
+
+fn build_archive_unlocked_with_policy(
+    roots: &Roots,
+    target: &str,
+    include_closure: bool,
+    allow_nix_absolute_symlinks: bool,
 ) -> io::Result<Archive> {
     super::Ingest::require_real_directory(&roots.hangar_dir(), "Hangar root")?;
     let entry = select_entry_unlocked(roots, target)?;
@@ -657,7 +1137,7 @@ fn build_archive_unlocked(
             digest: digest.clone(),
             meta: String::new(),
             root_mode: mode_of(&fs::symlink_metadata(&path)?),
-            nodes: collect_nodes(&path)?,
+            nodes: collect_nodes_with_policy(&path, allow_nix_absolute_symlinks)?,
         });
     }
 
@@ -691,11 +1171,20 @@ fn build_archive_unlocked(
     Ok(Archive {
         root_id: entry.id,
         objects,
+        nix_manifest: None,
         signature: None,
     })
 }
 
 fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize> {
+    import_archive_unlocked_with_policy(roots, archive, false)
+}
+
+fn import_archive_unlocked_with_policy(
+    roots: &Roots,
+    archive: Archive,
+    allow_nix_absolute_symlinks: bool,
+) -> io::Result<usize> {
     super::Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
     let archive_stage = roots.hangar_dir().join(ARCHIVE_STAGE);
     super::Ingest::ensure_real_directory(&archive_stage, "Hangar archive staging")?;
@@ -739,9 +1228,17 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
             }
             validate_digest(&object.digest)?;
             let output = stage_objects.join(&object.digest);
-            write_nodes(&output, &object.nodes, object.root_mode)?;
-            let actual = Envelope::try_output_hash_of(&output.to_string_lossy())
-                .map_err(io::Error::other)?;
+            write_nodes_with_policy(&output, &object.nodes, object.root_mode, allow_nix_absolute_symlinks)?;
+            let actual = if allow_nix_absolute_symlinks {
+                Envelope::try_output_hash_of_in_hangar(
+                    &output.to_string_lossy(),
+                    &roots.hangar_dir(),
+                    false,
+                )
+            } else {
+                Envelope::try_output_hash_of(&output.to_string_lossy())
+            }
+            .map_err(io::Error::other)?;
             if actual != object.digest {
                 return Err(invalid(&format!(
                     "archive output `{}` re-hashes as `{actual}`",
@@ -930,11 +1427,21 @@ fn verify_archive_object(
     roots: &Roots,
     object: &ArchiveObject,
     staged: Option<&Path>,
+    allow_nix_absolute_symlinks: bool,
 ) -> io::Result<()> {
     let path = staged
         .map(|root| root.join(&object.digest))
         .unwrap_or_else(|| roots.hangar_dir().join("objects").join(&object.digest));
-    let actual = Envelope::try_output_hash_of(&path.to_string_lossy()).map_err(io::Error::other)?;
+    let actual = if allow_nix_absolute_symlinks {
+        Envelope::try_output_hash_of_in_hangar(
+            &path.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+    } else {
+        Envelope::try_output_hash_of(&path.to_string_lossy())
+    }
+    .map_err(io::Error::other)?;
     if actual != object.digest {
         return Err(invalid(&format!(
             "output `{}` re-hashes as `{actual}`",
@@ -945,6 +1452,14 @@ fn verify_archive_object(
 }
 
 fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
+    verify_archive_contents_with_policy(roots, archive, false)
+}
+
+fn verify_archive_contents_with_policy(
+    roots: &Roots,
+    archive: &Archive,
+    allow_nix_absolute_symlinks: bool,
+) -> io::Result<()> {
     super::Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
     let archive_stage = roots.hangar_dir().join(ARCHIVE_STAGE);
     super::Ingest::ensure_real_directory(&archive_stage, "Hangar archive staging")?;
@@ -962,8 +1477,18 @@ fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
             .filter(|object| object.meta.is_empty())
         {
             let output = stage.join(&object.digest);
-            write_nodes(&output, &object.nodes, object.root_mode)?;
-            verify_archive_object(roots, object, Some(&stage))?;
+            write_nodes_with_policy(
+                &output,
+                &object.nodes,
+                object.root_mode,
+                allow_nix_absolute_symlinks,
+            )?;
+            verify_archive_object(
+                roots,
+                object,
+                Some(&stage),
+                allow_nix_absolute_symlinks,
+            )?;
             outputs.insert(object.digest.clone());
         }
         for object in archive
@@ -1027,7 +1552,11 @@ fn select_entry_from(entries: &[StoreEntry], target: &str) -> io::Result<StoreEn
         .ok_or_else(|| invalid(&format!("no Hangar entry matches `{target}`")))
 }
 
-fn collect_nodes(root: &Path) -> io::Result<Vec<ArchiveNode>> {
+
+fn collect_nodes_with_policy(
+    root: &Path,
+    allow_nix_absolute_symlinks: bool,
+) -> io::Result<Vec<ArchiveNode>> {
     let metadata = fs::symlink_metadata(root).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
             invalid(&format!("output `{}` is missing", root.display()))
@@ -1047,6 +1576,7 @@ fn collect_nodes(root: &Path) -> io::Result<Vec<ArchiveNode>> {
         &canonical_root,
         &mut hardlinks,
         &mut nodes,
+        allow_nix_absolute_symlinks,
     )?;
     nodes.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(nodes)
@@ -1058,6 +1588,7 @@ fn collect_nodes_at(
     canonical_root: &Path,
     hardlinks: &mut BTreeMap<(u64, u64), String>,
     out: &mut Vec<ArchiveNode>,
+    allow_nix_absolute_symlinks: bool,
 ) -> io::Result<()> {
     if out.len() >= MAX_NODES_PER_OBJECT {
         return Err(invalid("output tree contains too many nodes"));
@@ -1077,7 +1608,14 @@ fn collect_nodes_at(
         children.sort_by_key(|entry| entry.file_name());
         for child in children {
             let child_rel = relative.join(child.file_name());
-            collect_nodes_at(&child.path(), &child_rel, canonical_root, hardlinks, out)?;
+            collect_nodes_at(
+                &child.path(),
+                &child_rel,
+                canonical_root,
+                hardlinks,
+                out,
+                allow_nix_absolute_symlinks,
+            )?;
         }
     } else if metadata.is_file() {
         if metadata.len() > MAX_NODE_BYTES {
@@ -1113,20 +1651,6 @@ fn collect_nodes_at(
         });
     } else if file_type.is_symlink() {
         let target = fs::read_link(root)?;
-        if target.is_absolute() {
-            return Err(invalid(
-                "absolute symlinks are not portable Hangar archive nodes",
-            ));
-        }
-        let resolved = fs::canonicalize(root).map_err(|error| {
-            invalid(&format!(
-                "symlink `{}` is dangling or cyclic: {error}",
-                root.display()
-            ))
-        })?;
-        if !resolved.starts_with(canonical_root) {
-            return Err(invalid("symlink target escapes the Hangar output root"));
-        }
         let target = target
             .to_str()
             .ok_or_else(|| invalid("symlink target is not UTF-8"))?;
@@ -1135,6 +1659,23 @@ fn collect_nodes_at(
             || target.bytes().any(|byte| byte.is_ascii_control())
         {
             return Err(invalid("symlink target is not portable"));
+        }
+        if Path::new(target).is_absolute() {
+            if !allow_nix_absolute_symlinks {
+                return Err(invalid(
+                    "absolute symlinks are not portable Hangar archive nodes",
+                ));
+            }
+        } else {
+            let resolved = fs::canonicalize(root).map_err(|error| {
+                invalid(&format!(
+                    "symlink `{}` is dangling or cyclic: {error}",
+                    root.display()
+                ))
+            })?;
+            if !resolved.starts_with(canonical_root) {
+                return Err(invalid("symlink target escapes the Hangar output root"));
+            }
         }
         out.push(ArchiveNode {
             path: portable_path(relative)?,
@@ -1150,7 +1691,13 @@ fn collect_nodes_at(
     Ok(())
 }
 
-fn write_nodes(root: &Path, nodes: &[ArchiveNode], root_mode: u32) -> io::Result<()> {
+
+fn write_nodes_with_policy(
+    root: &Path,
+    nodes: &[ArchiveNode],
+    root_mode: u32,
+    allow_nix_absolute_symlinks: bool,
+) -> io::Result<()> {
     validate_no_path_collisions(nodes)?;
     fs::create_dir_all(root)?;
 
@@ -1204,7 +1751,12 @@ fn write_nodes(root: &Path, nodes: &[ArchiveNode], root_mode: u32) -> io::Result
         let path = root.join(&node.path);
         let target = std::str::from_utf8(&node.bytes)
             .map_err(|_| invalid("archive symlink target is not UTF-8"))?;
-        let _ = symlink_or_hardlink_target(root, &path, &node.bytes)?;
+        let _ = symlink_or_hardlink_target_with_policy(
+            root,
+            &path,
+            &node.bytes,
+            allow_nix_absolute_symlinks,
+        )?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -1225,7 +1777,13 @@ fn write_nodes(root: &Path, nodes: &[ArchiveNode], root_mode: u32) -> io::Result
     Ok(())
 }
 
-fn symlink_or_hardlink_target(root: &Path, link: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
+
+fn symlink_or_hardlink_target_with_policy(
+    root: &Path,
+    link: &Path,
+    bytes: &[u8],
+    allow_nix_absolute_symlinks: bool,
+) -> io::Result<PathBuf> {
     let target =
         std::str::from_utf8(bytes).map_err(|_| invalid("archive link target is not UTF-8"))?;
     if target.is_empty()
@@ -1236,6 +1794,9 @@ fn symlink_or_hardlink_target(root: &Path, link: &Path, bytes: &[u8]) -> io::Res
     }
     let relative = Path::new(target);
     if relative.is_absolute() {
+        if allow_nix_absolute_symlinks {
+            return Ok(relative.to_path_buf());
+        }
         return Err(invalid("archive link target is absolute"));
     }
     let parent = link.parent().unwrap_or(root);
@@ -1539,6 +2100,10 @@ impl Archive {
                 out.extend_from_slice(&node.bytes);
             }
         }
+        if let Some(manifest) = &self.nix_manifest {
+            out.push(NIX_MANIFEST_TRAILER);
+            encode_nix_manifest(&mut out, manifest)?;
+        }
         Ok(out)
     }
 
@@ -1636,7 +2201,18 @@ impl Archive {
                 nodes,
             });
         }
-        let signature = match reader.byte()? {
+        let trailer = reader.byte()?;
+        let nix_manifest = if trailer == NIX_MANIFEST_TRAILER {
+            Some(decode_nix_manifest(&mut reader)?)
+        } else {
+            None
+        };
+        let signature_tag = if trailer == NIX_MANIFEST_TRAILER {
+            reader.byte()?
+        } else {
+            trailer
+        };
+        let signature = match signature_tag {
             0 => None,
             1 => Some(ArchiveSignature {
                 key_id: reader.string()?,
@@ -1656,9 +2232,68 @@ impl Archive {
         Ok(Self {
             root_id,
             objects,
+            nix_manifest,
+
             signature,
         })
     }
+}
+fn encode_nix_manifest(out: &mut Vec<u8>, manifest: &NixClosureManifest) -> io::Result<()> {
+    put_string(out, &manifest.output)?;
+    put_string(out, &manifest.platform)?;
+    put_string(out, &manifest.revision)?;
+    put_string(out, &manifest.cache_key)?;
+    put_u32(out, manifest.members.len())?;
+    for member in &manifest.members {
+        put_string(out, &member.key)?;
+        put_string(out, &member.hash)?;
+        put_u64(out, member.size)?;
+        put_u32(out, member.references.len())?;
+        for reference in &member.references {
+            put_string(out, reference)?;
+        }
+    }
+    Ok(())
+}
+
+fn decode_nix_manifest(reader: &mut Reader<'_>) -> io::Result<NixClosureManifest> {
+    let output = reader.string()?;
+    let platform = reader.string()?;
+    let revision = reader.string()?;
+    let cache_key = reader.string()?;
+    let count = reader.u32()? as usize;
+    if count > MAX_OBJECTS {
+        return Err(invalid("Nix closure manifest contains too many members"));
+    }
+    let mut members = Vec::with_capacity(count);
+    for _ in 0..count {
+        let key = reader.string()?;
+        let hash = reader.string()?;
+        let size = reader.u64()?;
+        let reference_count = reader.u32()? as usize;
+        if reference_count > MAX_OBJECTS {
+            return Err(invalid(
+                "Nix closure manifest member contains too many references",
+            ));
+        }
+        let mut references = Vec::with_capacity(reference_count);
+        for _ in 0..reference_count {
+            references.push(reader.string()?);
+        }
+        members.push(NixClosureMember {
+            key,
+            hash,
+            size,
+            references,
+        });
+    }
+    Ok(NixClosureManifest {
+        output,
+        platform,
+        revision,
+        cache_key,
+        members,
+    })
 }
 
 struct Reader<'a> {
@@ -1859,6 +2494,12 @@ fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
 
 fn seal_tree(path: &Path) -> io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        // Symlink permissions are not meaningful, and set_permissions follows
+        // the link on the supported platforms. A Nix closure may intentionally
+        // preserve an absolute link whose target is not present locally.
+        return Ok(());
+    }
     if metadata.is_dir() {
         let children = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
         for child in children {
@@ -2028,6 +2669,11 @@ fn remove_tree(path: &Path) -> io::Result<()> {
 
 fn make_tree_writable(path: &Path) -> io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        // Do not follow a dangling absolute link while making staged data
+        // writable; Nix closures may retain such links by design.
+        return Ok(());
+    }
     if metadata.is_dir() {
         for child in fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()? {
             make_tree_writable(&child.path())?;
@@ -2139,6 +2785,7 @@ mod tests {
                     bytes: vec![0, 1, 2, 255],
                 }],
             }],
+            nix_manifest: None,
             signature: None,
         };
         let bytes = archive.encode().unwrap();
@@ -2212,11 +2859,12 @@ mod tests {
             root_id: digest.into(),
             objects: vec![ArchiveObject {
                 id: digest.into(),
-                digest: digest.into(),
+                digest: digest.to_string(),
                 meta: String::new(),
                 root_mode: 0o755,
                 nodes: Vec::new(),
             }],
+            nix_manifest: None,
             signature: None,
         };
         let signed = sign_decoded(archive, &key).unwrap();
@@ -2274,8 +2922,9 @@ mod tests {
                 digest,
                 meta: String::new(),
                 root_mode: mode_of(&fs::symlink_metadata(&source).unwrap()),
-                nodes: collect_nodes(&source).unwrap(),
+                nodes: collect_nodes_with_policy(&source, false).unwrap(),
             }],
+            nix_manifest: None,
             signature: None,
         };
         let bytes = archive.encode().unwrap();

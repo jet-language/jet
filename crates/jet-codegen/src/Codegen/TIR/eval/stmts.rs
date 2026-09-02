@@ -700,20 +700,33 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 Ok(Flow::Normal)
             }
             TStmt::ContractScope {
-                pre, body, post, ..
+                pre,
+                body,
+                post,
+                result,
             } => {
                 self.check_contracts(pre, scope)?;
                 let flow = self.exec_stmts(body, scope)?;
                 if post.is_empty() {
                     return Ok(flow);
                 }
-                let result = match &flow {
-                    Flow::Return(value) => value.clone(),
-                    Flow::Normal => CtValue::Unit,
-                    _ => return Ok(flow),
+                let result_value = match result.mode {
+                    crate::Codegen::TIR::TContractResultMode::Direct => match &flow {
+                        Flow::Return(value) => value.clone(),
+                        Flow::Normal => CtValue::Unit,
+                        _ => return Ok(flow),
+                    },
+                    crate::Codegen::TIR::TContractResultMode::ResultPayload
+                    | crate::Codegen::TIR::TContractResultMode::OptionPayload => match &flow {
+                        Flow::Return(CtValue::Failed(_)) => return Ok(flow),
+                        Flow::Return(CtValue::Present(value)) => (**value).clone(),
+                        Flow::Return(value) => value.clone(),
+                        Flow::Normal => CtValue::Unit,
+                        _ => return Ok(flow),
+                    },
                 };
-                let result_name = crate::Codegen::mangle_generated("result");
-                let prior = scope.insert(result_name.clone(), result);
+                let result_name = result.binding_local.name.clone();
+                let prior = scope.insert(result_name.clone(), result_value);
                 let checked = self.check_contracts(post, scope);
                 match prior {
                     Some(value) => {
@@ -2129,12 +2142,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         else {
                             return Err(unsupported("view-mut field element", self.span()));
                         };
-                        let mangled = crate::Codegen::mangle(&assign.field);
                         let slot = element_fields.iter_mut().find(|(name, _)| {
-                            name == &assign.field
-                                || name == &mangled
-                                || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                                    == Some(assign.field.as_str())
+                            super::field_name_matches(name, &assign.field)
                         });
                         let Some((_, slot)) = slot else {
                             return Err(unsupported(
@@ -2173,7 +2182,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 };
                 let mut found = false;
                 for (name, val) in &mut fields {
-                    if name == &assign.field {
+                    if super::field_name_matches(name, &assign.field) {
                         if let Some(op) = assign.op {
                             *val = self.eval_runtime_binop(op, val.clone(), rhs, self.span())?;
                         } else {

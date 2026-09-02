@@ -1034,8 +1034,8 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
     // `JetShow` renders. Keep opaque handles and audit records on that
     // projection instead of exposing the CtValue carrier fields or error
     // variant names.
-    if let Some(text) = ServicesLite::service_show_value(value)
-        .or_else(|| SyncLite::sync_show_value(value))
+    if let Some(text) =
+        ServicesLite::service_show_value(value).or_else(|| SyncLite::sync_show_value(value))
     {
         return Some(text);
     }

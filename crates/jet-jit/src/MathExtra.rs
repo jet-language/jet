@@ -34,6 +34,15 @@ fn jet_jit_math_from_bits(value: i64) -> f64 {
 fn jet_jit_math_round(value: f64) -> i64 {
     math_rt::jet_std_math_round(value)
 }
+fn jet_jit_math_is_nan(x: f64) -> i8 {
+    i8::from(math_rt::jet_std_math_is_nan(x))
+}
+fn jet_jit_math_is_infinite(x: f64) -> i8 {
+    i8::from(math_rt::jet_std_math_is_infinite(x))
+}
+fn jet_jit_math_is_finite(x: f64) -> i8 {
+    i8::from(math_rt::jet_std_math_is_finite(x))
+}
 
 fn opt_i64(v: Option<i64>) -> i64 {
     match v {
@@ -403,6 +412,9 @@ host_fns! {
     checked_neg: "jet_jit_math_checked_neg" => jet_jit_math_checked_neg: i64_i64;
     checked_div: "jet_jit_math_checked_div" => jet_jit_math_checked_div: i64_i64_i64;
     checked_rem: "jet_jit_math_checked_rem" => jet_jit_math_checked_rem: i64_i64_i64;
+    is_nan: "jet_jit_math_is_nan" => jet_jit_math_is_nan: f64_i8;
+    is_infinite: "jet_jit_math_is_infinite" => jet_jit_math_is_infinite: f64_i8;
+    is_finite: "jet_jit_math_is_finite" => jet_jit_math_is_finite: f64_i8;
     is_normal: "jet_jit_math_is_normal" => jet_jit_math_is_normal: f64_i8;
     is_subnormal: "jet_jit_math_is_subnormal" => jet_jit_math_is_subnormal: f64_i8;
     is_canonical: "jet_jit_math_is_canonical" => jet_jit_math_is_canonical: f64_i8;

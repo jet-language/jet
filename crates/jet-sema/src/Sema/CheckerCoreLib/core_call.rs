@@ -2,7 +2,7 @@ use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
 use super::core_types::{decode_error_ty, json_error_ty, json_ty, u8_ty, unit_ty};
 use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
 use super::serde_diags::{
-    freestanding_hint, is_freestanding_forbidden, module_short_name, reactive_derived_unit,
+    no_os_hint, is_no_os_forbidden, module_short_name, reactive_derived_unit,
     reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
 };
 use crate::Diagnostics::{CryptoMisuseReason, Diagnostic, Span};
@@ -1281,10 +1281,10 @@ impl<'a> Checker<'a> {
                 self.diags.push(e0746(&api, e, span));
             }
         }
-        // E2-M15 / E3301: reject OS-dependent APIs in freestanding builds.
-        if self.freestanding && is_freestanding_forbidden(module) {
+        // E2-M15 / E3301: reject OS-dependent APIs on no-OS targets.
+        if self.no_os && is_no_os_forbidden(module) {
             let api = format!("{}.{}", module_short_name(module), name);
-            let hint = freestanding_hint(module);
+            let hint = no_os_hint(module);
             self.diags.push(e3301(&api, hint, span));
             // Still infer args to avoid cascading errors.
             for a in args.iter_mut() {

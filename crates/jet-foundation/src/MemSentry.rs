@@ -399,6 +399,19 @@ pub fn jet_sentry_quarantine_owner(owner: usize) {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetSentryObligationStatus {
+    Failed,
+}
+
+impl JetSentryObligationStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "false",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JetSentryFault {
     pub code: &'static str,
@@ -407,6 +420,9 @@ pub struct JetSentryFault {
     pub gate: String,
     pub operation: String,
     pub obligation: String,
+    pub obligation_status: JetSentryObligationStatus,
+    pub foreign_component: Option<String>,
+    pub foreign_fenced: Option<bool>,
     pub detail: String,
 }
 
@@ -417,7 +433,7 @@ pub fn jet_sentry_check(
     operation: &str,
     obligation: &str,
 ) -> Option<JetSentryFault> {
-    jet_sentry_check_inner(start, bytes, alignment, operation, obligation, true)
+    jet_sentry_check_inner(start, bytes, alignment, operation, obligation, true, None)
 }
 
 /// Check a pointer that is about to cross a foreign boundary.
@@ -434,8 +450,59 @@ pub fn jet_sentry_check_foreign(
     operation: &str,
     obligation: &str,
 ) -> Option<JetSentryFault> {
-    jet_sentry_check_inner(start, bytes, alignment, operation, obligation, false)
+    jet_sentry_check_foreign_with_component(
+        start,
+        bytes,
+        alignment,
+        operation,
+        obligation,
+        "foreign",
+    )
 }
+
+/// Check a borrowed foreign edge and retain the registered component in any
+/// fault. Unknown non-null foreign storage remains valid input.
+pub fn jet_sentry_check_foreign_with_component(
+    start: usize,
+    bytes: usize,
+    alignment: usize,
+    operation: &str,
+    obligation: &str,
+    component: &str,
+) -> Option<JetSentryFault> {
+    jet_sentry_check_inner(
+        start,
+        bytes,
+        alignment,
+        operation,
+        obligation,
+        false,
+        Some(component),
+    )
+}
+
+/// Check a raw pointer at a foreign edge while retaining strict Jet
+/// allocation provenance. This is the raw-pointer counterpart to
+/// `jet_sentry_check_foreign_with_component`.
+pub fn jet_sentry_check_foreign_strict(
+    start: usize,
+    bytes: usize,
+    alignment: usize,
+    operation: &str,
+    obligation: &str,
+    component: &str,
+) -> Option<JetSentryFault> {
+    jet_sentry_check_inner(
+        start,
+        bytes,
+        alignment,
+        operation,
+        obligation,
+        true,
+        Some(component),
+    )
+}
+
 
 fn jet_sentry_check_inner(
     start: usize,
@@ -444,6 +511,7 @@ fn jet_sentry_check_inner(
     operation: &str,
     obligation: &str,
     require_provenance: bool,
+    foreign_component: Option<&str>,
 ) -> Option<JetSentryFault> {
     let gate = GATE.with(|gate| gate.borrow().clone())?;
     if !gate.enabled {
@@ -512,6 +580,11 @@ fn jet_sentry_check_inner(
             None
         }
     }?;
+    let foreign_component = foreign_component
+        .filter(|component| !component.is_empty())
+        .map(str::to_string);
+    let foreign_fenced =
+        foreign_component.as_ref().map(|_| FENCE_DEPTH.with(|depth| depth.get() != 0));
     let name = gate_name(&gate);
     let repairs: &[&str] = match code_detail.0 {
         "R0802" => &[
@@ -534,6 +607,9 @@ fn jet_sentry_check_inner(
         gate: name,
         operation: operation.to_string(),
         obligation: obligation.to_string(),
+        obligation_status: JetSentryObligationStatus::Failed,
+        foreign_component,
+        foreign_fenced,
         detail: code_detail.1,
     };
     let _ = jet_memory_ledger_record(MemoryLedgerWitness {

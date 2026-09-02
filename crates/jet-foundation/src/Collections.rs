@@ -125,7 +125,8 @@ pub fn is_closure_method(method: &str) -> bool {
         "map" | "filter" | "each" | "find" | "any" | "all" | "sort_by" | "sort_by_desc" | "reduce"
         // D-ITER1: lazy adapter set
         | "take_while" | "skip_while" | "flat_map" | "scan"
-        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by"
+        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "count_where"
+        | "update_first"
         | "partition"
         // D-FAILCOMP1: failure-aware adapters
         | "filter_map"
@@ -256,7 +257,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "a accepted action active_count add add_asset_bundle add_doc add_executable add_install add_library add_new ",
     "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
     "blocked_count bool buffer bytes cancel capacity capitalize chars chunk_while chunks clear clone ",
-    "close collect compare concat contains contains_value copy copy_to count count_by counts count_ones count_zeros ",
+    "close collect compare concat contains contains_value copy copy_to count count_by count_where counts count_ones count_zeros ",
     "cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
     "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
     "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
@@ -279,7 +280,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
     "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
     "to_ascii_lower to_ascii_upper to_int to_list to_lower to_radix to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
-    "top_n trailing_zeros trim trim_end trim_start true_ try_collect try_insert try_push try_reserve types union unsubscribe unzip update upgrade without from_radix round floor ceil hmac_sha256 ",
+    "top_n trailing_zeros trim trim_end trim_start true_ try_collect try_insert try_push try_reserve types union unsubscribe unzip update update_first upgrade without from_radix round floor ceil hmac_sha256 ",
     "value values view wait weighted_pick why windows with_capacity write write_byte write_bytes write_to ",
     "write_f32_be write_f32_le write_f64_be write_f64_le write_i16_be write_i16_le write_i32_be write_i32_le write_i64_be write_i64_le write_i8 write_u16_be write_u16_le write_u32_be write_u32_le write_u64_be write_u64_le write_u8 zip zip_pad zip_short",
 );
@@ -1400,7 +1401,8 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
         })),
         ("remove", 1 | 2) => Some(Some(Type::Option(Box::new(inner.clone())))),
-        ("count", 1) => Some(Some(Type::Int)),
+        ("count" | "count_where", 1) => Some(Some(Type::Int)),
+        ("update_first", 2) => Some(Some(Type::Bool)),
         ("counts", 0) => Some(Some(Type::Map {
             key: Box::new(inner.clone()),
             key_span: None,
@@ -2567,6 +2569,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "sort_desc"
                 | "sort_by_desc"
                 | "clear"
+                | "update_first"
                 | "split_write"
                 | "get_disjoint_write"
                 | "edit_disjoint"
@@ -2934,7 +2937,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 param_contract: None,
                 call_metadata: None,
             }]),
-            "find" | "any" | "all"
+            "find" | "any" | "all" | "count_where"
             // D-ITER1: closure bool predicates.
             | "take_while" | "skip_while" | "position" | "partition" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
@@ -2943,6 +2946,16 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 param_contract: None,
                 call_metadata: None,
             }]),
+            "update_first" => Some(vec![
+                Type::Fn {
+                    params: vec![(**inner).clone()],
+                    ret: Some(Box::new(Type::Bool)),
+                    effect_bound: None, return_view_provenance: None,
+                    param_contract: None,
+                    call_metadata: None,
+                },
+                (**inner).clone(),
+            ]),
             "each" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None,
@@ -3667,7 +3680,7 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
     } else if (matches!(recv_ty, Type::List(_))
         && matches!(
             method,
-            "remove" | "sort_by" | "sort_desc" | "sort_by_desc" | "edit_disjoint"
+            "remove" | "sort_by" | "sort_desc" | "sort_by_desc" | "update_first" | "edit_disjoint"
         ))
         || matches!(
             recv_ty,

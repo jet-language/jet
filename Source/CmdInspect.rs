@@ -51,12 +51,6 @@ struct ProjectOutputSpec {
     path: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug)]
-struct ProjectOutputGroup {
-    key: String,
-    path: Option<PathBuf>,
-    addresses: Vec<String>,
-}
 
 pub(crate) struct CheckResult {
     source: String,
@@ -282,17 +276,19 @@ fn check_projection_with_options_and_preflight(
             "Driver::check_file_with_effect_facts_profile",
         )
     } else {
-        let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_and_settings(
-            &entry,
-            None,
-            false,
-            setting_overrides,
-        );
+        let (diagnostics, bundle, facts) =
+            jet::Driver::check_file_with_effect_facts_profile_and_settings(
+                &entry,
+                None,
+                false,
+                profile,
+                setting_overrides,
+            );
         (
             diagnostics,
             bundle,
             facts,
-            "Driver::check_file_with_effect_facts_and_settings",
+            "Driver::check_file_with_effect_facts_profile_and_settings",
         )
     };
     if scope == CheckScope::ExplicitFile
@@ -360,15 +356,19 @@ fn scope_name(scope: CheckScope) -> &'static str {
     }
 }
 
-fn missing_project_context_diagnostic(path: &Path) -> Option<Diagnostic> {
+pub(crate) fn missing_project_context_diagnostic(path: &Path) -> Option<Diagnostic> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    if jet::Loader::find_manifest_root_checked(parent)
+    if jet::Loader::find_package_root_checked(parent)
         .ok()
         .flatten()
         .is_some()
+        || jet::Loader::package_facts_for_entry(path)
+            .ok()
+            .flatten()
+            .is_some()
         || jet::Loader::find_workspace_root_checked(parent)
             .ok()
             .flatten()
@@ -377,19 +377,41 @@ fn missing_project_context_diagnostic(path: &Path) -> Option<Diagnostic> {
         return None;
     }
     let source = fs::read_to_string(path).ok()?;
-    let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+    let source_for_parse = jet::Package::mask_inline_package_source(&source).ok()?.0;
+    let (tokens, lex_diagnostics) = jet::Lexer::lex(&source_for_parse);
     if !lex_diagnostics.is_empty() {
         return None;
     }
-    let program = jet::Parser::parse(&tokens).ok()?;
-    let span = program.imports.iter().find_map(|import| match &import.kind {
-        jet::AST::ImportKind::Module(name, span)
-            if name.starts_with(jet::Syntax::PROJECT_IMPORT_PREFIX) => Some(*span),
-        jet::AST::ImportKind::Unqualified {
-            module_alias, span, ..
-        } if module_alias.starts_with(jet::Syntax::PROJECT_IMPORT_PREFIX) => Some(*span),
+    let parsed_span = jet::Parser::parse(&tokens).ok().and_then(|program| {
+        program.imports.iter().find_map(|import| match &import.kind {
+            jet::AST::ImportKind::Module(name, span)
+                if name.starts_with(jet::Syntax::PROJECT_IMPORT_PREFIX) => Some(*span),
+            jet::AST::ImportKind::Unqualified {
+                module_alias, span, ..
+            } if module_alias.starts_with(jet::Syntax::PROJECT_IMPORT_PREFIX) => Some(*span),
+            _ => None,
+        })
+    });
+    let lexical_span = tokens.windows(4).find_map(|window| match (
+        &window[0].kind,
+        &window[1].kind,
+        &window[2].kind,
+        &window[3].kind,
+    ) {
+        (
+            jet::Lexer::TokKind::KwUse,
+            jet::Lexer::TokKind::Ident(project),
+            jet::Lexer::TokKind::Dot,
+            jet::Lexer::TokKind::Ident(_),
+        ) if project == jet::Syntax::PROJECT_IMPORT_ROOT => {
+            Some(jet::Diagnostics::Span::new(
+                window[1].span.start,
+                window[3].span.end,
+            ))
+        }
         _ => None,
-    })?;
+    });
+    let span = parsed_span.or(lexical_span)?;
     Some(Diagnostic::from_row(
         "E2393",
         &[("import", "use project.<module>")],
@@ -444,9 +466,6 @@ fn normalize_output_path(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn output_path_key(path: &Path) -> String {
-    normalize_output_path(path).to_string_lossy().into_owned()
-}
 
 fn source_line(source: &str, offset: usize) -> usize {
     let end = offset.min(source.len());
@@ -559,26 +578,6 @@ fn project_output_specs(
     (specs.into_values().collect(), diagnostics)
 }
 
-fn project_output_groups(specs: &[ProjectOutputSpec]) -> Vec<ProjectOutputGroup> {
-    let mut groups = std::collections::BTreeMap::<String, ProjectOutputGroup>::new();
-    for spec in specs {
-        let key = spec
-            .path
-            .as_deref()
-            .map(output_path_key)
-            .unwrap_or_else(|| format!("<unresolved:{}>", spec.address));
-        groups
-            .entry(key.clone())
-            .or_insert_with(|| ProjectOutputGroup {
-                key,
-                path: spec.path.clone(),
-                addresses: Vec::new(),
-            })
-            .addresses
-            .push(spec.address.clone());
-    }
-    groups.into_values().collect()
-}
 
 #[derive(Clone, Debug)]
 struct ProjectBundleProof {
@@ -657,20 +656,17 @@ impl ProjectBundleProof {
                     ),
                 )
             }
-        } else if target.is_some() {
-            (
-                "toolchain unavailable",
-                format!(
-                    "native target `{}` needs the build toolchain; check does not invoke rustc",
-                    target.unwrap_or_default()
-                ),
-            )
         } else {
             let misses = jet::Codegen::TIR::validate_tir_support(bundle);
+            let detail_prefix = target
+                .map(|target| format!("target={target}; "))
+                .unwrap_or_default();
             if misses.is_empty() {
                 (
                     "proven",
-                    "AOT=proven; JIT=proven; interpreter=shared checked TIR route".to_string(),
+                    format!(
+                        "{detail_prefix}AOT=proven; JIT=proven; interpreter=shared checked TIR route"
+                    ),
                 )
             } else {
                 (
@@ -761,15 +757,15 @@ fn output_proof_rows(
         spec.name.as_str()
     };
     let output_label = format!("{} `{}`", spec.address, output_name);
-    let entry_detail = match (resolved, location.as_deref()) {
-        (Some(_), Some(location)) => {
+    let entry_detail = match location.as_deref() {
+        Some(location) => {
             let requested = entry_fn
                 .filter(|name| *name != jet::Codegen::ENTRY_FN)
                 .map(|name| format!("; requested `{name}`"))
                 .unwrap_or_default();
             format!("{output_label} resolved at {location}{requested}")
         }
-        _ => format!(
+        None => format!(
             "{output_label} is absent from the checked module graph ({}:1)",
             spec.path
                 .as_deref()
@@ -895,74 +891,62 @@ fn project_proof_rows(
     setting_overrides: &std::collections::BTreeMap<String, String>,
 ) -> (Vec<CheckProofRow>, Vec<Diagnostic>) {
     let (specs, mut diagnostics) = project_output_specs(bundle, package_facts);
-    let groups = project_output_groups(&specs);
-    let primary_key = bundle
-        .modules
-        .get(bundle.entry)
-        .map(|module| output_path_key(&module.path));
-    let mut rows_by_output = std::collections::BTreeMap::<String, Vec<CheckProofRow>>::new();
+    let mut rows = Vec::new();
 
-    for group in groups {
-        let mut checked_bundle = None;
-        let candidate = if primary_key.as_ref().is_some_and(|key| key == &group.key) {
-            Some(bundle)
-        } else if let Some(path) = group.path.as_deref() {
-            let path_string = path.to_string_lossy().into_owned();
-            let (check_diagnostics, bundle, _) = if setting_overrides.is_empty() {
-                jet::Driver::check_file_with_effect_facts_profile(
-                    &path_string,
-                    None,
-                    false,
-                    profile,
-                )
-            } else {
-                jet::Driver::check_file_with_effect_facts_and_settings(
-                    &path_string,
-                    None,
-                    false,
-                    setting_overrides,
-                )
-            };
-            diagnostics.extend(check_diagnostics);
-            checked_bundle = bundle;
-            checked_bundle.as_ref()
+    for spec in &specs {
+        let declared_output = package_facts
+            .is_some_and(|facts| facts.outputs.contains_key(&spec.address))
+            || bundle.modules.iter().any(|module| {
+                module.items.iter().any(|item| {
+                    let jet::AST::Item::Const(constant) = item else {
+                        return false;
+                    };
+                    constant
+                        .resolved_output
+                        .as_ref()
+                        .is_some_and(|output| output.address == spec.address)
+                })
+            });
+        let checked_bundle_storage = declared_output.then(|| {
+            spec.path.as_deref().and_then(|path| {
+                let path = path.to_string_lossy().into_owned();
+                let (check_diagnostics, checked_bundle, _) =
+                    jet::Driver::check_file_with_effect_facts_for_output(
+                        &path,
+                        &spec.address,
+                        profile,
+                        setting_overrides,
+                    );
+                diagnostics.extend(check_diagnostics);
+                checked_bundle
+            })
+        });
+        let checked_bundle = if declared_output {
+            checked_bundle_storage.as_ref().and_then(Option::as_ref)
         } else {
-            None
+            Some(bundle)
         };
 
-        if let Some(candidate) = candidate {
-            let shared = ProjectBundleProof::from_bundle(candidate, target);
-            for address in group.addresses {
-                let Some(spec) = specs.iter().find(|spec| spec.address == address) else {
-                    continue;
-                };
-                rows_by_output.insert(
-                    address,
-                    output_proof_rows(candidate, spec, entry_fn, &shared, &mut diagnostics),
-                );
-            }
-        } else {
-            let reason = if group.path.is_some() {
+        let Some(checked_bundle) = checked_bundle else {
+            let reason = if spec.path.is_some() {
                 "the output entry check returned no bundle"
             } else {
                 "the manifest entry could not be resolved"
             };
-            for address in group.addresses {
-                let Some(spec) = specs.iter().find(|spec| spec.address == address) else {
-                    continue;
-                };
-                let (rows, row_diagnostics) = failed_output_rows(spec, reason);
-                diagnostics.extend(row_diagnostics);
-                rows_by_output.insert(address, rows);
-            }
-        }
-    }
+            let (failed, failed_diagnostics) = failed_output_rows(spec, reason);
+            rows.extend(failed);
+            diagnostics.extend(failed_diagnostics);
+            continue;
+        };
 
-    let mut rows = Vec::new();
-    for spec in specs {
-        if let Some(output_rows) = rows_by_output.remove(&spec.address) {
-            rows.extend(output_rows);
-        }
+        let shared = ProjectBundleProof::from_bundle(checked_bundle, target);
+        rows.extend(output_proof_rows(
+            checked_bundle,
+            spec,
+            entry_fn,
+            &shared,
+            &mut diagnostics,
+        ));
     }
     (rows, diagnostics)
 }
@@ -1200,12 +1184,10 @@ pub(crate) fn run_output(args: &[String], json: bool) {
     let mut effects = output.effects.clone();
     effects.sort();
     let required_effects = effects.iter().cloned().collect::<jet::Sema::EffectSet>();
-    let manifest = path
-        .parent()
-        .and_then(jet::Loader::find_manifest_root)
-        .and_then(|root| jet::Loader::manifest_path(&root))
-        .and_then(|manifest_path| fs::read_to_string(&manifest_path).ok())
-        .and_then(|raw| jet::Package::PackageFacts::parse(&raw, "package.jet").ok());
+    let manifest = match jet::Loader::package_facts_for_bundle(&projection.bundle) {
+        Ok(manifest) => manifest,
+        Err(diagnostics) => render_check_failure(path, &diagnostics, json, false),
+    };
     let authority =
         jet::EffectBudget::project_application_effects(&required_effects, manifest.as_ref());
 
@@ -1766,7 +1748,7 @@ pub(crate) fn run_guarantees(
     color: bool,
     gates: jet::Policy::GateSet,
     profile: &str,
-    freestanding: bool,
+    no_os: bool,
 ) {
     let Some(file) = entry_file(args) else {
         crate::cli_error!(@fix "E2104", "`jet inspect guarantees` needs an entry file", "jet inspect guarantees run.jet");
@@ -1790,7 +1772,7 @@ pub(crate) fn run_guarantees(
         .count();
     let dependencies = bundle.dep_roots.keys().cloned().collect::<Vec<_>>();
     let report =
-        jet::Driver::guarantee_report(package, dependencies, unsafe_gates, profile, freestanding);
+        jet::Driver::guarantee_report(package, dependencies, unsafe_gates, profile, no_os);
     if json {
         render_json(&report, &checked.check);
     } else {
@@ -1814,20 +1796,23 @@ pub(crate) fn run_provenance(args: &[String], json: bool) {
             exit(jet::ExitCodes::USER_ERROR);
         }
     };
-    let manifest_path =
-        jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
-    let manifest = match jet::Manifest::load(&root) {
-        Some(Ok(manifest)) => manifest,
-        Some(Err(diagnostic)) => {
+    let entry = crate::find_project_entry(&root);
+    let package = match jet::Loader::package_facts_for_entry(&entry) {
+        Ok(Some(package)) => package,
+        Ok(None) => {
+            crate::cli_error!("E2105", "the project has no package facts");
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+        Err(diagnostics) => {
+            let source = fs::read_to_string(&entry).unwrap_or_default();
             eprint!(
                 "{}",
-                jet::render_diagnostics(&manifest_path.display().to_string(), "", &[diagnostic],)
+                jet::render_diagnostics(&entry.display().to_string(), &source, &diagnostics)
             );
             exit(jet::ExitCodes::USER_ERROR);
         }
-        None => unreachable!("manifest root was found above"),
     };
-    let requirement = manifest
+    let requirement = package
         .authority
         .trust
         .as_ref()
@@ -2155,8 +2140,8 @@ fn render_human(report: &jet::Driver::GuaranteeReport) {
             "single-file"
         }
     );
-    if report.freestanding {
-        println!("target: freestanding");
+    if report.no_os {
+        println!("target: no-OS");
     }
     render_human_policy(&report.policy);
     println!("component              guarantee  evidence");
@@ -2176,10 +2161,10 @@ fn render_human(report: &jet::Driver::GuaranteeReport) {
 fn render_json(report: &jet::Driver::GuaranteeReport, check: &CheckResult) {
     let policy = render_policy_json(&report.policy);
     let mut document = format!(
-        "{{\"schema_version\":1,\"profile\":\"{}\",\"package\":{},\"freestanding\":{},\"policy\":{},\"components\":[",
+        "{{\"schema_version\":1,\"profile\":\"{}\",\"package\":{},\"no_os\":{},\"policy\":{},\"components\":[",
         json_escape(&report.profile),
         report.package,
-        report.freestanding,
+        report.no_os,
         policy,
     );
     for (index, component) in report.components.iter().enumerate() {

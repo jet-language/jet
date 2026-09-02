@@ -1,7 +1,6 @@
 //! D-FACT-GATE1=A: the full compile-time gate ledger and its projections.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::process::exit;
 
 use jet::Diagnostics::Span;
@@ -62,7 +61,7 @@ pub(crate) fn run(
     let scope = option_value(args, "--scope").map(|value| value.to_ascii_lowercase());
 
     let mut ledger = GateLedger::collect(&bundle, gates);
-    append_external_writers(&mut ledger, &bundle.project_root, args);
+    append_external_writers(&mut ledger, &bundle, args);
     if !ledger.diagnostics().is_empty() {
         render_diagnostics(&ledger, &bundle, json, color);
     }
@@ -261,19 +260,25 @@ fn trust_decision_label(decision: jet::Package::TrustDecision) -> &'static str {
     }
 }
 
-pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args: &[String]) {
-    if let Some(Ok(facts)) = jet::Package::PackageFacts::load(root) {
-        append_authority_entries(ledger, &facts.authority, "package.jet");
+pub(crate) fn append_external_writers(
+    ledger: &mut GateLedger,
+    bundle: &jet::AST::ProgramBundle,
+    args: &[String],
+) {
+    let root = &bundle.project_root;
+    if let Ok(Some(facts)) = jet::Loader::package_facts_for_bundle(bundle) {
+        let source = facts.origin.as_str();
+        append_authority_entries(ledger, &facts.authority, source);
         for effect in &facts.build_allow {
             let mut provenance = facts.field_provenance("build_allow").to_vec();
             if provenance.is_empty() {
-                provenance.push("package.jet:build.allow".to_string());
+                provenance.push(format!("{source}:build.allow"));
             }
             ledger.push(external_entry(
                 GateKind::BuildFlag,
                 "security",
                 "package",
-                "package.jet",
+                source,
                 &format!("build:{effect}"),
                 "package build authority",
                 provenance,
@@ -467,8 +472,7 @@ fn append_invocation_flags(ledger: &mut GateLedger, args: &[String]) {
                 "session bypass or trust choice",
                 vec!["command line".to_string()],
             ));
-        } else if argument == "--freestanding"
-            || argument == "--force"
+        } else if argument == "--force"
             || argument == "--release"
             || argument.starts_with("--target=")
             || argument.starts_with("--profile=")

@@ -817,7 +817,7 @@ macro_rules! jet_lane_show {
     pub fn after(ms: i64) -> JetReceiver<()> {
         let (tx, rx) = channel::<()>();
         let delay = super::jet_task_delay_ms_defaulted(ms);
-        let _ = super::jet_scheduler_spawn(move || {
+        super::jet_scheduler_spawn_detached_timer(move || {
             super::jet_scheduler_sleep_ms(delay);
             tx.send(());
         });
@@ -828,7 +828,7 @@ macro_rules! jet_lane_show {
     pub fn after_value<T: Send + 'static>(ms: i64, value: T) -> JetReceiver<T> {
         let (tx, rx) = channel::<T>();
         let delay = super::jet_task_delay_ms_defaulted(ms);
-        let _ = super::jet_scheduler_spawn(move || {
+        super::jet_scheduler_spawn_detached_timer(move || {
             super::jet_scheduler_sleep_ms(delay);
             tx.send(value);
         });
@@ -839,7 +839,7 @@ macro_rules! jet_lane_show {
     pub fn interval(ms: i64) -> JetReceiver<i64> {
         let (tx, rx) = channel::<i64>();
         let delay = super::jet_task_interval_ms_defaulted(ms);
-        let _ = std::thread::spawn(move || {
+        super::jet_scheduler_spawn_detached_timer(move || {
             let mut tick = 1i64;
             loop {
                 super::jet_scheduler_sleep_ms(delay);

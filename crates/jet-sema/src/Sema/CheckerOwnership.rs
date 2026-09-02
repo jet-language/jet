@@ -2912,13 +2912,33 @@ impl<'a> Checker<'a> {
     }
 
     fn report_temporary_view_source(&mut self, span: Span, string_view: bool) {
+        let (code, what, why, fix) = if string_view {
+            (
+                "E2307",
+                "A returned view cannot borrow from a temporary argument",
+                "The temporary owner is dropped at the end of this statement, while the returned view remains live",
+                "Store the owner in a named binding first, then pass that binding to the view-returning call",
+            )
+        } else {
+            (
+                "E2305",
+                "a returned view cannot borrow from a temporary argument",
+                "the temporary owner is dropped at the end of this statement, while the returned view remains live",
+                "store the owner in a named binding first, then pass that binding to the view-returning call",
+            )
+        };
+        if self
+            .diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == code && diagnostic.span == Some(span))
+        {
+            return;
+        }
         self.diags.push(Diagnostic::error(
-            if string_view { "E2307" } else { "E2305" },
-            "a returned view cannot borrow from a temporary argument".to_string(),
-            "the temporary owner is dropped at the end of this statement, while the returned view remains live"
-                .to_string(),
-            "store the owner in a named binding first, then pass that binding to the view-returning call"
-                .to_string(),
+            code,
+            what.to_string(),
+            why.to_string(),
+            fix.to_string(),
             Some(span),
         ));
     }
@@ -5471,6 +5491,50 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
+    }
+
+    /// Generic ownership fact for a consuming lowering boundary. A direct
+    /// non-scalar local is movable only when sema has already proved that the
+    /// binding is owned, no live view/call/group loan reaches it, and no later
+    /// statement reads it. The caller decides which operation can consume the
+    /// fact; this helper does not change source-level access conventions.
+    pub(crate) fn proven_owned_last_use(&self, expr: &Expr, expected: &Type) -> bool {
+        let Expr::Ident(name, _) = expr.without_parens() else {
+            return false;
+        };
+        let Some(info) = self.lookup(name) else {
+            return false;
+        };
+        if info.invalid
+            || info.param_conv.is_some()
+            || self.is_borrowed_binding(name)
+            || self.flow.moved.contains(name)
+            || info.ty != *expected
+            || info.ty.is_scalar()
+            || self.is_name_live_after(name)
+        {
+            return false;
+        }
+        let owner_def = info.def_span;
+        if self.call_access_frames.iter().any(|frame| {
+            frame
+                .accesses
+                .iter()
+                .any(|access| access.place.owner.def_span == owner_def)
+        }) || self.taskgroup_stack.iter().any(|group| {
+            group
+                .borrows
+                .iter()
+                .any(|borrow| borrow.place.owner.def_span == owner_def)
+        }) {
+            return false;
+        }
+        !crate::Sema::view_facts_newest_first(&self.flow.views)
+            .into_iter()
+            .any(|(view_name, fact)| {
+                fact.place.owner.def_span == owner_def
+                    && (fact.invalidated.is_some() || self.view_is_live_now(view_name))
+            })
     }
 
     pub(crate) fn check_take_arg_ownership(

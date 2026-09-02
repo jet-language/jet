@@ -32,6 +32,270 @@ fn root() -> PathBuf {
 fn read(p: &PathBuf) -> String {
     fs::read_to_string(p).unwrap_or_else(|_| panic!("cannot read {}", p.display()))
 }
+struct PreludeShowRow {
+    impl_file: &'static str,
+    type_file: &'static str,
+    rust_type: &'static str,
+    canonical_type: &'static str,
+}
+
+/// These are the nine Prelude `JetShow` implementations whose Core values are
+/// admitted by the foundation's synthetic printable table. Keep the file and
+/// Rust type explicit: unrelated Prelude renderers are not this invariant.
+const PRELUDE_JET_SHOW_ROWS: &[PreludeShowRow] = &[
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Compute.rs",
+        type_file: "CoreLib/Top/Compute.rs",
+        rust_type: "JetComputeDevice",
+        canonical_type: "ComputeDevice",
+    },
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Sync.rs",
+        type_file: "CoreLib/Top/Sync.rs",
+        rust_type: "JetSyncText",
+        canonical_type: "SyncText",
+    },
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Sync.rs",
+        type_file: "CoreLib/Top/Sync.rs",
+        rust_type: "JetSyncCounter",
+        canonical_type: "SyncCounter",
+    },
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Sync.rs",
+        type_file: "CoreLib/Top/Sync.rs",
+        rust_type: "JetSyncMap",
+        canonical_type: "SyncMap",
+    },
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Sync.rs",
+        type_file: "CoreLib/Top/Sync.rs",
+        rust_type: "JetSyncList",
+        canonical_type: "SyncList",
+    },
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Services.rs",
+        type_file: "CoreLib/Top/Services.rs",
+        rust_type: "JetServiceRestart",
+        canonical_type: "ServiceRestart",
+    },
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Services.rs",
+        type_file: "CoreLib/Top/Services.rs",
+        rust_type: "JetServiceDelivery",
+        canonical_type: "ServiceDelivery",
+    },
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Services.rs",
+        type_file: "CoreLib/Top/ServiceAuthority.rs",
+        rust_type: "JetServiceRuntime",
+        canonical_type: "ServiceRuntime",
+    },
+    PreludeShowRow {
+        impl_file: "CoreLib/Top/Services.rs",
+        type_file: "CoreLib/Top/Services.rs",
+        rust_type: "JetServiceStateStore",
+        canonical_type: "ServiceStateStore",
+    },
+];
+
+struct PreludeShowExclusion {
+    impl_file: &'static str,
+    type_file: &'static str,
+    rust_type: &'static str,
+    canonical_type: &'static str,
+    reason: &'static str,
+}
+
+/// Explicit-only renderers. `ServiceEndpoint` is the card's "Endpoint"
+/// shorthand; keep the canonical Core name here rather than inventing an alias.
+const PRELUDE_JET_SHOW_EXCLUSIONS: &[PreludeShowExclusion] = &[
+    PreludeShowExclusion {
+        impl_file: "CoreLib/Top/Compute.rs",
+        type_file: "CoreLib/Top/Compute.rs",
+        rust_type: "JetTensor",
+        canonical_type: "Tensor",
+        reason: "Tensor has an explicit state-aware renderer; it is not an automatic printable row",
+    },
+    PreludeShowExclusion {
+        impl_file: "CoreLib/Top/Compute.rs",
+        type_file: "CoreLib/Top/Compute.rs",
+        rust_type: "JetComputeStream",
+        canonical_type: "ComputeStream",
+        reason: "ComputeStream identity is runtime-local, so its explicit renderer omits the identity",
+    },
+    PreludeShowExclusion {
+        impl_file: "CoreLib/Top/Compute.rs",
+        type_file: "CoreLib/Top/Compute.rs",
+        rust_type: "JetSparseCsr",
+        canonical_type: "SparseTensor",
+        reason: "SparseTensor uses the explicit `jet_compute_sparse_show` projection",
+    },
+    PreludeShowExclusion {
+        impl_file: "CoreLib/Top/Services.rs",
+        type_file: "CoreLib/Top/Services.rs",
+        rust_type: "JetServiceTree",
+        canonical_type: "ServiceTree",
+        reason: "ServiceTree owns runtime workers and uses the explicit `jet_services_tree_show` projection",
+    },
+    PreludeShowExclusion {
+        impl_file: "CoreLib/Top/Services.rs",
+        type_file: "CoreLib/Top/ServiceAuthority.rs",
+        rust_type: "JetServiceEndpoint",
+        canonical_type: "ServiceEndpoint",
+        reason: "ServiceEndpoint uses the explicit `jet_services_endpoint_show` projection",
+    },
+];
+
+fn prelude_declared_type(source: &str, rust_type: &str) -> bool {
+    source.lines().any(|line| {
+        let line = line.trim_start();
+        ["pub struct ", "pub enum ", "pub type ", "struct ", "enum ", "type "]
+            .iter()
+            .any(|prefix| {
+                line.strip_prefix(prefix)
+                    .and_then(|rest| rest.split(|ch: char| ch.is_whitespace() || ch == '<').next())
+                    == Some(rust_type)
+            })
+    })
+}
+
+fn prelude_declared_jet_show(source: &str, rust_type: &str) -> bool {
+    source.lines().any(|line| {
+        let line = line.trim_start();
+        let Some(rest) = line.strip_prefix("impl ") else {
+            return false;
+        };
+        let Some((trait_name, target)) = rest.split_once(" for ") else {
+            return false;
+        };
+        let target = target
+            .split(|ch: char| ch.is_whitespace() || ch == '<' || ch == '{')
+            .next()
+            .unwrap_or_default();
+        trait_name.ends_with("JetShow") && target == rust_type
+    })
+}
+
+fn prelude_file(relative: &str) -> PathBuf {
+    root()
+        .join("crates/jet-codegen/src/Prelude")
+        .join(relative)
+}
+
+fn named_string_const(source: &str, name: &str) -> BTreeSet<String> {
+    let marker = format!("const {name}: &[&str] = &[");
+    let start = source
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing canonical printable const `{name}`"));
+    let body = &source[start + marker.len()..];
+    let end = body
+        .find("];")
+        .unwrap_or_else(|| panic!("unterminated canonical printable const `{name}`"));
+    body[..end]
+        .lines()
+        .filter_map(|line| {
+            let (_, rest) = line.split_once('"')?;
+            let (value, _) = rest.split_once('"')?;
+            Some(value.to_string())
+        })
+        .collect()
+}
+
+#[test]
+fn prelude_jet_show_rows_match_canonical_printable_types() {
+    let mut prelude_types = BTreeSet::new();
+    for row in PRELUDE_JET_SHOW_ROWS {
+        let impl_source = read(&prelude_file(row.impl_file));
+        assert!(
+            prelude_declared_jet_show(&impl_source, row.rust_type),
+            "missing Prelude JetShow implementation `{}` for `{}` in {}",
+            row.rust_type,
+            row.canonical_type,
+            row.impl_file
+        );
+        let type_source = read(&prelude_file(row.type_file));
+        assert!(
+            prelude_declared_type(&type_source, row.rust_type),
+            "missing Prelude type declaration `{}` for `{}` in {}",
+            row.rust_type,
+            row.canonical_type,
+            row.type_file
+        );
+        assert!(
+            prelude_types.insert(row.canonical_type.to_string()),
+            "duplicate canonical Prelude JetShow row `{}`",
+            row.canonical_type
+        );
+    }
+
+    let foundation = read(&root().join("crates/jet-foundation/src/Traits.rs"));
+    let declared = named_string_const(&foundation, "PRELUDE_JET_SHOW_PRINTABLE_TYPES");
+    let missing: Vec<_> = prelude_types.difference(&declared).cloned().collect();
+    let extra: Vec<_> = declared.difference(&prelude_types).cloned().collect();
+
+    let mut registry = jet_foundation::Traits::TraitRegistry::default();
+    registry.register_synthetic_display_debug();
+    let missing_auto: Vec<_> = prelude_types
+        .iter()
+        .filter(|name| !registry.auto_printable.contains(*name))
+        .cloned()
+        .collect();
+
+    assert!(
+        missing.is_empty() && extra.is_empty() && missing_auto.is_empty(),
+        "Prelude JetShow printable relationship drifted.\n\
+         Missing canonical rows: {:?}\n\
+         Extra canonical rows: {:?}\n\
+         Missing auto_printable entries: {:?}",
+        missing,
+        extra,
+        missing_auto
+    );
+}
+
+#[test]
+fn prelude_jet_show_exclusions_remain_explicit_only() {
+    let mut registry = jet_foundation::Traits::TraitRegistry::default();
+    registry.register_synthetic_display_debug();
+    let mut canonical_names = BTreeSet::new();
+
+    for exclusion in PRELUDE_JET_SHOW_EXCLUSIONS {
+        let impl_source = read(&prelude_file(exclusion.impl_file));
+        assert!(
+            prelude_declared_jet_show(&impl_source, exclusion.rust_type),
+            "missing explicitly excluded Prelude JetShow implementation `{}` in {}",
+            exclusion.rust_type,
+            exclusion.impl_file
+        );
+        let type_source = read(&prelude_file(exclusion.type_file));
+        assert!(
+            prelude_declared_type(&type_source, exclusion.rust_type),
+            "missing explicitly excluded Prelude type declaration `{}` in {}",
+            exclusion.rust_type,
+            exclusion.type_file
+        );
+        assert!(
+            canonical_names.insert(exclusion.canonical_type.to_string()),
+            "duplicate explicit Prelude JetShow exclusion `{}`",
+            exclusion.canonical_type
+        );
+        assert!(
+            !exclusion.reason.trim().is_empty(),
+            "explicit Prelude JetShow exclusion `{}` needs a narrow reason",
+            exclusion.canonical_type
+        );
+        assert!(
+            !registry
+                .auto_printable
+                .contains(exclusion.canonical_type),
+            "excluded Prelude JetShow type `{}` has an automatic printable row: {}",
+            exclusion.canonical_type,
+            exclusion.reason
+        );
+    }
+}
+
 
 /// Collect all registered-shape codes emitted in Source/ via Diagnostic::error
 /// / Diagnostic::warn.
@@ -324,9 +588,11 @@ fn semantic_guidance_lints_round_trip_through_the_registry() {
         ("L0517", "path_containment_string_prefix"),
         ("L0518", "redundant_fixed_cleanup"),
         ("L0519", "unit_scalar_rewrap"),
+        ("L0520", "display_migration"),
         ("L0521", "complete_ascii_case_ladder"),
         ("L0522", "walk_files_filter"),
         ("L0523", "repeated_list_head"),
+        ("L0524", "raw_multiline_html"),
     ] {
         let row = jet_foundation::Registry::diagnostic(code)
             .unwrap_or_else(|| panic!("{code} must stay registered"));

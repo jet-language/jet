@@ -550,6 +550,7 @@ fn lower_spawn_function(
             compute_retrack_names: HashSet::new(),
             contract_pool: Vec::new(),
             contract_posts: Vec::new(),
+            contract_results: Vec::new(),
         };
         lctx.seed_entry_pending();
         for cap in &lam.captures {
@@ -1060,6 +1061,7 @@ pub(crate) fn lower_shared_transaction_lambda(
             compute_retrack_names: HashSet::new(),
             contract_pool: Vec::new(),
             contract_posts: Vec::new(),
+            contract_results: Vec::new(),
         };
         lctx.seed_entry_pending();
 
@@ -1343,6 +1345,7 @@ fn lower_callable_lambda_with_env(
             compute_retrack_names: HashSet::new(),
             contract_pool: Vec::new(),
             contract_posts: Vec::new(),
+            contract_results: Vec::new(),
         };
         lctx.seed_entry_pending();
         let mut arg_i = 0usize;
@@ -1526,6 +1529,7 @@ pub(crate) fn lower_option_lift2_factory(
             compute_retrack_names: HashSet::new(),
             contract_pool: Vec::new(),
             contract_posts: Vec::new(),
+            contract_results: Vec::new(),
             result_option_vars: HashSet::new(),
             dead: false,
             stack_guard: false,
@@ -1712,6 +1716,7 @@ fn lower_function(
                 })
                 .collect(),
             contract_posts: Vec::new(),
+            contract_results: Vec::new(),
         };
         lctx.emit_stack_enter(&stack_file, tir.line, &tir.name, &stack_src)?;
         let enter = lctx
@@ -1981,6 +1986,7 @@ fn lower_generator_body(
                 })
                 .collect(),
             contract_posts: Vec::new(),
+            contract_results: Vec::new(),
         };
         lctx.seed_entry_pending();
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {

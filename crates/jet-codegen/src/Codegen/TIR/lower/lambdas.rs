@@ -817,8 +817,12 @@ pub(crate) fn lower_spawn_lambda_for_jit_with_shared_block(
 /// return (`LambdaMeta::fallible_propagation`), so the rendered closure returns
 /// `JetOutcome<_, E>` and its happy path must build the same carrier
 /// (`Ok::<_, E>(…)`) — otherwise the `?` sits inside a `()` closure and rustc
-/// rejects the generated code (I2). Mirrors `spawn_body_result_ty`.
+/// rejects the generated code (I2). Task-group normalization may attach the
+/// same carrier to an infallible sibling through `fallible_carrier`.
 fn spawn_fallible_err_rust(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Option<String> {
+    if let Some(Type::Result { err, .. }) = lam.meta.fallible_carrier.as_ref() {
+        return Some(cx.rust_type(err));
+    }
     if !lam.meta.fallible_propagation {
         return None;
     }

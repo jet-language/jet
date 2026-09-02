@@ -25,7 +25,7 @@ const HELPER_ENTROPY_UNAVAILABLE_EXIT: i32 = 75;
 pub const DEFAULT_REGISTRY: &str = "jet";
 
 /// Directory that holds signing keys: `$JET_KEYS_DIR` if set (tests/CI point it
-/// at a scratch dir, same override idiom as `JET_STORE_DIR` /
+/// at a scratch dir, same override idiom as `JET_PACKAGE_STORE_DIR` /
 /// `JET_REGISTRY_CACHE_DIR`), else `~/.jet/keys`.
 pub fn keys_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("JET_KEYS_DIR") {

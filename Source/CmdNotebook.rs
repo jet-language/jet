@@ -21,6 +21,21 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const BOOTSTRAP_ROUTE: &str = "/__jet_notebook_bootstrap";
 const BOOTSTRAP_TTL: Duration = Duration::from_secs(30);
 
+enum ServeLoopbackHook {
+    Disabled,
+    #[cfg(test)]
+    Test(ServeLoopbackTestHook),
+}
+
+#[cfg(test)]
+struct ServeLoopbackTestHook {
+    bound: std::sync::mpsc::SyncSender<SocketAddr>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    accepted: Arc<AtomicUsize>,
+    active: Arc<AtomicUsize>,
+    peak_active: Arc<AtomicUsize>,
+}
+
 /// Dispatch `jet notebook [PATH] [--protocol] [--bind ADDR] [--token TOKEN]`.
 pub(crate) fn run_notebook(raw: &[String]) {
     let path = notebook_path(raw);
@@ -74,7 +89,14 @@ pub(crate) fn run_notebook(raw: &[String]) {
         },
     };
     let auto_open = io::stdin().is_terminal() && is_loopback(addr);
-    match serve_loopback(kernel, addr, &token, path.as_deref(), auto_open) {
+    match serve_loopback(
+        kernel,
+        addr,
+        &token,
+        path.as_deref(),
+        auto_open,
+        ServeLoopbackHook::Disabled,
+    ) {
         Ok(code) => exit(code),
         Err(error) => {
             crate::cli_error!("E2105", "notebook server failed: {error}");
@@ -161,9 +183,16 @@ fn serve_loopback(
     token: &str,
     path: Option<&Path>,
     auto_open: bool,
+    _hook: ServeLoopbackHook,
 ) -> Result<i32, String> {
     let listener = TcpListener::bind(addr).map_err(|error| error.to_string())?;
     let bound = listener.local_addr().map_err(|error| error.to_string())?;
+    #[cfg(test)]
+    if let ServeLoopbackHook::Test(hook) = &_hook {
+        hook.bound
+            .send(bound)
+            .map_err(|_| "notebook listener readiness receiver dropped".to_string())?;
+    }
     let bootstrap = if auto_open {
         let nonce = mint_token()?;
         let state = Arc::new(Mutex::new(Some(BootstrapGrant {
@@ -186,15 +215,51 @@ fn serve_loopback(
 
     let shared = Arc::new(Mutex::new(kernel));
     let active = Arc::new(AtomicUsize::new(0));
-    for connection in listener.incoming() {
+    #[cfg(test)]
+    let active = match &_hook {
+        ServeLoopbackHook::Disabled => active,
+        ServeLoopbackHook::Test(hook) => Arc::clone(&hook.active),
+    };
+    #[cfg(test)]
+    let peak_active = match &_hook {
+        ServeLoopbackHook::Disabled => None,
+        ServeLoopbackHook::Test(hook) => Some(Arc::clone(&hook.peak_active)),
+    };
+    loop {
+        #[cfg(test)]
+        if let ServeLoopbackHook::Test(hook) = &_hook {
+            if hook.stop.load(Ordering::Acquire) {
+                break;
+            }
+        }
+        let Some(connection) = listener.incoming().next() else {
+            break;
+        };
         let Ok(stream) = connection else { continue };
-        if active
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                (count < MAX_CONNECTIONS).then_some(count + 1)
-            })
-            .is_err()
-        {
+        #[cfg(test)]
+        if let ServeLoopbackHook::Test(hook) = &_hook {
+            if hook.stop.load(Ordering::Acquire) {
+                break;
+            }
+        }
+        let Ok(_previous) = active.fetch_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |count| (count < MAX_CONNECTIONS).then_some(count + 1),
+        ) else {
+            #[cfg(test)]
+            if let ServeLoopbackHook::Test(hook) = &_hook {
+                hook.accepted.fetch_add(1, Ordering::AcqRel);
+            }
             continue;
+        };
+        #[cfg(test)]
+        if let ServeLoopbackHook::Test(hook) = &_hook {
+            hook.accepted.fetch_add(1, Ordering::AcqRel);
+        }
+        #[cfg(test)]
+        if let Some(peak_active) = &peak_active {
+            peak_active.fetch_max(_previous + 1, Ordering::AcqRel);
         }
         let shared = Arc::clone(&shared);
         let active_for_thread = Arc::clone(&active);
@@ -754,6 +819,26 @@ fn json_str(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct NotebookServerGuard {
+        address: SocketAddr,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+        active: Arc<AtomicUsize>,
+        join: Option<std::thread::JoinHandle<Result<i32, String>>>,
+    }
+
+    impl Drop for NotebookServerGuard {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            let _ = TcpStream::connect(self.address);
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while self.active.load(Ordering::Acquire) != 0 && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if let Some(join) = self.join.take() {
+                let _ = join.join();
+            }
+        }
+    }
 
     #[test]
     fn listener_notice_withholds_the_bearer_token() {
@@ -885,5 +970,143 @@ mod tests {
         );
         drop(server);
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn notebook_listener_serves_valid_client_behind_bounded_partial_preauth_clients() {
+        const TOKEN: &str = "notebook-listener-test-token";
+        let (bound_tx, bound_rx) = std::sync::mpsc::sync_channel(1);
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak_active = Arc::new(AtomicUsize::new(0));
+        let server = {
+            let stop = Arc::clone(&stop);
+            let accepted = Arc::clone(&accepted);
+            let active = Arc::clone(&active);
+            let peak_active = Arc::clone(&peak_active);
+            std::thread::spawn(move || {
+                let kernel =
+                    Kernel::open(None, "notebook-listener-availability-test").unwrap();
+                serve_loopback(
+                    kernel,
+                    "127.0.0.1:0",
+                    TOKEN,
+                    None,
+                    false,
+                    ServeLoopbackHook::Test(ServeLoopbackTestHook {
+                        bound: bound_tx,
+                        stop,
+                        accepted,
+                        active,
+                        peak_active,
+                    }),
+                )
+            })
+        };
+        let address = bound_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("notebook listener did not publish its bound address");
+        let mut server_guard = NotebookServerGuard {
+            address,
+            stop: Arc::clone(&stop),
+            active: Arc::clone(&active),
+            join: Some(server),
+        };
+
+        let hostile_count = MAX_CONNECTIONS + 1;
+        let mut partials = Vec::with_capacity(hostile_count);
+        for _ in 0..hostile_count {
+            let mut client =
+                TcpStream::connect(address).expect("connect partial notebook client");
+            client
+                .set_write_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            client.write_all(b"G").unwrap();
+            partials.push(client);
+        }
+
+        let admission_deadline = Instant::now() + Duration::from_secs(2);
+        while (accepted.load(Ordering::Acquire) < hostile_count
+            || active.load(Ordering::Acquire) < MAX_CONNECTIONS)
+            && Instant::now() < admission_deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            accepted.load(Ordering::Acquire),
+            hostile_count,
+            "listener did not process every hostile connection"
+        );
+        assert_eq!(
+            active.load(Ordering::Acquire),
+            MAX_CONNECTIONS,
+            "hostile clients must fill, but not exceed, the connection cap"
+        );
+        assert_eq!(
+            peak_active.load(Ordering::Acquire),
+            MAX_CONNECTIONS,
+            "active notebook workers exceeded or missed the connection cap"
+        );
+
+        let release_deadline = Instant::now() + Duration::from_secs(2);
+        while active.load(Ordering::Acquire) >= MAX_CONNECTIONS
+            && !partials.is_empty()
+            && Instant::now() < release_deadline
+        {
+            drop(partials.pop());
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            active.load(Ordering::Acquire) < MAX_CONNECTIONS,
+            "a partial client did not release an admitted worker"
+        );
+
+        let started = Instant::now();
+        let mut valid = TcpStream::connect(address).expect("connect valid notebook client");
+        valid.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        valid
+            .write_all(
+                format!(
+                    "GET /health HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {TOKEN}\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let mut response = Vec::new();
+        valid.read_to_end(&mut response).unwrap();
+        let response = String::from_utf8(response).unwrap();
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "valid client received no health response: {response}"
+        );
+        assert!(response.contains("\"ok\":true"));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "valid client waited behind partial pre-auth clients"
+        );
+        assert_eq!(peak_active.load(Ordering::Acquire), MAX_CONNECTIONS);
+
+        drop(valid);
+        drop(partials);
+        let release_deadline = Instant::now() + Duration::from_secs(2);
+        while active.load(Ordering::Acquire) != 0 && Instant::now() < release_deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            active.load(Ordering::Acquire),
+            0,
+            "notebook workers did not release after hostile clients closed"
+        );
+
+        server_guard.stop.store(true, Ordering::Release);
+        let _ = TcpStream::connect(address);
+        let result = server_guard
+            .join
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(result, Ok(ExitCodes::OK));
     }
 }

@@ -174,10 +174,7 @@ pub struct BuildMount {
 }
 
 impl BuildMount {
-    pub fn read_only(
-        source: impl Into<String>,
-        destination: impl Into<String>,
-    ) -> Self {
+    pub fn read_only(source: impl Into<String>, destination: impl Into<String>) -> Self {
         BuildMount {
             source: source.into(),
             destination: destination.into(),

@@ -85,7 +85,7 @@ pub(crate) fn run_module_explain(subject: &str, file: &str, profile: &str, json:
     print!("{}", crate::CmdInspect::check_result_text(&checked.check));
 }
 
-pub(crate) fn run_dossier(args: &[String], json: bool) {
+pub(crate) fn run_dossier(args: &[String], json: bool, profile: &str) {
     let mut positional: Vec<&str> = Vec::new();
     for a in args {
         if !a.starts_with('-') {
@@ -149,7 +149,13 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
     };
 
     let abs = absolutize(path);
-    let checked = crate::CmdInspect::check_projection(&abs).unwrap_or_else(|diagnostics| {
+    let checked = crate::CmdInspect::check_projection_with_options(
+        &abs,
+        jet::Policy::GateSet::default(),
+        profile,
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap_or_else(|diagnostics| {
         crate::CmdInspect::render_check_failure(&abs, &diagnostics, json, false);
     });
     let target = target.unwrap_or_else(|| {

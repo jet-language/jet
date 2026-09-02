@@ -40,7 +40,7 @@ pub enum Item {
     /// U3 (unified-ecosystem §4): `module name { … }` — a named, composable
     /// declaration contributing typed values to reserved namespaces.
     Module(ModuleDecl),
-    /// S59 (E2-M14): `#Extern module c.<lib> { … }` (user overlay) or
+    /// S59 (E2-M14): `#Import module c.<lib> { … }` (user overlay) or
     /// `#Bindgen module c.<lib>.__bindgen__ { … }` (compiler-generated cache).
     CModule(CModule),
     /// D-MOD1/2 (code module system): `module name;` (file declaration) or
@@ -276,16 +276,16 @@ pub struct ModuleAliasDef {
 }
 
 /// S59 (E2-M14): which attribute introduced a C FFI module — the user-written
-/// overlay (`#Extern`) or the generated cache surface (`#Bindgen`).
+/// overlay (`#Import`) or the generated cache surface (`#Bindgen`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CModuleKind {
-    /// `#Extern module c.<lib> { … }` — user overlay, allowed anywhere.
+    /// `#Import module c.<lib> { … }` — user overlay, allowed anywhere.
     Extern,
     /// `#Bindgen module c.<lib>.__bindgen__ { … }` — generated, cache files only.
     Bindgen,
 }
 
-/// S59 (E2-M14): one `#Extern`/`#Bindgen module c.<lib>[.__bindgen__] { … }` block.
+/// S59 (E2-M14): one `#Import`/`#Bindgen module c.<lib>[.__bindgen__] { … }` block.
 #[derive(Debug, Clone)]
 pub struct CModule {
     pub kind: CModuleKind,
@@ -2126,18 +2126,22 @@ pub enum SerdeWireShape {
     Text,
     Array,
     Object,
+    /// Typed JSON keeps numeric lexemes in the internal `DataTree::Number`
+    /// carrier so fixed-width decoders can validate without rounding.
+    Number,
 }
 
 impl SerdeWireShape {
     pub fn name(self) -> &'static str {
         match self {
             Self::Null => "Null",
+            Self::Bool => "Bool",
             Self::Int => "Int",
             Self::Float => "Float",
-            Self::Bool => "Bool",
             Self::Text => "Text",
             Self::Array => "Array",
             Self::Object => "Object",
+            Self::Number => "Number",
         }
     }
 }
@@ -2228,7 +2232,7 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
                         return def
                             .derives
                             .iter()
-                            .any(|(derive, _)| derive == crate::Generics::ENCODE)
+                            .any(|(derive, _)| derive == crate::Generics::DECODE)
                             .then(|| resolve(items, &def.base, seen))
                             .flatten();
                     }
@@ -2245,7 +2249,7 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
                             return def
                                 .derives
                                 .iter()
-                                .any(|(derive, _)| derive == crate::Generics::ENCODE)
+                                .any(|(derive, _)| derive == crate::Generics::DECODE)
                                 .then(|| resolve(items, &def.base, seen))
                                 .flatten();
                         }
@@ -2279,11 +2283,12 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
         seen: &mut std::collections::HashSet<String>,
     ) -> Option<Vec<SerdeWireShape>> {
         let shapes = match ty {
-            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => vec![SerdeWireShape::Int],
-            Type::Float | Type::Float32 => vec![SerdeWireShape::Float],
+            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => {
+                vec![SerdeWireShape::Int, SerdeWireShape::Number]
+            }
+            Type::Float | Type::Float32 => vec![SerdeWireShape::Float, SerdeWireShape::Number],
             Type::Bool => vec![SerdeWireShape::Bool],
             Type::String | Type::Char => vec![SerdeWireShape::Text],
-            Type::Named(name) if name == "Decimal" => vec![SerdeWireShape::Text],
             Type::List(_) | Type::FixedList { .. } => vec![SerdeWireShape::Array],
             Type::Map { .. } | Type::Tuple(_) => vec![SerdeWireShape::Object],
             Type::Shared(inner) => resolve(items, inner, seen)?,

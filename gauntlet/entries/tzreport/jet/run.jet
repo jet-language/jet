@@ -1,32 +1,18 @@
 use core.[files, time]
 
-struct Meeting {
-    when: DateTime
-    name: String
-}
-
-#CLI
-struct Args {
-    input: String
-}
-
-fn parse_meeting(line: String) Meeting -> {
-    fields :: line.split_once("|") ?? panic("bad meeting")
-    local :: time.parse_rfc3339(fields.after) ?? panic("bad timestamp")
-    Meeting{when: local, name: fields.before}
-}
+#CLI struct Args { path: String }
 
 fn run(args: Args) {
-    text :: files.read(args.input) ?? panic("read failed")
-    meetings := [Meeting]{}
-    loop line in text.lines() {
-        if line != "" -> meetings.push(parse_meeting(line))
-    }
-    meetings.sort_by(meeting -> (when: meeting.when, name: meeting.name))
+    meetings := (files.read(args.path) ?? panic("read")).lines().filter(line -> line != "").map(line -> {
+        fields :: line.split_once("|") ?? panic("bad")
+        (a: time.parse_rfc3339(fields.after) ?? panic("bad"), b: fields.before)
+    })
+    meetings.sort_by(.a)
     loop (position, meeting) in meetings {
-        gap :: if position == 0 -> "-" else -> "{meeting.when.difference(meetings[position - 1].when).in(.Minutes) ?? 0}"
-        print("{meeting.name} utc={meeting.when.format_rfc3339()} day={meeting.when.format("%a")} gap={gap}")
+        gap :: if position == 0 -> "-" else -> "{meeting.a.difference(meetings[position - 1].a).in(.Minutes) ?? 0}"
+        print("{meeting.b} utc={meeting.a.format_rfc3339()} day={meeting.a.format("%a")} gap={gap}")
     }
-    span :: if meetings.len() == 0 -> 0 else -> meetings[meetings.len() - 1].when.difference(meetings[0].when).in(.Minutes) ?? 0
-    print("span {span} minutes {meetings.len()}")
+    n :: meetings.len()
+    span :: if n == 0 -> 0 else -> meetings[n - 1].a.difference(meetings[0].a).in(.Minutes) ?? 0
+    print("span {span} minutes {n}")
 }

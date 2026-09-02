@@ -1456,6 +1456,80 @@ mod tests {
     }
 
     #[test]
+    fn typed_snapshot_decode_rejects_nested_and_oversized_json_before_conversion() {
+        let nested = format!(
+            "{{\"abilities\":[],\"limits\":{{\"max_edits\":64,\"max_findings\":256,\"max_fuel\":10000000,\"max_memory_bytes\":16777216,\"max_response_bytes\":262144,\"max_table_elements\":10000,\"timeout_ms\":2000}},\"protocol\":1,\"spans\":[],\"stage\":\"typed\",\"symbols\":[],\"trust\":\"untrusted\",\"types\":{nested}}}",
+            nested = format!(
+                "{}0{}",
+                "[".repeat(JSON::MAX_JSON_DEPTH + 1),
+                "]".repeat(JSON::MAX_JSON_DEPTH + 1)
+            )
+        );
+        let error = TypedSnapshot::decode(nested.as_bytes())
+            .expect_err("nested snapshot JSON must hit the shared parser depth cap");
+        assert_eq!(error.message, "JSON exceeds maximum nesting depth");
+
+        let snapshot = sample_snapshot();
+        let valid = snapshot
+            .encode()
+            .expect("sample snapshot must produce valid protocol JSON");
+        assert_eq!(
+            TypedSnapshot::decode(&valid).expect("valid snapshot protocol must decode"),
+            snapshot
+        );
+
+        let mut oversized = valid;
+        oversized.resize(JSON::MAX_PROTOCOL_MESSAGE_BYTES + 1, b' ');
+        let error = TypedSnapshot::decode(&oversized)
+            .expect_err("oversized snapshot JSON must hit the shared parser size cap");
+        assert_eq!(error.message, "JSON input exceeds the 1 MiB limit");
+    }
+
+    #[test]
+    fn analyze_response_decode_rejects_nested_and_oversized_json_before_conversion() {
+        let nested = format!(
+            "{{\"artifacts\":[],\"findings\":{nested},\"protocol\":1,\"proposed_edits\":[]}}",
+            nested = format!(
+                "{}0{}",
+                "[".repeat(JSON::MAX_JSON_DEPTH + 1),
+                "]".repeat(JSON::MAX_JSON_DEPTH + 1)
+            )
+        );
+        let error = AnalyzeResponse::decode(nested.as_bytes())
+            .expect_err("nested response JSON must hit the shared parser depth cap");
+        assert_eq!(error.message, "JSON exceeds maximum nesting depth");
+
+        let response = AnalyzeResponse {
+            protocol: PROTOCOL_VERSION,
+            findings: vec![Finding {
+                rule: "no-x".into(),
+                span_id: "sp1".into(),
+                message: "prefer y".into(),
+                severity: "warning".into(),
+            }],
+            proposed_edits: vec![ProposedEdit {
+                span_id: "sp1".into(),
+                replacement: "y".into(),
+                rationale: "rename".into(),
+            }],
+            artifacts: vec![],
+        };
+        let valid = response
+            .encode()
+            .expect("sample response must produce valid protocol JSON");
+        assert_eq!(
+            AnalyzeResponse::decode(&valid).expect("valid response protocol must decode"),
+            response
+        );
+
+        let mut oversized = valid;
+        oversized.resize(JSON::MAX_PROTOCOL_MESSAGE_BYTES + 1, b' ');
+        let error = AnalyzeResponse::decode(&oversized)
+            .expect_err("oversized response JSON must hit the shared parser size cap");
+        assert_eq!(error.message, "JSON input exceeds the 1 MiB limit");
+    }
+
+    #[test]
     fn validate_accepts_in_span_findings_and_edits() {
         let snap = sample_snapshot();
         let response = AnalyzeResponse {

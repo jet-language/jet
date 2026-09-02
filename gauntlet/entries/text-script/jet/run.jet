@@ -1,13 +1,7 @@
-use core.files as files
-
-#CLI
-struct Args {
-    input: String
-}
-
+use core.files
+#CLI struct Args { input: String }
 fn run(args: Args) {
-    lines := (files.read(args.input) ?? panic("read failed")).lines().filter(line -> !line.trim().is_empty()).map(line -> line.trim())
-    lines.sort()
-    print("lines {lines.len()}")
-    loop line in lines -> print(line)
+lines:=(files.read(args.input)??panic("read failed")).lines().filter(line->line.trim()!="").map(line->line.trim())
+lines.sort()
+print("lines {lines.len()}\n{lines.join("\n")}")
 }

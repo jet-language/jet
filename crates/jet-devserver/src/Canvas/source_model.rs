@@ -459,7 +459,7 @@ mod secure_fs {
             ));
         }
         let final_metadata = file.metadata()?;
-        if !same_file(&metadata, &final_metadata) {
+        if !same_file(&metadata, &final_metadata) || final_metadata.nlink() != 1 {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "Canvas source changed while it was being read",
@@ -469,14 +469,19 @@ mod secure_fs {
     }
 
     fn require_regular_metadata(metadata: &std::fs::Metadata) -> io::Result<()> {
-        if metadata.is_file() {
-            Ok(())
-        } else {
-            Err(io::Error::new(
+        if !metadata.is_file() {
+            return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "Canvas source path is not a regular file",
-            ))
+            ));
         }
+        if metadata.nlink() != 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Canvas source file must not be a hard link",
+            ));
+        }
+        Ok(())
     }
 
     fn same_file(left: &std::fs::Metadata, right: &std::fs::Metadata) -> bool {
@@ -608,7 +613,22 @@ mod secure_fs {
         ))
     }
 
-    pub(super) fn read_bounded(_: &Path, _: u64) -> io::Result<Vec<u8>> {
+    pub(super) fn read_bounded(path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
+        #[cfg(windows)]
+        {
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let name = path.file_name().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Canvas source path has no file name",
+                )
+            })?;
+            return crate::read_static_file_bounded(parent, Path::new(name), max_bytes);
+        }
+        #[cfg(not(windows))]
         unsupported()
     }
 

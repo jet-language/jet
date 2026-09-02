@@ -6,6 +6,8 @@ use crate::Codegen::mangle_generated;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::integer_bounds_for_expr;
+use crate::Codegen::TIR::TIntegerBounds;
 use crate::Codegen::TIR::label_name;
 use crate::Codegen::TIR::lower::collect_txn_mut_roots;
 use crate::Codegen::TIR::lower::encoding_reader_item_type;
@@ -23,6 +25,7 @@ use crate::Codegen::TIR::lower_forin_collection;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::LowerEnv;
@@ -2018,9 +2021,143 @@ pub(crate) fn normalize_eval_fragment_return(expr: &Expr, expected: Option<&Type
         _ => None,
     }
 }
+const INT_SMALL_MIN: i128 = -(1i128 << 62);
+const INT_SMALL_MAX: i128 = (1i128 << 62) - 1;
+
+fn interval_fits_inline(bounds: TIntegerBounds) -> bool {
+    bounds.lo >= INT_SMALL_MIN && bounds.hi <= INT_SMALL_MAX
+}
+
+fn range_iteration_bounds(
+    start: &TExpr,
+    end: &TExpr,
+    step: Option<&TExpr>,
+    exclusive: bool,
+) -> Option<TIntegerBounds> {
+    let start = integer_bounds_for_expr(start)?;
+    let end = integer_bounds_for_expr(end)?;
+    let step = match step {
+        Some(step) => integer_bounds_for_expr(step)?,
+        None => TIntegerBounds::exact(1),
+    };
+    if !interval_fits_inline(start) || !interval_fits_inline(end) || !interval_fits_inline(step) {
+        return None;
+    }
+    let (lo, hi) = if step.lo >= 1 {
+        (
+            start.lo,
+            if exclusive {
+                end.hi.checked_sub(1)?
+            } else {
+                end.hi
+            },
+        )
+    } else if step.hi <= -1 {
+        (
+            if exclusive {
+                end.lo.checked_add(1)?
+            } else {
+                end.lo
+            },
+            start.hi,
+        )
+    } else {
+        return None;
+    };
+    let bounds = TIntegerBounds { lo, hi };
+    (lo <= hi && interval_fits_inline(bounds)).then_some(bounds)
+}
+
+fn refine_loop_local(
+    env: &mut LowerEnv,
+    local_expr: &TExpr,
+    lower: Option<i128>,
+    upper: Option<i128>,
+) {
+    let TExprKind::Local(local) = &local_expr.kind else {
+        return;
+    };
+    if local.deref || local.is_persistent() {
+        return;
+    }
+    let Some(mut current) = integer_bounds_for_expr(local_expr) else {
+        return;
+    };
+    if let Some(lower) = lower {
+        current.lo = current.lo.max(lower);
+    }
+    if let Some(upper) = upper {
+        current.hi = current.hi.min(upper);
+    }
+    if current.lo <= current.hi {
+        env.set_integer_bounds(&local.name, Some(current));
+    }
+}
+
+fn refine_loop_comparison(
+    env: &mut LowerEnv,
+    op: crate::AST::BinOp,
+    lhs: &TExpr,
+    rhs: &TExpr,
+) {
+    let rhs_bounds = integer_bounds_for_expr(rhs);
+    if matches!(&lhs.kind, TExprKind::Local(_)) {
+        if let Some(bounds) = rhs_bounds {
+            match op {
+                crate::AST::BinOp::Lt => {
+                    refine_loop_local(env, lhs, None, bounds.hi.checked_sub(1))
+                }
+                crate::AST::BinOp::Le => refine_loop_local(env, lhs, None, Some(bounds.hi)),
+                crate::AST::BinOp::Gt => {
+                    refine_loop_local(env, lhs, bounds.lo.checked_add(1), None)
+                }
+                crate::AST::BinOp::Ge => refine_loop_local(env, lhs, Some(bounds.lo), None),
+                crate::AST::BinOp::Eq => {
+                    refine_loop_local(env, lhs, Some(bounds.lo), Some(bounds.hi))
+                }
+                _ => {}
+            }
+        }
+        return;
+    }
+    let lhs_bounds = integer_bounds_for_expr(lhs);
+    let Some(bounds) = lhs_bounds else {
+        return;
+    };
+    if !matches!(&rhs.kind, TExprKind::Local(_)) {
+        return;
+    }
+    match op {
+        crate::AST::BinOp::Lt => refine_loop_local(env, rhs, bounds.lo.checked_add(1), None),
+        crate::AST::BinOp::Le => refine_loop_local(env, rhs, Some(bounds.lo), None),
+        crate::AST::BinOp::Gt => refine_loop_local(env, rhs, None, bounds.hi.checked_sub(1)),
+        crate::AST::BinOp::Ge => refine_loop_local(env, rhs, None, Some(bounds.hi)),
+        crate::AST::BinOp::Eq => refine_loop_local(env, rhs, Some(bounds.lo), Some(bounds.hi)),
+        _ => {}
+    }
+}
+
+fn refine_loop_condition(env: &mut LowerEnv, condition: &TExpr) {
+    if let TExprKind::Binary {
+        op: crate::AST::BinOp::And,
+        lhs,
+        rhs,
+        ..
+    } = &condition.kind
+    {
+        refine_loop_condition(env, lhs);
+        refine_loop_condition(env, rhs);
+        return;
+    }
+    let TExprKind::Binary { op, lhs, rhs, .. } = &condition.kind else {
+        return;
+    };
+    refine_loop_comparison(env, *op, lhs, rhs);
+}
 #[inline(never)]
 fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
     macro_rules! ready_return {
+
         ($stmt:expr) => {
             return LowerStmtPlan::ready($stmt);
         };
@@ -2264,6 +2401,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let binding = refutable_binding_name(pattern, &init)
                     .expect("refutable unwrap pattern must carry one validated binding");
                 env.bind(binding, TLocal::user(binding), Some(init.ty.clone()));
+                env.set_integer_bounds(binding, integer_bounds_for_expr(&init));
                 ready_return!(TStmt::Let {
                     name: binding.to_owned(),
                     kw: "let",
@@ -2382,11 +2520,21 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             Some(moved)
                         } else {
                             let init = lower_expr(&b.init, cx, env);
+                            // A place-window binding may be represented as a
+                            // transparent dereferenced slot. Preserve the
+                            // referent's storage provenance on that slot:
+                            // current-frame locals expire with this frame,
+                            // collection elements are heap-owned, and
+                            // by-reference parameters remain caller-owned.
+                            let address_lifetime = tir_address_lifetime(&init);
                             let range = matches!(inner, Expr::Slice { .. });
                             let slot = if range {
                                 TLocal::user(&b.name)
+                                    .with_address_lifetime(address_lifetime)
                             } else {
-                                TLocal::user(&b.name).through_ref()
+                                TLocal::user(&b.name)
+                                    .through_ref()
+                                    .with_address_lifetime(address_lifetime)
                             };
                             let binding_ty = if init.ty.is_compute_view_mut() {
                                 Some(init.ty.clone())
@@ -2544,6 +2692,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             };
                             let slot = TLocal::user(&b.name);
                             env.bind(&b.name, slot, Some(init_ty.clone()));
+                            env.set_integer_bounds(&b.name, integer_bounds_for_expr(&init));
                             ready_return!(TStmt::Let {
                                 name: b.name.clone(),
                                 kw: "let",
@@ -2819,6 +2968,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             TLocal::user(&binding_name)
                         };
                         env.bind(&b.name, slot, Some(ty));
+                        env.set_integer_bounds(&b.name, integer_bounds_for_expr(&init));
                         if b.gc_promotion.is_some() || b.gc_transferred {
                             env.mark_gc(&b.name);
                         }
@@ -2868,6 +3018,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             // Rc/raw function value into the Send crossing.
                             value_t = force_interrupt_callback_value(value_t, cx);
                         }
+                        env.update_integer_bounds(name, *op, &value_t);
                         TStmt::Assign {
                             place: TPlace::Local(
                                 cx.persistent_local(name)
@@ -3264,7 +3415,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         } => {
             return in_own_frame(|| {
                 let cond = lower_expr(cond, cx, env);
-                let branch = clone_env(env);
+                let mut branch = clone_env(env);
+                refine_loop_condition(&mut branch, &cond);
                 let label = label_name(label);
                 return deferred_stmt(vec![LowerBody::scoped(body, branch)], move |mut lowered| {
                     TStmt::While {
@@ -3298,8 +3450,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 } else {
                     init_val
                 };
+                let init_bounds = integer_bounds_for_expr(&init_val);
                 let mut scoped = clone_env(env);
                 scoped.bind(&init.name, TLocal::user(&init.name), Some(init_ty.clone()));
+                scoped.set_integer_bounds(&init.name, init_bounds);
                 let init_stmt = Box::new(TStmt::Let {
                     name: init.name.clone(),
                     kw: "let mut",
@@ -3313,6 +3467,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     gc_transferred: false,
                 });
                 let cond = lower_expr(cond, cx, &mut scoped);
+                refine_loop_condition(&mut scoped, &cond);
                 let has_step = step.is_some();
                 let mut bodies = Vec::with_capacity(if has_step { 2 } else { 1 });
                 if let Some(step) = step {
@@ -3368,6 +3523,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // context inside the body sees it; a panic after the loop does not.
                     let mut branch = clone_env(env);
                     branch.bind(var, TLocal::user(var), Some(Type::Int));
+                    if let Some(bounds) =
+                        range_iteration_bounds(&start, &end, step.as_ref(), *exclusive)
+                    {
+                        branch.set_integer_bounds(var, Some(bounds));
+                    }
                     let label = label_name(label);
                     let var = var.clone();
                     let exclusive = *exclusive;

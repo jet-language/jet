@@ -1,6 +1,8 @@
-use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::{
+    integer_bounds_for_expr, integer_bounds_for_op, TIntegerBounds, TLocal,
+};
 use crate::Codegen::TIR::TirWorklist;
-use crate::AST::{Expr, LValue, Stmt, Type};
+use crate::AST::{BinOp, Expr, LValue, Stmt, Type};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -203,6 +205,43 @@ impl LowerEnv {
     /// can never be captured in generated Rust.
     pub(crate) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (slot, ty));
+    }
+    /// Replace the dynamic interval fact for an existing lexical slot. A
+    /// missing fact is intentional: the slot may still have a finite type
+    /// interval, while an ordinary `Int` remains allowed to spill.
+    pub(super) fn set_integer_bounds(
+        &mut self,
+        name: &str,
+        bounds: Option<TIntegerBounds>,
+    ) {
+        if let Some((slot, _)) = self.locals.get_mut(name) {
+            slot.integer_bounds = bounds;
+        }
+    }
+
+    pub(super) fn integer_bounds_of(&self, name: &str) -> Option<TIntegerBounds> {
+        self.locals
+            .get(name)
+            .and_then(|(slot, _)| slot.integer_bounds)
+    }
+
+    /// Record the interval produced by a local assignment. Compound writes
+    /// are retained only when both the old value and RHS are proven.
+    pub(super) fn update_integer_bounds(
+        &mut self,
+        name: &str,
+        op: Option<BinOp>,
+        value: &crate::Codegen::TIR::TExpr,
+    ) {
+        let bounds = match op {
+            None => integer_bounds_for_expr(value),
+            Some(op) => self
+                .integer_bounds_of(name)
+                .and_then(|lhs| integer_bounds_for_expr(value).and_then(|rhs| {
+                    integer_bounds_for_op(op, lhs, rhs)
+                })),
+        };
+        self.set_integer_bounds(name, bounds);
     }
     /// The structured slot for `name`. This is the single fact every engine
     /// resolves a local by; the Rust spellings below derive from it.

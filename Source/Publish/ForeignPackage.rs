@@ -136,18 +136,24 @@ fn prepare_library(
     registry: ForeignRegistry,
     no_sign: bool,
 ) -> Result<LibraryInput, String> {
-    let facts = crate::Package::PackageFacts::load(root)
-        .ok_or_else(|| "no package.jet found in the publish root".to_string())?
-        .map_err(|error| format!("package facts are invalid: {error}"))?;
+    let facts = crate::Loader::package_facts_for_root(root)
+        .map_err(|diagnostics| {
+            diagnostics
+                .into_iter()
+                .map(|diagnostic| format!("{diagnostic:?}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        })?
+        .ok_or_else(|| "no package source found in the publish root".to_string())?;
     let package_name = facts.name.clone();
     let version = facts
         .version
         .clone()
-        .ok_or_else(|| "package.jet has no package version".to_string())?;
+        .ok_or_else(|| "package source has no package version".to_string())?;
     let license = facts
         .license
         .clone()
-        .ok_or_else(|| "package.jet has no SPDX license".to_string())?;
+        .ok_or_else(|| "package source has no SPDX license".to_string())?;
     crate::Publish::validate_published_license(&package_name, &version, Some(&license))
         .map_err(|error| error.detail)?;
 

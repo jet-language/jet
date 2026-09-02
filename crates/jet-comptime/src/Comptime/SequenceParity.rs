@@ -7,7 +7,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{BinOp, CtFloat, CtKey, CtReport, CtValue, Type};
 
 use super::super::super::Builtins::{as_bool, as_int, cmp};
-use super::super::super::Diagnostics::{comptime_panic, index_oob, unsupported};
+use super::super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::super::Interpreter::Interp;
 
 pub(super) enum SequenceOutcome {
@@ -78,18 +78,8 @@ pub(super) fn eval_sequence_method(
     }
     if method == "insert" {
         return Some((|| {
-            let [index, item] = args else {
-                return Err(unsupported(
-                    "the method `.insert` with these arguments",
-                    span,
-                ));
-            };
-            let index = as_int(index, span)?;
-            if index < 0 || index as usize > xs.len() {
-                return Err(index_oob(xs.len(), index, span));
-            }
             let mut out = xs.to_vec();
-            out.insert(index as usize, item.clone());
+            super::super::super::CollectionEval::list_insert_args(&mut out, args, span)?;
             Ok(SequenceOutcome::WriteBack(CtValue::List(out)))
         })());
     }
@@ -143,9 +133,9 @@ fn eval(
         }
         ("chunks", [n]) => {
             let n = as_int(n, span)?;
-            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
-                "chunks", n,
-            ) {
+            if let Some(message) =
+                crate::Comptime::CollectionEval::sequence_argument_message("chunks", n)
+            {
                 return Err(comptime_panic(message, span));
             }
             let n = n as usize;
@@ -374,9 +364,9 @@ fn eval(
         }
         ("take", [n]) => {
             let n = as_int(n, span)?;
-            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
-                "take", n,
-            ) {
+            if let Some(message) =
+                crate::Comptime::CollectionEval::sequence_argument_message("take", n)
+            {
                 return Err(comptime_panic(message, span));
             }
             let n = n as usize;
@@ -384,9 +374,9 @@ fn eval(
         }
         ("skip", [n]) => {
             let n = as_int(n, span)?;
-            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
-                "skip", n,
-            ) {
+            if let Some(message) =
+                crate::Comptime::CollectionEval::sequence_argument_message("skip", n)
+            {
                 return Err(comptime_panic(message, span));
             }
             let n = n as usize;
@@ -397,9 +387,9 @@ fn eval(
         }
         ("step_by", [n]) => {
             let n = as_int(n, span)?;
-            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
-                "step_by", n,
-            ) {
+            if let Some(message) =
+                crate::Comptime::CollectionEval::sequence_argument_message("step_by", n)
+            {
                 return Err(comptime_panic(message, span));
             }
             CtValue::List(xs.iter().step_by(n as usize).cloned().collect())
@@ -476,9 +466,9 @@ fn eval(
         }
         ("windows", [n]) => {
             let n = as_int(n, span)?;
-            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
-                "windows", n,
-            ) {
+            if let Some(message) =
+                crate::Comptime::CollectionEval::sequence_argument_message("windows", n)
+            {
                 return Err(comptime_panic(message, span));
             }
             let n = n as usize;

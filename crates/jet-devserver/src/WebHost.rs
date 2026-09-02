@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufReader, IsTerminal, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -1080,6 +1080,961 @@ fn clock_time() -> String {
     format!("{:02}:{:02}:{:02}", sod / 3600, (sod % 3600) / 60, sod % 60)
 }
 
+/// A held output directory used by both the compiler and the publication
+/// transaction.  The path is retained for diagnostics only; every filesystem
+/// operation below it goes through the held directory authority.
+pub struct WebOutputAuthority {
+    path: PathBuf,
+    directory: secure_output::Directory,
+}
+
+/// A compiler-owned temporary output.  It is created exclusively below a held
+/// output authority and removed by its descriptor-relative drop path.
+pub struct WebOutputTempFile {
+    path: PathBuf,
+    inner: secure_output::TempFile,
+}
+
+impl WebOutputAuthority {
+    /// Create the directory tree without following links, then pin the final
+    /// output directory before returning.
+    pub fn open_or_create(path: &Path) -> std::io::Result<Self> {
+        let real = ensure_real_output_dir(path)?;
+        let directory = secure_output::open_root(&real)?;
+        Ok(Self {
+            path: real,
+            directory,
+        })
+    }
+
+    /// Open an already-created directory and retain its descriptor/handle.
+    pub fn open(path: &Path) -> std::io::Result<Self> {
+        let real = ensure_real_output_dir(path)?;
+        let directory = secure_output::open_root(&real)?;
+        Ok(Self {
+            path: real,
+            directory,
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn path_for(&self, name: &str) -> std::io::Result<PathBuf> {
+        let name = normal_output_name(name)?;
+        Ok(self.path.join(name))
+    }
+
+    pub fn replace_file(&self, name: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let name = normal_output_name(name)?;
+        secure_output::replace_file(&self.directory, name, bytes)
+    }
+
+    pub fn open_file(&self, name: &str) -> std::io::Result<std::fs::File> {
+        let name = normal_output_name(name)?;
+        secure_output::open_file(&self.directory, name)
+    }
+
+    pub fn validate_file(&self, name: &str, required: bool) -> std::io::Result<bool> {
+        let name = normal_output_name(name)?;
+        match secure_output::open_file(&self.directory, name) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn remove_file_if_exists(&self, name: &str) -> std::io::Result<()> {
+        let name = normal_output_name(name)?;
+        match secure_output::remove_file(&self.directory, name) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn rename_file_to(&self, name: &str, destination: &Self) -> std::io::Result<()> {
+        let name = normal_output_name(name)?;
+        secure_output::rename_file(&self.directory, name, &destination.directory, name)
+    }
+    pub fn open_existing_child(&self, name: &str) -> std::io::Result<Self> {
+        let name = normal_output_name(name)?;
+        let directory = secure_output::open_child(&self.directory, name)?;
+        Ok(Self {
+            path: self.path.join(name),
+            directory,
+        })
+    }
+
+
+    pub fn create_child(&self, path: &Path) -> std::io::Result<Self> {
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let real_parent = fs::canonicalize(parent)?;
+        if real_parent != self.path {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "web child directory escapes its held output root",
+            ));
+        }
+        let name = normal_output_name(
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "web child directory has no normal name",
+                    )
+                })?,
+        )?;
+        let directory = secure_output::open_child(&self.directory, name)?;
+        Ok(Self {
+            path: self.path.join(name),
+            directory,
+        })
+    }
+
+    pub fn create_unique_child(&self, prefix: &str) -> std::io::Result<(String, Self)> {
+        for _ in 0..100 {
+            let name = format!(
+                "{prefix}-{}-{}",
+                std::process::id(),
+                PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed)
+            );
+            match secure_output::create_child(&self.directory, std::ffi::OsStr::new(&name)) {
+                Ok(directory) => {
+                    return Ok((
+                        name.clone(),
+                        Self {
+                            path: self.path.join(&name),
+                            directory,
+                        },
+                    ))
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a web publication journal",
+        ))
+    }
+
+    pub fn remove_child_directory(&self, name: &str) -> std::io::Result<()> {
+        let name = normal_output_name(name)?;
+        match secure_output::remove_directory(&self.directory, name) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Allocate a private file for a tool such as rustc.  The file is never
+    /// opened by pathname by Jet again; its held descriptor remains the
+    /// cleanup authority.
+    pub fn create_temp_file(&self, prefix: &str, extension: &str) -> std::io::Result<WebOutputTempFile> {
+        for _ in 0..100 {
+            let name = format!(
+                ".{prefix}-{}-{}{}",
+                std::process::id(),
+                PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed),
+                extension
+            );
+            match secure_output::create_temp_file(
+                &self.directory,
+                std::ffi::OsStr::new(&name),
+            ) {
+                Ok(inner) => {
+                    return Ok(WebOutputTempFile {
+                        path: self.path.join(&name),
+                        inner,
+                    })
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a web compiler temporary",
+        ))
+    }
+}
+
+impl WebOutputTempFile {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        secure_output::write_temp(&mut self.inner, bytes)
+    }
+
+    pub fn read_all(&mut self) -> std::io::Result<Vec<u8>> {
+        secure_output::read_temp(&mut self.inner)
+    }
+}
+
+fn normal_output_name(value: &str) -> std::io::Result<&std::ffi::OsStr> {
+    let path = Path::new(value);
+    let mut components = path.components();
+    let Some(Component::Normal(name)) = components.next() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "web output name is not a normal component",
+        ));
+    };
+    if components.next().is_some() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "web output name is not a single component",
+        ));
+    }
+    Ok(name)
+}
+
+#[cfg(unix)]
+mod secure_output {
+    use std::ffi::{c_char, CString, OsStr};
+    use std::fs::{File, OpenOptions};
+    use std::io::{self, Read, Seek, SeekFrom, Write};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    use std::path::{Component, Path, PathBuf};
+    const O_RDONLY: i32 = 0;
+    const O_WRONLY: i32 = 1;
+    const O_RDWR: i32 = 2;
+    const O_CREAT: i32 = 0o100;
+    const O_EXCL: i32 = 0o200;
+    const O_CLOEXEC: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+        0o2000000
+    } else {
+        0x01000000
+    };
+    const O_DIRECTORY: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+        0o200000
+    } else {
+        0x00100000
+    };
+    const O_NOFOLLOW: i32 = if cfg!(any(target_os = "linux", target_os = "android")) {
+        0o400000
+    } else {
+        0x0100
+    };
+    const AT_REMOVEDIR: i32 = 0x200;
+    const MODE_FILE: u32 = 0o600;
+
+    unsafe extern "C" {
+        fn mkdirat(directory: i32, path: *const c_char, mode: u32) -> i32;
+        fn openat(directory: i32, path: *const c_char, flags: i32, ...) -> i32;
+        fn renameat(
+            old_directory: i32,
+            old_path: *const c_char,
+            new_directory: i32,
+            new_path: *const c_char,
+        ) -> i32;
+        fn unlinkat(directory: i32, path: *const c_char, flags: i32) -> i32;
+    }
+
+    pub struct Directory {
+        path: PathBuf,
+        file: File,
+    }
+
+    pub struct TempFile {
+        name: CString,
+        file: File,
+        parent: File,
+    }
+
+    fn c_name(value: &OsStr) -> io::Result<CString> {
+        CString::new(value.as_bytes()).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "web output name contains NUL")
+        })
+    }
+
+    fn permission(message: &str) -> io::Error {
+        io::Error::new(io::ErrorKind::PermissionDenied, message)
+    }
+    fn unlink_at(parent: &File, name: &CString, flags: i32) -> io::Result<()> {
+        if unsafe { unlinkat(parent.as_raw_fd(), name.as_ptr(), flags) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+
+    fn open_directory_at(parent: &File, name: &OsStr) -> io::Result<File> {
+        let name = c_name(name)?;
+        let fd = unsafe {
+            openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+
+    fn open_file_at(parent: &File, name: &OsStr) -> io::Result<File> {
+        let name = c_name(name)?;
+        let fd = unsafe {
+            openat(
+                parent.as_raw_fd(),
+                name.as_ptr(),
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+
+    fn check_regular(file: &File) -> io::Result<(u64, u64)> {
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.nlink() != 1 {
+            return Err(permission("web output must be a singly-linked regular file"));
+        }
+        Ok((metadata.dev(), metadata.ino()))
+    }
+
+    pub fn open_root(path: &Path) -> io::Result<Directory> {
+        let cwd = std::fs::canonicalize(".")?;
+        let path = std::fs::canonicalize(path)?;
+        let relative = path.strip_prefix(&cwd).map_err(|_| {
+            permission("web output root escapes the working directory")
+        })?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            .open(&cwd)?;
+        let mut walked = cwd.clone();
+        for component in relative.components() {
+            let Component::Normal(name) = component else {
+                return Err(permission("web output root is not a normal directory"));
+            };
+            let next = open_directory_at(&file, name)?;
+            let expected = walked.join(name);
+            let path_metadata = std::fs::symlink_metadata(&expected)?;
+            let actual = next.metadata()?;
+            if !path_metadata.is_dir()
+                || !actual.is_dir()
+                || path_metadata.dev() != actual.dev()
+                || path_metadata.ino() != actual.ino()
+            {
+                return Err(permission("web output root changed during secure open"));
+            }
+            file = next;
+            walked = expected;
+        }
+        let actual = file.metadata()?;
+        if !actual.is_dir() {
+            return Err(permission("web output root is not a directory"));
+        }
+        Ok(Directory { path, file })
+    }
+
+    pub fn open_child(parent: &Directory, name: &OsStr) -> io::Result<Directory> {
+        let file = open_directory_at(&parent.file, name)?;
+        let path = parent.path.join(name);
+        let path_metadata = std::fs::symlink_metadata(&path)?;
+        let actual = file.metadata()?;
+        if !path_metadata.is_dir()
+            || !actual.is_dir()
+            || path_metadata.dev() != actual.dev()
+            || path_metadata.ino() != actual.ino()
+        {
+            return Err(permission("web child directory changed during secure open"));
+        }
+        Ok(Directory { path, file })
+    }
+
+    pub fn create_child(parent: &Directory, name: &OsStr) -> io::Result<Directory> {
+        let name_c = c_name(name)?;
+        if unsafe { mkdirat(parent.file.as_raw_fd(), name_c.as_ptr(), 0o700) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        open_child(parent, name)
+    }
+
+    pub fn open_file(parent: &Directory, name: &OsStr) -> io::Result<File> {
+        let file = open_file_at(&parent.file, name)?;
+        check_regular(&file)?;
+        Ok(file)
+    }
+
+    fn check_existing(parent: &Directory, name: &OsStr) -> io::Result<bool> {
+        match open_file(parent, name) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn unique_temp_name(prefix: &OsStr) -> CString {
+        let name = format!(
+            ".{}-{}-{}",
+            prefix.to_string_lossy(),
+            std::process::id(),
+            super::PUBLICATION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        CString::new(name).expect("generated web temporary name has no NUL")
+    }
+
+    pub fn create_temp_file(parent: &Directory, name: &OsStr) -> io::Result<TempFile> {
+        let name = c_name(name)?;
+        let fd = unsafe {
+            openat(
+                parent.file.as_raw_fd(),
+                name.as_ptr(),
+                O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                MODE_FILE,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let file = unsafe { File::from_raw_fd(fd) };
+        let parent_file = match parent.file.try_clone() {
+            Ok(parent_file) => parent_file,
+            Err(error) => {
+                drop(file);
+                let _ = unlink_at(&parent.file, &name, 0);
+                return Err(error);
+            }
+        };
+        Ok(TempFile {
+            name,
+            file,
+            parent: parent_file,
+        })
+    }
+    pub fn write_temp(temp: &mut TempFile, bytes: &[u8]) -> io::Result<()> {
+        temp.file.write_all(bytes)?;
+        temp.file.sync_all()
+    }
+
+    pub fn read_temp(temp: &mut TempFile) -> io::Result<Vec<u8>> {
+        temp.file.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::new();
+        temp.file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    pub fn replace_file(parent: &Directory, name: &OsStr, bytes: &[u8]) -> io::Result<()> {
+        let _ = check_existing(parent, name)?;
+        let temporary = unique_temp_name(name);
+        let fd = unsafe {
+            openat(
+                parent.file.as_raw_fd(),
+                temporary.as_ptr(),
+                O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                MODE_FILE,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut file = unsafe { File::from_raw_fd(fd) };
+        let result = (|| {
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            let temporary_id = check_regular(&file)?;
+            let name_c = c_name(name)?;
+            if unsafe {
+                renameat(
+                    parent.file.as_raw_fd(),
+                    temporary.as_ptr(),
+                    parent.file.as_raw_fd(),
+                    name_c.as_ptr(),
+                )
+            } != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            let published = open_file(parent, name)?;
+            if check_regular(&published)? != temporary_id {
+                return Err(permission("published web output identity changed"));
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = unlink_at(&parent.file, &temporary, 0);
+        }
+        result
+    }
+
+    pub fn rename_file(
+        source: &Directory,
+        source_name: &OsStr,
+        destination: &Directory,
+        destination_name: &OsStr,
+    ) -> io::Result<()> {
+        let source_file = open_file(source, source_name)?;
+        let source_id = check_regular(&source_file)?;
+        let _ = check_existing(destination, destination_name)?;
+        let source_name_c = c_name(source_name)?;
+        let destination_name_c = c_name(destination_name)?;
+        if unsafe {
+            renameat(
+                source.file.as_raw_fd(),
+                source_name_c.as_ptr(),
+                destination.file.as_raw_fd(),
+                destination_name_c.as_ptr(),
+            )
+        } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let published = open_file(destination, destination_name)?;
+        if check_regular(&published)? != source_id {
+            return Err(permission("published web output identity changed"));
+        }
+        Ok(())
+    }
+
+    pub fn remove_file(parent: &Directory, name: &OsStr) -> io::Result<()> {
+        let _ = open_file(parent, name)?;
+        let name = c_name(name)?;
+        unlink_at(&parent.file, &name, 0)
+    }
+
+    pub fn remove_directory(parent: &Directory, name: &OsStr) -> io::Result<()> {
+        let name = c_name(name)?;
+        unlink_at(&parent.file, &name, AT_REMOVEDIR)
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = unlink_at(&self.parent, &self.name, 0);
+        }
+    }
+}
+
+#[cfg(windows)]
+mod secure_output {
+    use std::ffi::{c_void, OsStr};
+    use std::fs::{File, OpenOptions};
+    use std::io::{self, Read, Seek, SeekFrom, Write};
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use std::path::{Path, PathBuf};
+
+    type Handle = *mut c_void;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+    const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+    const FILE_SHARE_ALL: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    const FILE_ATTRIBUTE_TAG_INFO_CLASS: i32 = 9;
+    const FILE_RENAME_INFO_CLASS: i32 = 3;
+    const FILE_DISPOSITION_INFO_CLASS: i32 = 4;
+
+    #[repr(C)]
+    struct FileAttributeTagInfo {
+        attributes: u32,
+        reparse_tag: u32,
+    }
+
+    #[repr(C)]
+    struct FileRenameInfo {
+        replace_if_exists: i32,
+        root_directory: Handle,
+        file_name_length: u32,
+        file_name: [u16; 1],
+    }
+
+    #[repr(C)]
+    struct FileDispositionInfo {
+        delete_file: u8,
+    }
+
+    unsafe extern "system" {
+        fn GetFileInformationByHandleEx(
+            file: Handle,
+            class: i32,
+            info: *mut c_void,
+            size: u32,
+        ) -> i32;
+        fn GetFinalPathNameByHandleW(
+            file: Handle,
+            path: *mut u16,
+            path_len: u32,
+            flags: u32,
+        ) -> u32;
+        fn SetFileInformationByHandle(
+            file: Handle,
+            class: i32,
+            info: *mut c_void,
+            size: u32,
+        ) -> i32;
+
+    }
+
+    pub struct Directory {
+        path: PathBuf,
+        file: File,
+        final_path: String,
+    }
+
+    pub struct TempFile {
+        path: PathBuf,
+        file: File,
+    }
+
+    fn wide(value: &OsStr) -> Vec<u16> {
+        value.encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    fn normalize(value: String) -> String {
+        value
+            .replace('/', "\\")
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase()
+    }
+
+    fn final_path(file: &File) -> io::Result<String> {
+        let needed = unsafe {
+            GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0)
+        };
+        if needed == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut buffer = vec![0u16; needed as usize + 1];
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                0,
+            )
+        };
+        if written == 0 || written as usize >= buffer.len() {
+            return Err(io::Error::last_os_error());
+        }
+        buffer.truncate(written as usize);
+        Ok(normalize(String::from_utf16_lossy(&buffer)))
+    }
+
+    fn check_reparse(file: &File) -> io::Result<()> {
+        let mut info = FileAttributeTagInfo {
+            attributes: 0,
+            reparse_tag: 0,
+        };
+        if unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                FILE_ATTRIBUTE_TAG_INFO_CLASS,
+                (&mut info as *mut FileAttributeTagInfo).cast(),
+                std::mem::size_of::<FileAttributeTagInfo>() as u32,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if info.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "web output contains a Windows reparse point",
+            ));
+        }
+        Ok(())
+    }
+
+    fn open_directory(path: &Path) -> io::Result<File> {
+        let file = OpenOptions::new()
+            .read(true)
+            .access_mode(GENERIC_READ | GENERIC_WRITE)
+            .share_mode(FILE_SHARE_ALL)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        check_reparse(&file)?;
+        if !file.metadata()?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "web output root is not a directory",
+            ));
+        }
+        Ok(file)
+    }
+
+    fn open_file_path(path: &Path, write: bool, create_new: bool) -> io::Result<File> {
+        let mut options = OpenOptions::new();
+        options.read(true).write(write);
+        if create_new {
+            options.create_new(true);
+        }
+        options
+            .access_mode(GENERIC_READ | if write { GENERIC_WRITE } else { 0 })
+            .share_mode(FILE_SHARE_ALL)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+    }
+
+    fn check_regular(file: &File) -> io::Result<()> {
+        check_reparse(file)?;
+        if !file.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "web output is not a regular file",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn open_root(path: &Path) -> io::Result<Directory> {
+        let file = open_directory(path)?;
+        let expected = normalize(
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                std::env::current_dir()?.join(path)
+            }
+            .to_string_lossy()
+            .into_owned(),
+        );
+        let actual = final_path(&file)?;
+        if actual != expected {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "web output root changed during secure open",
+            ));
+        }
+        Ok(Directory {
+            path: path.to_path_buf(),
+            file,
+            final_path: actual,
+        })
+    }
+
+    pub fn open_child(parent: &Directory, name: &OsStr) -> io::Result<Directory> {
+        let path = parent.path.join(name);
+        let file = open_directory(&path)?;
+        let actual = final_path(&file)?;
+        let expected = normalize(path.to_string_lossy().into_owned());
+        if actual != expected || !actual.starts_with(&format!("{}\\", parent.final_path)) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "web child directory escaped its held output root",
+            ));
+        }
+        Ok(Directory {
+            path,
+            file,
+            final_path: actual,
+        })
+    }
+
+    pub fn create_child(parent: &Directory, name: &OsStr) -> io::Result<Directory> {
+        let path = parent.path.join(name);
+        std::fs::create_dir(&path)?;
+        open_child(parent, name)
+    }
+
+    pub fn open_file(parent: &Directory, name: &OsStr) -> io::Result<File> {
+        let path = parent.path.join(name);
+        let file = open_file_path(&path, false, false)?;
+        check_regular(&file)?;
+        if normalize(final_path(&file)?) != normalize(path.to_string_lossy().into_owned()) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "web output file escaped its held directory",
+            ));
+        }
+        Ok(file)
+    }
+
+    fn replace_handle(source: &File, destination: &File, name: &OsStr) -> io::Result<()> {
+        let file_name = name.encode_wide().collect::<Vec<_>>();
+        let offset = std::mem::offset_of!(FileRenameInfo, file_name);
+        let size = offset + file_name.len() * std::mem::size_of::<u16>();
+        let mut storage = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
+        let info = storage.as_mut_ptr().cast::<FileRenameInfo>();
+        unsafe {
+            (*info).replace_if_exists = 1;
+            (*info).root_directory = destination.as_raw_handle();
+            (*info).file_name_length = (file_name.len() * 2) as u32;
+            std::ptr::copy_nonoverlapping(
+                file_name.as_ptr(),
+                (*info).file_name.as_mut_ptr(),
+                file_name.len(),
+            );
+            if SetFileInformationByHandle(
+                source.as_raw_handle(),
+                FILE_RENAME_INFO_CLASS,
+                info.cast(),
+                size as u32,
+            ) == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
+
+    fn delete_handle(file: &File) -> io::Result<()> {
+        let mut info = FileDispositionInfo { delete_file: 1 };
+        if unsafe {
+            SetFileInformationByHandle(
+                file.as_raw_handle(),
+                FILE_DISPOSITION_INFO_CLASS,
+                (&mut info as *mut FileDispositionInfo).cast(),
+                std::mem::size_of::<FileDispositionInfo>() as u32,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub fn replace_file(parent: &Directory, name: &OsStr, bytes: &[u8]) -> io::Result<()> {
+        if let Ok(existing) = open_file(parent, name) {
+            check_regular(&existing)?;
+        }
+        let path = parent.path.join(format!(
+            ".{}-{}-{}",
+            name.to_string_lossy(),
+            std::process::id(),
+            super::PUBLICATION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let mut temporary = open_file_path(&path, true, true)?;
+        temporary.write_all(bytes)?;
+        temporary.sync_all()?;
+        check_regular(&temporary)?;
+        replace_handle(&temporary, &parent.file, name)?;
+        let published = open_file(parent, name)?;
+        check_regular(&published)?;
+        Ok(())
+    }
+
+    pub fn rename_file(
+        source: &Directory,
+        source_name: &OsStr,
+        destination: &Directory,
+        destination_name: &OsStr,
+    ) -> io::Result<()> {
+        let source_path = source.path.join(source_name);
+        let source_file = open_file_path(&source_path, true, false)?;
+        check_regular(&source_file)?;
+        if let Ok(existing) = open_file(destination, destination_name) {
+            check_regular(&existing)?;
+        }
+        replace_handle(&source_file, &destination.file, destination_name)
+    }
+
+    pub fn remove_file(parent: &Directory, name: &OsStr) -> io::Result<()> {
+        let path = parent.path.join(name);
+        let file = open_file_path(&path, true, false)?;
+        check_regular(&file)?;
+        delete_handle(&file)
+    }
+
+    pub fn remove_directory(parent: &Directory, name: &OsStr) -> io::Result<()> {
+        let path = parent.path.join(name);
+        let file = open_directory(&path)?;
+        delete_handle(&file)
+    }
+
+    pub fn create_temp_file(parent: &Directory, name: &OsStr) -> io::Result<TempFile> {
+        let path = parent.path.join(name);
+        let file = open_file_path(&path, true, true)?;
+        check_regular(&file)?;
+        Ok(TempFile { path, file })
+    }
+
+    pub fn write_temp(temp: &mut TempFile, bytes: &[u8]) -> io::Result<()> {
+        temp.file.write_all(bytes)?;
+        temp.file.sync_all()
+    }
+
+    pub fn read_temp(temp: &mut TempFile) -> io::Result<Vec<u8>> {
+        temp.file.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::new();
+        temp.file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = delete_handle(&self.file);
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+mod secure_output {
+    use std::ffi::OsStr;
+    use std::fs::File;
+    use std::io;
+    use std::path::Path;
+
+    pub struct Directory;
+    pub struct TempFile;
+
+    fn unsupported<T>() -> io::Result<T> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "secure web output authority is unavailable on this platform",
+        ))
+    }
+
+    pub fn open_root(_: &Path) -> io::Result<Directory> {
+        unsupported()
+    }
+    pub fn open_child(_: &Directory, _: &OsStr) -> io::Result<Directory> {
+        unsupported()
+    }
+    pub fn create_child(_: &Directory, _: &OsStr) -> io::Result<Directory> {
+        unsupported()
+    }
+    pub fn open_file(_: &Directory, _: &OsStr) -> io::Result<File> {
+        unsupported()
+    }
+    pub fn replace_file(_: &Directory, _: &OsStr, _: &[u8]) -> io::Result<()> {
+        unsupported()
+    }
+    pub fn rename_file(
+        _: &Directory,
+        _: &OsStr,
+        _: &Directory,
+        _: &OsStr,
+    ) -> io::Result<()> {
+        unsupported()
+    }
+    pub fn remove_file(_: &Directory, _: &OsStr) -> io::Result<()> {
+        unsupported()
+    }
+    pub fn remove_directory(_: &Directory, _: &OsStr) -> io::Result<()> {
+        unsupported()
+    }
+    pub fn create_temp_file(_: &Directory, _: &OsStr) -> io::Result<TempFile> {
+        unsupported()
+    }
+    pub fn write_temp(_: &mut TempFile, _: &[u8]) -> io::Result<()> {
+        unsupported()
+    }
+    pub fn read_temp(_: &mut TempFile) -> io::Result<Vec<u8>> {
+        unsupported()
+    }
+}
+
 /// Publish one completed web bundle under the same lock used by static
 /// readers. Preflight every member, journal the old bundle, then roll back the
 /// journal if any replacement fails.
@@ -1098,23 +2053,40 @@ fn stage_and_swap_locked(staging: &Path, out_dir: &Path) -> std::io::Result<()> 
         "index.html",
     ];
     const MAP_FILES: [&str; 2] = ["app.js.map", "app.wasm.map"];
-    let output_root = ensure_real_output_dir(out_dir)?;
-    ensure_existing_real_dir(staging, &output_root)?;
+
+    let output_root = WebOutputAuthority::open(out_dir)?;
+    let staging_name = staging
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "web staging directory has no normal name",
+            )
+        })?;
+    let staging_parent = staging
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if fs::canonicalize(staging_parent)? != output_root.path() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "web staging directory escapes the output directory",
+        ));
+    }
+    let staging_root = output_root.open_existing_child(staging_name)?;
+
     let mut names = Vec::with_capacity(FILES.len() + MAP_FILES.len());
     let mut staged_names = Vec::with_capacity(FILES.len() + MAP_FILES.len());
     for name in FILES {
-        let src = staging.join(name);
-        let dst = output_root.join(name);
-        validate_publication_file(&src, &output_root, true)?;
-        validate_publication_file(&dst, &output_root, false)?;
+        staging_root.validate_file(name, true)?;
+        output_root.validate_file(name, false)?;
         names.push(name);
         staged_names.push(name);
     }
     for name in MAP_FILES {
-        let src = staging.join(name);
-        let dst = output_root.join(name);
-        let staged = validate_publication_file(&src, &output_root, false)?;
-        let current = validate_publication_file(&dst, &output_root, false)?;
+        let staged = staging_root.validate_file(name, false)?;
+        let current = output_root.validate_file(name, false)?;
         if staged || current {
             names.push(name);
         }
@@ -1123,103 +2095,42 @@ fn stage_and_swap_locked(staging: &Path, out_dir: &Path) -> std::io::Result<()> 
         }
     }
 
-    let backup = create_publication_backup(&output_root)?;
+    let (backup_name, backup) = output_root.create_unique_child(".jet-web-publication")?;
     let mut backed_up = Vec::new();
     let mut published = Vec::new();
     let result = (|| {
         for name in &names {
-            let dst = output_root.join(name);
-            if fs::symlink_metadata(&dst).is_ok() {
-                rename_with_retry(&dst, &backup.join(name))?;
+            if output_root.validate_file(name, false)? {
                 backed_up.push(*name);
+                output_root.rename_file_to(name, &backup)?;
             }
         }
         for name in &staged_names {
-            rename_with_retry(&staging.join(name), &output_root.join(name))?;
             published.push(*name);
+            staging_root.rename_file_to(name, &output_root)?;
         }
         Ok::<(), std::io::Error>(())
     })();
+
     if let Err(error) = result {
         for name in published.iter().rev() {
-            let _ = fs::remove_file(output_root.join(name));
+            let _ = output_root.remove_file_if_exists(name);
         }
         for name in backed_up.iter().rev() {
-            let _ = rename_with_retry(&backup.join(name), &output_root.join(name));
+            let _ = backup.rename_file_to(name, &output_root);
         }
-        cleanup_publication_backup(&backup, &names);
+        for name in &names {
+            let _ = backup.remove_file_if_exists(name);
+        }
+        let _ = output_root.remove_child_directory(&backup_name);
         return Err(error);
     }
 
-    cleanup_publication_backup(&backup, &names);
+    for name in &names {
+        let _ = backup.remove_file_if_exists(name);
+    }
+    let _ = output_root.remove_child_directory(&backup_name);
     Ok(())
-}
-
-fn validate_publication_file(
-    path: &Path,
-    root: &Path,
-    required: bool,
-) -> std::io::Result<bool> {
-    reject_symlink_or_escape(path, root)?;
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if !is_singly_linked_regular_file(&metadata) => {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "web bundle members must be regular files",
-            ))
-        }
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-fn is_singly_linked_regular_file(metadata: &fs::Metadata) -> bool {
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        metadata.nlink() == 1
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.number_of_links() == 1
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        true
-    }
-}
-
-fn create_publication_backup(root: &Path) -> std::io::Result<PathBuf> {
-    let parent = root.parent().unwrap_or_else(|| Path::new("."));
-    for _ in 0..100 {
-        let name = format!(
-            ".jet-web-publication-{}-{}",
-            std::process::id(),
-            PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
-        let path = parent.join(name);
-        match fs::create_dir(&path) {
-            Ok(()) => return Ok(path),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "could not allocate a web publication journal",
-    ))
-}
-
-fn cleanup_publication_backup(path: &Path, names: &[&str]) {
-    for name in names {
-        let _ = fs::remove_file(path.join(name));
-    }
-    let _ = fs::remove_dir(path);
 }
 
 fn ensure_real_output_dir(path: &Path) -> std::io::Result<PathBuf> {
@@ -1233,53 +2144,6 @@ fn ensure_real_output_dir(path: &Path) -> std::io::Result<PathBuf> {
         ));
     }
     Ok(real)
-}
-
-fn ensure_existing_real_dir(path: &Path, root: &Path) -> std::io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "web staging directory must be a real directory",
-        ));
-    }
-    let real = fs::canonicalize(path)?;
-    if !real.starts_with(root) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "web staging directory escapes the output directory",
-        ));
-    }
-    Ok(())
-}
-
-fn reject_symlink_or_escape(path: &Path, root: &Path) -> std::io::Result<()> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "web output paths must not be symlinks",
-            ));
-        }
-        if let Some(parent) = path.parent() {
-            let real_parent = fs::canonicalize(parent)?;
-            if !real_parent.starts_with(root) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    "web output path escapes the output directory",
-                ));
-            }
-        }
-    } else if let Some(parent) = path.parent() {
-        let real_parent = fs::canonicalize(parent)?;
-        if !real_parent.starts_with(root) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "web output path escapes the output directory",
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn ensure_directory_without_symlinks(path: &Path) -> std::io::Result<()> {
@@ -1306,19 +2170,6 @@ fn ensure_directory_without_symlinks(path: &Path) -> std::io::Result<()> {
     }
 }
 
-fn rename_with_retry(src: &Path, dst: &Path) -> std::io::Result<()> {
-    let mut last_err = None;
-    for attempt in 0..5 {
-        if attempt > 0 {
-            thread::sleep(Duration::from_millis(20 * attempt as u64));
-        }
-        match fs::rename(src, dst) {
-            Ok(()) => return Ok(()),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    Err(last_err.unwrap())
-}
 
 /// Bind the application preview listener. `Some(port)` (from `--port=<N>`)
 /// binds that exact port and fails loud if it's taken — an explicit choice
@@ -2858,9 +3709,9 @@ mod tests {
         format_line_colored, format_line_plain, frame_lines, header_words, host_header_allowed,
         handle_connection, handle_connection_with_root, html_raw_response_limit,
         inject_canvas_session, inject_live_reload, decode_html, mint_session_secret, origin_allowed,
-        stage_and_swap, try_acquire_connection, APPLICATION_PORT_RANGE, MAX_CONNECTION_THREADS,
-        MAX_STATIC_RESPONSE_BYTES, CanvasHostOptions, DeadlineStream, DevStatus, ListenerKind,
-        Ordering, WebHost, bind_application_server,
+        stage_and_swap, try_acquire_connection, serve_forever, APPLICATION_PORT_RANGE,
+        MAX_CONNECTION_THREADS, MAX_STATIC_RESPONSE_BYTES, CanvasHostOptions, DeadlineStream,
+        DevStatus, ListenerKind, Ordering, WebHost, bind_application_server,
     };
     use crate::Request;
     use std::collections::HashMap;
@@ -2897,6 +3748,73 @@ mod tests {
         client.join().unwrap();
     }
 
+    #[test]
+    fn live_server_admission_drops_connections_after_cap() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server_shutdown = Arc::clone(&shutdown);
+        let status = Arc::new(DevStatus::new("admission.jet", false));
+        let debug_sessions = Arc::new(crate::Canvas::DebugSessions::default());
+        let session = Arc::new(crate::ResidentDevSession::new(
+            "admission.jet",
+            0,
+            address.port(),
+        ));
+        let server = thread::spawn(move || {
+            serve_forever(
+                listener,
+                status,
+                debug_sessions,
+                session,
+                "admission.jet".to_string(),
+                ListenerKind::Application,
+                "127.0.0.1".to_string(),
+                "test-session".to_string(),
+                server_shutdown,
+                std::path::PathBuf::from("."),
+            );
+        });
+
+        let mut clients = Vec::with_capacity(MAX_CONNECTION_THREADS);
+        for _ in 0..MAX_CONNECTION_THREADS {
+            let mut client = TcpStream::connect(address).unwrap();
+            client.write_all(b"G").unwrap();
+            clients.push(client);
+        }
+
+        let mut rejected = false;
+        for _ in 0..100 {
+            let mut candidate = TcpStream::connect(address).unwrap();
+            candidate
+                .set_read_timeout(Some(Duration::from_millis(20)))
+                .unwrap();
+            let _ = candidate.write_all(b"G");
+            let mut byte = [0u8; 1];
+            match candidate.read(&mut byte) {
+                Ok(0) => {
+                    rejected = true;
+                    break;
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) => {}
+                Err(_) => {
+                    rejected = true;
+                    break;
+                }
+                Ok(_) => {}
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(rejected, "live server must enforce the connection cap");
+        drop(clients);
+        shutdown.store(true, Ordering::SeqCst);
+        server.join().unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn stage_and_swap_rejects_symlinked_destination() {
@@ -2919,6 +3837,90 @@ mod tests {
             "web finalization must not replace a symlinked output"
         );
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_and_swap_rejects_hardlinked_destination() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join(format!(".jet-webhost-hardlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let output = root.join("build");
+        let staging = output.join(".staging");
+        let outside = root.join("outside.js");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(&staging.join("web.manifest.json"), "staged").unwrap();
+        std::fs::write(&outside, "must survive").unwrap();
+        std::fs::hard_link(&outside, output.join("web.manifest.json")).unwrap();
+
+        assert!(
+            stage_and_swap(&staging, &output).is_err(),
+            "web finalization must reject hard-linked output members"
+        );
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_and_swap_rejects_symlinked_staging_ancestor() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::current_dir()
+            .unwrap()
+            .join(format!(".jet-webhost-staging-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let output = root.join("build");
+        let staging_target = root.join("staging-target");
+        let staging = output.join(".staging");
+        let outside = root.join("outside.js");
+        std::fs::create_dir_all(&output).unwrap();
+        std::fs::create_dir_all(&staging_target).unwrap();
+        std::fs::write(staging_target.join("web.manifest.json"), "must not publish").unwrap();
+        std::fs::write(&outside, "must survive").unwrap();
+        symlink(&staging_target, &staging).unwrap();
+
+        assert!(
+            stage_and_swap(&staging, &output).is_err(),
+            "web finalization must reject a symlinked staging directory"
+        );
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
+        assert_eq!(
+            std::fs::read_to_string(staging_target.join("web.manifest.json")).unwrap(),
+            "must not publish"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_and_swap_rejects_symlinked_output_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::current_dir()
+            .unwrap()
+            .join(format!(".jet-webhost-output-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let real_output = root.join("real-build");
+        let output = root.join("build");
+        let staging = real_output.join(".staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("web.manifest.json"), "must not publish").unwrap();
+        symlink(&real_output, &output).unwrap();
+
+        assert!(
+            stage_and_swap(&staging, &output).is_err(),
+            "web finalization must reject a symlinked output root"
+        );
+        assert!(
+            !real_output.join("web.manifest.json").exists(),
+            "rejected output-root link must not receive bytes"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

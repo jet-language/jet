@@ -183,6 +183,25 @@ Violating an invariant means stop and fix it.
   exception is an owner-ratified carve-out that names a tier that cannot apply
   to that surface (for example native `#Unsafe` on a pure web target).
 
+### Competitive performance gate
+
+Jet targets a strict win against every matched peer on every required
+performance cell and metric. Rust alone permits parity at a same-run
+Jet/Rust ratio of `1.05` or lower; that band is measurement noise, not a
+target or win. Every non-Rust peer requires Jet/peer below `1.00`.
+
+Apply the rule per cell and metric. Never average away a loss, substitute an
+easier workload or tier, omit a required peer, or pass wrong, unavailable,
+uncovered, mismatched, or inconclusive evidence. A performance card,
+milestone, dashboard, or release gate remains open while any required cell
+fails. General optimization continues toward the largest safe Jet win; it
+never trades away semantics, diagnostics, determinism, safety, or I9 parity.
+
+The gauntlet manifest and every performance gate encode this comparator
+policy. A prose-only threshold is incomplete. Historical receipts remain
+immutable evidence under their recorded policy; they never grandfather a
+weaker current exit criterion.
+
 ## Workflow ownership
 
 Keep bounded work inline. For larger work, use the active harness plus Tower.

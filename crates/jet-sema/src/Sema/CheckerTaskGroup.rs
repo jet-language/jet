@@ -467,6 +467,28 @@ impl<'a> Checker<'a> {
             }
         }
     }
+    /// Mark one compiler-generated task handle as consumed by its owning
+    /// group immediately after its binding is checked. Anonymous task
+    /// statements nested in an `if`/loop otherwise reach that inner scope's
+    /// obligation check before the enclosing group can mark its pending
+    /// spawn.
+    pub(crate) fn mark_taskgroup_spawn_owned(&mut self, name: &str) {
+        let pending = self
+            .taskgroup_stack
+            .iter()
+            .rev()
+            .find_map(|ctx| {
+                ctx.pending.iter().find_map(|spawn| {
+                    (spawn.binding.as_deref() == Some(name)).then_some(spawn.span)
+                })
+            });
+        if let Some(span) = pending {
+            if !self.flow.moved.contains(name) {
+                self.mark_moved_by(name.to_string(), span, "task group");
+            }
+        }
+    }
+
 
     pub(crate) fn taskgroup_spawn_from_expr(expr: &Expr) -> Option<(&Expr, Span)> {
         match expr {
@@ -707,7 +729,7 @@ impl<'a> Checker<'a> {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {
                     ref name, ref args, ..
-                } if name == "Task" && args.len() == 1 => args[0].clone(),
+                } if name == "Task" && args.len() == 1 => taskgroup_success_type(&args[0]),
                 other => {
                     self.diags.push(Diagnostic::error(
                         "E0112",
@@ -726,7 +748,7 @@ impl<'a> Checker<'a> {
                         Type::Apply { name, args, .. }
                             if name == "Task" && args.len() == 1 =>
                         {
-                            args[0].clone()
+                            taskgroup_success_type(&args[0])
                         }
                         other => {
                             self.diags.push(Diagnostic::error(
@@ -815,7 +837,7 @@ impl<'a> Checker<'a> {
             Some(Type::List(inner)) => match *inner {
                 Type::Apply {
                     ref name, ref args, ..
-                } if name == "Task" && args.len() == 1 => args[0].clone(),
+                } if name == "Task" && args.len() == 1 => taskgroup_success_type(&args[0]),
                 other => {
                     self.diags.push(Diagnostic::error(
                         "E0112",
@@ -850,7 +872,96 @@ impl<'a> Checker<'a> {
         let saved_binding = self.current_binding_name.take();
         let ty = self.infer(expr);
         self.current_binding_name = saved_binding;
-        ty
+        ty.map(|ty| self.normalize_taskgroup_carrier(expr, ty))
+    }
+
+    /// D-CONC-FAIL1: task-group combinators use one internal Result carrier
+    /// when any child propagates failure. Attach that carrier to every spawned
+    /// lambda so TIR can wrap infallible siblings before constructing the
+    /// homogeneous `Vec<JetTask<Result<…>>>`.
+    fn normalize_taskgroup_carrier(&self, expr: &mut Expr, ty: Type) -> Type {
+        let lambdas = taskgroup_spawn_lambdas(expr);
+        let propagated = lambdas.iter().any(|lam| lam.meta.fallible_propagation);
+        let lambda_error = lambdas.iter().find_map(|lam| {
+            taskgroup_result_error(lam.meta.fallible_carrier.as_ref()?)
+        });
+        let type_error = taskgroup_result_error(&ty);
+        if !propagated && lambda_error.is_none() && type_error.is_none() {
+            return ty;
+        }
+        let error = lambda_error
+            .or(type_error)
+            .or_else(|| self.ret.as_ref().and_then(taskgroup_result_error))
+            .or_else(|| self.expected_type.as_ref().and_then(taskgroup_result_error))
+            .unwrap_or_else(|| Type::Named(Syntax::TYPE_ERR.to_string()));
+        match ty {
+            Type::List(inner) => {
+                let Type::Apply { name, args } = inner.as_ref() else {
+                    return Type::List(inner);
+                };
+                if name != "Task" || args.len() != 1 {
+                    return Type::List(inner);
+                }
+                let payload = taskgroup_success_type(&args[0]);
+                let carrier = Type::Result {
+                    ok: Box::new(payload),
+                    err: Box::new(error),
+                };
+                if let Expr::ListLit(items, _) = expr {
+                    for item in items {
+                        if let Some(lam) = taskgroup_spawn_lambda_mut(item) {
+                            lam.meta.fallible_carrier = Some(carrier.clone());
+                        }
+                    }
+                }
+                Type::List(Box::new(Type::Apply {
+                    name: name.clone(),
+                    args: vec![carrier],
+                }))
+            }
+            Type::Tuple(fields) => {
+                let mut normalized = Vec::with_capacity(fields.len());
+                for (name, task_ty) in &fields {
+                    let Some(task_elem) = taskgroup_task_elem(task_ty) else {
+                        return Type::Tuple(fields);
+                    };
+                    let carrier = Type::Result {
+                        ok: Box::new(taskgroup_success_type(task_elem)),
+                        err: Box::new(error.clone()),
+                    };
+                    normalized.push((
+                        name.clone(),
+                        Box::new(Type::Apply {
+                            name: "Task".to_string(),
+                            args: vec![carrier],
+                        }),
+                    ));
+                }
+                if let Expr::TupleLit(lit_fields, _, ty_slot) = expr {
+                    for (name, task_ty) in &normalized {
+                        let Some(carrier) = taskgroup_task_elem(task_ty) else {
+                            continue;
+                        };
+                        if let Some((_, branch)) =
+                            lit_fields.iter_mut().find(|(field, _)| field == name)
+                        {
+                            if let Some(lam) = taskgroup_spawn_lambda_mut(branch) {
+                                lam.meta.fallible_carrier = Some(carrier.clone());
+                            }
+                        }
+                    }
+                    let normalized_ty = Type::Tuple(
+                        normalized
+                            .iter()
+                            .map(|(name, ty)| (name.clone(), ty.clone()))
+                            .collect(),
+                    );
+                    *ty_slot = Some(normalized_ty);
+                }
+                Type::Tuple(normalized)
+            }
+            other => other,
+        }
     }
 
     fn mark_taskgroup_all_consumed(&mut self, expr: &Expr) {
@@ -859,6 +970,70 @@ impl<'a> Checker<'a> {
         for name in names {
             self.mark_moved_by(name.clone(), expr.span(), "task group");
         }
+    }
+}
+
+fn taskgroup_spawn_lambda(expr: &Expr) -> Option<&crate::AST::Lambda> {
+    match expr {
+        Expr::MethodCall { method, args, .. }
+            if method == Syntax::INTERNAL_TASK_SPAWN_METHOD && args.len() == 1 =>
+        {
+            match &args[0].expr {
+                Expr::Lambda(lam) => Some(lam.as_ref()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn taskgroup_spawn_lambda_mut(expr: &mut Expr) -> Option<&mut crate::AST::Lambda> {
+    match expr {
+        Expr::MethodCall { method, args, .. }
+            if method == Syntax::INTERNAL_TASK_SPAWN_METHOD && args.len() == 1 =>
+        {
+            match &mut args[0].expr {
+                Expr::Lambda(lam) => Some(lam.as_mut()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn taskgroup_spawn_lambdas(expr: &Expr) -> Vec<&crate::AST::Lambda> {
+    match expr {
+        Expr::ListLit(items, _) => items.iter().filter_map(taskgroup_spawn_lambda).collect(),
+        Expr::TupleLit(fields, _, _) => fields
+            .iter()
+            .filter_map(|(_, branch)| taskgroup_spawn_lambda(branch))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn taskgroup_task_elem(ty: &Type) -> Option<&Type> {
+    match ty {
+        Type::Apply { name, args } if name == "Task" && args.len() == 1 => Some(&args[0]),
+        _ => None,
+    }
+}
+
+fn taskgroup_result_error(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Result { err, .. } => Some((**err).clone()),
+        Type::List(inner) => taskgroup_task_elem(inner).and_then(taskgroup_result_error),
+        Type::Tuple(fields) => fields
+            .iter()
+            .find_map(|(_, field)| taskgroup_task_elem(field).and_then(taskgroup_result_error)),
+        _ => None,
+    }
+}
+
+fn taskgroup_success_type(ty: &Type) -> Type {
+    match ty {
+        Type::Result { ok, .. } => (**ok).clone(),
+        other => other.clone(),
     }
 }
 

@@ -604,14 +604,38 @@ fn checked_bundle_with_application_authority_and_entry(
     setting_overrides: &BTreeMap<String, String>,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Result<CheckedBundle, Vec<Diagnostic>> {
-    jet_driver::run_compiler_work(|| {
-        if let Some(Err(diags)) =
-            crate::check_programmable_build_for_tier(file, gates, profile, setting_overrides)
-        {
-            return Err(diags);
+    checked_bundle_with_application_authority_and_entry_with_overlays(
+        file,
+        gates,
+        job_fn,
+        entry_fn,
+        profile,
+        setting_overrides,
+        application_authority,
+        &[],
+    )
+}
+
+fn checked_bundle_with_application_authority_and_entry_with_overlays(
+    file: &str,
+    gates: jet_foundation::Policy::GateSet,
+    job_fn: Option<&str>,
+    entry_fn: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    overlays: &[(&std::path::Path, &str)],
+) -> Result<CheckedBundle, Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        if overlays.is_empty() {
+            if let Some(Err(diags)) =
+                crate::check_programmable_build_for_tier(file, gates, profile, setting_overrides)
+            {
+                return Err(diags);
+            }
         }
         crate::RunCache::note_parse();
-        match crate::Loader::load_entry_with_overlay(file, None, false) {
+        match crate::Loader::load_entry_with_overlays(file, overlays, false) {
             Ok(mut bundle) => {
                 if let Err(diags) =
                     crate::Driver::seed_build_facts(&mut bundle, profile, false, setting_overrides)
@@ -746,7 +770,7 @@ fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
 fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     let trace_tiers = jet_jit::trace_tiers_enabled();
     let argv = crate::Comptime::runtime_argv();
-    let (outcome, flags, rows) = jet_driver::run_compiler_work(move || {
+    let (outcome, flags, rows) = crate::with_compiler_stack(move || {
         jet_jit::set_trace_tiers(trace_tiers);
         let outcome = match argv.as_deref() {
             Some(args) => jet_jit::with_program_args(args, work),
@@ -902,6 +926,62 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authori
     })
 }
 
+/// Run one JIT program from an authoritative immutable source closure.
+///
+/// `file` is a diagnostic/module identity only. Every entry and import is
+/// resolved from `source_closure`; checked source paths are never reopened.
+pub fn run_jit_once_with_source_closure(
+    file: &str,
+    source_closure: &[(std::path::PathBuf, String)],
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    entry_fn: Option<&str>,
+) -> RunWithLints {
+    let overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
+    on_compiler_stack(|| {
+        run_jit_once_on_compiler_stack_with_overlays(
+            file,
+            program_args,
+            json,
+            gates,
+            setting_overrides,
+            true,
+            application_authority,
+            entry_fn,
+            &overlays,
+        )
+    })
+}
+
+/// Run one JIT program from an authoritative entry source snapshot.
+pub fn run_jit_once_with_source(
+    file: &str,
+    source: &str,
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    entry_fn: Option<&str>,
+) -> RunWithLints {
+    run_jit_once_with_source_closure(
+        file,
+        &[(std::path::PathBuf::from(file), source.to_owned())],
+        program_args,
+        json,
+        gates,
+        setting_overrides,
+        application_authority,
+        entry_fn,
+    )
+}
+
 fn run_jit_once_on_compiler_stack(
     file: &str,
     program_args: &[&str],
@@ -911,6 +991,30 @@ fn run_jit_once_on_compiler_stack(
     surface_lints: bool,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
     entry_fn: Option<&str>,
+) -> RunWithLints {
+    run_jit_once_on_compiler_stack_with_overlays(
+        file,
+        program_args,
+        json,
+        gates,
+        setting_overrides,
+        surface_lints,
+        application_authority,
+        entry_fn,
+        &[],
+    )
+}
+
+fn run_jit_once_on_compiler_stack_with_overlays(
+    file: &str,
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+    surface_lints: bool,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    entry_fn: Option<&str>,
+    overlays: &[(&std::path::Path, &str)],
 ) -> RunWithLints {
     crate::RunCache::reset_phases();
     let started = std::time::Instant::now();
@@ -924,7 +1028,8 @@ fn run_jit_once_on_compiler_stack(
     // A cached tier-1 module has the ordinary `run` entry. A named job must
     // pass through entry selection first, so never let a warm artifact skip
     // the shared job selector.
-    if application_authority.is_none()
+    if overlays.is_empty()
+        && application_authority.is_none()
         && entry_fn.is_none()
         && !surface_lints
         && requested.is_none()
@@ -942,7 +1047,7 @@ fn run_jit_once_on_compiler_stack(
             };
         }
     }
-    match checked_bundle_with_application_authority_and_entry(
+    match checked_bundle_with_application_authority_and_entry_with_overlays(
         file,
         gates,
         requested,
@@ -950,6 +1055,7 @@ fn run_jit_once_on_compiler_stack(
         "dev",
         setting_overrides,
         application_authority,
+        overlays,
     ) {
         Ok(checked) => {
             if timing {
@@ -958,7 +1064,8 @@ fn run_jit_once_on_compiler_stack(
             let lints = checked.lints;
             let bundle = checked.bundle;
             let selected = selected_job(&bundle, requested);
-            if application_authority.is_none()
+            if overlays.is_empty()
+                && application_authority.is_none()
                 && entry_fn.is_none()
                 && surface_lints
                 && setting_overrides.is_empty()
@@ -987,13 +1094,15 @@ fn run_jit_once_on_compiler_stack(
             let mut scheduled_stderr = String::new();
             if selected.is_none() && bundle_has_service_output(&bundle) {
                 for name in scheduled_job_names_once(&bundle) {
-                    let job_bundle = match checked_bundle_with_application_authority(
+                    let job_bundle = match checked_bundle_with_application_authority_and_entry_with_overlays(
                         file,
                         gates,
+                        None,
                         Some(&name),
                         "dev",
                         setting_overrides,
                         application_authority,
+                        overlays,
                     ) {
                         Ok(job_bundle) => job_bundle.bundle,
                         Err(diags) => {
@@ -1057,7 +1166,8 @@ fn run_jit_once_on_compiler_stack(
             if timing {
                 timer.lap("jit");
             }
-            if entry_fn.is_none()
+            if overlays.is_empty()
+                && entry_fn.is_none()
                 && setting_overrides.is_empty()
                 && matches!(outcome, RunOutcome::Ran { .. })
             {
@@ -1209,13 +1319,39 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
     entry_fn: Option<&str>,
 ) -> RunWithLints {
+    run_interpreter_once_with_source_closure(
+        file,
+        &[],
+        program_args,
+        gates,
+        profile,
+        setting_overrides,
+        application_authority,
+        entry_fn,
+    )
+}
+
+pub fn run_interpreter_once_with_source_closure(
+    file: &str,
+    source_closure: &[(std::path::PathBuf, String)],
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+    entry_fn: Option<&str>,
+) -> RunWithLints {
     crate::RunCache::reset_phases();
     if let Some(result) = job_help_if_requested(file, program_args, gates, setting_overrides) {
         return result;
     }
+    let overlays = source_closure
+        .iter()
+        .map(|(path, source)| (path.as_path(), source.as_str()))
+        .collect::<Vec<_>>();
     on_compiler_stack(|| {
         let requested = requested_job(program_args);
-        match checked_bundle_with_application_authority_and_entry(
+        match checked_bundle_with_application_authority_and_entry_with_overlays(
             file,
             gates,
             requested,
@@ -1223,6 +1359,7 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_
             profile,
             setting_overrides,
             application_authority,
+            &overlays,
         ) {
             Ok(checked) => {
                 let lints = checked.lints;

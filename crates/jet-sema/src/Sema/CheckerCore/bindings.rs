@@ -793,6 +793,18 @@ impl<'a> Checker<'a> {
                         if self.registry.distinct_range(type_name).is_some()
                 )
         );
+        let preserve_result_carrier = match b.init.without_parens() {
+            Expr::If { .. } | Expr::Try(..) => true,
+            Expr::Call(call) => {
+                matches!(call.name.as_str(), Syntax::LIT_OK | Syntax::LIT_ERR)
+            }
+            _ => false,
+        };
+        let saved_ordinary_binding_root_depth = self.ordinary_binding_root_depth;
+        self.ordinary_binding_root_depth = (b.ty.is_none()
+            && !preserve_result_carrier
+            && matches!(self.expected_type, Some(Type::Result { .. })))
+        .then_some(self.source_nesting + 1);
         let mut it = if distinct_range_constructor {
             self.infer_without_auto_propagation(&mut b.init)
         } else if b.mutable {
@@ -800,6 +812,7 @@ impl<'a> Checker<'a> {
         } else {
             self.infer(&mut b.init)
         };
+        self.ordinary_binding_root_depth = saved_ordinary_binding_root_depth;
         self.borrow_ctx = saved_borrow_ctx;
         let arena_alloc_source = arena_alloc_source.or_else(|| self.arena_alloc_source(&b.init));
         if implicit_field_read
@@ -1078,17 +1091,19 @@ impl<'a> Checker<'a> {
             // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
             // start with the gate already open.
             let mut mutated = std::collections::HashMap::new();
-            let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting(
-                &b.init,
-                self.ct_funcs,
-                self.ct_externs,
-                self.ct_base_dir,
-                &globals,
-                self.core_imports,
-                self.gates,
-                self.ct_impure_depth,
-                Some(&mut mutated),
-            );
+            let folded =
+                crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
+                    &b.init,
+                    self.ct_funcs,
+                    self.ct_externs,
+                    self.ct_base_dir,
+                    &globals,
+                    self.core_imports,
+                    self.gates,
+                    self.ct_impure_depth,
+                    self.items,
+                    Some(&mut mutated),
+                );
             self.apply_ct_mutations(mutated);
             match folded {
                 Ok((v, inputs)) => {
@@ -1125,17 +1140,19 @@ impl<'a> Checker<'a> {
             // pattern match here that a stray `(...)` could dodge.)
             let globals = self.current_ct_globals().into_owned();
             let mut mutated = std::collections::HashMap::new();
-            let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting(
-                &b.init,
-                self.ct_funcs,
-                self.ct_externs,
-                self.ct_base_dir,
-                &globals,
-                self.core_imports,
-                self.gates,
-                0,
-                Some(&mut mutated),
-            );
+            let folded =
+                crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
+                    &b.init,
+                    self.ct_funcs,
+                    self.ct_externs,
+                    self.ct_base_dir,
+                    &globals,
+                    self.core_imports,
+                    self.gates,
+                    0,
+                    self.items,
+                    Some(&mut mutated),
+                );
             let changed = Self::ct_mutated_names(&globals, &mutated);
             if !changed.is_empty() {
                 // The initializer advanced a receiver. Baking either side

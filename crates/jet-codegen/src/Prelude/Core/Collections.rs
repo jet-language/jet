@@ -472,15 +472,39 @@ fn jet_map_entries_kernel<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> Vec<(K,
 /// Return at most `n` map entries by descending value, with ascending keys as
 /// the deterministic tie break. Negative limits select no entries.
 fn jet_map_top_n<K: Ord + Clone, V: Ord + Clone>(m: &JetMap<K, V>, n: i64) -> Vec<(K, V)> {
-    let mut entries = jet_map_entries_kernel(m);
-    entries.sort_by(|(left_key, left_value), (right_key, right_value)| {
+    let limit = usize::try_from(n.max(0)).unwrap_or(usize::MAX).min(m.len());
+    if limit == 0 {
+        return Vec::new();
+    }
+
+    let rank = |(left_key, left_value): &(K, V), (right_key, right_value): &(K, V)| {
         right_value
             .cmp(left_value)
             .then_with(|| left_key.cmp(right_key))
-    });
-    let limit = usize::try_from(n.max(0)).unwrap_or(usize::MAX);
-    entries.truncate(limit);
-    entries
+    };
+    let mut best = Vec::with_capacity(limit);
+    for (key, value) in m.iter() {
+        if best.len() < limit {
+            best.push((key.clone(), value.clone()));
+            if best.len() == limit {
+                best.sort_by(&rank);
+            }
+            continue;
+        }
+        let worst = best.len() - 1;
+        let better = value > &best[worst].1
+            || (value == &best[worst].1 && key < &best[worst].0);
+        if !better {
+            continue;
+        }
+        best[worst] = (key.clone(), value.clone());
+        let mut inserted = worst;
+        while inserted > 0 && rank(&best[inserted], &best[inserted - 1]).is_lt() {
+            best.swap(inserted, inserted - 1);
+            inserted -= 1;
+        }
+    }
+    best
 }
 
 fn jet_map_min_value_kernel<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
@@ -541,6 +565,41 @@ fn jet_list_remove_slot_kernel<T: Clone>(xs: &mut Vec<T>, index: i64) -> Result<
         return Err(jet_list_bounds_message(len, index));
     }
     Ok(xs.remove(index as usize))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JetListInsertError {
+    IndexOutOfBounds { len: usize, index: i64 },
+}
+
+impl JetListInsertError {
+    pub(crate) fn code(self) -> &'static str {
+        "E3010"
+    }
+
+    pub(crate) fn message(self) -> String {
+        match self {
+            Self::IndexOutOfBounds { len, index } => jet_list_bounds_message(len, index),
+        }
+    }
+}
+
+fn jet_list_insert_kernel<T>(
+    xs: &mut Vec<T>,
+    index: i64,
+    value: T,
+) -> Result<(), JetListInsertError> {
+    let position = match usize::try_from(index) {
+        Ok(position) if position <= xs.len() => position,
+        _ => {
+            return Err(JetListInsertError::IndexOutOfBounds {
+                len: xs.len(),
+                index,
+            })
+        }
+    };
+    xs.insert(position, value);
+    Ok(())
 }
 
 fn jet_list_count_kernel<T: PartialEq>(xs: &[T], value: &T) -> i64 {
@@ -770,6 +829,33 @@ where
 {
     for part in s.split(sep) {
         f(part.to_string());
+    }
+}
+
+/// Scan ASCII whitespace-delimited byte tokens without materialising each
+/// token. The callback sees the source slice directly; the caller's
+/// accumulator is proven dead after the scan.
+#[inline(always)]
+fn jet_bytes_ascii_whitespace_for_each<F>(
+    bytes: &[u8],
+    space: u8,
+    ws_start: u8,
+    ws_end: u8,
+    mut f: F,
+) where
+    F: FnMut(&[u8], bool),
+{
+    let mut start = 0usize;
+    for (index, &byte) in bytes.iter().enumerate() {
+        if byte == space || (byte >= ws_start && byte <= ws_end) {
+            if start < index {
+                f(&bytes[start..index], false);
+            }
+            start = index + 1;
+        }
+    }
+    if start < bytes.len() {
+        f(&bytes[start..], true);
     }
 }
 

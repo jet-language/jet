@@ -58,8 +58,76 @@ pub fn canonical_program(prog: &Program) -> Vec<u8> {
 /// identity projection intentionally omits that redundant head. Keep this
 /// projection out of public `canonical_program`, whose semantic identity keeps
 /// constructor types distinct; build-cache identity also retains the head.
+///
+/// A singleton `return value` in a callable body is the block spelling of the
+/// same tail value emitted by `--simplify` as `-> value`. Normalize that
+/// representation only for this formatter-local identity check.
 fn canonical_simplify_program(prog: &Program) -> Vec<u8> {
-    canonicalize_struct_literal_heads(&canonical_program(prog))
+    let mut normalized = Program {
+        imports: prog.imports.clone(),
+        items: prog.items.clone(),
+        script_body: prog.script_body.clone(),
+        block_spans: prog.block_spans.clone(),
+        fenced_statements: prog.fenced_statements.clone(),
+        web_target_ceiling: prog.web_target_ceiling,
+        pub_file: prog.pub_file,
+        no_prelude: prog.no_prelude,
+        default_target: prog.default_target.clone(),
+        html_path: prog.html_path.clone(),
+        policy_declarations: prog.policy_declarations.clone(),
+        user_policy_declarations: prog.user_policy_declarations.clone(),
+        applied_rules: prog.applied_rules.clone(),
+        rule_facts: prog.rule_facts.clone(),
+    };
+    normalize_simplify_items(&mut normalized.items);
+    canonicalize_struct_literal_heads(&canonical_program(&normalized))
+}
+
+fn normalize_simplify_items(items: &mut [Item]) {
+    for item in items {
+        match item {
+            Item::Func(function) => normalize_simplify_body(&mut function.body),
+            Item::Struct(definition) => {
+                for function in &mut definition.methods {
+                    normalize_simplify_body(&mut function.body);
+                }
+                for implementation in &mut definition.trait_impls {
+                    for function in &mut implementation.methods {
+                        normalize_simplify_body(&mut function.body);
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                for function in &mut definition.methods {
+                    normalize_simplify_body(&mut function.body);
+                }
+                for implementation in &mut definition.trait_impls {
+                    for function in &mut implementation.methods {
+                        normalize_simplify_body(&mut function.body);
+                    }
+                }
+            }
+            Item::Impl(definition) => {
+                for function in &mut definition.methods {
+                    normalize_simplify_body(&mut function.body);
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &mut module.body {
+                    normalize_simplify_items(body);
+                }
+            }
+            Item::GenericModule(module) => normalize_simplify_items(&mut module.body),
+            _ => {}
+        }
+    }
+}
+
+fn normalize_simplify_body(body: &mut Vec<Stmt>) {
+    if let [Stmt::Return(Some(value), _)] = body.as_mut_slice() {
+        let value = value.clone();
+        body[0] = Stmt::Expr(value);
+    }
 }
 
 fn canonicalize_struct_literal_heads(canonical: &[u8]) -> Vec<u8> {

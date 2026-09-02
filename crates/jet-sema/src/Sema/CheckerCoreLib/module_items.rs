@@ -975,14 +975,14 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.archive.gzip" => &["compress", "decompress"],
         "core.archive.zstd" => &["compress", "decompress"],
         // D-DEP-DB1: SQLite ring package.
-        // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/`commit`/
-        // `rollback` are `DBConnection` instance methods, not module items.
+        // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/
+        // `commit`/`rollback` are DBConnection instance methods, not module
+        // items. `SQL` is the sole sink carrier; there is no separate parameter API.
         "core.db" => &[
             "open",
             "open_memory",
             "policy",
             "policy_audit",
-            "params",
             "row_value",
             "row_int",
             "row_float",

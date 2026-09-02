@@ -970,13 +970,13 @@ fn environment_image_rejects_symlinked_extra_file() {
     let outside = Scratch::new("environment-image-symlink-outside");
     fs::write(
         project.path.join("env.jet"),
-        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"secret.bin\"] }\n",
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"payload.bin\"] }\n",
     )
     .unwrap();
-    fs::write(outside.path.join("secret.bin"), b"must not be read\n").unwrap();
+    fs::write(outside.path.join("payload.bin"), b"must not be read\n").unwrap();
     symlink(
-        outside.path.join("secret.bin"),
-        project.path.join("secret.bin"),
+        outside.path.join("payload.bin"),
+        project.path.join("payload.bin"),
     )
     .unwrap();
     ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
@@ -999,7 +999,7 @@ fn environment_image_rejects_symlinked_extra_file() {
         "stderr: {stderr}"
     );
     assert_eq!(
-        fs::read_to_string(outside.path.join("secret.bin")).unwrap(),
+        fs::read_to_string(outside.path.join("payload.bin")).unwrap(),
         "must not be read\n"
     );
 }
@@ -1012,13 +1012,13 @@ fn environment_image_rejects_hardlinked_extra_file() {
     let outside = Scratch::new("environment-image-hardlink-outside");
     fs::write(
         project.path.join("env.jet"),
-        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"secret.bin\"] }\n",
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"payload.bin\"] }\n",
     )
     .unwrap();
-    fs::write(outside.path.join("secret.bin"), b"must not be read\n").unwrap();
+    fs::write(outside.path.join("payload.bin"), b"must not be read\n").unwrap();
     fs::hard_link(
-        outside.path.join("secret.bin"),
-        project.path.join("secret.bin"),
+        outside.path.join("payload.bin"),
+        project.path.join("payload.bin"),
     )
     .unwrap();
     ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
@@ -1038,7 +1038,49 @@ fn environment_image_rejects_hardlinked_extra_file() {
     );
     assert!(stderr.contains("hard link"), "stderr: {stderr}");
     assert_eq!(
-        fs::read_to_string(outside.path.join("secret.bin")).unwrap(),
+        fs::read_to_string(outside.path.join("payload.bin")).unwrap(),
+        "must not be read\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn environment_image_rejects_symlinked_ancestor_extra_file() {
+    use std::os::unix::fs::symlink;
+
+    let project = Scratch::new("environment-image-symlink-ancestor-file");
+    let root = Scratch::new("environment-image-symlink-ancestor-root");
+    let outside = Scratch::new("environment-image-symlink-ancestor-outside");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"nested/payload.bin\"] }\n",
+    )
+    .unwrap();
+    fs::write(outside.path.join("payload.bin"), b"must not be read\n").unwrap();
+    symlink(&outside.path, project.path.join("nested")).unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "symlinked ancestor image file must fail: {stderr}"
+    );
+    assert!(
+        stderr.contains("not a symlink")
+            || stderr.contains("symlink")
+            || stderr.contains("not a directory"),
+        "stderr: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(outside.path.join("payload.bin")).unwrap(),
         "must not be read\n"
     );
 }

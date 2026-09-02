@@ -5,7 +5,9 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc, run_default_multi};
+use tir_support::{
+    assert_tiers_agree, build_and_run, have_rustc, jit_run_traced, run_default_multi,
+};
 
 const SOURCE: &str = r#"
 use core.compute as compute
@@ -138,6 +140,34 @@ fn compute_cpu_oracle_default_run_matches_aot_meaning() {
     assert_eq!(
         stdout,
         "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nmse_profile:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
+    );
+}
+
+#[test]
+fn compute_result_tensor_payload_survives_resident_return_cleanup() {
+    let source = r#"
+use core.compute as compute
+
+fn make_tensor() Tensor !ComputeError -> {
+    tensor :: compute.full([2], 3.0) ?? panic("tensor")
+    return tensor
+}
+
+fn run() {
+    tensor :: make_tensor() ?? panic("result")
+    print("shape:{compute.shape(tensor)}")
+    print("value:{compute.to_list(tensor)}")
+}
+"#;
+    let expected = "shape:[2]\nvalue:[3.0, 3.0]\n";
+    assert_tiers_agree("compute_result_tensor_payload", source, expected);
+
+    let (code, stdout, stderr) = jit_run_traced("compute_result_tensor_payload_trace", source);
+    assert_eq!(code, 0, "traced default jet run failed: {stderr}");
+    assert_eq!(stdout, expected, "traced default output drifted: {stderr}");
+    assert!(
+        stderr.contains("tier1 native") && !stderr.contains("tier0 interp"),
+        "Result-wrapped Tensor did not stay resident:\n{stderr}"
     );
 }
 

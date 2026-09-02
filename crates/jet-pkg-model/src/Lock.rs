@@ -11,7 +11,7 @@ use crate::Syntax;
 use crate::SHA256::sha256_hex;
 use jet_foundation::Facts::BuildStamp;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::path::Path;
 
 // ComptimeInput struct lives in AST for cross-seam sharing; re-export here.
@@ -29,6 +29,9 @@ pub struct LockedPackage {
     pub name: String,
     pub version: String,
     pub source: LockSource,
+    /// Portable Nix closure identity. This is present exactly when `source` is
+    /// `LockSource::Nix`; non-Nix packages keep this field as `None`.
+    pub nix_closure: Option<NixClosureRecord>,
     /// Exact resolved identity (only for git + registry deps).
     pub locked: Option<LockedRevision>,
     /// Plan fingerprint = sha256 of (source_tree_hash + sorted dep fingerprints).
@@ -70,6 +73,145 @@ pub struct LockedPackage {
     /// the transparency, publisher, and build evidence above that floor.
     pub provenance: Option<DependencyProvenance>,
 }
+
+/// D-JPK-OFFLINE2: the portable, content-addressed evidence needed to replay
+/// one Nix output without consulting a host Nix store or a package catalog.
+///
+/// Every field is an identity or a digest. Host paths are intentionally not
+/// representable here; the project CAS bundle is located from the project
+/// root and this record only names it by digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NixClosureRecord {
+    pub channel: String,
+    pub revision: String,
+    pub system: String,
+    pub signed_index_manifest: String,
+    pub derivation: String,
+    pub output: String,
+    pub nar_hash: String,
+    pub size: u64,
+    pub compression: String,
+    pub references: Vec<String>,
+    pub upstream_proof: String,
+    pub cache_key: String,
+    pub project_cas_bundle: String,
+}
+
+impl NixClosureRecord {
+    /// Reject incomplete or path-bearing records before they can become a
+    /// replay authority. The lock must never smuggle a machine-local path
+    /// through a field that claims to be content addressed.
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("channel", self.channel.as_str()),
+            ("revision", self.revision.as_str()),
+            ("system", self.system.as_str()),
+            ("signed-index-manifest", self.signed_index_manifest.as_str()),
+            ("derivation", self.derivation.as_str()),
+            ("output", self.output.as_str()),
+            ("nar-hash", self.nar_hash.as_str()),
+            ("compression", self.compression.as_str()),
+            ("upstream-proof", self.upstream_proof.as_str()),
+            ("cache-key", self.cache_key.as_str()),
+            ("project-cas-bundle", self.project_cas_bundle.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(format!("Nix closure record is missing `{name}`"));
+            }
+            if !value.is_ascii()
+                || value.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+                || value.contains('/')
+                || value.contains('\\')
+            {
+                return Err(format!(
+                    "Nix closure record `{name}` contains a host path or unsafe control byte"
+                ));
+            }
+        }
+        if !matches!(
+            self.channel.as_str(),
+            "nixpkgs-unstable" | "nixos-unstable"
+        ) {
+            return Err("Nix closure record has an unsupported channel".into());
+        }
+        if !is_lower_hex(&self.revision, 40) {
+            return Err(
+                "Nix closure record revision must be exactly 40 lowercase hexadecimal characters"
+                    .into(),
+            );
+        }
+        if !matches!(
+            self.system.as_str(),
+            "x86_64-linux" | "aarch64-linux" | "x86_64-darwin" | "aarch64-darwin"
+        ) {
+            return Err("Nix closure record has an unsupported system".into());
+        }
+        if !is_lower_hex(&self.signed_index_manifest, 64) {
+            return Err(
+                "Nix closure record signed index manifest must be a 64-character lowercase SHA-256"
+                    .into(),
+            );
+        }
+        if !is_lower_hex(&self.derivation, 64) {
+            return Err(
+                "Nix closure record derivation must be a 64-character lowercase SHA-256".into(),
+            );
+        }
+        if !is_cas_digest(&self.output) {
+            return Err("Nix closure record output is not a canonical CAS digest".into());
+        }
+        if !is_nar_hash(&self.nar_hash) {
+            return Err("Nix closure record NarHash is not canonical".into());
+        }
+        if !matches!(self.compression.as_str(), "none" | "zstd") {
+            return Err("Nix closure record uses unsupported compression".into());
+        }
+        if !is_cas_digest(&self.upstream_proof) {
+            return Err("Nix closure record upstream proof is not a canonical digest".into());
+        }
+        if !is_lower_hex(&self.cache_key, 64) {
+            return Err(
+                "Nix closure record cache key must be a 64-character lowercase SHA-256".into(),
+            );
+        }
+        if !is_cas_digest(&self.project_cas_bundle) {
+            return Err("Nix closure record CAS bundle is not a canonical digest".into());
+        }
+        let mut references = BTreeSet::new();
+        for reference in &self.references {
+            if !is_cas_digest(reference) {
+                return Err("Nix closure record contains an invalid reference identity".into());
+            }
+            if !references.insert(reference) {
+                return Err("Nix closure record repeats an ordered reference".into());
+            }
+        }
+        if self.size == 0 || self.size > 16 * 1024 * 1024 * 1024 {
+            return Err("Nix closure record has an invalid NAR size".into());
+        }
+        Ok(())
+    }
+}
+
+fn is_lower_hex(value: &str, digits: usize) -> bool {
+    value.len() == digits
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn is_cas_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256-")
+        .is_some_and(|digest| is_lower_hex(digest, 64))
+}
+
+fn is_nar_hash(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .is_some_and(|digest| is_lower_hex(digest, 64))
+}
+
 
 /// D-BOUND-PROV1: evidence recorded once per locked dependency. Empty fields
 /// are meaningful: an unattested dependency remains resolvable by default, but
@@ -526,10 +668,9 @@ pub enum LockSource {
     },
     /// D-JPK-OFFLINE2=B: a package realized through the Nix compatibility
     /// provider. `reference` is the source ref it was realized from
-    /// (`openssl@nixpkgs`); `output` is the realized output path recorded so an
-    /// offline reuse can re-verify the on-disk closure against the package's
-    /// [`LockEnvelope`] `output_hash`. The ref spelling is a label only — trust
-    /// comes from the re-hashed closure, never the text.
+    /// (`openssl@nixpkgs`); `output` is the portable Hangar content digest.
+    /// The complete replay identity lives on `LockedPackage::nix_closure` and
+    /// is mandatory for this source variant.
     Nix {
         reference: String,
         output: String,
@@ -762,6 +903,10 @@ pub fn write(lock: &LockFile) -> String {
             ),
         };
         out.push_str(&format!("source = {}\n", source_str));
+        if let Some(nix) = &pkg.nix_closure {
+            write_nix_closure(&mut out, nix);
+        }
+
 
         if let Some(rev) = &pkg.locked {
             out.push_str(&format!(
@@ -969,7 +1114,9 @@ fn canonicalize_lock(lock: &mut LockFile) {
             values.dedup();
         }
     }
-    canonicalize_last(&mut lock.packages, |package| package.name.clone());
+    // Package order follows the declaration/realization sequence. Replayed
+    // records still replace their prior identity without re-sorting the list.
+    canonicalize_last_preserving_order(&mut lock.packages, |package| package.name.clone());
     canonicalize_last(&mut lock.workspace_members, |member| member.name.clone());
     canonicalize_last(&mut lock.toolchains, |toolchain| toolchain.id.clone());
     canonicalize_last(&mut lock.browsers, |browser| browser.engine.clone());
@@ -1003,6 +1150,25 @@ fn canonicalize_lock(lock: &mut LockFile) {
     policy
         .build_grants
         .dedup_by(|left, right| left.0 == right.0);
+}
+
+fn canonicalize_last_preserving_order<T, K, F>(values: &mut Vec<T>, mut key: F)
+where
+    K: Ord,
+    F: FnMut(&T) -> K,
+{
+    let mut positions = BTreeMap::new();
+    let mut canonical = Vec::with_capacity(values.len());
+    for value in values.drain(..) {
+        let key = key(&value);
+        if let Some(index) = positions.get(&key).copied() {
+            canonical[index] = value;
+        } else {
+            positions.insert(key, canonical.len());
+            canonical.push(value);
+        }
+    }
+    *values = canonical;
 }
 
 fn canonicalize_last<T, K, F>(values: &mut Vec<T>, mut key: F)
@@ -1245,6 +1411,55 @@ fn oversized_lock_file_message() -> String {
     "lock file exceeds the 1 MiB safety limit".to_string()
 }
 
+fn write_nix_closure(out: &mut String, closure: &NixClosureRecord) {
+    out.push_str(&format!(
+        "nix-channel = \"{}\"\n",
+        escape_str(&closure.channel)
+    ));
+    out.push_str(&format!(
+        "nix-revision = \"{}\"\n",
+        escape_str(&closure.revision)
+    ));
+    out.push_str(&format!(
+        "nix-system = \"{}\"\n",
+        escape_str(&closure.system)
+    ));
+    out.push_str(&format!(
+        "nix-signed-index-manifest = \"{}\"\n",
+        escape_str(&closure.signed_index_manifest)
+    ));
+    out.push_str(&format!(
+        "nix-derivation = \"{}\"\n",
+        escape_str(&closure.derivation)
+    ));
+    out.push_str(&format!("nix-output = \"{}\"\n", escape_str(&closure.output)));
+    out.push_str(&format!(
+        "nix-nar-hash = \"{}\"\n",
+        escape_str(&closure.nar_hash)
+    ));
+    out.push_str(&format!("nix-size = {}\n", closure.size));
+    out.push_str(&format!(
+        "nix-compression = \"{}\"\n",
+        escape_str(&closure.compression)
+    ));
+    out.push_str(&format!(
+        "nix-references = {}\n",
+        write_string_array(&closure.references)
+    ));
+    out.push_str(&format!(
+        "nix-upstream-proof = \"{}\"\n",
+        escape_str(&closure.upstream_proof)
+    ));
+    out.push_str(&format!(
+        "nix-cache-key = \"{}\"\n",
+        escape_str(&closure.cache_key)
+    ));
+    out.push_str(&format!(
+        "nix-project-cas-bundle = \"{}\"\n",
+        escape_str(&closure.project_cas_bundle)
+    ));
+}
+
 /// D-JPK-CACHE1=A (A4): serialize the envelope field set (shared by
 /// `[[package]]` and `[[toolchain]]` blocks). `output-hash`/`platform`/
 /// `provenance` are always emitted for a realized object (the frozen schema);
@@ -1388,14 +1603,19 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 }
                 "[root]" => in_root = true,
                 "[build.stamp]" => in_build_stamp = true,
-                _ => {}
+                _ => return Err(format!("unknown lock section `{line}`")),
             }
             continue;
         }
 
         let (key, val) = match line.split_once('=') {
             Some((k, v)) => (k.trim(), v.trim()),
-            None => continue,
+            None => {
+                return Err(format!(
+                    "malformed lock line {}: expected `key = value`",
+                    line_number + 1
+                ))
+            }
         };
 
         if key == "version"
@@ -1405,7 +1625,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             && current_workspace_overlay_package.is_none()
             && !in_root
         {
-            version = val.trim_matches('"').parse().ok();
+            version = Some(
+                val.trim_matches('"')
+                    .parse()
+                    .map_err(|_| format!("invalid lock version: {val}"))?,
+            );
             continue;
         }
 
@@ -1433,17 +1657,17 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         }
 
         if key == "workspace_policy_allow_unfree" && current_pkg.is_none() && !in_root {
-            workspace_policy_allow_unfree = parse_string_array(val);
+            workspace_policy_allow_unfree = parse_string_array(val)?;
             continue;
         }
         if key == "workspace_policy_build_deny" && current_pkg.is_none() && !in_root {
-            workspace_policy_build_deny = parse_string_array(val);
+            workspace_policy_build_deny = parse_string_array(val)?;
             continue;
         }
 
         if in_root {
             match key {
-                "dependencies" => root_deps = parse_string_array(val),
+                "dependencies" => root_deps = parse_string_array(val)?,
                 "authority" => {
                     let parsed = crate::Package::Blocks::parse_authority_value(val)
                         .map_err(|error| error.to_string())?;
@@ -1506,16 +1730,16 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "package" => package.package = Some(unescape_str(val)),
                 "source" => package.source = Some(unescape_str(val)),
                 "version" => package.version = Some(unescape_str(val)),
-                "flags" => package.flags = parse_string_array(val),
+                "flags" => package.flags = parse_string_array(val)?,
                 "priority" => {
                     package.priority = Some(
                         val.parse()
                             .map_err(|_| format!("invalid workspace overlay priority `{val}`"))?,
                     )
                 }
-                "field_priorities" => package.field_priorities = parse_string_array(val),
-                "env" => package.env = parse_string_array(val),
-                "patches" => package.patches = parse_string_array(val),
+                "field_priorities" => package.field_priorities = parse_string_array(val)?,
+                "env" => package.env = parse_string_array(val)?,
+                "patches" => package.patches = parse_string_array(val)?,
                 "allow_unfree" => {
                     package.allow_unfree = match val {
                         "true" => true,
@@ -1534,7 +1758,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         if let Some(ref mut grant) = current_workspace_build_grant {
             match key {
                 "package" => grant.package = Some(unescape_str(val)),
-                "effects" => grant.effects = parse_string_array(val),
+                "effects" => grant.effects = parse_string_array(val)?,
                 _ => return Err(format!("unknown workspace build grant field `{key}`")),
             }
             continue;
@@ -1595,7 +1819,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "content-hash" => pkg.content_hash = Some(unescape_str(val)),
                 "source" => pkg.source_raw = Some(val.to_string()),
                 "locked" => pkg.locked_raw = Some(val.to_string()),
-                "dependencies" => pkg.deps = parse_string_array(val),
+                "dependencies" => pkg.deps = parse_string_array(val)?,
                 "layer" => {
                     pkg.layer = crate::Syntax::RuntimeLayer::parse_manifest(val.trim_matches('"'));
                 }
@@ -1603,14 +1827,44 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                     pkg.inferred_layer =
                         crate::Syntax::RuntimeLayer::parse_manifest(val.trim_matches('"'));
                 }
-                "effects" => pkg.effects = parse_string_array(val),
-                "effect-grants" => pkg.effect_grants = parse_string_array(val),
-                "required-effects" => pkg.required_effects = parse_string_array(val),
-                "granted-effects" => pkg.granted_effects = parse_string_array(val),
-                "denied-effects" => pkg.denied_effects = parse_string_array(val),
+                "effects" => pkg.effects = parse_string_array(val)?,
+                "effect-grants" => pkg.effect_grants = parse_string_array(val)?,
+                "required-effects" => pkg.required_effects = parse_string_array(val)?,
+                "granted-effects" => pkg.granted_effects = parse_string_array(val)?,
+                "denied-effects" => pkg.denied_effects = parse_string_array(val)?,
                 "effect-authority" => {
                     pkg.effect_authority = Some(unescape_str(val));
                 }
+                "nix-channel" => pkg.nix_closure_mut().channel = Some(unescape_str(val)),
+                "nix-revision" => pkg.nix_closure_mut().revision = Some(unescape_str(val)),
+                "nix-system" => pkg.nix_closure_mut().system = Some(unescape_str(val)),
+                "nix-signed-index-manifest" => {
+                    pkg.nix_closure_mut().signed_index_manifest = Some(unescape_str(val))
+                }
+                "nix-derivation" => pkg.nix_closure_mut().derivation = Some(unescape_str(val)),
+                "nix-output" => pkg.nix_closure_mut().output = Some(unescape_str(val)),
+                "nix-nar-hash" => pkg.nix_closure_mut().nar_hash = Some(unescape_str(val)),
+                "nix-size" => {
+                    pkg.nix_closure_mut().size = Some(
+                        val.trim_matches('"')
+                            .parse()
+                            .map_err(|_| format!("invalid Nix closure size: {val}"))?,
+                    )
+                }
+                "nix-compression" => {
+                    pkg.nix_closure_mut().compression = Some(unescape_str(val))
+                }
+                "nix-references" => {
+                    pkg.nix_closure_mut().references = Some(parse_string_array(val)?)
+                }
+                "nix-upstream-proof" => {
+                    pkg.nix_closure_mut().upstream_proof = Some(unescape_str(val))
+                }
+                "nix-cache-key" => pkg.nix_closure_mut().cache_key = Some(unescape_str(val)),
+                "nix-project-cas-bundle" => {
+                    pkg.nix_closure_mut().project_cas_bundle = Some(unescape_str(val))
+                }
+
                 // D-JPK-CACHE1=A (A4): realized-output envelope. Seeing any of
                 // these marks the package as realized (envelope becomes Some).
                 "output-hash" => pkg.envelope_mut().output_hash = unescape_str(val),
@@ -1676,8 +1930,14 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         workspace_policy_build_deny,
     )?;
 
+    let version = version.ok_or("lock is missing top-level `version`")?;
+    if version != LOCK_VERSION {
+        return Err(format!(
+            "unsupported lock version {version}; expected {LOCK_VERSION}"
+        ));
+    }
     let mut lock = LockFile {
-        version: version.unwrap_or(0),
+        version,
         packages,
         root_dependencies: root_deps,
         authority,
@@ -1718,15 +1978,21 @@ pub fn looks_like_workspace_lock(raw: &str) -> bool {
     })
 }
 
-fn parse_string_array(val: &str) -> Vec<String> {
-    let val = val.trim().trim_start_matches('[').trim_end_matches(']');
+fn parse_string_array(val: &str) -> Result<Vec<String>, String> {
+    let val = val.trim();
+    if !(val.starts_with('[') && val.ends_with(']')) {
+        return Err(format!("invalid string array: {val}"));
+    }
+    let val = &val[1..val.len() - 1];
     if val.trim().is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut values = Vec::new();
     let mut current = String::new();
     let mut quoted = false;
     let mut escaped = false;
+    let mut item_started = false;
+    let mut item_quoted = false;
     for character in val.chars() {
         if escaped {
             current.push(match character {
@@ -1736,23 +2002,39 @@ fn parse_string_array(val: &str) -> Vec<String> {
                 other => other,
             });
             escaped = false;
+            item_started = true;
         } else if quoted && character == '\\' {
             escaped = true;
         } else if character == '"' {
             quoted = !quoted;
+            item_started = true;
+            item_quoted = true;
         } else if character == ',' && !quoted {
-            if !current.trim().is_empty() {
-                values.push(current.trim().to_string());
+            if !item_started {
+                return Err(format!("invalid string array: {val}"));
             }
+            values.push(if item_quoted {
+                current.clone()
+            } else {
+                current.trim().to_string()
+            });
             current.clear();
+            item_started = false;
+            item_quoted = false;
         } else if quoted || !character.is_whitespace() {
             current.push(character);
+            item_started = true;
         }
     }
-    if !current.trim().is_empty() {
-        values.push(current.trim().to_string());
+    if quoted || escaped || !item_started {
+        return Err(format!("invalid string array: {val}"));
     }
-    values
+    values.push(if item_quoted {
+        current
+    } else {
+        current.trim().to_string()
+    });
+    Ok(values)
 }
 
 #[derive(Default)]
@@ -1948,6 +2230,7 @@ fn build_workspace_overlay_policy(
                     name,
                     provider: overlay.provider.map(|provider| ProviderOverride {
                         provider,
+
                         channel: overlay.channel.clone(),
                     }),
                     packages: Vec::new(),
@@ -2054,6 +2337,7 @@ struct PartialPkg {
     denied_effects: Vec<String>,
     effect_authority: Option<String>,
     envelope: Option<LockEnvelope>,
+    nix_closure: Option<PartialNixClosure>,
     receipt: Option<String>,
     provenance: Option<DependencyProvenance>,
 }
@@ -2062,6 +2346,10 @@ impl PartialPkg {
     /// Lazily create the envelope on first envelope key seen.
     fn envelope_mut(&mut self) -> &mut LockEnvelope {
         self.envelope.get_or_insert_with(LockEnvelope::default)
+    }
+
+    fn nix_closure_mut(&mut self) -> &mut PartialNixClosure {
+        self.nix_closure.get_or_insert_with(PartialNixClosure::default)
     }
 
     fn provenance_mut(&mut self) -> &mut DependencyProvenance {
@@ -2073,12 +2361,32 @@ impl PartialPkg {
         let name = self.name.ok_or("missing name")?;
         let version = self.version.ok_or("missing version")?;
         let source = parse_source(self.source_raw.as_deref().unwrap_or(""))?;
+        let nix_closure = self.nix_closure.map(PartialNixClosure::finish).transpose()?;
+        match (&source, &nix_closure) {
+            (LockSource::Nix { output, .. }, Some(closure)) if closure.output != *output => {
+                return Err("Nix source output disagrees with its closure record".into());
+            }
+            (LockSource::Nix { .. }, None) => {
+                return Err("Nix package is missing its portable closure record".into());
+            }
+            (LockSource::Nix { .. }, Some(_)) => {}
+            (_, Some(_)) => {
+                return Err("portable Nix closure record attached to a non-Nix package".into());
+            }
+            _ => {}
+        }
+        if let (Some(envelope), Some(closure)) = (self.envelope.as_ref(), nix_closure.as_ref()) {
+            if envelope.output_hash != closure.output || envelope.platform != closure.system {
+                return Err("Nix envelope identity disagrees with its closure record".into());
+            }
+        }
         let locked = self.locked_raw.as_deref().map(parse_locked).transpose()?;
         let fingerprint = self.fingerprint.unwrap_or_default();
         Ok(LockedPackage {
             name,
             version,
             source,
+            nix_closure,
             locked,
             fingerprint,
             content_hash: self.content_hash,
@@ -2095,6 +2403,59 @@ impl PartialPkg {
             receipt: self.receipt,
             provenance: self.provenance,
         })
+    }
+}
+
+#[derive(Default)]
+struct PartialNixClosure {
+    channel: Option<String>,
+    revision: Option<String>,
+    system: Option<String>,
+    signed_index_manifest: Option<String>,
+    derivation: Option<String>,
+    output: Option<String>,
+    nar_hash: Option<String>,
+    size: Option<u64>,
+    compression: Option<String>,
+    references: Option<Vec<String>>,
+    upstream_proof: Option<String>,
+    cache_key: Option<String>,
+    project_cas_bundle: Option<String>,
+}
+
+impl PartialNixClosure {
+    fn finish(self) -> Result<NixClosureRecord, String> {
+        let record = NixClosureRecord {
+            channel: self.channel.ok_or("Nix closure is missing `channel`")?,
+            revision: self.revision.ok_or("Nix closure is missing `revision`")?,
+            system: self.system.ok_or("Nix closure is missing `system`")?,
+            signed_index_manifest: self
+                .signed_index_manifest
+                .ok_or("Nix closure is missing `signed-index-manifest`")?,
+            derivation: self
+                .derivation
+                .ok_or("Nix closure is missing `derivation`")?,
+            output: self.output.ok_or("Nix closure is missing `output`")?,
+            nar_hash: self.nar_hash.ok_or("Nix closure is missing `nar-hash`")?,
+            size: self.size.ok_or("Nix closure is missing `size`")?,
+            compression: self
+                .compression
+                .ok_or("Nix closure is missing `compression`")?,
+            references: self
+                .references
+                .ok_or("Nix closure is missing `references`")?,
+            upstream_proof: self
+                .upstream_proof
+                .ok_or("Nix closure is missing `upstream-proof`")?,
+            cache_key: self
+                .cache_key
+                .ok_or("Nix closure is missing `cache-key`")?,
+            project_cas_bundle: self
+                .project_cas_bundle
+                .ok_or("Nix closure is missing `project-cas-bundle`")?,
+        };
+        record.validate()?;
+        Ok(record)
     }
 }
 
@@ -2348,6 +2709,17 @@ pub fn load(project_root: &Path) -> Option<LockFile> {
     parse(&raw).ok()
 }
 
+/// Load the project lock without turning malformed lock state into a cache
+/// miss. Fully locked providers use this boundary before any catalog lookup.
+pub fn load_strict(project_root: &Path) -> Result<Option<LockFile>, String> {
+    let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    match read_lock_text(&path) {
+        Ok(raw) => parse(&raw).map(Some),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("could not read `{}`: {error}", path.display())),
+    }
+}
+
 /// D-CONF-STAMP1=B: return the lock-pinned provenance or capture one stamp
 /// for the lock-writing operation. A locked build may not fall back to the
 /// wall clock; a missing stamp is a stale lock input.
@@ -2455,7 +2827,7 @@ pub fn record_inferred_layer(
     };
     pkg.inferred_layer = Some(layer);
     ensure_build_stamp(project_root, &mut lock);
-    publish_lock_or_report(&lock_path, &write(&lock));
+    publish_lock_or_report(project_root, &write(&lock));
 }
 
 /// D-JPK-CACHE1=A (A4): stamp a realized package's output envelope into the
@@ -2476,25 +2848,31 @@ pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEn
     };
     pkg.envelope = Some(envelope);
     ensure_build_stamp(project_root, &mut lock);
-    publish_lock_or_report(&lock_path, &write(&lock));
+    publish_lock_or_report(project_root, &write(&lock));
 }
 
 /// D-JPK-OFFLINE2=B: after a successful Nix-provider realize, record the locked
-/// source identity (the resolved ref + realized output path) and the produced
-/// output closure envelope into `.jet/lock`, creating the lock if the project
-/// has none (a bare `jetpack env --prep` project may carry no manifest yet).
-/// This lock entry is the trust root a later offline realize matches before it
-/// may reuse the hangar copy: the recorded `output_hash` is re-verified against
-/// the on-disk closure, never the ref spelling (card #418). Upserts by package
-/// name so re-realizing the same package replaces its entry in place.
+/// source identity (the resolved ref + portable output digest) and the complete
+/// closure record into `.jet/lock`, creating the lock if the project has none.
+/// This lock entry is the trust root a later offline replay matches before it
+/// may reuse the Hangar copy. Upserts by package name so re-realizing the same
+/// package replaces its entry in place.
 pub fn record_nix_realization(
     project_root: &Path,
     name: &str,
     version: &str,
     reference: &str,
     output: &str,
+    nix_closure: NixClosureRecord,
     envelope: LockEnvelope,
 ) -> Result<(), String> {
+    nix_closure.validate()?;
+    if nix_closure.output != output || envelope.output_hash != output {
+        return Err("Nix closure and envelope outputs must match the realized output digest".into());
+    }
+    if envelope.platform != nix_closure.system {
+        return Err("Nix closure system does not match the lock envelope platform".into());
+    }
     let reference = crate::RefSpec::canonical_locked_ref(reference);
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     let mut lock = match read_lock_text(&lock_path) {
@@ -2526,7 +2904,29 @@ pub fn record_nix_realization(
             ));
         }
     };
-    lock.version = LOCK_VERSION;
+    let source_name = reference
+        .rsplit_once(crate::Syntax::REF_PROVIDER_AT)
+        .map(|(_, source)| {
+            source
+                .split_once(crate::Syntax::REF_CHANNEL_MARKER)
+                .map_or(source, |(name, _)| name)
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or(Syntax::REF_SOURCE_JETPACK);
+    if !lock
+        .source_channels
+        .iter()
+        .any(|channel| channel.name == source_name)
+    {
+        lock.source_channels.push(LockedSourceChannel {
+            name: source_name.to_string(),
+            channel: nix_closure.channel.clone(),
+            // The channel label is presentation metadata. The exact input
+            // must use the one canonical Nix index identity accepted by the
+            // provider selector.
+            exact: format!("github:NixOS/nixpkgs#{}", nix_closure.revision),
+        });
+    }
     let existing_provenance = lock
         .packages
         .iter()
@@ -2549,6 +2949,7 @@ pub fn record_nix_realization(
                         output: locked_output,
                     } if locked_reference == &reference && locked_output == output
                 )
+                && package.nix_closure.as_ref() == Some(&nix_closure)
                 && package
                     .envelope
                     .as_ref()
@@ -2562,6 +2963,8 @@ pub fn record_nix_realization(
             reference: reference.to_string(),
             output: output.to_string(),
         },
+        nix_closure: Some(nix_closure),
+
         locked: None,
         fingerprint: String::new(),
         content_hash: None,
@@ -2588,15 +2991,8 @@ pub fn record_nix_realization(
         lock.packages.push(entry);
     }
     ensure_build_stamp(project_root, &mut lock);
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "could not create project lock directory `{}`: {error}",
-                parent.display()
-            )
-        })?;
-    }
-    write_lock_atomically(&lock_path, &write(&lock))
+    let contents = write(&lock);
+    write_lock_atomically(project_root, contents.as_bytes())
 }
 
 /// Record one verified package-backed foreign namespace projection. The
@@ -2674,6 +3070,8 @@ pub fn record_foreign_realization(
             reference: reference.to_string(),
             output: output.to_string(),
         },
+        nix_closure: None,
+
         locked: None,
         fingerprint: envelope.output_hash.clone(),
         content_hash: None,
@@ -2698,21 +3096,14 @@ pub fn record_foreign_realization(
         lock.packages.push(entry);
     }
     ensure_build_stamp(project_root, &mut lock);
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "could not create project lock directory `{}`: {error}",
-                parent.display()
-            )
-        })?;
-    }
-    write_lock_atomically(&lock_path, &write(&lock))
+    write_lock_atomically(project_root, write(&lock).as_bytes())
 }
 
 /// Publish one complete canonical lock serialization without exposing a
 /// partially written file. The size check runs before creating a temporary so
 /// a rejected lock cannot replace the last good lock or leave scratch bytes.
-pub fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> {
+pub fn write_lock_atomically(project_root: &Path, contents: &[u8]) -> Result<(), String> {
+    let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     if contents.len() > MAX_LOCK_BYTES {
         return Err(format!(
             "internal error: refusing to write project lock `{}`: serialized lock is {} bytes, over the 1 MiB limit",
@@ -2720,58 +3111,12 @@ pub fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> 
             contents.len()
         ));
     }
-    match std::fs::read(path) {
-        Ok(existing) if existing == contents.as_bytes() => return Ok(()),
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(format!(
-                "could not inspect existing project lock `{}`: {error}",
-                path.display()
-            ));
-        }
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("project lock `{}` has no parent directory", path.display()))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("project lock `{}` has no UTF-8 file name", path.display()))?;
-    let mut temporary = None;
-    for attempt in 0..32u32 {
-        let candidate = parent.join(format!(
-            ".{file_name}.{}.partial",
-            std::process::id() + attempt
-        ));
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(mut file) => {
-                file.write_all(contents.as_bytes()).map_err(|error| {
-                    let _ = std::fs::remove_file(&candidate);
-                    format!("could not write temporary project lock: {error}")
-                })?;
-                file.sync_all().map_err(|error| {
-                    let _ = std::fs::remove_file(&candidate);
-                    format!("could not sync temporary project lock: {error}")
-                })?;
-                temporary = Some(candidate);
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => {
-                return Err(format!("could not create temporary project lock: {error}"));
-            }
-        }
-    }
-    let temporary = temporary.ok_or_else(|| {
-        "could not allocate a temporary project lock path after 32 attempts".to_string()
-    })?;
-    std::fs::rename(&temporary, path).map_err(|error| {
-        let _ = std::fs::remove_file(&temporary);
+    crate::SHA256::write_file_nofollow_at_root(
+        project_root,
+        Path::new(Syntax::UNIFIED_LOCK_FILE),
+        contents,
+    )
+    .map_err(|error| {
         format!(
             "could not atomically publish project lock `{}`: {error}",
             path.display()
@@ -2781,33 +3126,113 @@ pub fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> 
 
 /// Keep the historical best-effort recorder APIs observable: a rejected lock
 /// write is an internal error, never a silently successful update.
-fn publish_lock_or_report(path: &Path, contents: &str) {
-    if let Err(error) = write_lock_atomically(path, contents) {
+fn publish_lock_or_report(project_root: &Path, contents: &str) {
+    if let Err(error) = write_lock_atomically(project_root, contents.as_bytes()) {
         eprintln!("{error}");
     }
 }
 
-/// D-JPK-OFFLINE2=B: read the recorded Nix realization for `reference` from the
-/// project lock — the realized output path and its output envelope — so an
-/// offline realize can rebuild the cache expectation and re-verify the closure.
-/// `None` when the project has no lock or no matching Nix entry with an envelope.
-pub fn nix_realization(project_root: &Path, reference: &str) -> Option<(String, LockEnvelope)> {
-    let lock = load(project_root)?;
+/// D-JPK-OFFLINE2=B: read the complete recorded Nix realization for
+/// `reference` from the project lock. The output is a content digest, never a
+/// host path; the closure record supplies all metadata required for offline
+/// replay and cache validation.
+pub fn nix_realization(
+    project_root: &Path,
+    reference: &str,
+) -> Option<(NixClosureRecord, LockEnvelope)> {
+    nix_realization_strict(project_root, reference)
+        .ok()
+        .flatten()
+}
+
+/// Strict variant of [`nix_realization`]. A present but malformed lock is
+/// trust-state failure, never a cache miss.
+pub fn nix_realization_strict(
+    project_root: &Path,
+    reference: &str,
+) -> Result<Option<(NixClosureRecord, LockEnvelope)>, String> {
+    let Some(lock) = load_strict(project_root)? else {
+        return Ok(None);
+    };
     let reference = crate::RefSpec::canonical_locked_ref(reference);
     for pkg in lock.packages {
         if let LockSource::Nix {
-            reference: r,
+            reference: locked_reference,
             output,
         } = pkg.source
         {
-            if r == reference {
-                if let Some(env) = pkg.envelope {
-                    return Some((output, env));
-                }
+            if locked_reference != reference {
+                continue;
             }
+            let closure = pkg
+                .nix_closure
+                .ok_or_else(|| "Nix package is missing its portable closure record".to_string())?;
+            if closure.output != output {
+                return Err("Nix source output disagrees with its closure record".into());
+            }
+            let envelope = pkg.envelope.unwrap_or_else(|| LockEnvelope {
+                output_hash: closure.output.clone(),
+                platform: closure.system.clone(),
+                ..LockEnvelope::default()
+            });
+            if envelope.output_hash != closure.output || envelope.platform != closure.system {
+                return Err("Nix envelope identity disagrees with its closure record".into());
+            }
+            return Ok(Some((closure, envelope)));
         }
     }
-    None
+    Ok(None)
+}
+
+/// Return the package identity together with its complete portable Nix lock
+/// record. `None` means the lock has no record for this reference.
+pub fn locked_nix_package(
+    project_root: &Path,
+    reference: &str,
+) -> Option<(String, String, NixClosureRecord, LockEnvelope)> {
+    locked_nix_package_strict(project_root, reference)
+        .ok()
+        .flatten()
+}
+
+/// Strict variant of [`locked_nix_package`]. A present but malformed lock is
+/// trust-state failure, never a cache miss.
+pub fn locked_nix_package_strict(
+    project_root: &Path,
+    reference: &str,
+) -> Result<Option<(String, String, NixClosureRecord, LockEnvelope)>, String> {
+    let Some(lock) = load_strict(project_root)? else {
+        return Ok(None);
+    };
+    let reference = crate::RefSpec::canonical_locked_ref(reference);
+    for pkg in lock.packages {
+        let LockSource::Nix {
+            reference: locked_reference,
+            output,
+        } = pkg.source
+        else {
+            continue;
+        };
+        if locked_reference != reference {
+            continue;
+        }
+        let closure = pkg
+            .nix_closure
+            .ok_or_else(|| "Nix package is missing its portable closure record".to_string())?;
+        if closure.output != output {
+            return Err("Nix source output disagrees with its closure record".into());
+        }
+        let envelope = pkg.envelope.unwrap_or_else(|| LockEnvelope {
+            output_hash: closure.output.clone(),
+            platform: closure.system.clone(),
+            ..LockEnvelope::default()
+        });
+        if envelope.output_hash != closure.output || envelope.platform != closure.system {
+            return Err("Nix envelope identity disagrees with its closure record".into());
+        }
+        return Ok(Some((pkg.name, pkg.version, closure, envelope)));
+    }
+    Ok(None)
 }
 
 /// Record an exact CRAN source closure and realized R library for offline replay.
@@ -2888,6 +3313,8 @@ pub fn record_cran_realization(
             repository: repository.to_string(),
             authority: authority.to_string(),
         },
+        nix_closure: None,
+
         locked: None,
         fingerprint: source_hash.to_string(),
         content_hash: None,
@@ -2914,10 +3341,7 @@ pub fn record_cran_realization(
         lock.packages.push(entry);
     }
     ensure_build_stamp(project_root, &mut lock);
-    if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    publish_lock_or_report(&lock_path, &write(&lock));
+    publish_lock_or_report(project_root, &write(&lock));
 }
 
 /// Exact CRAN realization trust root for online integrity and offline replay.
@@ -3021,6 +3445,8 @@ pub fn record_luarocks_realization(
             repository: repository.to_string(),
             authority: authority.to_string(),
         },
+        nix_closure: None,
+
         locked: None,
         fingerprint: source_hash.to_string(),
         content_hash: None,
@@ -3047,10 +3473,7 @@ pub fn record_luarocks_realization(
         lock.packages.push(entry);
     }
     ensure_build_stamp(project_root, &mut lock);
-    if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    publish_lock_or_report(&lock_path, &write(&lock));
+    publish_lock_or_report(project_root, &write(&lock));
 }
 
 /// Exact LuaRocks realization trust root for online integrity and offline replay.
@@ -3161,6 +3584,8 @@ pub fn record_registry_realization(
             tier: "not-applicable".to_string(),
             gate_status: "not-applicable".to_string(),
         },
+        nix_closure: None,
+
         locked: None,
         fingerprint: source_hash.to_string(),
         content_hash: None,
@@ -3186,10 +3611,7 @@ pub fn record_registry_realization(
         lock.packages.push(entry);
     }
     ensure_build_stamp(project_root, &mut lock);
-    if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    publish_lock_or_report(&lock_path, &write(&lock));
+    publish_lock_or_report(project_root, &write(&lock));
 }
 
 /// Exact scripting-registry trust root for online drift checks and offline replay.
@@ -3199,6 +3621,7 @@ pub fn registry_realization(
     reference: &str,
 ) -> Option<(String, String, String, String, LockEnvelope)> {
     let lock = load(project_root)?;
+    let reference = crate::RefSpec::canonical_locked_ref(reference);
     for package in lock.packages {
         if let LockSource::Registry {
             registry: locked_registry,
@@ -3250,24 +3673,18 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
             build_stamp: None,
             build_contributions: Vec::new(),
         });
-    // A project has exactly one `jet` self-toolchain pin (its object id is
-    // `jet-<version>-<fp>`), kept distinct from any bridge build-toolchain
-    // entry (`toolchain-<version>`). Replace the existing jet pin in place so
-    // moving channels never accumulates stale pins.
+    lock.version = LOCK_VERSION;
     if let Some(existing) = lock
         .toolchains
         .iter_mut()
-        .find(|t| t.id.starts_with("jet-"))
+        .find(|entry| entry.channel == tc.channel)
     {
         *existing = tc;
     } else {
         lock.toolchains.push(tc);
     }
     ensure_build_stamp(project_root, &mut lock);
-    if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    publish_lock_or_report(&lock_path, &write(&lock));
+    publish_lock_or_report(project_root, &write(&lock));
 }
 
 /// D-BROWSER-AUTO1=A (#1187): upsert a project-locked browser binary by engine.
@@ -3302,10 +3719,7 @@ pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
         lock.browsers.push(browser);
     }
     ensure_build_stamp(project_root, &mut lock);
-    if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    publish_lock_or_report(&lock_path, &write(&lock));
+    publish_lock_or_report(project_root, &write(&lock));
 }
 
 /// D-BUILDGEN1: record generated-module output hashes in the unified lock.
@@ -3350,8 +3764,23 @@ pub fn record_generated_inputs(
     locked: bool,
     stamp: &BuildStamp,
 ) -> Result<(), Diagnostic> {
+    let lock_was_present = project_root
+        .join(Syntax::UNIFIED_LOCK_FILE)
+        .exists();
+    record_generated_inputs_with_lock_state(project_root, generated, locked, stamp, lock_was_present)
+}
+
+/// Record generated provenance while preserving whether the build started with
+/// a lock. The driver captures that state before its runtime reload can publish
+/// any lock update, so a first build bootstraps dependencies exactly once.
+pub fn record_generated_inputs_with_lock_state(
+    project_root: &Path,
+    generated: &[ComptimeInput],
+    locked: bool,
+    stamp: &BuildStamp,
+    lock_was_present: bool,
+) -> Result<(), Diagnostic> {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let lock_was_present = lock_path.exists();
     let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
@@ -3430,11 +3859,9 @@ pub fn record_generated_inputs(
             lock.comptime_inputs.push(input.clone());
         }
     }
-    lock.comptime_inputs.sort_by(|a, b| a.path.cmp(&b.path));
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
-    }
-    write_lock_atomically(&lock_path, &write(&lock))
+    lock.comptime_inputs
+        .sort_by(|left, right| left.path.cmp(&right.path).then_with(|| left.hash.cmp(&right.hash)));
+    write_lock_atomically(project_root, write(&lock).as_bytes())
         .map_err(|error| lock_write_error(&lock_path, std::io::Error::other(error)))?;
     Ok(())
 }
@@ -3569,10 +3996,7 @@ pub fn record_build_contributions(
     if lock.build_stamp.is_none() {
         lock.build_stamp = Some(stamp.clone());
     }
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
-    }
-    write_lock_atomically(&lock_path, &write(&lock))
+    write_lock_atomically(project_root, write(&lock).as_bytes())
         .map_err(|error| lock_write_error(&lock_path, std::io::Error::other(error)))?;
     Ok(())
 }
@@ -3628,10 +4052,7 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
         lock.source_channels.push(source);
     }
     ensure_build_stamp(project_root, &mut lock);
-    if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    publish_lock_or_report(&lock_path, &write(&lock));
+    publish_lock_or_report(project_root, &write(&lock));
 }
 
 /// D-RINGLAYER1=A M2: set manifest `runtime:` ceiling on locked packages at fetch time.
@@ -3878,12 +4299,39 @@ mod a4_envelope_tests {
             catalog_trust: String::new(),
         }
     }
+    fn nix_digest(fill: char) -> String {
+        format!(
+            "sha256-{}",
+            std::iter::repeat(fill).take(64).collect::<String>()
+        )
+    }
+
+    fn nix_closure(output: &str) -> NixClosureRecord {
+        NixClosureRecord {
+            channel: "nixpkgs-unstable".into(),
+            revision: "a".repeat(40),
+            system: "x86_64-linux".into(),
+            signed_index_manifest: "b".repeat(64),
+            derivation: "c".repeat(64),
+            output: output.into(),
+            nar_hash: format!("sha256:{}", "d".repeat(64)),
+            size: 42,
+            compression: "zstd".into(),
+            references: Vec::new(),
+            upstream_proof: nix_digest('e'),
+            cache_key: "f".repeat(64),
+            project_cas_bundle: nix_digest('0'),
+        }
+    }
+
 
     fn pkg_with(name: &str, envelope: Option<LockEnvelope>) -> LockedPackage {
         LockedPackage {
             name: name.to_string(),
             version: "1.0.0".to_string(),
             source: LockSource::Root,
+            nix_closure: None,
+
             locked: None,
             fingerprint: "sha256-abc".to_string(),
             content_hash: None,
@@ -3918,6 +4366,47 @@ mod a4_envelope_tests {
             build_stamp: None,
             build_contributions: Vec::new(),
         }
+    }
+
+    #[test]
+    fn record_nix_lock_uses_canonical_source_exact() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lock-canonical-source-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        let output = nix_digest('1');
+        let mut closure = nix_closure(&output);
+        closure.references = vec![nix_digest('2')];
+        record_nix_realization(
+            &root,
+            "ripgrep",
+            "15.2.0",
+            "ripgrep@default",
+            &output,
+            closure,
+            env(&output, "x86_64-linux", "", "canonical-source"),
+        )
+        .unwrap();
+        let raw = std::fs::read_to_string(root.join(".jet/lock")).unwrap();
+        let lock = parse(&raw).unwrap();
+        let channel = lock
+            .source_channels
+            .iter()
+            .find(|channel| channel.name == "default")
+            .expect("recorded Nix source channel");
+        assert_eq!(
+            channel.exact,
+            format!(
+                "github:NixOS/nixpkgs#{}",
+                "a".repeat(40)
+            )
+        );
+        assert!(lock.packages.iter().any(|package| {
+            package.name == "ripgrep" && matches!(package.source, LockSource::Nix { .. })
+        }));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// A realized package's envelope round-trips through write→parse unchanged,
@@ -3957,9 +4446,10 @@ mod a4_envelope_tests {
             "\"}",
         ]
         .concat();
+        let output = nix_digest('a');
         let mut envelope = env(
-            &tricky("output-hash"),
-            &tricky("platform"),
+            &output,
+            "x86_64-linux",
             &tricky("signature"),
             &local_nix,
         );
@@ -3969,9 +4459,9 @@ mod a4_envelope_tests {
         let mut package = pkg_with("package", Some(envelope.clone()));
         package.source = LockSource::Nix {
             reference: local_nix.clone(),
-            output: tricky("output"),
+            output: output.clone(),
         };
-        package.effect_authority = Some(tricky("effect-authority"));
+        package.nix_closure = Some(nix_closure(&output));
         package.receipt = Some(tricky("receipt"));
         package.provenance = Some(DependencyProvenance {
             transparency: Some(tricky("transparency")),
@@ -4051,6 +4541,11 @@ mod a4_envelope_tests {
         }];
 
         let first = write(&lock);
+        let parsed = parse(&first).expect("portable Nix closure parses");
+        assert_eq!(
+            parsed.packages[0].nix_closure,
+            Some(nix_closure(&nix_digest('a')))
+        );
         assert!(first.len() <= MAX_LOCK_BYTES);
         let mut current = first.clone();
         for cycle in 1..=32 {
@@ -4060,6 +4555,35 @@ mod a4_envelope_tests {
             assert_eq!(current, first, "lock changed on cycle {cycle}");
         }
     }
+
+    #[test]
+    fn nix_lock_requires_complete_portable_closure() {
+        let output = nix_digest('a');
+        let other_output = nix_digest('b');
+        let mut package = pkg_with("nix", None);
+        package.source = LockSource::Nix {
+            reference: "nixpkgs#hello".into(),
+            output: output.clone(),
+        };
+        let missing = base_lock(vec![package.clone()], Vec::new());
+        assert!(parse(&write(&missing)).is_err());
+
+        let mut complete = package.clone();
+        complete.nix_closure = Some(nix_closure(&output));
+        let complete_raw = write(&base_lock(vec![complete], Vec::new()));
+        assert!(parse(&complete_raw).is_ok());
+        assert!(parse(&complete_raw.replace("nix-references = []\n", "")).is_err());
+
+        package.nix_closure = Some(nix_closure(&other_output));
+        let mismatched = base_lock(vec![package], Vec::new());
+        assert!(parse(&write(&mismatched)).is_err());
+
+        let mut non_nix = pkg_with("root", None);
+        non_nix.nix_closure = Some(nix_closure(&output));
+        let invalid_non_nix = base_lock(vec![non_nix], Vec::new());
+        assert!(parse(&write(&invalid_non_nix)).is_err());
+    }
+
 
     #[test]
     fn lock_writer_deduplicates_replayed_records_and_stays_bounded() {
@@ -4114,15 +4638,93 @@ mod a4_envelope_tests {
         let original = "version = 1\n[root]\ndependencies = []\n";
         std::fs::write(&path, "stale lock bytes\n".repeat(128)).unwrap();
 
-        write_lock_atomically(&path, original).expect("small lock write");
+        write_lock_atomically(&dir, original.as_bytes()).expect("small lock write");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
 
-        let error = write_lock_atomically(&path, &"x".repeat(MAX_LOCK_BYTES + 1))
+        let error = write_lock_atomically(&dir, "x".repeat(MAX_LOCK_BYTES + 1).as_bytes())
             .expect_err("oversized lock must be refused");
         assert!(error.contains("internal error"), "{error}");
         assert!(error.contains("1 MiB"), "{error}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn atomic_lock_writer_rejects_preexisting_managed_directory_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "lock-writer-managed-link-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let outside = root.with_file_name(format!(
+            "{}-outside",
+            root.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&outside).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_lock = outside.join("lock");
+        let sentinel = b"external lock must remain unchanged\n";
+        std::fs::write(&outside_lock, sentinel).unwrap();
+        symlink(&outside, root.join(".jet")).unwrap();
+
+        let error = write_lock_atomically(&root, b"new lock bytes\n")
+            .expect_err("a managed-directory symlink must be rejected");
+        assert!(error.contains("could not atomically publish"), "{error}");
+        assert_eq!(std::fs::read(&outside_lock).unwrap(), sentinel);
+
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn atomic_lock_writer_rejects_swapped_ancestor_without_touching_external_target() {
+        use std::os::unix::fs::symlink;
+
+        let parent = std::env::temp_dir().join(format!(
+            "lock-writer-ancestor-swap-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let workspace = parent.join("workspace");
+        let root = workspace.join("project");
+        let outside = parent.join("outside");
+        let outside_root = outside.join("project");
+        let outside_lock = outside_root.join(".jet/lock");
+        std::fs::remove_dir_all(&parent).ok();
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        std::fs::create_dir_all(outside_root.join(".jet")).unwrap();
+        let sentinel = b"external ancestor target must remain unchanged\n";
+        std::fs::write(&outside_lock, sentinel).unwrap();
+        std::fs::rename(&workspace, parent.join("workspace-old")).unwrap();
+        symlink(&outside, &workspace).unwrap();
+
+        let error = write_lock_atomically(&root, b"new lock bytes\n")
+            .expect_err("a swapped ancestor must be rejected");
+        assert!(error.contains("could not atomically publish"), "{error}");
+        assert_eq!(std::fs::read(&outside_lock).unwrap(), sentinel);
+
+        std::fs::remove_file(&workspace).unwrap();
+        std::fs::remove_dir_all(parent).unwrap();
     }
 
     #[test]
@@ -4290,8 +4892,9 @@ mod a4_envelope_tests {
         let mut package = pkg_with("omp", None);
         package.source = LockSource::Nix {
             reference: legacy.into(),
-            output: "/nix/store/omp".into(),
+            output: nix_digest('a'),
         };
+        package.nix_closure = Some(nix_closure(&nix_digest('a')));
         let mut lock = base_lock(vec![package], Vec::new());
         lock.source_channels.push(LockedSourceChannel {
             name: "releases".into(),
@@ -4489,4 +5092,22 @@ priority = 2
         p.required_effects.sort();
         assert_eq!(back.packages[0], p);
     }
+    #[test]
+    fn lock_parser_rejects_missing_version_unknown_sections_and_malformed_lines() {
+        assert!(parse("garbage").is_err());
+        assert!(parse("[[unknown]]\n").is_err());
+        assert!(parse("version = 1\nnot-a-field").is_err());
+        assert!(parse("version = 0\n").is_err());
+        assert!(parse("version = 1\n[root]\ndependencies = nope\n").is_err());
+    }
+
+    #[test]
+    fn lock_parser_preserves_empty_array_members() {
+        let lock = parse(
+            "version = 1\n[root]\ndependencies = [\"\", \"kept\"]\n",
+        )
+        .expect("valid lock array");
+        assert_eq!(lock.root_dependencies, vec![String::new(), "kept".to_string()]);
+    }
+
 }

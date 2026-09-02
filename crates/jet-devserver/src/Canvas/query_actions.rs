@@ -2087,16 +2087,16 @@ pub(super) struct CanvasAuthority {
 
 pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    if let Some(root) = jet_driver::Loader::find_manifest_root(dir) {
-        if let Some(Ok(package)) = jet_driver::Package::PackageFacts::load(&root) {
-            return CanvasAuthority {
-                grant: "canvas.source_edit:package".to_string(),
-                package_id: package.name,
-                version: package.version.unwrap_or_else(|| "unversioned".to_string()),
-                touched_file: rel_path(&root, path),
-                project_root: root,
-            };
-        }
+    if let Ok(Some(package)) = jet_semindex::package_facts_for_entry(path) {
+        let root = jet_driver::Loader::find_manifest_root(dir)
+            .unwrap_or_else(|| dir.to_path_buf());
+        return CanvasAuthority {
+            grant: "canvas.source_edit:package".to_string(),
+            package_id: package.name,
+            version: package.version.unwrap_or_else(|| "unversioned".to_string()),
+            touched_file: rel_path(&root, path),
+            project_root: root,
+        };
     }
     CanvasAuthority {
         grant: "canvas.source_edit:single_file".to_string(),

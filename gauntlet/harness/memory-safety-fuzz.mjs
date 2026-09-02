@@ -372,33 +372,29 @@ function requireContext(context) {
   for (const name of names) if (typeof context[name] !== "function") throw new Error(`memory-safety axis adapter needs ${name} callback`);
 }
 
-async function runRunner(axis, runner, axisDir, corpus, summary, expected, context) {
-  const runnerDir = path.join(axisDir, runner.id.replaceAll(/[^A-Za-z0-9_.-]/g, "_"));
-  await fs.mkdir(runnerDir, { recursive: true });
-  const files = await context.stageAxisFiles(runnerDir, runner.files);
-  const inputPath = context.axisStagePath(runnerDir, axis.corpus.path);
-  await fs.mkdir(path.dirname(inputPath), { recursive: true });
-  await fs.writeFile(inputPath, corpus.data);
-  const copiedSha = await (context.fileSha256 ? context.fileSha256(inputPath) : sha256(await fs.readFile(inputPath)));
-  const probes = await context.probeAxisTools(runnerDir, runner.tools, context.jetBin);
-  const result = {
+function runnerCorpus(axis, corpus, summary) {
+  return {
+    path: axis.corpus.path,
+    seed: corpus.seed,
+    case_count: corpus.caseCount,
+    bytes_per_case: corpus.bytesPerCase,
+    bytes: corpus.bytes,
+    generated_sha256: corpus.sha256,
+    copied_sha256: null,
+    matches_generator: false,
+    case_kinds: summary.counts,
+    valid_case_count: summary.counts.valid,
+    adversarial_case_count: corpus.caseCount - summary.counts.valid,
+  };
+}
+
+function baseRunnerResult(axis, runner, corpus, summary) {
+  return {
     id: runner.id,
     language: runner.language,
-    tools: probes,
-    source_files: files,
-    corpus: {
-      path: axis.corpus.path,
-      seed: corpus.seed,
-      case_count: corpus.caseCount,
-      bytes_per_case: corpus.bytesPerCase,
-      bytes: corpus.bytes,
-      generated_sha256: corpus.sha256,
-      copied_sha256: copiedSha,
-      matches_generator: copiedSha === corpus.sha256,
-      case_kinds: summary.counts,
-      valid_case_count: summary.counts.valid,
-      adversarial_case_count: corpus.caseCount - summary.counts.valid,
-    },
+    tools: [],
+    source_files: [],
+    corpus: runnerCorpus(axis, corpus, summary),
     resource_budget: axis.budget,
     resource_enforcement: {
       cpu: "RLIMIT_CPU via ulimit -t",
@@ -411,26 +407,99 @@ async function runRunner(axis, runner, axisDir, corpus, summary, expected, conte
     status: "unmeasured",
     findings: [],
   };
-  const unavailable = probes.find((probe) => probe.status === "unavailable");
-  const probeFailure = probes.find((probe) => probe.status === "probe_failed");
-  if (unavailable) {
-    result.status = "unavailable";
-    result.reason = unavailable.reason;
-    return result;
-  }
-  if (probeFailure) {
-    result.status = "failed";
-    result.reason = probeFailure.reason;
-    return result;
-  }
+}
 
+function failureMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function failureProcess(reason) {
+  const stderr = failureMessage(reason);
+  return {
+    code: null,
+    signal: null,
+    timed_out: false,
+    resource_exceeded: null,
+    stdout: "",
+    stderr,
+    stdout_bytes: "",
+    stderr_bytes: Buffer.from(stderr, "utf8").toString("base64"),
+  };
+}
+
+function markRunnerFailure(result, stage, command, error) {
+  const reason = failureMessage(error);
+  const previous = result[stage] && typeof result[stage] === "object" ? result[stage] : {};
+  result[stage] = {
+    ...previous,
+    status: "failed",
+    command: command ?? previous.command ?? null,
+    process: previous.process ?? failureProcess(reason),
+    failure: { stage, reason },
+  };
+  result.failure = { stage, status: "failed", reason };
+  result.failed_stage = stage;
+  result.status = "failed";
+  result.reason = `${stage} execution failed: ${reason}`;
+  return result;
+}
+
+async function runRunner(axis, runner, axisDir, corpus, summary, expected, context) {
+  const result = baseRunnerResult(axis, runner, corpus, summary);
   const localFindings = [];
+  let stage = "setup";
+  let command = null;
+  let probes = [];
   let compile = null;
   let run = null;
   try {
+    const runnerDir = path.join(axisDir, runner.id.replaceAll(/[^A-Za-z0-9_.-]/g, "_"));
+    await fs.mkdir(runnerDir, { recursive: true });
+    const files = await context.stageAxisFiles(runnerDir, runner.files);
+    if (!Array.isArray(files)) throw new Error("axis file staging did not return a file list");
+    result.source_files = files;
+    const inputPath = context.axisStagePath(runnerDir, axis.corpus.path);
+    await fs.mkdir(path.dirname(inputPath), { recursive: true });
+    await fs.writeFile(inputPath, corpus.data);
+    const copiedSha = await (context.fileSha256 ? context.fileSha256(inputPath) : sha256(await fs.readFile(inputPath)));
+    result.corpus.copied_sha256 = copiedSha;
+    result.corpus.matches_generator = copiedSha === corpus.sha256;
+    if (!result.corpus.matches_generator) {
+      return markRunnerFailure(
+        result,
+        "setup",
+        null,
+        new Error(`copied fuzz corpus digest ${copiedSha} does not match generated digest ${corpus.sha256}`),
+      );
+    }
+    probes = await context.probeAxisTools(runnerDir, runner.tools, context.jetBin);
+    if (!Array.isArray(probes)) throw new Error("axis tool probing did not return a probe list");
+    result.tools = probes;
+    const unavailable = probes.find((probe) => probe.status === "unavailable");
+    const probeFailure = probes.find((probe) => probe.status === "probe_failed");
+    if (unavailable) {
+      result.status = "unavailable";
+      result.reason = unavailable.reason;
+      return result;
+    }
+    if (probeFailure) {
+      result.status = "failed";
+      result.reason = probeFailure.reason;
+      result.failure = { stage: "setup", status: "failed", reason: probeFailure.reason };
+      result.failed_stage = "setup";
+      result.setup = {
+        status: "failed",
+        command: null,
+        process: failureProcess(probeFailure.reason),
+        failure: result.failure,
+      };
+      return result;
+    }
+
     if (runner.compile) {
-      const compileCommand = context.axisCommand(runner.compile, { jet_bin: context.jetBin });
-      compile = await context.runMemoryCommand(runnerDir, compileCommand, axis.budget);
+      stage = "compile";
+      command = context.axisCommand(runner.compile, { jet_bin: context.jetBin });
+      compile = await context.runMemoryCommand(runnerDir, command, axis.budget);
       result.compile = compile;
       delete result.compile.raw;
       const compileEvidence = processEvidence(compile, context.outputLimit ?? DEFAULT_OUTPUT_LIMIT);
@@ -452,8 +521,9 @@ async function runRunner(axis, runner, axisDir, corpus, summary, expected, conte
       }
     }
 
-    const runCommand = context.axisCommand(runner.run, { jet_bin: context.jetBin });
-    run = await context.runMemoryCommand(runnerDir, runCommand, axis.budget);
+    stage = "run";
+    command = context.axisCommand(runner.run, { jet_bin: context.jetBin });
+    run = await context.runMemoryCommand(runnerDir, command, axis.budget);
     result.run = run;
     delete result.run.raw;
     const runEvidence = processEvidence(run, context.outputLimit ?? DEFAULT_OUTPUT_LIMIT);
@@ -506,9 +576,8 @@ async function runRunner(axis, runner, axisDir, corpus, summary, expected, conte
       result.status = "complete";
     }
   } catch (error) {
-    result.status = "failed";
-    result.reason = `${run ? "run" : "compile"} execution failed: ${error.message}`;
     result.findings = enrichFindings(localFindings, { corpus, summary, tools: probes });
+    return markRunnerFailure(result, stage, command, error);
   }
   return result;
 }
@@ -543,7 +612,8 @@ export async function runMemorySafetyFuzzAxis(axis, context = {}) {
       const command = result.run?.command || result.compile?.command || result.declared_run || result.declared_compile || [];
       for (const finding of result.findings ?? []) recordFinding(receipts, finding, runner, process, corpus, summary, expected, context, command);
     } catch (error) {
-      runners.push({ id: runner.id, language: runner.language, status: "failed", reason: `runner setup failed: ${error.message}`, findings: [] });
+      const failed = baseRunnerResult(axis, runner, corpus, summary);
+      runners.push(markRunnerFailure(failed, "setup", null, error));
     }
   }
   const measured = runners.length === axis.runners.length && runners.every((runner) => ["complete", "finding"].includes(runner.status));

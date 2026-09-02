@@ -30,6 +30,7 @@ pub use jet_pkg_model::Store::{
 };
 
 use crate::TrustRoot::{cache_builder_identity, is_cache_builder_revoked};
+use crate::RuntimePolicy;
 use crate::SHA256;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::cell::RefCell;
@@ -1361,6 +1362,237 @@ fn record_realized_mode_unlocked(
     Ok(entry)
 }
 
+/// Recreate a Nix package record from lock-declared CAS objects.
+///
+/// The logical `/nix/store` names are deterministic projections derived from
+/// the locked object digest. They are not host store paths and are never
+/// copied into the project lock.
+pub(crate) fn record_locked_nix(
+    roots: &Roots,
+    name: &str,
+    version: &str,
+    reference: &str,
+    lock_envelope: &crate::Lock::LockEnvelope,
+    closure: &crate::Lock::NixClosureRecord,
+    object_digests: &[String],
+    lock_digest: &str,
+) -> std::io::Result<StoreEntry> {
+    closure.validate().map_err(std::io::Error::other)?;
+    if lock_envelope.output_hash != closure.output {
+        return Err(std::io::Error::other(
+            "locked Nix envelope output disagrees with its closure record",
+        ));
+    }
+    if lock_envelope.platform.is_empty()
+        || lock_envelope.platform != closure.system
+        || lock_digest.is_empty()
+    {
+        return Err(std::io::Error::other(
+            "locked Nix replay has incomplete or mismatched target identity",
+        ));
+    }
+    let object_root = roots.hangar_dir().join(OBJECTS_DIR);
+    let mut digests = BTreeSet::new();
+    for digest in object_digests {
+        if digest.is_empty() || digest.contains('/') || digest.contains('\\') {
+            return Err(std::io::Error::other(
+                "locked Nix replay contains an unsafe CAS digest",
+            ));
+        }
+        if !digests.insert(digest.clone()) {
+            continue;
+        }
+        let path = object_root.join(digest);
+        let actual = super::Envelope::try_output_hash_of_in_hangar(
+            &path.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .map_err(std::io::Error::other)?;
+        if actual != *digest {
+            return Err(std::io::Error::other(format!(
+                "locked Nix CAS object `{digest}` re-hashed as `{actual}`"
+            )));
+        }
+    }
+    if !digests.contains(&closure.output)
+        || closure.references.iter().any(|digest| !digests.contains(digest))
+    {
+        return Err(std::io::Error::other(
+            "locked Nix CAS bundle omits a declared closure reference",
+        ));
+    }
+
+    let cache_identity = CacheIdentity {
+        source_fingerprint: closure.output.clone(),
+        recipe_fingerprint: SHA256::sha256_hex(super::Provider::NIX_RECIPE_ID.as_bytes()),
+        policy_fingerprint: closure.cache_key.clone(),
+        platform: lock_envelope.platform.clone(),
+    };
+    let make_producer = |output: &str, refs: &[String]| -> std::io::Result<ProducerRecord> {
+        let logical = locked_nix_logical_path(output, "out");
+        let logical_refs = refs
+            .iter()
+            .map(|reference| locked_nix_logical_path(reference, "out"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut facts = super::Provider::nix_build_facts_record();
+        facts.insert("nix.drv_path".into(), format!("locked-derivation:{}", closure.derivation));
+        facts.insert("nix.reference".into(), reference.to_string());
+        facts.insert("nix.store-path".into(), logical.clone());
+        facts.insert("nix.output.out".into(), logical);
+        facts.insert("nix.output.out.digest".into(), output.to_string());
+        facts.insert("nix.references".into(), logical_refs);
+        facts.insert("nix.nar-hash".into(), closure.nar_hash.clone());
+        facts.insert("nix.nar-size".into(), closure.size.to_string());
+        facts.insert("nix.compression".into(), closure.compression.clone());
+        facts.insert("nix.index.channel".into(), closure.channel.clone());
+        facts.insert("nix.index.revision".into(), closure.revision.clone());
+        facts.insert("nix.index.system".into(), closure.system.clone());
+        facts.insert(
+            "nix.index.manifest.sha256".into(),
+            closure.signed_index_manifest.clone(),
+        );
+        facts.insert("nix.derivation.sha256".into(), closure.derivation.clone());
+        facts.insert("nix.cache.key".into(), closure.cache_key.clone());
+        facts.insert("nix.lock.digest".into(), lock_digest.to_string());
+        facts.insert(
+            "nix.closure.receipt".into(),
+            closure.project_cas_bundle.clone(),
+        );
+        facts.insert(
+            "nix.cache.closure.receipt.sha256".into(),
+            closure.project_cas_bundle.clone(),
+        );
+        facts.insert("nix.cache.source_fingerprint".into(), output.to_string());
+        facts.insert(
+            "nix.cache.recipe_fingerprint".into(),
+            cache_identity.recipe_fingerprint.clone(),
+        );
+        facts.insert(
+            "nix.cache.policy_fingerprint".into(),
+            closure.cache_key.clone(),
+        );
+        facts.insert(
+            "nix.cache.platform".into(),
+            lock_envelope.platform.clone(),
+        );
+        let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(facts.clone())
+            .map_err(std::io::Error::other)?;
+        let nix_toolchain_facts = format!(
+            "nix-derivation:{}",
+            facts
+                .get("nix.drv_path")
+                .ok_or_else(|| std::io::Error::other("locked Nix producer lost derivation identity"))?
+        );
+        let mut producer = ProducerRecord::new(
+            "nix",
+            format!("locked-nix:{}", closure.derivation),
+            closure.derivation.clone(),
+            plan,
+            nix_toolchain_facts,
+            format!(
+                "policy={}\nplatform={}",
+                closure.cache_key, lock_envelope.platform
+            ),
+            facts,
+        )
+        .map_err(std::io::Error::other)?;
+        let identity = CacheIdentity {
+            source_fingerprint: output.to_string(),
+            ..cache_identity.clone()
+        };
+        producer.bind_cache_provenance(reference, output, &identity, refs);
+        Ok(producer)
+    };
+
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        AdmissionTransaction::recover_unlocked(roots)?;
+        let mut entries = Vec::new();
+        for digest in &digests {
+            let out = object_root.join(digest).to_string_lossy().into_owned();
+            let envelope = crate::Envelope::Envelope {
+                output_hash: digest.clone(),
+                platform: lock_envelope.platform.clone(),
+                signature: lock_envelope.signature.clone(),
+                provenance: lock_envelope.provenance.clone(),
+            };
+            let producer = make_producer(digest, &[])?;
+            let id = entry_id("__nix_cas", digest, &format!("nix-cas:{digest}"), &out);
+            entries.push(StoreEntry {
+                id,
+                name: "__nix_cas".into(),
+                version: digest.clone(),
+                reference: format!("nix-cas:{digest}"),
+                out: out.clone(),
+                bin: String::new(),
+                rlib: String::new(),
+                envelope,
+                cache_identity: CacheIdentity {
+                    source_fingerprint: digest.clone(),
+                    ..cache_identity.clone()
+                },
+                references: Vec::new(),
+                named_outputs: BTreeMap::from([("out".into(), digest.clone())]),
+                platform_artifact_kind: String::new(),
+                producer_record: producer.encode(),
+                receipt: String::new(),
+                realized_at: 0,
+                last_used_at: 0,
+            });
+        }
+
+        let output = object_root.join(&closure.output).to_string_lossy().into_owned();
+        let output_bin = Path::new(&output).join("bin");
+        let primary_producer = make_producer(&closure.output, &closure.references)?;
+        let primary_id = entry_id(name, version, reference, &output);
+        let primary = StoreEntry {
+            id: primary_id.clone(),
+            name: name.to_string(),
+            version: version.to_string(),
+            reference: reference.to_string(),
+            out: output.clone(),
+            bin: fs::symlink_metadata(&output_bin)
+                .is_ok()
+                .then(|| output_bin.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            rlib: String::new(),
+            envelope: crate::Envelope::Envelope {
+                output_hash: closure.output.clone(),
+                platform: lock_envelope.platform.clone(),
+                signature: lock_envelope.signature.clone(),
+                provenance: lock_envelope.provenance.clone(),
+            },
+            cache_identity: cache_identity.clone(),
+            references: closure.references.clone(),
+            named_outputs: BTreeMap::from([("out".into(), closure.output.clone())]),
+            platform_artifact_kind: String::new(),
+            producer_record: primary_producer.encode(),
+            receipt: String::new(),
+            realized_at: 0,
+            last_used_at: 0,
+        };
+        entries.push(primary);
+        let primary_index = entries.len() - 1;
+        let mut transaction = AdmissionTransaction::new(roots)?;
+        transaction.commit(
+            entries.as_mut_slice(),
+            &[],
+            None,
+            Closure::RegistrationMode::AdmittedNix,
+            None,
+        )?;
+        Ok(entries[primary_index].clone())
+    })
+}
+
+fn locked_nix_logical_path(digest: &str, output: &str) -> String {
+    let digest = digest.strip_prefix("sha256-").unwrap_or(digest);
+    let short = &digest[..digest.len().min(32)];
+    format!("/nix/store/jet-{short}-{output}")
+}
+
+
 fn canonical_graph_digest(
     roots: &Roots,
     graph: &Closure::ClosureGraph,
@@ -1591,6 +1823,53 @@ fn pin_nix_gc_root(_entry_dir: &Path, out: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Reconstruct one fully locked Nix package from its project CAS bundle.
+fn replay_locked_nix_package(
+    roots: &Roots,
+    ctx: &super::Provider::Ctx<'_>,
+    spec: &super::RefSpec::RefSpec,
+) -> Result<Option<VerifiedRealization>, RealizeError> {
+    let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) else {
+        return Ok(None);
+    };
+    let (name, version, closure, envelope) =
+        match super::Lock::locked_nix_package_strict(project, &spec.raw) {
+            Ok(Some(value)) => value,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                return Err(RealizeError::Store(std::io::Error::other(error)));
+            }
+        };
+    let lock_digest =
+        super::Provider::project_lock_digest(Some(project)).map_err(RealizeError::Provider)?;
+    let (_, object_digests) = import_nix_cas_bundle_checked(
+        project,
+        roots,
+        &closure.project_cas_bundle,
+        &closure,
+        &envelope,
+    )
+    .map_err(RealizeError::Store)?;
+    let entry = record_locked_nix(
+        roots,
+        &name,
+        &version,
+        &spec.raw,
+        &envelope,
+        &closure,
+        &object_digests,
+        &lock_digest,
+    )
+    .map_err(RealizeError::Store)?;
+    project_receipt_projection(ctx, &entry)?;
+    let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
+    Ok(Some(VerifiedRealization {
+        entry,
+        source_state: super::Provider::SourceState::Cached,
+        lease,
+    }))
+}
+
 /// Single realization boundary for every product consumer. Cache reuse,
 /// quarantine, provider execution, and recording cannot be bypassed by CLI or
 /// JetOS callers.
@@ -1621,6 +1900,14 @@ pub fn realize_verified(
             Some((*expectation).clone()),
         ),
     };
+    let locked_nix = match &request {
+        RealizeRequest::Package { spec, .. } => ctx
+            .project_dir
+            .filter(|path| path.is_dir())
+            .and_then(|project| super::Lock::locked_nix_package(project, &spec.raw))
+            .is_some(),
+        RealizeRequest::Adapter { .. } => false,
+    };
 
     // A missing bindings directory means "no configured cache". A present
     // but malformed or unreadable binding is trust state, not a cache miss;
@@ -1632,6 +1919,17 @@ pub fn realize_verified(
         }
         RealizeRequest::Adapter { .. } => false,
     };
+
+    // A complete Nix lock is authoritative for both warm and cold paths.
+    // Validate/import its project CAS before considering any shared cache
+    // candidate, so a stale cache cannot turn a locked replay into discovery.
+    if locked_nix {
+        if let RealizeRequest::Package { spec, .. } = &request {
+            if let Some(replayed) = replay_locked_nix_package(roots, ctx, spec)? {
+                return Ok(replayed);
+            }
+        }
+    }
 
     let candidate = find_by_reference(roots, &reference);
     if let (Some(candidate), Some(expectation)) = (candidate, expectation.as_ref()) {
@@ -1677,7 +1975,7 @@ pub fn realize_verified(
                     }
                 }
 
-                if cache_bindings.is_empty() && !indexed_nix_repair {
+                if cache_bindings.is_empty() && !indexed_nix_repair && !locked_nix {
                     let mut failure = integrity_failure(roots, &candidate, expectation, proof);
                     if let Err(error) = quarantine_invalid_entry(roots, &candidate, expectation) {
                         failure.actual = format!("{}; quarantine failed: {error}", failure.actual);
@@ -1955,11 +2253,8 @@ fn record_receipt_projection(
     }
     package.receipt = Some(receipt.to_string());
     crate::Lock::ensure_build_stamp(project_root, &mut lock);
-    crate::Lock::write_lock_atomically(&lock_path, &crate::Lock::write(&lock))
+    crate::Lock::write_lock_atomically(project_root, crate::Lock::write(&lock).as_bytes())
         .map_err(std::io::Error::other)?;
-    if let Some(parent) = lock_path.parent() {
-        sync_store_directory(parent)?;
-    }
     Ok(true)
 }
 

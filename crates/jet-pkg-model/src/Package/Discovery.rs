@@ -224,6 +224,22 @@ mod tests {
     }
 
     #[test]
+    fn deep_tree_is_rejected_before_discovery_descent() {
+        let dir = tempdir("deep-tree");
+        let mut current = dir.clone();
+        for index in 0..=(crate::SHA256::MAX_TREE_DEPTH + 1) {
+            current.push(format!("d{index}"));
+            std::fs::create_dir(&current).unwrap();
+        }
+        std::fs::write(current.join("workspace.jet"), "module workspace { }\n").unwrap();
+        assert!(matches!(
+            discover_module_in(&dir, "workspace"),
+            Err(DiscoveryError::NotFound { .. })
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn ambiguous_when_two_files_declare_the_same_module() {
         let dir = tempdir("ambiguous");
         std::fs::write(dir.join("one.jet"), "module dup { }\n").unwrap();

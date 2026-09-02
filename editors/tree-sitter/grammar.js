@@ -32,6 +32,9 @@ module.exports = grammar({
 
   conflicts: ($) => [
     [$._expr, $.lambda_param],
+    // Parenthesized key/value loop bindings share the `(a, b)` expression and
+    // lambda-parameter prefix; the following `in` token selects the loop form.
+    [$._loop_head, $._expr, $.lambda_param],
     [$._expr, $.list_pattern],
     [$._type, $._expr],
     [$.capability_type, $.union_type],
@@ -71,7 +74,7 @@ module.exports = grammar({
   ],
 
   rules: {
-    source_file: ($) => repeat($._item),
+    source_file: ($) => seq(optional($.inline_package), repeat($._item)),
 
     // ── Applied rules (D-SHAPE2, D-ATTR1/2/3, D-CASING1) ──────────────────
     // `#Rule`, `#Rule(args)`, and `#[Rule, Rule(args)]` bracket lists.
@@ -140,6 +143,11 @@ module.exports = grammar({
         $.migration_block,
         $.config_field,
       ),
+
+    // D-ECO-INLINEPACKAGE1=A: the carrier is contextual source structure.
+    // PackageFacts owns its field grammar; tree-sitter only recognizes the
+    // balanced record shell so editor spans remain intact.
+    inline_package: ($) => seq("package", $.record_literal),
 
     // Top-level manifest/config record field: `payload: { … }`, `name: "x"`,
     // `system.my-host: { … }` in a `pkg.jet` / `env.jet` / `config.jet`. The
@@ -877,10 +885,19 @@ module.exports = grammar({
       choice(
         seq(
           field("var", $.identifier),
-          optional(seq(",", field("var2", $.identifier))),
-          ";",
+          "in",
           field("source", $._expr),
-          optional(seq(";", field("stride", $._expr))),
+          optional(seq(",", field("stride", $._expr))),
+        ),
+        seq(
+          "(",
+          field("var", $.identifier),
+          ",",
+          field("var2", $.identifier),
+          ")",
+          "in",
+          field("source", $._expr),
+          optional(seq(",", field("stride", $._expr))),
         ),
         seq(
           field("state", $.identifier),

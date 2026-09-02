@@ -168,15 +168,11 @@ mod jet_devserver_impl {
                 std::process::exit(1);
             }
 
-            let output_root = match jet_devserver_rebuild(
-                &app_file,
-                html_override.as_deref(),
-                false,
-                None,
-            ) {
-                Some(root) => Arc::new(root),
-                None => std::process::exit(1),
-            };
+            let output_root =
+                match jet_devserver_rebuild(&app_file, html_override.as_deref(), false, None) {
+                    Some(root) => Arc::new(root),
+                    None => std::process::exit(1),
+                };
 
             let version = Arc::new(AtomicU64::new(1));
             let listener = jet_devserver_bind(port_pref);
@@ -188,9 +184,7 @@ mod jet_devserver_impl {
             {
                 let version = Arc::clone(&version);
                 let output_root = Arc::clone(&output_root);
-                thread::spawn(move || {
-                    jet_devserver_serve_forever(listener, version, output_root)
-                });
+                thread::spawn(move || jet_devserver_serve_forever(listener, version, output_root));
             }
 
             println!("App preview: http://127.0.0.1:{}/", bound_port);
@@ -233,7 +227,10 @@ mod jet_devserver_impl {
                 Err(e) => {
                     eprintln!("error: couldn't bind to port {}: {}", port, e);
                     if e.kind() == std::io::ErrorKind::AddrInUse {
-                        eprintln!(" fix: stop whatever's using port {}, or pick another with `.port(n)`", port);
+                        eprintln!(
+                            " fix: stop whatever's using port {}, or pick another with `.port(n)`",
+                            port
+                        );
                     }
                     std::process::exit(1);
                 }
@@ -316,10 +313,14 @@ mod jet_devserver_impl {
         );
         let staging_root = out_dir.join(&staging_name);
         let source_stem = jet_devserver_source_stem(&abs_file);
-        let staging = match jet_devserver_create_staging(&output_root, &staging_root, &source_stem) {
+        let staging = match jet_devserver_create_staging(&output_root, &staging_root, &source_stem)
+        {
             Ok(staging) => staging,
             Err(e) => {
-                eprintln!("error: couldn't create a staging folder for the rebuild: {}", e);
+                eprintln!(
+                    "error: couldn't create a staging folder for the rebuild: {}",
+                    e
+                );
                 return None;
             }
         };
@@ -330,9 +331,7 @@ mod jet_devserver_impl {
         // cwd-sensitive wrapper that breaks under the staging cwd below.
         let jet_bin = std::env::var("JET_BIN").unwrap_or_else(|_| "jet".to_string());
         let mut command = Command::new(&jet_bin);
-        command
-            .args(["build", "--target=web"])
-            .arg(&abs_file);
+        command.args(["build", "--target=web"]).arg(&abs_file);
         let command_guard = match jet_devserver_prepare_build_command(&mut command, &staging) {
             Ok(guard) => guard,
             Err(e) => {
@@ -349,7 +348,10 @@ mod jet_devserver_impl {
         let out = match out {
             Ok(o) => o,
             Err(e) => {
-                eprintln!("error: couldn't run `{} build --target=web`: {}", jet_bin, e);
+                eprintln!(
+                    "error: couldn't run `{} build --target=web`: {}",
+                    jet_bin, e
+                );
                 eprintln!(" fix: make sure `jet` is on PATH, or run this program via `jet dev` (which passes its own path in JET_BIN)");
                 let _ = jet_devserver_cleanup_staging(&output_root, &staging);
                 return None;
@@ -379,8 +381,7 @@ mod jet_devserver_impl {
                 Err(e) => {
                     eprintln!(
                         "error: `.html(\"{}\")` names a file that doesn't exist: {}",
-                        html_path,
-                        e
+                        html_path, e
                     );
                     let _ = jet_devserver_cleanup_staging(&output_root, &staging);
                     return None;
@@ -410,10 +411,16 @@ mod jet_devserver_impl {
             .stderr(Stdio::piped())
             .spawn()?;
         let stdout = child.stdout.take().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::Other, "build stdout pipe was not available")
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "build stdout pipe was not available",
+            )
         });
         let stderr = child.stderr.take().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::Other, "build stderr pipe was not available")
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "build stderr pipe was not available",
+            )
         });
         let (stdout, stderr) = match (stdout, stderr) {
             (Ok(stdout), Ok(stderr)) => (stdout, stderr),
@@ -453,16 +460,12 @@ mod jet_devserver_impl {
                 None => thread::sleep(Duration::from_millis(1)),
             }
         };
-        let stdout = stdout_join
-            .join()
-            .map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::Other, "build stdout reader panicked")
-            })??;
-        let stderr = stderr_join
-            .join()
-            .map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::Other, "build stderr reader panicked")
-            })??;
+        let stdout = stdout_join.join().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::Other, "build stdout reader panicked")
+        })??;
+        let stderr = stderr_join.join().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::Other, "build stderr reader panicked")
+        })??;
         if exceeded.load(Ordering::Acquire) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -505,12 +508,7 @@ mod jet_devserver_impl {
                     let available = limit.saturating_sub(used);
                     let kept = available.min(count);
                     let next = used.saturating_add(kept);
-                    match budget.compare_exchange(
-                        used,
-                        next,
-                        Ordering::AcqRel,
-                        Ordering::Acquire,
-                    ) {
+                    match budget.compare_exchange(used, next, Ordering::AcqRel, Ordering::Acquire) {
                         Ok(_) => break kept,
                         Err(next) => used = next,
                     }
@@ -621,15 +619,15 @@ mod jet_devserver_impl {
         const AT_REMOVEDIR: i32 = 0x200;
 
         unsafe extern "C" {
-            fn mkdirat(directory: i32, path: *const i8, mode: u32) -> i32;
-            fn openat(directory: i32, path: *const i8, flags: i32, mode: u32) -> i32;
+            fn mkdirat(directory: i32, path: *const std::ffi::c_char, mode: u32) -> i32;
+            fn openat(directory: i32, path: *const std::ffi::c_char, flags: i32, mode: u32) -> i32;
             fn renameat(
                 old_directory: i32,
-                old_path: *const i8,
+                old_path: *const std::ffi::c_char,
                 new_directory: i32,
-                new_path: *const i8,
+                new_path: *const std::ffi::c_char,
             ) -> i32;
-            fn unlinkat(directory: i32, path: *const i8, flags: i32) -> i32;
+            fn unlinkat(directory: i32, path: *const std::ffi::c_char, flags: i32) -> i32;
         }
 
         fn name(value: &OsStr) -> std::io::Result<CString> {
@@ -807,12 +805,7 @@ mod jet_devserver_impl {
                 let _ = unlink_at(root, OsStr::new(value), 0);
             }
             for value in backed_up.iter().rev() {
-                let _ = rename_at(
-                    journal,
-                    OsStr::new(value),
-                    root,
-                    OsStr::new(value),
-                );
+                let _ = rename_at(journal, OsStr::new(value), root, OsStr::new(value));
             }
         }
 
@@ -1082,12 +1075,8 @@ mod jet_devserver_impl {
             if current >= JET_DEVSERVER_MAX_CONNECTION_THREADS {
                 return false;
             }
-            match active.compare_exchange(
-                current,
-                current + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
+            match active.compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
+            {
                 Ok(_) => return true,
                 Err(next) => current = next,
             }
@@ -1214,10 +1203,7 @@ mod jet_devserver_impl {
                     "devserver headers exceed the request budget",
                 ));
             }
-            let Some((name, value)) = line
-                .trim_end_matches(['\r', '\n'])
-                .split_once(':')
-            else {
+            let Some((name, value)) = line.trim_end_matches(['\r', '\n']).split_once(':') else {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "malformed devserver header",
@@ -1352,14 +1338,13 @@ mod jet_devserver_impl {
         let is_index = file_path.file_name().and_then(|f| f.to_str()) == Some("index.html");
         let content_type = jet_devserver_content_type_for(&file_path);
         let script = is_index.then(jet_devserver_live_reload_script);
-        let read_limit = script.as_ref().map_or(
-            JET_DEVSERVER_MAX_RESPONSE_BYTES,
-            |script| {
+        let read_limit = script
+            .as_ref()
+            .map_or(JET_DEVSERVER_MAX_RESPONSE_BYTES, |script| {
                 JET_DEVSERVER_MAX_RESPONSE_BYTES
                     .checked_sub(script.len())
                     .unwrap_or(0)
-            },
-        );
+            });
         let bytes = {
             let _publication = output_root.publication_lock.lock().map_err(|_| {
                 std::io::Error::new(
@@ -1413,12 +1398,7 @@ mod jet_devserver_impl {
             }
             if let Some(index) = jet_devserver_find_body_end(&bytes) {
                 let parts = [&bytes[..index], script.as_bytes(), &bytes[index..]];
-                return jet_devserver_write_response_parts(
-                    stream,
-                    "200 OK",
-                    content_type,
-                    &parts,
-                );
+                return jet_devserver_write_response_parts(stream, "200 OK", content_type, &parts);
             }
             let parts = [&bytes[..], script.as_bytes()];
             return jet_devserver_write_response_parts(stream, "200 OK", content_type, &parts);
@@ -1429,16 +1409,14 @@ mod jet_devserver_impl {
     fn jet_devserver_find_body_end(bytes: &[u8]) -> Option<usize> {
         const MARKER: &[u8] = b"</body>";
         bytes.windows(MARKER.len()).position(|window| {
-            window.iter().zip(MARKER).all(|(actual, expected)| {
-                actual.to_ascii_lowercase() == *expected
-            })
+            window
+                .iter()
+                .zip(MARKER)
+                .all(|(actual, expected)| actual.to_ascii_lowercase() == *expected)
         })
     }
 
-    fn jet_devserver_read_bounded(
-        file: File,
-        limit: usize,
-    ) -> std::io::Result<Vec<u8>> {
+    fn jet_devserver_read_bounded(file: File, limit: usize) -> std::io::Result<Vec<u8>> {
         jet_devserver_check_opened_file(&file)?;
         let metadata = file.metadata()?;
         let length_bytes = metadata.len();
@@ -1538,10 +1516,7 @@ mod jet_devserver_impl {
 
         unsafe extern "system" {
             fn GetFileAttributesW(name: *const u16) -> u32;
-            fn GetFileInformationByHandle(
-                file: Handle,
-                info: *mut ByHandleFileInformation,
-            ) -> i32;
+            fn GetFileInformationByHandle(file: Handle, info: *mut ByHandleFileInformation) -> i32;
             fn GetFileInformationByHandleEx(
                 file: Handle,
                 class: i32,
@@ -1785,14 +1760,7 @@ mod jet_devserver_impl {
             create_new: bool,
             directory: bool,
         ) -> std::io::Result<File> {
-            open_existing_with_share(
-                path,
-                access,
-                write,
-                create_new,
-                directory,
-                FILE_SHARE_ALL,
-            )
+            open_existing_with_share(path, access, write, create_new, directory, FILE_SHARE_ALL)
         }
 
         fn open_root(path: &Path) -> std::io::Result<JetDevServerOutputRoot> {
@@ -2122,13 +2090,8 @@ mod jet_devserver_impl {
             verify_parent(&root_path, &root_final, &root.directory)?;
             std::fs::create_dir(&staging_path)?;
             reject_reparse_components(&staging_path)?;
-            let (directory, actual) = open_dir_in_parent(
-                &root_path,
-                &root_final,
-                name,
-                false,
-                &root.directory,
-            )?;
+            let (directory, actual) =
+                open_dir_in_parent(&root_path, &root_final, name, false, &root.directory)?;
             if !is_child(&root_final, &actual) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
@@ -2163,13 +2126,8 @@ mod jet_devserver_impl {
                         "devserver path is not relative",
                     ));
                 };
-                let (directory, actual) = open_dir_in_parent(
-                    &current_path,
-                    &current_final,
-                    value,
-                    false,
-                    &current,
-                )?;
+                let (directory, actual) =
+                    open_dir_in_parent(&current_path, &current_final, value, false, &current)?;
                 current_path.push(value);
                 current = directory;
                 current_final = actual;
@@ -2180,13 +2138,8 @@ mod jet_devserver_impl {
                     "devserver path is not relative",
                 ));
             };
-            let (file, _) = open_file_in_parent(
-                &current_path,
-                &current_final,
-                value,
-                false,
-                &current,
-            )?;
+            let (file, _) =
+                open_file_in_parent(&current_path, &current_final, value, false, &current)?;
             let _ = current;
             Ok(file)
         }
@@ -2339,18 +2292,15 @@ mod jet_devserver_impl {
                 OsStr::new("build"),
                 true,
                 &staging.directory,
-            )
-            {
+            ) {
                 for value in JET_DEVSERVER_STAGING_FILES {
-                    if let Ok((file, _)) =
-                        open_file_in_parent(
-                            &staging.path.join("build"),
-                            &build_final,
-                            OsStr::new(value),
-                            true,
-                            &build,
-                        )
-                    {
+                    if let Ok((file, _)) = open_file_in_parent(
+                        &staging.path.join("build"),
+                        &build_final,
+                        OsStr::new(value),
+                        true,
+                        &build,
+                    ) {
                         let _ = delete_handle(&file);
                     }
                 }
@@ -2648,12 +2598,10 @@ mod jet_devserver_impl {
                 .chars()
                 .last()
                 .is_some_and(|character| character == ' ' || character == '.')
-            || text
-                .chars()
-                .any(|character| {
-                    character.is_control()
-                        || matches!(character, ':' | '\\' | '<' | '>' | '"' | '|' | '?' | '*')
-                })
+            || text.chars().any(|character| {
+                character.is_control()
+                    || matches!(character, ':' | '\\' | '<' | '>' | '"' | '|' | '?' | '*')
+            })
         {
             return false;
         }

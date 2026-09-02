@@ -1294,7 +1294,7 @@ fn shared_foreign_undo_rejects_ambiguous_owners() {
         root.join("left.jet"),
         r#"
 use c.shared as ffi
-#Extern module c.shared {
+#Import module c.shared {
     #Undo(undo_mutate) fn mutate(value: Int) Int = "mutate"
 }
 fn undo_mutate(value: Int) { print(value) }

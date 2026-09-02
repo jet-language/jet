@@ -34,11 +34,7 @@ mod seeded_random_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
 }
 
-fn seeded_rng_int(
-    state: &mut u64,
-    low: i64,
-    high: i64,
-) -> Result<i64, &'static str> {
+fn seeded_rng_int(state: &mut u64, low: i64, high: i64) -> Result<i64, &'static str> {
     seeded_random_kernel::jet_seeded_rng_int_checked(state, low, high)
 }
 
@@ -48,13 +44,15 @@ fn seeded_rng_float(state: &mut u64) -> f64 {
 
 fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
-    items.sort_by(|left, right| match cmp_for_sort(left.clone(), right.clone(), span) {
-        Ok(order) => order,
-        Err(error) => {
-            sort_error.get_or_insert(error);
-            std::cmp::Ordering::Equal
-        }
-    });
+    items.sort_by(
+        |left, right| match cmp_for_sort(left.clone(), right.clone(), span) {
+            Ok(order) => order,
+            Err(error) => {
+                sort_error.get_or_insert(error);
+                std::cmp::Ordering::Equal
+            }
+        },
+    );
     if let Some(error) = sort_error {
         return Err(error);
     }
@@ -130,13 +128,15 @@ pub fn vault_comptime_denied(module: &str, method: &str, span: Span) -> Diagnost
 
 fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
-    items.sort_by(|left, right| match cmp_for_sort(right.clone(), left.clone(), span) {
-        Ok(order) => order,
-        Err(error) => {
-            sort_error.get_or_insert(error);
-            std::cmp::Ordering::Equal
-        }
-    });
+    items.sort_by(
+        |left, right| match cmp_for_sort(right.clone(), left.clone(), span) {
+            Ok(order) => order,
+            Err(error) => {
+                sort_error.get_or_insert(error);
+                std::cmp::Ordering::Equal
+            }
+        },
+    );
     match sort_error {
         Some(error) => Err(error),
         None => Ok(items),
@@ -419,17 +419,9 @@ pub fn eval_build_time_io(
     if builtin == crate::Syntax::BUILTIN_FIND {
         return eval_locked_find(base_dir, &rel, embed_inputs, span);
     }
-    let full = checked_embed_path(base_dir, &rel).map_err(|error| {
-        Diagnostic::error(
-            "E0955",
-            format!("`{builtin}` can't open `{rel}`"),
-            format!("{error} (looked next to the file doing the embedding)"),
-            "check the path — it is relative to the file's own directory".to_string(),
-            Some(span),
-        )
-    })?;
-    let bytes = crate::SHA256::read_file_nofollow(
-        &full,
+    let bytes = crate::SHA256::read_file_nofollow_at_root(
+        base_dir,
+        Path::new(&rel),
         crate::SHA256::MAX_TREE_FILE_BYTES,
     )
     .map_err(|error| {
@@ -493,17 +485,9 @@ pub fn eval_locked_find(
     let mut matches = find_glob(&base_root, glob, span)?;
     matches.sort();
     for rel in &matches {
-        let full = checked_embed_path(&base_root, rel).map_err(|error| {
-            Diagnostic::error(
-                "E0955",
-                format!("`{builtin}` can't open `{rel}`"),
-                format!("{error} (matched while expanding `{glob}`)"),
-                "check the glob and remove unreadable files from its match set".to_string(),
-                Some(span),
-            )
-        })?;
-        let bytes = crate::SHA256::read_file_nofollow(
-            &full,
+        let bytes = crate::SHA256::read_file_nofollow_at_root(
+            base_dir,
+            Path::new(rel),
             crate::SHA256::MAX_TREE_FILE_BYTES,
         )
         .map_err(|error| {
@@ -511,7 +495,7 @@ pub fn eval_locked_find(
                 "E0955",
                 format!("`{builtin}` can't open `{rel}`"),
                 format!("{error} (matched while expanding `{glob}`)"),
-                "check the glob and remove unreadable files from its match set".to_string(),
+                "check the path — it is relative to the file's own directory".to_string(),
                 Some(span),
             )
         })?;
@@ -552,17 +536,9 @@ pub fn eval_build_embed(
             Some(span),
         ));
     }
-    let full = checked_embed_path(base_dir, rel).map_err(|error| {
-        Diagnostic::error(
-            "E0955",
-            format!("`b.embed` cannot open `{rel}`"),
-            error.to_string(),
-            "check the locked relative path".to_string(),
-            Some(span),
-        )
-    })?;
-    let bytes = crate::SHA256::read_file_nofollow(
-        &full,
+    let bytes = crate::SHA256::read_file_nofollow_at_root(
+        base_dir,
+        Path::new(rel),
         crate::SHA256::MAX_TREE_FILE_BYTES,
     )
     .map_err(|error| {
@@ -647,14 +623,7 @@ fn walk_find(
         if ty.is_dir() {
             let dir_depth = depth + 1;
             if dir_depth < max_depth {
-                walk_find(
-                    &path,
-                    &logical_path,
-                    pattern,
-                    dir_depth,
-                    max_depth,
-                    out,
-                )?;
+                walk_find(&path, &logical_path, pattern, dir_depth, max_depth, out)?;
             }
         } else if ty.is_file() {
             let rel = normalize_rel(&logical_path.to_string_lossy());
@@ -1621,19 +1590,11 @@ impl<'a> Interp<'a> {
             .first()
             .ok_or_else(|| unsupported(&format!("{builtin} with no path"), span))?;
         let rel = check_embed_path(builtin, arg, span)?;
-        let full = match checked_embed_path(&self.base_dir, &rel) {
-            Ok(path) => path,
-            Err(error) => {
-                return Err(Diagnostic::error(
-                    "E0955",
-                    format!("`{builtin}` can't open `{rel}`"),
-                    format!("{error} (looked next to the file doing the embedding)"),
-                    "check the path — it is relative to the file's own directory".to_string(),
-                    Some(span),
-                ));
-            }
-        };
-        match crate::SHA256::read_file_nofollow(&full, crate::SHA256::MAX_TREE_FILE_BYTES) {
+        match crate::SHA256::read_file_nofollow_at_root(
+            &self.base_dir,
+            Path::new(&rel),
+            crate::SHA256::MAX_TREE_FILE_BYTES,
+        ) {
             Ok(bytes) => {
                 // D-CTEFFECT1 Tier-1: record the embed input hash for .jet/lock.
                 let hash = crate::SHA256::sha256_hex(&bytes);
@@ -1692,7 +1653,7 @@ impl<'a> Interp<'a> {
         }
     }
 
-fn integer_width_for_expr(&self, expr: &Expr) -> Option<u32> {
+    fn integer_width_for_expr(&self, expr: &Expr) -> Option<u32> {
         match expr {
             Expr::Ident(name, _) => self
                 .binding_types
@@ -1724,16 +1685,12 @@ mod tests {
     fn embed_file_bytes_and_build_embed_reject_symlink_escape() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join(format!(
-            "jet-comptime-embed-symlink-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-comptime-embed-symlink-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let outside = root.with_file_name(format!(
-            "jet-comptime-embed-outside-{}",
-            std::process::id()
-        ));
+        let outside =
+            root.with_file_name(format!("jet-comptime-embed-outside-{}", std::process::id()));
         std::fs::write(&outside, "must not be embedded").unwrap();
         symlink(&outside, root.join("payload.txt")).unwrap();
         let span = Span::new(0, 1);
@@ -1749,7 +1706,97 @@ mod tests {
         }
         let args = [CtValue::Str("payload.txt".to_string())];
         assert!(eval_build_embed(&args, &root, None, span).is_err());
-        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must not be embedded");
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "must not be embedded"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn embed_forms_reject_symlinked_ancestor_without_recording_input() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-comptime-embed-ancestor-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jet-comptime-embed-ancestor-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("payload.txt"), "must not be embedded").unwrap();
+        symlink(&outside, root.join("nested")).unwrap();
+        let span = Span::new(0, 1);
+
+        for builtin in [
+            crate::Syntax::BUILTIN_EMBED_FILE,
+            crate::Syntax::BUILTIN_EMBED_BYTES,
+        ] {
+            let mut inputs = Vec::new();
+            assert!(
+                eval_build_time_io(
+                    builtin,
+                    &root,
+                    Some("nested/payload.txt"),
+                    Some(&mut inputs),
+                    span,
+                )
+                .is_err(),
+                "{builtin} must reject a symlinked ancestor"
+            );
+            assert!(inputs.is_empty(), "{builtin} must not record outside input");
+        }
+        let args = [CtValue::Str("nested/payload.txt".to_string())];
+        let mut inputs = Vec::new();
+        assert!(eval_build_embed(&args, &root, Some(&mut inputs), span).is_err());
+        assert!(inputs.is_empty(), "b.embed must not record outside input");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn embed_forms_reject_hardlinked_input_without_hashing_it() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-comptime-embed-hardlink-{}",
+            std::process::id()
+        ));
+        let outside = root.with_file_name(format!(
+            "jet-comptime-embed-hardlink-outside-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&outside, "must not be embedded").unwrap();
+        std::fs::hard_link(&outside, root.join("payload.txt")).unwrap();
+        let span = Span::new(0, 1);
+
+        for builtin in [
+            crate::Syntax::BUILTIN_EMBED_FILE,
+            crate::Syntax::BUILTIN_EMBED_BYTES,
+        ] {
+            let mut inputs = Vec::new();
+            assert!(
+                eval_build_time_io(builtin, &root, Some("payload.txt"), Some(&mut inputs), span,)
+                    .is_err(),
+                "{builtin} must reject a multiply linked input"
+            );
+            assert!(inputs.is_empty(), "{builtin} must not hash a hard link");
+        }
+        let args = [CtValue::Str("payload.txt".to_string())];
+        let mut inputs = Vec::new();
+        assert!(eval_build_embed(&args, &root, Some(&mut inputs), span).is_err());
+        assert!(inputs.is_empty(), "b.embed must not hash a hard link");
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&outside);
@@ -1775,13 +1822,11 @@ mod tests {
         std::fs::write(outside.join("secret.txt"), "must not be read").unwrap();
         symlink(&outside, root.join("link")).unwrap();
 
-        let result = eval_locked_find(
-            &root,
-            "link/**",
-            None,
-            Span::new(0, 1),
+        let result = eval_locked_find(&root, "link/**", None, Span::new(0, 1));
+        assert!(
+            result.is_err(),
+            "find must reject a symlinked traversal root"
         );
-        assert!(result.is_err(), "find must reject a symlinked traversal root");
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);
@@ -1808,14 +1853,12 @@ mod tests {
         symlink(&outside, root.join("link")).unwrap();
 
         let mut inputs = Vec::new();
-        let result = eval_locked_find(
-            &root,
-            r"link\**\*.txt",
-            Some(&mut inputs),
-            Span::new(0, 1),
-        );
+        let result = eval_locked_find(&root, r"link\**\*.txt", Some(&mut inputs), Span::new(0, 1));
         assert!(result.is_err(), "find must refuse the hostile matched read");
-        assert!(inputs.is_empty(), "refused find must record no outside input");
+        assert!(
+            inputs.is_empty(),
+            "refused find must record no outside input"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);

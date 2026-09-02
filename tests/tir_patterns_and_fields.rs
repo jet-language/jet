@@ -95,7 +95,7 @@ fn run() {
     range := 0
     s :: "ok"
     loop i in 1..<4 {
-        range = (range + i)
+        range += i
     }
     pair :: Pair{ left: value, right: range }
     xs := [v, pair.right]
@@ -506,8 +506,8 @@ fn run() {
     }
 }
 
-/// D-DISPLAYDBG1: map iteration's tuple-like record can display its DataTree
-/// value through the shared value projection on every execution tier.
+/// D-DISPLAYDBG1: map iteration's tuple-like record can project its DataTree
+/// value through the explicit Debug path on every execution tier.
 #[test]
 fn datatree_map_iteration_display_matches_every_tier() {
     let src = r#"
@@ -516,7 +516,7 @@ fn run() {
         "key": DataTree.Object(["nested": DataTree.Int(1)])
     }
     loop (key, value) in fields {
-        print("{key}:{value}")
+        print("{key}:{value:Debug}")
         print("{key}:{value:Debug}")
     }
 }
@@ -1078,7 +1078,7 @@ use core.crypto.expert as expert
 fn run() {
     seed :: [U8#32]{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 }
     #Unsafe(\"fixed signature vector\") {
-        signature :: expert.ed25519_sign(seed, [])
+        signature :: expert.ed25519_sign(seed, []) ?? panic(\"sign\")
     }
     print(\"ok\")
 }
@@ -1264,6 +1264,31 @@ fn run() {
         rustc.status.success(),
         "rustc rejected generated code (I2 violation):\n{}",
         String::from_utf8_lossy(&rustc.stderr)
+    );
+}
+
+#[test]
+fn shared_empty_collections_use_expected_payload_type() {
+    let src = r#"
+fn make_map() Shared<[String:String]> -> {
+    return shared []
+}
+fn make_list() Shared<[String]> -> {
+    return shared []
+}
+fn run() {
+    _ :: make_map()
+    _ :: make_list()
+}
+"#;
+    let rust = compile("shared_expected_payload", src);
+    assert!(
+        rust.contains("jet_std::JetShared<JetMap<String, String>>"),
+        "Shared empty map lost its expected payload type:\n{rust}"
+    );
+    assert!(
+        rust.contains("jet_std::JetShared<Vec<String>>"),
+        "Shared empty list lost its expected payload type:\n{rust}"
     );
 }
 

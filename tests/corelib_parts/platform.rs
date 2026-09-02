@@ -70,6 +70,37 @@ fn run() {
 }
 
 #[test]
+fn core_files_parallel_walk_and_read_count_share_lowering() {
+    let out = compile_temp(
+        "core_files_parallel_count.jet",
+        r#"
+use core.files as fs
+
+fn count_file(path: String, needle: String) Int ->
+    (fs.read(path) ?? panic("read failed")).count(needle)
+
+fn run() {
+    entries :: fs.walk_parallel(".") ?? panic("walk failed")
+    print(entries.len())
+    print(count_file("README.md", "Jet"))
+}
+"#,
+    );
+    assert!(
+        out.rust.contains("jet_std_fs_walk_parallel"),
+        "parallel filesystem walk must use the shared runtime helper"
+    );
+    assert!(
+        out.rust.contains("jet_unicode_count"),
+        "a String count after a fixed core read must lower to the shared text helper"
+    );
+    assert!(
+        !out.rust.contains("return Ok(jet_todo_stop("),
+        "fixed core MethodCall aliases must not leave a receiver-type Todo"
+    );
+}
+
+#[test]
 fn core_files_depth_example_runs() {
     let jet = jet_bin();
     if !jet.exists() {

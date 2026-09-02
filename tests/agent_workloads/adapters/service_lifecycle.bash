@@ -34,7 +34,7 @@ run_jp() {
 }
 
 if [[ $task == service-lifecycle-readiness-timeout ]]; then
-  if run_jp timeout.out timeout.err 200 services up timeout --no-color; then
+  if run_jp timeout.out timeout.err 200 services up timeout --trust --no-color; then
     printf '%s\n' 'readiness timeout unexpectedly succeeded' >&2
     exit 1
   fi
@@ -66,18 +66,18 @@ if [[ $task == service-lifecycle-readiness-timeout ]]; then
   }
   printf '%s\n' 'service=failed' 'error=E1261' 'limit=bounded' 'descendants=contained' 'receipt=startup-failed'
 else
-  run_jp up.out up.err 5000 services up fixture --no-color || {
+  run_jp up.out up.err 5000 services up fixture --trust --no-color || {
     cat up.err >&2
     exit 1
   }
-  run_jp health.out health.err 5000 services health fixture --json --no-color || {
+  run_jp health.out health.err 5000 services health fixture --trust --json --no-color || {
     cat health.err >&2
     exit 1
   }
   grep -q '"health":"healthy"' health.out
   grep -q 'linux-systemd-user' health.out
   grep -q 'delegated-cgroup' health.out
-  run_jp wait.out wait.err 5000 services wait fixture --no-color || {
+  run_jp wait.out wait.err 5000 services wait fixture --trust --no-color || {
     cat wait.err >&2
     exit 1
   }

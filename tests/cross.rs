@@ -14,7 +14,7 @@ fn check_freestanding_src(src: &str, label: &str) -> String {
     let path = dir.join("test.jet");
     fs::write(&path, src).unwrap();
     let file_arg = path.to_string_lossy().into_owned();
-    match jet::compile_freestanding(&file_arg) {
+    match jet::compile_no_os(&file_arg) {
         Ok(_) => "(no errors)\n".to_string(),
         Err(diags) => jet::render_diagnostics(&file_arg, src, &diags),
     }
@@ -37,8 +37,8 @@ fn run() {
         out
     );
     assert!(
-        out.contains("freestanding"),
-        "expected 'freestanding' in error; got:\n{}",
+        out.contains("no-OS"),
+        "expected 'no-OS' in error; got:\n{}",
         out
     );
 }
@@ -127,7 +127,7 @@ fn e3301_snapshot() {
     }
     let src = fs::read_to_string(&src_path).unwrap();
     let shown = "tests/ui/freestanding_e3301.jet";
-    let actual = match jet::compile_freestanding(&src_path.to_string_lossy()) {
+    let actual = match jet::compile_no_os(&src_path.to_string_lossy()) {
         Ok(_) => "(no errors)\n".to_string(),
         Err(diags) => jet::render_diagnostics(shown, &src, &diags),
     };

@@ -1,41 +1,19 @@
 use core.files as files
 use core.regex as re
 
-#CLI
-struct Args {
-    directory: String
-}
+#CLI struct Args { path: String }
 
-struct Photo {
-    number: Int
-    name: String
-    path: String
+fn run(args: Args){
+d::args.path
+e::files.list_dir(d)??panic("cannot list directory")
+q::Regex{"^IMG_(\d+)\.jpeg$"}
+p:=[String]{...e.filter(x->!x.is_dir).filter_map(x->re.match(q,x.name).map(m->"{("{Int.parse(m.group(1)??"0")??0}").pad_start(20,"0")}|{x.name}")).to_list()}
+p.sort_by((x:String)->x)
+loop (i,x) in p{
+f::x.split_once("|")??panic("bad photo")
+n::"{i+1}".pad_start(4,"0")
+files.rename(Path.from(d).join(f.after),Path.from(d).join("photo-{n}.jpg"))??panic("cannot rename photo")
+print("renamed {f.after} -> photo-{n}.jpg")
 }
-
-fn run(args: Args) {
-    dir :: args.directory
-    entries :: files.list_dir(dir) ?? panic("cannot list directory")
-    target_dir :: Path.from(dir)
-    pattern :: Regex{"^IMG_(\d+)\.jpeg$"}
-    photos := [Photo]{}
-    loop entry in entries {
-        if !entry.is_dir {
-            matched :: re.match(pattern, entry.name)
-            if matched == .Val(mat) {
-                photos.push(Photo{
-                    number: Int.parse(mat.group(1) ?? "0") ?? 0,
-                    name: entry.name,
-                    path: entry.path
-                })
-            }
-        }
-    }
-    photos.sort_by((photo: Photo) -> (number: photo.number, name: photo.name))
-    loop (index, photo) in photos {
-        display_index :: index + 1
-        index_text :: display_index.to_string().pad_start(4, "0")
-        files.rename(photo.path, target_dir.join("photo-{index_text}.jpg").to_string()) ?? panic("cannot rename photo")
-        print("renamed {photo.name} -> photo-{index_text}.jpg")
-    }
-    print("renamed {photos.len()} skipped {entries.filter(entry -> !entry.is_dir).len() - photos.len()}")
+print("renamed {p.len()} skipped {e.count_where(x->!x.is_dir)-p.len()}")
 }

@@ -29,8 +29,9 @@ impl Default for BuildStamp {
 }
 /// Stable target inputs that distinguish one emitted Prelude artifact from
 /// another. The target triple remains the adjacent `BuildFactSnapshot` fact;
-/// these fields capture the selected runtime layer, provider, and source
-/// closure that the triple alone cannot identify.
+/// these fields capture the selected runtime layer, provider, source closure,
+/// linker, tier, compiler, environment, and dependency identities that the
+/// triple alone cannot identify.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetDossier {
     /// The selected runtime ring for the reachable Prelude closure.
@@ -40,6 +41,16 @@ pub struct TargetDossier {
     pub provider_identity: String,
     /// An opaque, stable identity for the canonical Prelude source closure.
     pub closure_identity: String,
+    /// Identity of the linker input, including a content digest for files.
+    pub linker_identity: String,
+    /// Selected execution tier (AOT, Dev, or JIT).
+    pub tier_identity: String,
+    /// Compiler/code-generation identity.
+    pub compiler_identity: String,
+    /// Environment boundary (hosted, browser, WASI, or no-OS).
+    pub environment_identity: String,
+    /// Resolved dependency graph identity.
+    pub dependency_identity: String,
 }
 
 impl Default for TargetDossier {
@@ -48,6 +59,11 @@ impl Default for TargetDossier {
             layer: crate::RingLayer::RuntimeLayer::Std,
             provider_identity: "hosted-default".to_string(),
             closure_identity: "prelude-hosted-v1".to_string(),
+            linker_identity: "hosted-default".to_string(),
+            tier_identity: "dev".to_string(),
+            compiler_identity: env!("CARGO_PKG_VERSION").to_string(),
+            environment_identity: "hosted".to_string(),
+            dependency_identity: "none".to_string(),
         }
     }
 }
@@ -62,7 +78,33 @@ impl TargetDossier {
             layer,
             provider_identity: provider_identity.into(),
             closure_identity: closure_identity.into(),
+            ..Self::default()
         }
+    }
+
+    pub fn with_linker_identity(mut self, identity: impl Into<String>) -> Self {
+        self.linker_identity = identity.into();
+        self
+    }
+
+    pub fn with_tier_identity(mut self, identity: impl Into<String>) -> Self {
+        self.tier_identity = identity.into();
+        self
+    }
+
+    pub fn with_compiler_identity(mut self, identity: impl Into<String>) -> Self {
+        self.compiler_identity = identity.into();
+        self
+    }
+
+    pub fn with_environment_identity(mut self, identity: impl Into<String>) -> Self {
+        self.environment_identity = identity.into();
+        self
+    }
+
+    pub fn with_dependency_identity(mut self, identity: impl Into<String>) -> Self {
+        self.dependency_identity = identity.into();
+        self
     }
 
     /// Append canonical bytes for the target dossier portion of an artifact
@@ -71,12 +113,17 @@ impl TargetDossier {
     /// Length framing is intentional: it keeps field boundaries unambiguous,
     /// so identities such as `("ab", "c")` cannot collide with `("a", "bc")`.
     pub fn append_cache_bytes(&self, target_triple: &str, bytes: &mut Vec<u8>) {
-        bytes.extend_from_slice(b"jet-target-dossier-v1\0");
+        bytes.extend_from_slice(b"jet-target-dossier-v2\0");
         for value in [
             target_triple,
             self.layer.as_str(),
             self.provider_identity.as_str(),
             self.closure_identity.as_str(),
+            self.linker_identity.as_str(),
+            self.tier_identity.as_str(),
+            self.compiler_identity.as_str(),
+            self.environment_identity.as_str(),
+            self.dependency_identity.as_str(),
         ] {
             append_cache_frame(bytes, value.as_bytes());
         }
@@ -89,6 +136,7 @@ impl TargetDossier {
         bytes
     }
 }
+
 
 fn append_cache_frame(bytes: &mut Vec<u8>, value: &[u8]) {
     bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
@@ -707,7 +755,7 @@ mod tests {
     #[test]
     fn target_dossier_identity_is_framed_and_profile_sensitive() {
         let hosted = BuildFactSnapshot::default();
-        let freestanding = hosted.clone().with_target_dossier(TargetDossier::new(
+        let no_os = hosted.clone().with_target_dossier(TargetDossier::new(
             RuntimeLayer::Core,
             "board.uart",
             "prelude-core-v1",
@@ -715,7 +763,7 @@ mod tests {
 
         assert_ne!(
             hosted.artifact_identity_bytes(),
-            freestanding.artifact_identity_bytes()
+            no_os.artifact_identity_bytes()
         );
 
         let left = TargetDossier::new(RuntimeLayer::Core, "ab", "c");

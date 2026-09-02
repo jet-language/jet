@@ -1,29 +1,20 @@
 use core.files as files
 
-#CLI
-struct Args {
-    input: String
-}
 
-fn run(args: Args) !Err -> {
-    data :: files.read_bytes(Path.from(args.input)) ?? return
-    reader :: Reader.over(data)
-    if (reader.take(4) ?? return) != "JGB1".bytes() -> return Err("bad magic")
-    count :: Int.from_u32(reader.read_u32_le() ?? return)
+#CLI struct Args { path: String }
 
-    sum := Float{0.0}
-    hash := U64{14695981039346656037}
-    loop _ in 0..<count {
-        id :: Int.from_u32(reader.read_u32_le() ?? return)
-        value :: reader.read_f64_le() ?? return
-        name_len :: Int.from_u16(reader.read_u16_le() ?? return)
-        if id % 7 == 0 -> sum += value
-        loop _ in 0..<name_len {
-            byte :: reader.read_u8() ?? return
-            hash = (hash ~| U64.from_u8(byte)).wrapping_mul(U64{1099511628211})
-        }
+fn run(args: Args) !Err {
+    r :: Reader.over(files.read_bytes(args.path) ?? return)
+    r.take_pattern([U8]{"JGB1"}) ?? return
+    n :: Int.from_u32(r.read_u32_le() ?? return)
+    s := 0.0
+    h := U64{14695981039346656037}
+    loop _ in 0..<n {
+        i :: r.read_u32_le() ?? return
+        v :: r.read_f64_le() ?? return
+        l :: r.read_u16_le() ?? return
+        if i % 7 == 0 -> s += v
+        loop b in r.take(l) ?? return -> h = (h ~| b).wrapping_mul(1099511628211)
     }
-    print("records {count}")
-    print("sum7 {sum:Fixed(6)}")
-    print("fnv {(Int.parse(hash.to_string()) ?? 0):Hex(16)}")
+    print("records {n}\nsum7 {s:Fixed(6)}\nfnv {Int.from_u64(h):Hex(16)}")
 }

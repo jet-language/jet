@@ -532,8 +532,7 @@ pub(super) fn fs_rename(from: &str, to: &str) -> FsResult<()> {
     })
 }
 pub(super) fn fs_absolute(path: &str) -> FsResult<String> {
-    text_kernel::jet_std_fs_absolute(&path.to_string())
-        .map_err(io_error_ct)
+    text_kernel::jet_std_fs_absolute(&path.to_string()).map_err(io_error_ct)
 }
 pub(super) fn fs_stat(path: &str) -> FsResult<crate::AST::CtValue> {
     text_kernel::jet_fs_stat(&path.to_string())
@@ -549,8 +548,14 @@ pub(super) fn fs_stat(path: &str) -> FsResult<crate::AST::CtValue> {
                     "created_ms".to_string(),
                     crate::AST::CtValue::Int(stat.created_ms),
                 ),
-                ("readonly".to_string(), crate::AST::CtValue::Bool(stat.readonly)),
-                ("is_file".to_string(), crate::AST::CtValue::Bool(stat.is_file)),
+                (
+                    "readonly".to_string(),
+                    crate::AST::CtValue::Bool(stat.readonly),
+                ),
+                (
+                    "is_file".to_string(),
+                    crate::AST::CtValue::Bool(stat.is_file),
+                ),
                 ("is_dir".to_string(), crate::AST::CtValue::Bool(stat.is_dir)),
                 (
                     "is_symlink".to_string(),

@@ -107,7 +107,15 @@ pub struct ArithmeticPolicyFact {
 #[derive(Debug, Default, Clone)]
 pub struct CallArgFlags {
     pub implicit_clone: bool,
+    /// D-CONC-SHARE1=A: sema synthesized an Arc clone for a Shared<T>
+    /// argument crossing a loop boundary. Lowering keeps this distinct from
+    /// ordinary value cloning.
     pub shared_auto_clone: bool,
+    /// Sema proved this non-scalar owned argument is at its last use. Lowering
+    /// may transfer the existing storage instead of materializing a copy; the
+    /// flag carries no source-level access marker and marshaling engines may
+    /// ignore the Rust move.
+    pub owned_last_use: bool,
     /// D-CONC-SHARE1=A (card #1561): sema synthesized this closure argument
     /// while desugaring a plain field read or write on a `Shared<T>` handle.
     /// It marks the compiler's own use of the locked read/edit seam apart from
@@ -125,6 +133,9 @@ pub struct CallArgFlags {
     pub template_items: Option<Vec<super::DeriveBodyItem>>,
     /// D-CABI-CALLBACK1: sema proved this argument is a stable C callback symbol.
     pub c_callback_symbol: bool,
+    /// Sema proved this synthetic typed-text hole is already an `HTML` value.
+    /// TIR preserves the fact so every engine composes the fragment directly.
+    pub trusted_html: bool,
     /// D-APILABEL1=A: where the caller wrote this argument, when labels put the
     /// list out of declaration order. The binder rewrites `args` into
     /// declaration order, so lowering needs this to keep the ratified rule that
@@ -822,7 +833,7 @@ pub enum Expr {
     /// `ty` is filled by sema for codegen (canonical sorted shape).
     TupleLit(Vec<(String, Expr)>, Span, Option<Type>),
     /// S46 (M8): `(params) -> expr` or block body.
-    Lambda(Lambda),
+    Lambda(Box<Lambda>),
     /// S47 / D-CALLVALUE1=B: direct call of a function-valued expression such
     /// as a lambda, field, or index; a returned call result uses `.call(args)`.
     CallValue {

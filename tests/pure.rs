@@ -15,22 +15,22 @@ fn provenance_cell(map: &Option<jet::AST::ViewProvenanceMap>) -> jet::AST::ViewP
     cell
 }
 
-// Serialize all tests that mutate the process-global JET_STORE_DIR to prevent
+// Serialize all tests that mutate the process-global JET_PACKAGE_STORE_DIR to prevent
 // concurrent set_var races under cargo's parallel runner.
 static STORE_LOCK: Mutex<()> = Mutex::new(());
 
-/// Run `f` with `JET_STORE_DIR` pointed at a fresh `dir`, serializing concurrent
+/// Run `f` with `JET_PACKAGE_STORE_DIR` pointed at a fresh `dir`, serializing concurrent
 /// calls and restoring the prior value afterward.
 fn with_store<T, F: FnOnce() -> T>(dir: &Path, f: F) -> T {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).unwrap();
-    let prev = std::env::var("JET_STORE_DIR").ok();
-    std::env::set_var("JET_STORE_DIR", dir);
+    let prev = std::env::var("JET_PACKAGE_STORE_DIR").ok();
+    std::env::set_var("JET_PACKAGE_STORE_DIR", dir);
     let result = f();
     match prev {
-        Some(v) => std::env::set_var("JET_STORE_DIR", v),
-        None => std::env::remove_var("JET_STORE_DIR"),
+        Some(v) => std::env::set_var("JET_PACKAGE_STORE_DIR", v),
+        None => std::env::remove_var("JET_PACKAGE_STORE_DIR"),
     }
     let _ = std::fs::remove_dir_all(dir);
     result

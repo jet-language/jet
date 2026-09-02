@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 const KIND_FILE: &str = "regular file";
+const HARDLINK_DETAIL: &str = "authority file must have exactly one hard link";
+
 const KIND_DIRECTORY: &str = "directory";
 
 /// The kind proven by a checked open.
@@ -476,6 +478,7 @@ impl AuthorityResolver {
         })
     }
 
+
     /// `Path::parent()` of a bare relative name yields `Some("")`, which the
     /// OS rejects outright. Callers that walk up from an entry file mean the
     /// current directory; normalize once here so every authority entry point
@@ -562,15 +565,38 @@ impl AuthorityResolver {
                 actual: kind_name(&metadata),
             });
         }
+        require_single_link_file(&full, &metadata)?;
         let identity = FileIdentity::from_metadata(&metadata, AuthorityKind::File);
-        let mut bytes = Vec::new();
-        handle
+        if metadata.len() > crate::SHA256::MAX_TREE_FILE_BYTES {
+            return Err(authority_limit_error(
+                &full,
+                format!(
+                    "authority file exceeds the {}-byte read bound",
+                    crate::SHA256::MAX_TREE_FILE_BYTES
+                ),
+            ));
+        }
+        let capacity = usize::try_from(metadata.len())
+            .unwrap_or(usize::MAX)
+            .min(64 * 1024);
+        let mut bytes = Vec::with_capacity(capacity);
+        let mut limited = (&mut handle).take(crate::SHA256::MAX_TREE_FILE_BYTES.saturating_add(1));
+        limited
             .read_to_end(&mut bytes)
             .map_err(|error| AuthorityError::Io {
                 path: full.clone(),
                 operation: "read",
                 detail: error.to_string(),
             })?;
+        if bytes.len() as u64 > crate::SHA256::MAX_TREE_FILE_BYTES {
+            return Err(authority_limit_error(
+                &full,
+                format!(
+                    "authority file exceeds the {}-byte read bound",
+                    crate::SHA256::MAX_TREE_FILE_BYTES
+                ),
+            ));
+        }
         let final_metadata = handle.metadata().map_err(|error| AuthorityError::Io {
             path: full.clone(),
             operation: "revalidate",
@@ -581,6 +607,7 @@ impl AuthorityResolver {
         {
             return Err(AuthorityError::Changed(full));
         }
+        require_single_link_file(&full, &final_metadata)?;
         let checked = CheckedFile {
             path: full,
             relative,
@@ -732,19 +759,8 @@ impl AuthorityResolver {
     /// rejected, even when their target would otherwise be inside the root.
     pub fn discover_members(&self, path: &Path) -> Result<Vec<CheckedMember>, AuthorityError> {
         let scan = self.checked_directory(path)?;
-        let mut entries = fs::read_dir(&scan.path)
-            .map_err(|error| AuthorityError::Io {
-                path: scan.path.clone(),
-                operation: "read",
-                detail: error.to_string(),
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| AuthorityError::Io {
-                path: scan.path.clone(),
-                operation: "inspect",
-                detail: error.to_string(),
-            })?;
-        entries.sort_by_key(|entry| entry.file_name());
+        let mut budget = WalkBudget::default();
+        let entries = self.read_sorted_entries(&scan.path, &mut budget)?;
         let mut members = Vec::new();
         for entry in entries {
             let file_type = entry.file_type().map_err(|error| AuthorityError::Io {
@@ -781,19 +797,8 @@ impl AuthorityResolver {
         extension: Option<&str>,
     ) -> Result<Vec<CheckedFile>, AuthorityError> {
         let scan = self.checked_directory(path)?;
-        let mut entries = fs::read_dir(&scan.path)
-            .map_err(|error| AuthorityError::Io {
-                path: scan.path.clone(),
-                operation: "read",
-                detail: error.to_string(),
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| AuthorityError::Io {
-                path: scan.path.clone(),
-                operation: "inspect",
-                detail: error.to_string(),
-            })?;
-        entries.sort_by_key(|entry| entry.file_name());
+        let mut budget = WalkBudget::default();
+        let entries = self.read_sorted_entries(&scan.path, &mut budget)?;
         let mut files = Vec::new();
         for entry in entries {
             let name = entry.file_name();
@@ -824,17 +829,19 @@ impl AuthorityResolver {
             }
             let file = self.checked_file(&relative)?;
             self.revalidate_file(&file)?;
+            budget.record_file(&file.path, file.bytes.len())?;
             files.push(file);
         }
         self.revalidate_directory(&scan)?;
         Ok(files)
-    }
 
+    }
     /// Discover source files below the pinned root. Directory traversal and
     /// every returned file stay inside the same descriptor-relative resolver.
     pub fn discover_source_files(&self) -> Result<Vec<CheckedFile>, AuthorityError> {
         let mut files = Vec::new();
-        self.discover_source_files_from(Path::new("."), &mut files)?;
+        let mut budget = WalkBudget::default();
+        self.discover_source_files_from(Path::new("."), &mut files, &mut budget, 0)?;
         files.sort_by(|left, right| left.relative.cmp(&right.relative));
         self.revalidate_root()?;
         Ok(files)
@@ -845,9 +852,10 @@ impl AuthorityResolver {
     pub fn source_tree_hash(&self, directory: &CheckedDirectory) -> Result<String, AuthorityError> {
         self.revalidate_directory(directory)?;
         let mut files = Vec::new();
-        self.discover_source_files_from(&directory.relative, &mut files)?;
+        let mut budget = WalkBudget::default();
+        self.discover_source_files_from(&directory.relative, &mut files, &mut budget, 0)?;
         files.sort_by(|left, right| left.relative.cmp(&right.relative));
-        let mut input = Vec::new();
+        let mut hasher = crate::SHA256::StreamingSha256::new();
         for file in files {
             let relative = if directory.relative.as_os_str().is_empty() {
                 file.relative.clone()
@@ -858,14 +866,20 @@ impl AuthorityResolver {
                     .to_path_buf()
             };
             let relative = relative.to_string_lossy().replace('\\', "/");
-            input.extend_from_slice(relative.as_bytes());
-            input.push(0);
-            input.extend_from_slice(&(file.bytes.len() as u64).to_be_bytes());
-            input.extend_from_slice(&file.bytes);
+            hasher.update(relative.as_bytes());
+            hasher.update(&[0]);
+            hasher.update(&(file.bytes.len() as u64).to_be_bytes());
+            hasher.update(&file.bytes);
             self.revalidate_file(&file)?;
         }
         self.revalidate_directory(directory)?;
-        Ok(format!("sha256-{}", crate::SHA256::sha256_hex(&input)))
+        let digest = hasher.finalize();
+        let mut hex = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            use std::fmt::Write as _;
+            write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
+        }
+        Ok(format!("sha256-{hex}"))
     }
 
     /// Resolve workspace authority from checked top-level source snapshots.
@@ -896,15 +910,8 @@ impl AuthorityResolver {
             Err(error) => return Err(error),
         }
 
-        let mut entries = fs::read_dir(&self.root)
-            .map_err(|error| Self::map_io(&self.root, error, true))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| AuthorityError::Io {
-                path: self.root.clone(),
-                operation: "inspect",
-                detail: error.to_string(),
-            })?;
-        entries.sort_by_key(|entry| entry.file_name());
+        let mut budget = WalkBudget::default();
+        let entries = self.read_sorted_entries(&self.root, &mut budget)?;
 
         let mut canonical = None;
         let mut authorities = Vec::new();
@@ -920,6 +927,7 @@ impl AuthorityResolver {
             }
             let relative = PathBuf::from(&name);
             let file = self.checked_file(&relative)?;
+            budget.record_file(&file.path, file.bytes.len())?;
             let source = file.text()?;
             if crate::WorkspacePlan::declares_workspace_module(&source) {
                 let role = if name.to_str() == Some(crate::Syntax::WORKSPACE_FILE) {
@@ -1039,21 +1047,20 @@ impl AuthorityResolver {
         &self,
         path: &Path,
         files: &mut Vec<CheckedFile>,
+        budget: &mut WalkBudget,
+        depth: usize,
     ) -> Result<(), AuthorityError> {
+        if depth > crate::SHA256::MAX_TREE_DEPTH {
+            return Err(authority_limit_error(
+                &self.root.join(path),
+                format!(
+                    "authority source walk exceeds the {}-level depth bound",
+                    crate::SHA256::MAX_TREE_DEPTH
+                ),
+            ));
+        }
         let scan = self.checked_directory(path)?;
-        let mut entries = fs::read_dir(&scan.path)
-            .map_err(|error| AuthorityError::Io {
-                path: scan.path.clone(),
-                operation: "read",
-                detail: error.to_string(),
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| AuthorityError::Io {
-                path: scan.path.clone(),
-                operation: "inspect",
-                detail: error.to_string(),
-            })?;
-        entries.sort_by_key(|entry| entry.file_name());
+        let entries = self.read_sorted_entries(&scan.path, budget)?;
         for entry in entries {
             let name = entry.file_name();
             let file_type = entry.file_type().map_err(|error| AuthorityError::Io {
@@ -1075,7 +1082,16 @@ impl AuthorityResolver {
                 continue;
             }
             if file_type.is_dir() {
-                self.discover_source_files_from(&relative, files)?;
+                if depth >= crate::SHA256::MAX_TREE_DEPTH {
+                    return Err(authority_limit_error(
+                        &self.root.join(&relative),
+                        format!(
+                            "authority source walk exceeds the {}-level depth bound",
+                            crate::SHA256::MAX_TREE_DEPTH
+                        ),
+                    ));
+                }
+                self.discover_source_files_from(&relative, files, budget, depth + 1)?;
             } else if Path::new(&name)
                 .extension()
                 .and_then(|extension| extension.to_str())
@@ -1088,12 +1104,52 @@ impl AuthorityResolver {
                         actual: kind_name_from_file_type(&file_type),
                     });
                 }
-                let file = self.checked_file(&relative)?;
-                self.revalidate_file(&file)?;
+                let metadata = entry.metadata().map_err(|error| AuthorityError::Io {
+                    path: entry.path(),
+                    operation: "inspect",
+                    detail: error.to_string(),
+                })?;
+                budget.ensure_file(&self.root.join(&relative), metadata.len())?;
+                let file = match self.checked_file(&relative) {
+                    Ok(file) => file,
+                    Err(error) if is_hardlink_error(&error) => continue,
+                    Err(error) => return Err(error),
+                };
+                if let Err(error) = self.revalidate_file(&file) {
+                    if is_hardlink_error(&error) {
+                        continue;
+                    }
+                    return Err(error);
+                }
+                budget.record_file(&file.path, file.bytes.len())?;
                 files.push(file);
             }
         }
         self.revalidate_directory(&scan)
+    }
+
+    fn read_sorted_entries(
+        &self,
+        path: &Path,
+        budget: &mut WalkBudget,
+    ) -> Result<Vec<fs::DirEntry>, AuthorityError> {
+        let read_dir = fs::read_dir(path).map_err(|error| AuthorityError::Io {
+            path: path.to_path_buf(),
+            operation: "read",
+            detail: error.to_string(),
+        })?;
+        let mut entries = Vec::new();
+        for entry in read_dir {
+            let entry = entry.map_err(|error| AuthorityError::Io {
+                path: path.to_path_buf(),
+                operation: "inspect",
+                detail: error.to_string(),
+            })?;
+            budget.note_entry(path)?;
+            entries.push(entry);
+        }
+        entries.sort_by_key(|entry| entry.file_name());
+        Ok(entries)
     }
 
     fn probe_file(&self, path: &Path) -> Result<Option<CheckedFile>, AuthorityError> {
@@ -1160,6 +1216,9 @@ impl AuthorityResolver {
         if actual_kind != kind || FileIdentity::from_metadata(&metadata, actual_kind) != *expected {
             return Err(AuthorityError::Changed(path.to_path_buf()));
         }
+        if kind == AuthorityKind::File {
+            require_single_link_file(path, &metadata)?;
+        }
         Ok(())
     }
 
@@ -1194,6 +1253,79 @@ impl AuthorityResolver {
             },
             detail: error.to_string(),
         }
+    }
+}
+
+fn authority_limit_error(path: &Path, detail: String) -> AuthorityError {
+    AuthorityError::Invalid {
+        path: path.to_path_buf(),
+        detail,
+    }
+}
+
+#[derive(Default)]
+struct WalkBudget {
+    entries: usize,
+    files: usize,
+    bytes: u64,
+}
+
+impl WalkBudget {
+    fn note_entry(&mut self, path: &Path) -> Result<(), AuthorityError> {
+        if self.entries >= crate::SHA256::MAX_TREE_FILES {
+            return Err(authority_limit_error(
+                path,
+                format!(
+                    "authority directory walk exceeds the {}-entry bound",
+                    crate::SHA256::MAX_TREE_FILES
+                ),
+            ));
+        }
+        self.entries += 1;
+        Ok(())
+    }
+
+    fn ensure_file(&self, path: &Path, length: u64) -> Result<(), AuthorityError> {
+        if length > crate::SHA256::MAX_TREE_FILE_BYTES {
+            return Err(authority_limit_error(
+                path,
+                format!(
+                    "authority file exceeds the {}-byte read bound",
+                    crate::SHA256::MAX_TREE_FILE_BYTES
+                ),
+            ));
+        }
+        if self.files >= crate::SHA256::MAX_TREE_FILES {
+            return Err(authority_limit_error(
+                path,
+                format!(
+                    "authority source walk exceeds the {}-file bound",
+                    crate::SHA256::MAX_TREE_FILES
+                ),
+            ));
+        }
+        if self
+            .bytes
+            .checked_add(length)
+            .is_none_or(|total| total > crate::SHA256::MAX_TREE_TOTAL_BYTES)
+        {
+            return Err(authority_limit_error(
+                path,
+                format!(
+                    "authority source walk exceeds the {}-byte total bound",
+                    crate::SHA256::MAX_TREE_TOTAL_BYTES
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn record_file(&mut self, path: &Path, length: usize) -> Result<(), AuthorityError> {
+        let length = u64::try_from(length).unwrap_or(u64::MAX);
+        self.ensure_file(path, length)?;
+        self.files += 1;
+        self.bytes += length;
+        Ok(())
     }
 }
 
@@ -1248,6 +1380,42 @@ fn kind_name(metadata: &Metadata) -> &'static str {
     } else {
         "special file"
     }
+}
+
+fn is_single_link_file(metadata: &Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return metadata.nlink() == 1;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return metadata.number_of_links() == 1;
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
+fn require_single_link_file(path: &Path, metadata: &Metadata) -> Result<(), AuthorityError> {
+    if is_single_link_file(metadata) {
+        Ok(())
+    } else {
+        Err(AuthorityError::Invalid {
+            path: path.to_path_buf(),
+            detail: HARDLINK_DETAIL.to_string(),
+        })
+    }
+}
+
+fn is_hardlink_error(error: &AuthorityError) -> bool {
+    matches!(
+        error,
+        AuthorityError::Invalid { detail, .. } if detail == HARDLINK_DETAIL
+    )
 }
 
 fn kind_name_from_file_type(file_type: &std::fs::FileType) -> &'static str {
@@ -1396,7 +1564,7 @@ fn is_symlink_error(error: &io::Error) -> bool {
 mod authority_walk_tests {
     use super::AuthorityResolver;
     use std::fs;
-
+    use std::path::Path;
     fn temp_root(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("jet-authority-walk-{tag}-{}", std::process::id()))
     }
@@ -1450,6 +1618,43 @@ mod authority_walk_tests {
             .unwrap()
             .is_none());
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn source_walk_rejects_hostile_depth() {
+        let root = temp_root("deep");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut current = root.clone();
+        for index in 0..=(crate::SHA256::MAX_TREE_DEPTH + 1) {
+            current.push(format!("d{index}"));
+            fs::create_dir(&current).unwrap();
+        }
+        fs::write(current.join("input.jet"), "// input\n").unwrap();
+        let resolver = AuthorityResolver::open(&root).unwrap();
+        let result = resolver.discover_source_files();
+        assert!(matches!(
+            result,
+            Err(error) if error.to_string().contains("depth bound")
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn checked_file_rejects_oversized_eof_read() {
+        let root = temp_root("oversized");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("oversized.jet");
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(crate::SHA256::MAX_TREE_FILE_BYTES + 1).unwrap();
+        let resolver = AuthorityResolver::open(&root).unwrap();
+        let result = resolver.checked_file(Path::new("oversized.jet"));
+        assert!(matches!(
+            result,
+            Err(error) if error.to_string().contains("read bound")
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 }

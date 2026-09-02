@@ -5,6 +5,8 @@ use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::ambient_err_local;
+use crate::Codegen::TIR::integer_bounds_for_expr;
+use crate::Codegen::TIR::integer_native_floor_mod_proven;
 use crate::Codegen::TIR::bin_match_scan_closure_ex;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
@@ -70,6 +72,30 @@ fn is_raw_pointer_type(ty: &Type) -> bool {
     }
 }
 
+/// D-TYPEDSQL-SINK1=A: lower one checked SQL interpolation hole to its
+/// ordered `DBValue` representation. Primitive values retain their database
+/// type; other printable values use the same `JetShow` text fallback that the
+/// typed-text kernel used before the SQL carrier became typed.
+fn emit_sql_binding(hole: &TExpr, cx: &Cx) -> String {
+    let emitted = emit_tir_expr(hole, cx);
+    let value = format!("({emitted})");
+    let db_value = format!("{}jet_std::DBValue", cx.root_prefix);
+    match &hole.ty {
+        Type::Named(name) if name == crate::Syntax::TYPE_DB_VALUE => {
+            format!("{value}.clone()")
+        }
+        Type::Int | Type::IntN { .. } => {
+            format!("{db_value}::Int({value} as i64)")
+        }
+        Type::Float | Type::Float32 => {
+            format!("{db_value}::Float({value} as f64)")
+        }
+        Type::Bool => format!("{db_value}::Bool({value})"),
+        Type::String => format!("{db_value}::Text({value}.clone())"),
+        _ => format!("{db_value}::Text({value}.jet_show())"),
+    }
+}
+
 /// D-SIMD3=B: recognize the semantics-preserving shape that batches four
 /// independent scalar square roots into one F64x4 native operation. The
 /// frontend has already resolved the calls and types; this is only an AOT
@@ -84,7 +110,10 @@ fn f64x4_sqrt_operand(expr: &TExpr) -> Option<&TExpr> {
         } if module == "core.math"
             && method == "sqrt"
             && args.len() == 1
-            && matches!(&expr.ty, Type::Float) => args.first(),
+            && matches!(&expr.ty, Type::Float) =>
+        {
+            args.first()
+        }
         _ => None,
     }
 }
@@ -118,6 +147,50 @@ fn f64x4_literal_lane(expr: &TExpr) -> Option<(usize, &TExpr)> {
 fn f64x4_sqrt_lane(expr: &TExpr) -> Option<(usize, &TExpr)> {
     f64x4_sqrt_operand(expr).and_then(f64x4_literal_lane)
 }
+fn f64x4_splat_arg(expr: &TExpr) -> Option<&TExpr> {
+    match &expr.kind {
+        TExprKind::MathBuiltin {
+            type_name,
+            func,
+            args,
+        } if type_name == crate::Syntax::SIMD_F64X4_TYPE
+            && func == "splat"
+            && args.len() == 1
+            && matches!(&expr.ty, Type::Named(name) if name == crate::Syntax::SIMD_F64X4_TYPE) =>
+        {
+            args.first()
+        }
+        _ => None,
+    }
+}
+
+/// D-SIMD3=B: keep a lane-scaled vector multiply in the native F64x4
+/// carrier. This matches `value * F64x4.splat(scale * lane[index])` in
+/// operation order and leaves all other shapes on ordinary emission.
+fn f64x4_lane_scale_product<'a>(
+    lhs: &'a TExpr,
+    rhs: &'a TExpr,
+) -> Option<(usize, &'a TExpr, &'a TExpr)> {
+    if !matches!(&lhs.ty, Type::Named(name) if name == crate::Syntax::SIMD_F64X4_TYPE) {
+        return None;
+    }
+    let factor = f64x4_splat_arg(rhs)?;
+    let TExprKind::Binary {
+        op: BinOp::Mul,
+        lhs: scale,
+        rhs: lane,
+        ..
+    } = &factor.kind
+    else {
+        return None;
+    };
+    if !matches!(&scale.ty, Type::Float) {
+        return None;
+    }
+    let (index, lane_source) = f64x4_literal_lane(lane)?;
+    Some((index, lane_source, scale))
+}
+
 
 fn same_f64x4_local(left: &TExpr, right: &TExpr) -> bool {
     match (&left.kind, &right.kind) {
@@ -156,7 +229,10 @@ fn emit_f64x4_sqrt_constructor(args: &[TExpr], cx: &Cx) -> Option<String> {
     if cx.scalar_function.get() || args.len() != 4 {
         return None;
     }
-    let lanes = args.iter().map(f64x4_sqrt_lane).collect::<Option<Vec<_>>>()?;
+    let lanes = args
+        .iter()
+        .map(f64x4_sqrt_lane)
+        .collect::<Option<Vec<_>>>()?;
     if lanes
         .iter()
         .enumerate()
@@ -172,7 +248,10 @@ fn emit_f64x4_sqrt_constructor(args: &[TExpr], cx: &Cx) -> Option<String> {
             emit_tir_expr(lanes[0].1, cx)
         ));
     }
-    let operands = args.iter().map(f64x4_sqrt_operand).collect::<Option<Vec<_>>>()?;
+    let operands = args
+        .iter()
+        .map(f64x4_sqrt_operand)
+        .collect::<Option<Vec<_>>>()?;
     let operands = operands
         .into_iter()
         .map(|operand| emit_tir_expr(operand, cx))
@@ -348,6 +427,40 @@ pub(super) fn is_compute_view_mut(ty: &Type) -> bool {
     ty.is_compute_view_mut()
 }
 
+/// Render a root outcome with explicit generic arguments for a display/layout
+/// boundary that has no surrounding Rust type witness. Contextual constructors
+/// stay bare in `emit_tir_expr`; this helper is the narrow standalone escape.
+fn emit_tir_standalone_outcome(e: &TExpr, cx: &Cx) -> Option<String> {
+    let root = cx.root_prefix.as_str();
+    match (&e.kind, e.ty.without_user_tags()) {
+        (TExprKind::Present(inner), Type::Option(payload)) => Some(format!(
+            "Ok::<{}, {}JetAbsent>({})",
+            cx.rust_type(payload),
+            root,
+            emit_tir_expr(inner, cx)
+        )),
+        (TExprKind::Absent, Type::Option(payload)) => Some(format!(
+            "Err::<{}, {}JetAbsent>({}JetAbsent)",
+            cx.rust_type(payload),
+            root,
+            root
+        )),
+        (TExprKind::Ok(inner), Type::Result { ok, err }) => Some(format!(
+            "Ok::<{}, {}>({})",
+            cx.rust_type(ok),
+            cx.rust_type(err),
+            emit_tir_expr(inner, cx)
+        )),
+        (TExprKind::Err(inner), Type::Result { ok, err }) => Some(format!(
+            "Err::<{}, {}>({})",
+            cx.rust_type(ok),
+            cx.rust_type(err),
+            emit_tir_expr(inner, cx)
+        )),
+        _ => None,
+    }
+}
+
 /// Render one value through the ordinary Display rail used by string
 /// interpolation. An authored `Display` implementation remains visible,
 /// including when the value is nested in a Prelude collection.
@@ -358,7 +471,8 @@ pub(crate) fn emit_tir_display_value(value: &TExpr, cx: &Cx) -> String {
     if let Some(stop) = emit_tir_stopping_receiver(value, cx) {
         return stop;
     }
-    let rendered = emit_tir_expr(value, cx);
+    let rendered =
+        emit_tir_standalone_outcome(value, cx).unwrap_or_else(|| emit_tir_expr(value, cx));
     if matches!(&value.ty, Type::Int) {
         format!("{}jet_std::jet_int_to_string({rendered})", cx.root_prefix)
     } else {
@@ -591,7 +705,7 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                         render_path(second)
                     );
                     let Type::Tuple(fields) = result_ty else {
-                        unreachable!("sema types Cell guard split as an exact tuple");
+                        unreachable!("Cell guard split has an exact tuple result")
                     };
                     let plain = crate::Codegen::Tuples::tuple_fields_plain(fields);
                     let tuple = crate::Codegen::Tuples::tuple_struct_name(&plain);
@@ -618,9 +732,16 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
         THostCall::TypedText { kind, arg } => {
             let a = emit_tir_expr(arg, cx);
             match kind {
-                TTypedTextForm::SQLRaw => format!("{}jet_typed_sql_raw(({a}).clone())", cx.root_prefix),
-                TTypedTextForm::HTMLRaw => format!("{}jet_typed_html_raw(({a}).clone())", cx.root_prefix),
-                TTypedTextForm::ShRaw => format!("{}jet_typed_sh_raw(({a}).clone())", cx.root_prefix),
+                TTypedTextForm::SQLRaw => format!(
+                    "{}jet_typed_sql_raw::<{}jet_std::DBValue>(({a}).clone())",
+                    cx.root_prefix, cx.root_prefix
+                ),
+                TTypedTextForm::HTMLRaw => {
+                    format!("{}jet_typed_html_raw(({a}).clone())", cx.root_prefix)
+                }
+                TTypedTextForm::ShRaw => {
+                    format!("{}jet_typed_sh_raw(({a}).clone())", cx.root_prefix)
+                }
                 TTypedTextForm::SQLTemplate => jet_format!(
                     "{{ let {jet_prefix}sql = ({a}).clone(); {}jet_typed_sql_template(&{jet_prefix}sql) }}",
                     cx.root_prefix
@@ -629,7 +750,9 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                     "{{ let {jet_prefix}sql = ({a}).clone(); {}jet_typed_sql_params(&{jet_prefix}sql) }}",
                     cx.root_prefix
                 ),
-                TTypedTextForm::HTMLText => format!("{}jet_typed_html_text(({a}).clone())", cx.root_prefix),
+                TTypedTextForm::HTMLText => {
+                    format!("{}jet_typed_html_text(({a}).clone())", cx.root_prefix)
+                }
             }
         }
         THostCall::FnName(name) => cx.mangle_name(name),
@@ -727,12 +850,8 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             probe,
         } => {
             let subject = emit_tir_expr(subject, cx);
-            let (closure, _) = bin_match_scan_closure_ex(
-                parts,
-                cx,
-                &format!("({subject}).as_slice()"),
-                true,
-            );
+            let (closure, _) =
+                bin_match_scan_closure_ex(parts, cx, &format!("({subject}).as_slice()"), true);
             match probe {
                 crate::Codegen::TIR::TMatchProbe::IsSome => format!("({closure}).is_some()"),
                 crate::Codegen::TIR::TMatchProbe::Unwrap => format!("({closure}).unwrap()"),
@@ -765,11 +884,12 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 TTypedTextInterpKind::SQL => {
                     let hole_s = holes
                         .iter()
-                        .map(|h| format!("({}).jet_show()", emit_tir_expr(h, cx)))
+                        .map(|hole| emit_sql_binding(hole, cx))
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!(
-                        "{}jet_typed_sql_interpolate(&[{}], vec![{hole_s}])",
+                        "{}jet_typed_sql_interpolate::<{}jet_std::DBValue>(&[{}], vec![{hole_s}])",
+                        cx.root_prefix,
                         cx.root_prefix,
                         literals
                             .iter()
@@ -797,11 +917,26 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 TTypedTextInterpKind::HTML => {
                     let hole_s = holes
                         .iter()
-                        .map(|h| format!("({}).jet_show()", emit_tir_expr(h, cx)))
+                        .map(|hole| {
+                            let emitted = emit_tir_expr(hole, cx);
+                            if matches!(&hole.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_HTML) {
+                                format!("({emitted})")
+                            } else {
+                                format!("({emitted}).jet_show()")
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let trusted_s = holes
+                        .iter()
+                        .map(|hole| {
+                            matches!(&hole.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_HTML)
+                                .to_string()
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!(
-                        "{}jet_typed_html_interpolate(&[{}], vec![{hole_s}])",
+                        "{}jet_typed_html_interpolate(&[{}], vec![{hole_s}], &[{trusted_s}])",
                         cx.root_prefix,
                         literals
                             .iter()
@@ -1090,7 +1225,20 @@ fn emit_numeric_op(
     cx: &Cx,
 ) -> String {
     match op {
-        TNumericOp::Predicate(m) => format!("({recv}).{m}()"),
+        TNumericOp::Predicate(m) => {
+            let helper = match m.as_str() {
+                "is_nan" => "jet_std_math_is_nan",
+                "is_infinite" => "jet_std_math_is_infinite",
+                "is_finite" => "jet_std_math_is_finite",
+                _ => unreachable!("sema only creates known numeric predicates"),
+            };
+            let value = if matches!(recv_ty, Some(Type::Float32)) {
+                format!("({recv} as f64)")
+            } else {
+                recv.to_string()
+            };
+            format!("{}{}({value})", cx.root_prefix, helper)
+        }
         TNumericOp::BitCount { method: m, width } => {
             if matches!(recv_ty, Some(Type::Int)) {
                 format!(
@@ -1111,16 +1259,28 @@ fn emit_numeric_op(
                     value
                 }
             } else if matches!(result_ty, Some(Type::Int)) {
-                match recv_ty {
-                    Some(Type::IntN { signed: true, .. }) => format!(
-                        "{}jet_std::jet_int_from_i64(({recv}) as i64)",
-                        cx.root_prefix
-                    ),
-                    Some(Type::IntN { signed: false, .. }) => format!(
-                        "{}jet_std::jet_int_from_u64(({recv}) as u64)",
-                        cx.root_prefix
-                    ),
-                    _ => format!("(({recv}) as {dst_rust})"),
+                // A fixed-width/range carrier whose interval fits the packed
+                // signed-63-bit rail can cross into `Int` without consulting
+                // the bigint table. Keep the conversion helper for unbounded
+                // or wider carriers, where that lookup preserves exactness.
+                if recv_ty.is_some_and(|ty| {
+                    ty.integer_range().is_some_and(|(lo, hi)| {
+                        lo >= -(1i128 << 62) && hi <= (1i128 << 62) - 1
+                    })
+                }) {
+                    format!("(({recv}) as i64)")
+                } else {
+                    match recv_ty {
+                        Some(Type::IntN { signed: true, .. }) => format!(
+                            "{}jet_std::jet_int_from_i64(({recv}) as i64)",
+                            cx.root_prefix
+                        ),
+                        Some(Type::IntN { signed: false, .. }) => format!(
+                            "{}jet_std::jet_int_from_u64(({recv}) as u64)",
+                            cx.root_prefix
+                        ),
+                        _ => format!("(({recv}) as {dst_rust})"),
+                    }
                 }
             } else {
                 format!("(({recv}) as {dst_rust})")
@@ -1570,11 +1730,35 @@ pub(crate) fn emit_inline_range_decode(
         )),
         Type::Tagged { inner, .. } => emit_inline_range_decode(inner, &tree, root, true),
         Type::List(inner)
+            if matches!(
+                inner.as_ref(),
+                Type::IntN {
+                    signed: false,
+                    bits: 8
+                }
+            ) =>
+        {
+            Some(format!("<Vec<u8> as __jet_Decode>::jet_decode({tree})"))
+        }
+        Type::List(inner)
             if type_contains_inline_range(inner) || type_contains_fixed_int(inner) =>
         {
             let child = emit_inline_range_decode(inner, "__item", root, true)?;
             Some(format!(
                 "{root}jet_decode_inline_range_list({tree}, |__item| {child})"
+            ))
+        }
+        Type::FixedList { elem, len, .. }
+            if matches!(
+                elem.as_ref(),
+                Type::IntN {
+                    signed: false,
+                    bits: 8
+                }
+            ) =>
+        {
+            Some(format!(
+                "<[u8; {len}] as __jet_Decode>::jet_decode({tree})"
             ))
         }
         Type::FixedList { elem, len, .. }
@@ -1676,11 +1860,10 @@ fn emit_tir_module_call(
                     crate::Syntax::generated_suffix(rust_fn)
                 ))
         }
-        TModuleCallForm::InlineMangled { mangled } => {
-            cx.extern_funcs
-                .get(mangled)
-                .is_some_and(|extern_fn| extern_fn.c_abi)
-        }
+        TModuleCallForm::InlineMangled { mangled } => cx
+            .extern_funcs
+            .get(mangled)
+            .is_some_and(|extern_fn| extern_fn.c_abi),
     };
     match target_return {
         Some(Type::Result { ok, .. })
@@ -2642,9 +2825,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         a(1)
                     )
                 }
-                TBuiltinOp::InsertList => {
-                    format!("({}).insert({} as usize, {})", recv, a(0), a(1))
-                }
+                TBuiltinOp::InsertList => format!(
+                    "{root}jet_list_insert(&mut ({}), {}, {}, {:?}, {})",
+                    recv,
+                    a(0),
+                    a(1),
+                    cx.file,
+                    cx.current_fn_line.get().max(1)
+                ),
                 TBuiltinOp::RemoveMap => format!("{root}jet_map_pop_kernel(&mut ({}), &({}).clone())", recv, a(0)),
                 TBuiltinOp::RemoveList { line, mode } => match mode {
                     crate::Codegen::TIR::ListRemoveMode::Value => format!(
@@ -2791,7 +2979,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 TBuiltinOp::Clear => format!("({}).clear()", recv),
                 TBuiltinOp::Chars => format!("({}).chars().collect::<Vec<char>>()", recv),
-                TBuiltinOp::Bytes => {
+                TBuiltinOp::Bytes { owned: true } => format!("({}).into_bytes()", recv),
+                TBuiltinOp::Bytes { owned: false } => {
                     format!("{}jet_string_bytes(&({}))", cx.root_prefix, recv)
                 }
                 TBuiltinOp::StringFromBytes => {
@@ -3643,6 +3832,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             lhs,
             rhs,
         } => {
+            if !cx.scalar_function.get() && *op == BinOp::Mul {
+                if let Some((index, lane_source, scale)) =
+                    f64x4_lane_scale_product(lhs, rhs)
+                {
+                    // Keep Rust's left-to-right operand evaluation order:
+                    // `value`, then the scalar factor, then its lane source.
+                    let value = emit_tir_expr(lhs, cx);
+                    let scale = emit_tir_expr(scale, cx);
+                    let lane_source = emit_tir_expr(lane_source, cx);
+                    return format!(
+                        "{}jet_math_F64x4_mul_lane_scale::<{}>(&({value}), ({scale}), &({lane_source}))",
+                        cx.root_prefix, index
+                    );
+                }
+            }
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
             // Rust cannot derive recursive enum equality merely to compare an
@@ -3668,6 +3872,23 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let packed_int = matches!((&lhs.ty, &rhs.ty, &e.ty), (Type::Int, Type::Int, Type::Int));
             let packed_compare = matches!((&lhs.ty, &rhs.ty), (Type::Int, Type::Int));
             if packed_int {
+                if matches!(op, BinOp::FloorDiv | BinOp::Mod) {
+                    if let (Some(lhs_bounds), Some(rhs_bounds), Some(result_bounds)) = (
+                        integer_bounds_for_expr(lhs),
+                        integer_bounds_for_expr(rhs),
+                        integer_bounds_for_expr(e),
+                    ) {
+                        if integer_native_floor_mod_proven(
+                            *op,
+                            lhs_bounds,
+                            rhs_bounds,
+                            result_bounds,
+                        ) {
+                            let native_op = if *op == BinOp::FloorDiv { "/" } else { "%" };
+                            return format!("(({ls}) {native_op} ({rs}))");
+                        }
+                    }
+                }
                 let inline_helper = if integer_spill_is_proven_removed(e) {
                     match op {
                         BinOp::Add => Some("jet_int_add_inline"),
@@ -3780,8 +4001,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // Collection ordering is a shared Prelude operation. The
                 // returned tag preserves `PartialOrd::None` for Float NaN;
                 // the operator is reconstructed here only at the TIR seam.
-                let ordering =
-                    format!("{root}jet_list_order(&({ls}), &({rs}))", root = cx.root_prefix);
+                let ordering = format!(
+                    "{root}jet_list_order(&({ls}), &({rs}))",
+                    root = cx.root_prefix
+                );
                 let tag = mangle_generated("list_order");
                 return match op {
                     BinOp::Lt => format!("{{ let {tag} = {ordering}; {tag} == 0 }}"),
@@ -4514,7 +4737,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         TExprKind::ListSpread { parts } => {
-            let mut s = jet_format!("{{ let mut {jet_prefix}sp = Vec::new(); ");
+            // D-ALLOC1: reserve the statically known element slots up front and
+            // reserve each spread after evaluating it once. This keeps list
+            // spread construction from repeatedly growing its backing buffer
+            // without duplicating any source expression or changing its order.
+            let element_capacity = parts
+                .iter()
+                .filter(|part| matches!(part, ListSpreadPart::Elem(_)))
+                .count();
+            let mut s = jet_format!(
+                "{{ let mut {jet_prefix}sp = Vec::with_capacity({element_capacity}); "
+            );
             for part in parts {
                 match part {
                     ListSpreadPart::Elem(elem) => {
@@ -4524,9 +4757,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ));
                     }
                     ListSpreadPart::Spread(list) => {
+                        let spread = mangle_generated("spread");
+                        let list = emit_tir_expr(list, cx);
                         s.push_str(&jet_format!(
-                            "{jet_prefix}sp.extend(({}).clone()); ",
-                            emit_tir_expr(list, cx)
+                            "let {spread} = ({list}); {jet_prefix}sp.reserve(({spread}).len()); \
+                             {jet_prefix}sp.extend(({spread}).clone()); "
                         ));
                     }
                 }
@@ -4807,9 +5042,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // D-FAIL-CARRIER1=A: the optional view builds the one carrier. A present
-        // payload is the value side; an absence is the clean report.
-        TExprKind::Present(inner) => format!("Ok({})", emit_tir_expr(inner, cx)),
-        TExprKind::Absent => format!("Err({}JetAbsent)", cx.root_prefix),
+        // payload is the value side; an absence is the clean report. These
+        // constructors stay bare so Rust can infer both generic parameters from
+        // the destination or enclosing function return type. Standalone display
+        // uses `emit_tir_standalone_outcome` above to provide the missing witness.
+        TExprKind::Present(inner) => {
+            let value = emit_tir_expr(inner, cx);
+            format!("Ok({value})")
+        }
+        TExprKind::Absent => format!("Err({root}JetAbsent)"),
         // D-FAIL-BREACH1=A: a `#Todo` is a registered runtime stop, not a Rust
         // panic. The Prelude owns its wording, report shape, and exit code.
         TExprKind::Todo {
@@ -4826,10 +5067,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             "unreachable!(\"exhaustive dispatch at {}:{} (sema-proved, E0307)\")",
             cx.file, line
         ),
-        // c109 Phase 8: `Ok(x)` → `Ok(x)` / `Err(e)` → `Err(e)`. Mirrors the AST
-        // `Expr::Ok`/`Expr::Err`.
-        TExprKind::Ok(inner) => format!("Ok({})", emit_tir_expr(inner, cx)),
-        TExprKind::Err(inner) => format!("Err({})", emit_tir_expr(inner, cx)),
+        // c109 Phase 8: `Ok(x)` → `Ok(x)` / `Err(e)` → `Err(e)`. Leave the
+        // generic parameters to Rust in contextual positions; standalone
+        // display/layout values use `emit_tir_standalone_outcome`.
+        TExprKind::Ok(inner) => {
+            let value = emit_tir_expr(inner, cx);
+            format!("Ok({value})")
+        }
+        TExprKind::Err(inner) => {
+            let value = emit_tir_expr(inner, cx);
+            format!("Err({value})")
+        }
         // c109 Phase 8: the `?` propagation operator. Mirrors `Expr::Try` byte-for-byte
         // (Expression.rs): a debug trace frame wraps the value, then the error is
         // converted per the total `TryConvert`, then `?` propagates. `file`/`fn_name`
@@ -4842,7 +5090,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             line,
             fn_name,
         } => {
-            let v = emit_tir_expr(inner, cx);
+            let v = match &inner.kind {
+                TExprKind::ModuleCall {
+                    form,
+                    type_args,
+                    args,
+                    ..
+                } => emit_tir_module_call(inner, form, None, type_args, args, cx),
+                _ => emit_tir_expr(inner, cx),
+            };
             let context_helper = if note.is_some()
                 && crate::Codegen::TIR::try_target_is_default_error(inner, convert)
             {
@@ -4931,32 +5187,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             format!("{traced}?")
         }
-        // c109 Phase 8: the `??` fallback operator. Mirrors `emit_or_fallback`
-        // (Statement.rs). D-FAIL-CARRIER1=A: unwrap the optional-success role
-        // inside an explicit Result before running the fallback.
+        // c109 Phase 8: the `??` fallback operator. It consumes exactly one
+        // carrier, so Result<Option<T>, E> keeps its Option success value for
+        // a later `??` instead of flattening it here.
         TExprKind::OrFallback { value, fallback } => {
             if let Some(fast) = emit_immediate_outcome_fast_fallback(value, fallback, cx) {
                 return fast;
             }
             let v = emit_tir_expr(value, cx);
             let fb = emit_tir_orfallback_rhs(fallback, cx);
-            if matches!(&value.ty, Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Option(_)))
-            {
-                jet_format!(
-                    "match {} {{ Ok(Ok({jet_prefix}ok)) => {jet_prefix}ok, Ok(Err(_)) | Err(_) => {{ {root_prefix}jet_journey_reset(); {} }} }}",
-                    v,
-                    fb,
-                    root_prefix = cx.root_prefix
-                )
-            } else {
-                jet_format!(
-                    "match {} {{ Ok({jet_prefix}ok) => {jet_prefix}ok, Err({}) => {{ {root_prefix}jet_journey_reset(); {} }} }}",
-                    v,
-                    ambient_err_local().rust_name(),
-                    fb,
-                    root_prefix = cx.root_prefix
-                )
-            }
+            jet_format!(
+                "match {} {{ Ok({jet_prefix}ok) => {jet_prefix}ok, Err({}) => {{ {root_prefix}jet_journey_reset(); {} }} }}",
+                v,
+                ambient_err_local().rust_name(),
+                fb,
+                root_prefix = cx.root_prefix
+            )
         }
         // c109 Phase 8: optional chaining `base?.member`. Mirrors `Expr::OptField`:
         // `(base).clone().{and_then|map}(|__optv| __optv.{member})`. The combinator is
@@ -5183,7 +5429,33 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TClosureOp::Each => format!("{root}jet_list_each({vec_src}, {})", a(0)),
                 TClosureOp::EachMut => format!("{root}jet_list_each_mut({vec_src}, {})", a(0)),
-                TClosureOp::EachRef => format!("{root}jet_list_each_ref(&({}), {})", recv, a(0)),
+                TClosureOp::EachRef => {
+                    let callback = a(0);
+                    let callback_error = args.first().and_then(|callback| match &callback.ty {
+                        Type::Fn {
+                            ret: Some(ret), ..
+                        } => match ret.as_ref() {
+                            Type::Result { err, .. } => Some(err.as_ref()),
+                            _ => None,
+                        },
+                        _ => None,
+                    });
+                    let call =
+                        format!("{root}jet_list_each_ref(&({recv}), {callback})");
+                    match callback_error {
+                        Some(error)
+                            if matches!(error, Type::Named(name) if name == crate::Syntax::TYPE_NEVER) =>
+                        {
+                            format!(
+                                "{{ match {call} {{ Ok(()) => (), Err(never) => match never {{}} }} }}"
+                            )
+                        }
+                        Some(_) => format!("{call}?"),
+                        None => jet_name_format!(
+                            "{{ let mut {name_prefix}each_callback = {callback}; match {root}jet_list_each_ref(&({recv}), move |{name_prefix}each_item| {{ ({name_prefix}each_callback)({name_prefix}each_item); Ok::<(), std::convert::Infallible>(()) }}) {{ Ok(()) => (), Err(never) => match never {{}} }} }}"
+                        ),
+                    }
+                }
                 TClosureOp::EachMap => format!("{root}jet_map_each(({}).clone(), {})", recv, a(0)),
                 TClosureOp::MapAny => format!("{root}jet_map_any(({}).clone(), {})", recv, a(0)),
                 TClosureOp::MapAll => format!("{root}jet_map_all(({}).clone(), {})", recv, a(0)),
@@ -5203,6 +5475,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::Any => format!("{root}jet_list_any({vec_src}, {})", a(0)),
                 TClosureOp::BagAny => format!("({}).keys().any({})", recv, a(0)),
                 TClosureOp::All => format!("{root}jet_list_all({vec_src}, {})", a(0)),
+                TClosureOp::CountWhere => {
+                    format!("{root}jet_list_count_where(&({recv}), {})", a(0))
+                }
                 TClosureOp::SortBy => format!("{{ {root}jet_list_sort_by(&mut {}, {}); }}", recv, a(0)),
                 TClosureOp::SortByDesc => {
                     format!("{{ {root}jet_list_sort_by_desc(&mut {}, {}); }}", recv, a(0))
@@ -5319,6 +5594,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::CountBy => {
                     format!("{root}jet_list_count_by({vec_src}, {})", a(0))
                 }
+                TClosureOp::UpdateFirst => format!(
+                    "{root}jet_list_update_first(&mut ({}), {}, {})",
+                    recv,
+                    a(0),
+                    a(1)
+                ),
                 TClosureOp::DedupBy => {
                     format!("{root}jet_iter_dedup_by({as_iter}, {})", a(0))
                 }
@@ -5376,7 +5657,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             };
             let root = &cx.root_prefix;
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
-            match op {
+            let rendered = match op {
                 THandleOp::DurationNew { unit, float } => {
                     let helper = if *float {
                         "jet_duration_from_float"
@@ -6589,6 +6870,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             } else {
                                 "jet_http_mux_add_handler"
                             };
+                            let handler = web_handler(1);
                             format!(
                                 "{{ {}{}(&({}), \"{}\", &({}), {}) }}",
                                 root,
@@ -6596,7 +6878,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 recv,
                                 method.to_uppercase(),
                                 a(0),
-                                a(1)
+                                handler
                             )
                         }
                         ("HTTPMux", "middleware") => {
@@ -7353,7 +7635,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor`. Every read is
                 // fallible (`Result<T, String>`) — a bounds/match miss is an ordinary
                 // `Err`, never a panic (I1/L2).
-                THandleOp::ReaderOver => format!("{}jet_reader_over(&({}))", root, recv),
+                THandleOp::ReaderOver { owned: true } => {
+                    format!("{}jet_reader_over_owned({})", root, recv)
+                }
+                THandleOp::ReaderOver { owned: false } => {
+                    format!("{}jet_reader_over(&({}))", root, recv)
+                }
                 THandleOp::ReaderReadU8 => format!("{}jet_reader_read_u8(&mut ({}))", root, recv),
                 THandleOp::ReaderReadI8 => format!("{}jet_reader_read_i8(&mut ({}))", root, recv),
                 THandleOp::ReaderReadU16Le => {
@@ -7525,11 +7812,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ok_val = ok_val,
                     )
                 }
-                // D-DBDRIVER1: `DBConnection` instance methods. `query`/`query_one`/
-                // `execute` cross the FFI bridge boundary as plain wire text (params
-                // encoded, rows/count/error decoded) — see `Source/Prelude/DB.rs` and
-                // `jet_std::jet_db_{encode_params,decode_query_result,decode_execute_result}`
-                // in `Source/Prelude/CoreLib.rs`.
+                // D-DBDRIVER1: `DBConnection` instance methods. Every SQL sink
+                // receives one checked SQL carrier; policy application and the
+                // final driver wire split happen only inside the DB Prelude.
                 THandleOp::DBWithPolicy => format!(
                     "{root}JetDbScope {{ handle: ({recv}).handle, policy: ({policy}).clone(), user: ({user}).clone() }}",
                     policy = a(0),
@@ -7563,27 +7848,23 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     root = root,
                 ),
                 THandleOp::DBQuery => jet_format!(
-                    "{{ let {jet_prefix}scope = &({recv}); let {jet_prefix}sql = ({}).clone(); let {jet_prefix}params = ({}).clone(); {root}jet_db_scope_query({jet_prefix}scope, &{jet_prefix}sql, &{jet_prefix}params) }}",
+                    "{{ let {jet_prefix}scope = &({recv}); let {jet_prefix}sql = ({}).clone(); {root}jet_db_scope_query({jet_prefix}scope, &{jet_prefix}sql) }}",
                     a(0),
-                    a(1),
                     root = root,
                 ),
                 THandleOp::DBQueryOne => jet_format!(
-                    "{{ let {jet_prefix}scope = &({recv}); let {jet_prefix}sql = ({}).clone(); let {jet_prefix}params = ({}).clone(); {root}jet_db_scope_query({jet_prefix}scope, &{jet_prefix}sql, &{jet_prefix}params).map({root}jet_std::jet_db_first_row) }}",
+                    "{{ let {jet_prefix}scope = &({recv}); let {jet_prefix}sql = ({}).clone(); {root}jet_db_scope_query({jet_prefix}scope, &{jet_prefix}sql).map({root}jet_std::jet_db_first_row) }}",
                     a(0),
-                    a(1),
                     root = root,
                 ),
                 THandleOp::DBExecute => jet_format!(
-                    "{{ let {jet_prefix}scope = &({recv}); let {jet_prefix}sql = ({}).clone(); let {jet_prefix}params = ({}).clone(); {root}jet_db_scope_execute({jet_prefix}scope, &{jet_prefix}sql, &{jet_prefix}params) }}",
+                    "{{ let {jet_prefix}scope = &({recv}); let {jet_prefix}sql = ({}).clone(); {root}jet_db_scope_execute({jet_prefix}scope, &{jet_prefix}sql) }}",
                     a(0),
-                    a(1),
                     root = root,
                 ),
                 THandleOp::DBLive => jet_format!(
-                    "{{ let {jet_prefix}scope = &({recv}); let {jet_prefix}sql = ({}).clone(); let {jet_prefix}params = ({}).clone(); match {root}jet_db_scope_query({jet_prefix}scope, &{jet_prefix}sql, &{jet_prefix}params) {{ Ok(__rows) => {{ let {jet_prefix}initial = format!(\"{{:?}}\", __rows); let {jet_prefix}rerun_scope = (*{jet_prefix}scope).clone(); let {jet_prefix}rerun_sql = {jet_prefix}sql.clone(); let {jet_prefix}rerun_params = {jet_prefix}params.clone(); let {jet_prefix}query = {root}jet_app_live_query(({jet_prefix}scope.policy.table).clone(), {jet_prefix}initial.clone(), move || {root}jet_db_scope_query(&{jet_prefix}rerun_scope, &{jet_prefix}rerun_sql, &{jet_prefix}rerun_params).map(|__rows| format!(\"{{:?}}\", __rows)).map_err(|e| e.message)); let {jet_prefix}signal = {root}jet_std::JetSignal::new({jet_prefix}initial); Ok({root}jet_app_live_bind_signal(&{jet_prefix}query, move |__value| {jet_prefix}signal.set(__value))) }}, Err(e) => Err(e) }} }}",
+                    "{{ let {jet_prefix}scope = &({recv}); let {jet_prefix}sql = ({}).clone(); match {root}jet_db_scope_query({jet_prefix}scope, &{jet_prefix}sql) {{ Ok(__rows) => {{ let {jet_prefix}initial = format!(\"{{:?}}\", __rows); let {jet_prefix}rerun_scope = (*{jet_prefix}scope).clone(); let {jet_prefix}rerun_sql = {jet_prefix}sql.clone(); let {jet_prefix}query = {root}jet_app_live_query(({jet_prefix}scope.policy.table).clone(), {jet_prefix}initial.clone(), move || {root}jet_db_scope_query(&{jet_prefix}rerun_scope, &{jet_prefix}rerun_sql).map(|__rows| format!(\"{{:?}}\", __rows)).map_err(|e| e.message)); let {jet_prefix}signal = {root}jet_std::JetSignal::new({jet_prefix}initial); Ok({root}jet_app_live_bind_signal(&{jet_prefix}query, move |__value| {jet_prefix}signal.set(__value))) }}, Err(e) => Err(e) }} }}",
                     a(0),
-                    a(1),
                     root = root,
                 ),
                 THandleOp::DBBegin => format!("{ffi}::jet_db_begin(({recv}).handle)"),
@@ -7634,6 +7915,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "is_active" => format!("({recv}).active()"),
                     _ => unreachable!("sema admitted only Effect lifecycle methods"),
                 },
+            };
+            if op.raw_option_boundary() {
+                format!("{}jet_outcome_of({})", root, rendered)
+            } else {
+                rendered
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -7844,6 +8130,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             args,
         } => {
             let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+            let foreign_component = cx
+                .extern_funcs
+                .values()
+                .find_map(|info| {
+                    (info.c_abi && info.wrapper.as_str() == wrapper.as_str())
+                        .then(|| info.component.as_deref().unwrap_or("foreign"))
+                })
+                .unwrap_or("foreign");
+            let foreign_component = escape_rust_str(foreign_component);
             let arg_str = args
                 .iter()
                 .map(|a| {
@@ -7860,8 +8155,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                         if is_raw_pointer_type(&a.value.ty) {
                             s = format!(
-                                "{}jet_mem::jet_sentry_foreign_ptr({s})",
-                                cx.root_prefix
+                                "{}jet_mem::jet_sentry_foreign_ptr({s}, {component})",
+                                cx.root_prefix,
+                                component = foreign_component,
                             );
                         }
                     }
@@ -7898,9 +8194,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Type::Result { ok, .. } => ok.as_ref(),
                 other => other,
             };
-            let call = if *c_abi
-                && !bridge_returns_carrier
-                && matches!(bridge_return_ty, Type::Int)
+            let call = if *c_abi && !bridge_returns_carrier && matches!(bridge_return_ty, Type::Int)
             {
                 format!("{}jet_std::jet_int_from_i64({call})", cx.root_prefix)
             } else {

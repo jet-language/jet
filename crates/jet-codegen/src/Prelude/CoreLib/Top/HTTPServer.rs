@@ -15,11 +15,22 @@ struct JetHTTPMuxRoute {
     pattern: String,
     handler: JetHTTPHandler,
 }
+#[derive(Clone)]
+struct JetHTTPMuxRouteCacheEntry {
+    route: JetHTTPMuxRoute,
+    pattern: Option<JetHTTPRoutePattern>,
+}
+
+struct JetHTTPMuxRouteCache {
+    routes: Vec<JetHTTPMuxRouteCacheEntry>,
+    validation_error: Option<String>,
+}
 
 #[derive(Clone)]
 pub(crate) struct JetHTTPMux(
     std::sync::Arc<std::sync::Mutex<Vec<JetHTTPMuxRoute>>>,
     std::sync::Arc<std::sync::Mutex<Vec<JetHTTPMiddleware>>>,
+    std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<JetHTTPMuxRouteCache>>>>,
 );
 
 #[derive(Clone)]
@@ -40,11 +51,14 @@ enum JetHTTPRequestFraming {
     Chunked,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct JetHTTPRequestHead {
     framing: JetHTTPRequestFraming,
     expect_continue: bool,
+    method: String,
+    version: String,
     target: String,
+    headers: JetHTTPHeaders,
     content_encoding_layers: usize,
     trailer_names: Vec<String>,
 }
@@ -645,26 +659,80 @@ impl JetHTTPMux {
         JetHTTPMux(
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
         )
     }
+
+    fn route_cache(&self) -> std::sync::Arc<JetHTTPMuxRouteCache> {
+        let mut cached = self.2.lock().unwrap();
+        if let Some(cache) = cached.as_ref().cloned() {
+            return cache;
+        }
+        let routes = self.0.lock().unwrap();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut validation_error = None;
+        let mut cached_routes = Vec::with_capacity(routes.len());
+        for route in routes.iter() {
+            match jet_http_route_parse(&route.pattern) {
+                Ok(pattern) => {
+                    if validation_error.is_none() {
+                        let key = (route.method.clone(), jet_http_route_shape(&pattern));
+                        if !seen.insert(key) {
+                            validation_error = Some(format!(
+                                "E2804: HTTP route conflict for {} `{}`",
+                                route.method, route.pattern
+                            ));
+                        }
+                    }
+                    cached_routes.push(JetHTTPMuxRouteCacheEntry {
+                        route: route.clone(),
+                        pattern: Some(pattern),
+                    });
+                }
+                Err(error) => {
+                    if validation_error.is_none() {
+                        validation_error = Some(error);
+                    }
+                    cached_routes.push(JetHTTPMuxRouteCacheEntry {
+                        route: route.clone(),
+                        pattern: None,
+                    });
+                }
+            }
+        }
+        let cache = std::sync::Arc::new(JetHTTPMuxRouteCache {
+            routes: cached_routes,
+            validation_error,
+        });
+        *cached = Some(cache.clone());
+        cache
+    }
+
     fn add<F>(&self, method: &str, pattern: &str, f: F)
     where
         F: Fn(JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> + Send + Sync + 'static,
     {
-        self.0.lock().unwrap().push(JetHTTPMuxRoute {
+        let mut cached = self.2.lock().unwrap();
+        let mut routes = self.0.lock().unwrap();
+        routes.push(JetHTTPMuxRoute {
             method: method.to_string(),
             pattern: pattern.to_string(),
             handler: std::sync::Arc::new(f) as JetHTTPHandler,
         });
+        *cached = None;
     }
 
     fn add_handler(&self, method: &str, pattern: &str, handler: JetHTTPHandler) {
-        self.0.lock().unwrap().push(JetHTTPMuxRoute {
+        let mut cached = self.2.lock().unwrap();
+        let mut routes = self.0.lock().unwrap();
+        routes.push(JetHTTPMuxRoute {
             method: method.to_string(),
             pattern: pattern.to_string(),
             handler,
         });
+        *cached = None;
     }
+
 }
 
 fn jet_http_mux_middleware(mux: &JetHTTPMux, middleware: JetHTTPMiddleware) {
@@ -693,35 +761,31 @@ fn jet_http_mux_add_handler(mux: &JetHTTPMux, method: &str, pattern: &str, handl
     mux.add_handler(method, pattern, handler);
 }
 
-fn jet_http_mux_add_zero_handler<F>(mux: &JetHTTPMux, method: &str, pattern: &str, handler: F)
-where
-    F: Fn() -> Result<JetHTTPResponse, JetHTTPError> + Send + Sync + 'static,
-{
+fn jet_http_mux_add_zero_handler(
+    mux: &JetHTTPMux,
+    method: &str,
+    pattern: &str,
+    handler: std::sync::Arc<
+        dyn Fn() -> Result<JetHTTPResponse, JetHTTPError> + Send + Sync + 'static,
+    >,
+) {
     mux.add_handler(method, pattern, std::sync::Arc::new(move |_| handler()));
 }
 
 fn jet_http_srv_response(status: i64, body: &String) -> JetHTTPResponse {
-    if !(100..=599).contains(&status) {
-        return JetHTTPResponse {
-            status: 500,
-            version: "HTTP/1.1".to_string(),
-            body: JetHTTPBody::from_text("500 Internal Server Error".to_string()),
-            headers: JetHTTPHeaders::new(),
-            trailers: JetHTTPHeaders::new(),
-            head_content_length: None,
-            suppress_body: false,
-            protocol: "HTTP/1.1".to_string(),
-            remote_address: String::new(),
-            redirect_history: Vec::new(),
-            timings_ms: Vec::new(),
-            reused_connection: false,
-            raw_content_encoding: None,
-        };
-    }
+    jet_http_srv_response_owned(status, body.clone())
+}
+
+fn jet_http_srv_response_owned(status: i64, body: String) -> JetHTTPResponse {
+    let (status, body) = if !(100..=599).contains(&status) {
+        (500, "500 Internal Server Error".to_string())
+    } else {
+        (status, body)
+    };
     JetHTTPResponse {
         status,
         version: "HTTP/1.1".to_string(),
-        body: JetHTTPBody::from_text(body.clone()),
+        body: JetHTTPBody::from_text(body),
         headers: JetHTTPHeaders::new(),
         trailers: JetHTTPHeaders::new(),
         head_content_length: None,
@@ -740,7 +804,7 @@ fn jet_http_srv_response_with_headers(
     body: &str,
     headers: JetHTTPHeaders,
 ) -> JetHTTPResponse {
-    let mut response = jet_http_srv_response(status, &body.to_string());
+    let mut response = jet_http_srv_response_owned(status, body.to_string());
     response.headers = headers;
     response
 }
@@ -1276,7 +1340,7 @@ fn jet_http_server_handle_stream(
 }
 
 fn jet_http_srv_empty_response(status: i64) -> JetHTTPResponse {
-    let mut response = jet_http_srv_response(status, &String::new());
+    let mut response = jet_http_srv_response_owned(status, String::new());
     response.body = JetHTTPBody::empty();
     response
 }
@@ -2271,7 +2335,7 @@ fn jet_http2_serve_inner(
         while let Ok((stream_id, response)) = completed_rx.try_recv() {
             let Some(request) = requests.get_mut(&stream_id) else { continue };
             request.control = None;
-            let response = response.unwrap_or_else(|_| jet_http_srv_response(500, &"500 Internal Server Error".to_string()));
+            let response = response.unwrap_or_else(|_| jet_http_srv_response_owned(500, "500 Internal Server Error".to_string()));
             request.response_done = jet_http2_queue_response(
                 stream, stream_id, response, &mut outgoing, &mut stream_windows,
                 &mut connection_send_window, initial_send_window, peer_max_frame,
@@ -2735,8 +2799,9 @@ fn jet_http_srv_read_streaming(
         status: 400,
         message: "request read failed",
     })?;
-    let mut header = Vec::new();
-    while !header.ends_with(b"\r\n\r\n") {
+    let mut header = Vec::with_capacity(1024);
+    let mut peeked = [0u8; MAX_HEADER_BYTES + 1];
+    loop {
         if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             return Ok(None);
         }
@@ -2752,20 +2817,42 @@ fn jet_http_srv_read_streaming(
                 Err(JetHTTPReadError { status: 408, message: "request timed out" })
             };
         }
-        let mut byte = [0u8; 1];
-        match stream.read(&mut byte) {
+        match stream.peek(&mut peeked) {
             Ok(0) if header.is_empty() => return Ok(None),
             Ok(0) => return Err(JetHTTPReadError {
                 status: 400,
                 message: "request headers ended early",
             }),
-            Ok(_) => header.push(byte[0]),
-            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Ok(available) if available > header.len() => {
+                header.extend_from_slice(&peeked[header.len()..available]);
+                if let Some(end) = jet_http_header_end(&header) {
+                    let header_len = end + 4;
+                    if header_len > MAX_HEADER_BYTES {
+                        return Err(JetHTTPReadError {
+                            status: 431,
+                            message: "request headers are too large",
+                        });
+                    }
+                    header.truncate(header_len);
+                    break;
+                }
+                if header.len() > MAX_HEADER_BYTES {
+                    return Err(JetHTTPReadError {
+                        status: 431,
+                        message: "request headers are too large",
+                    });
+                }
+            }
+            Ok(_) => std::thread::sleep(std::time::Duration::from_millis(1)),
             Err(_) => return Err(JetHTTPReadError { status: 400, message: "request read failed" }),
         }
-        if header.len() > MAX_HEADER_BYTES {
-            return Err(JetHTTPReadError { status: 431, message: "request headers are too large" });
-        }
+    }
+    if let Err(error) = stream.read_exact(&mut header) {
+        return Err(if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+            JetHTTPReadError { status: 408, message: "request timed out" }
+        } else {
+            JetHTTPReadError { status: 400, message: "request read failed" }
+        });
     }
     let header_end = header.len() - 4;
     let head = jet_http_validate_headers(&header[..header_end])?;
@@ -2779,26 +2866,28 @@ fn jet_http_srv_read_streaming(
     } else {
         false
     };
-    let text = std::str::from_utf8(&header[..header_end]).map_err(|_| JetHTTPReadError {
-        status: 400,
-        message: "request headers are not valid UTF-8",
-    })?;
-    let mut lines = text.lines();
-    let line = lines.next().unwrap_or("");
-    let mut parts = line.splitn(3, ' ');
-    let method = parts.next().unwrap_or("");
-    let _target = parts.next().unwrap_or("");
-    let version = parts.next().unwrap_or("HTTP/1.1").to_string();
-    let mut headers = JetHTTPHeaders::new();
-    for line in lines {
-        let (name, value) = line.split_once(':').ok_or(JetHTTPReadError {
-            status: 400,
-            message: "request header is malformed",
-        })?;
-        headers.append(name, jet_http_trim_ows_start(value)).map_err(|_| JetHTTPReadError {
-            status: 400,
-            message: "request header is malformed",
-        })?;
+    let JetHTTPRequestHead {
+        framing,
+        expect_continue,
+        method,
+        version,
+        target,
+        mut headers,
+        content_encoding_layers,
+        trailer_names,
+    } = head;
+    if matches!(framing, JetHTTPRequestFraming::ContentLength(0)) && content_encoding_layers == 0 {
+        let trailers = std::sync::Arc::new(std::sync::Mutex::new(JetHTTPHeaders::new()));
+        return Ok(Some((
+            JetHTTPRequest::server_body_with_trailers(
+                &method,
+                target,
+                JetHTTPBody::empty(),
+                headers,
+                trailers,
+            ),
+            version,
+        )));
     }
     stream.set_read_timeout(Some(options.read_body_timeout)).map_err(|_| JetHTTPReadError {
         status: 400,
@@ -2813,7 +2902,7 @@ fn jet_http_srv_read_streaming(
         message: "request timeout stream could not be cloned",
     })?;
     let body_deadline = std::time::Instant::now() + options.read_body_timeout;
-    let continue_stream = if head.expect_continue && !body_already_arrived {
+    let continue_stream = if expect_continue && !body_already_arrived {
         Some(stream.try_clone().map_err(|_| JetHTTPReadError {
             status: 500,
             message: "continue response stream could not be cloned",
@@ -2822,7 +2911,7 @@ fn jet_http_srv_read_streaming(
         None
     };
     let trailers = std::sync::Arc::new(std::sync::Mutex::new(JetHTTPHeaders::new()));
-    let body = match head.framing {
+    let body = match framing {
         JetHTTPRequestFraming::ContentLength(length) => {
             if length > options.max_body_bytes {
                 return Err(JetHTTPReadError { status: 413, message: "request body is too large" });
@@ -2844,7 +2933,7 @@ fn jet_http_srv_read_streaming(
                     framing: 0,
                     decoded: 0,
                     limit: options.max_body_bytes,
-                    trailer_names: head.trailer_names.clone(),
+                    trailer_names,
                     trailers: trailers.clone(),
                     deadline: body_deadline,
                 },
@@ -2857,15 +2946,15 @@ fn jet_http_srv_read_streaming(
     };
     let body = jet_http_decode_request_body(
         body,
-        head.content_encoding_layers,
+        content_encoding_layers,
         options.max_body_bytes,
     )?;
-    if head.content_encoding_layers > 0 {
+    if content_encoding_layers > 0 {
         headers.remove("content-encoding");
         headers.remove("content-length");
     }
     Ok(Some((
-        JetHTTPRequest::server_body_with_trailers(method, head.target, body, headers, trailers),
+        JetHTTPRequest::server_body_with_trailers(&method, target, body, headers, trailers),
         version,
     )))
 }
@@ -2959,12 +3048,16 @@ fn jet_http_srv_read_buffered(
         } else {
             JET_HTTP_KEEPALIVE_IDLE_TIMEOUT
         };
+    let mut parsed_head: Option<JetHTTPRequestHead> = None;
     loop {
         if let Some(header_end) = jet_http_header_end(pending) {
             if header_end > MAX_HEADER_BYTES {
                 return Err(JetHTTPReadError { status: 431, message: "request headers are too large" });
             }
-            let head = jet_http_validate_headers(&pending[..header_end])?;
+            if parsed_head.is_none() {
+                parsed_head = Some(jet_http_validate_headers(&pending[..header_end])?);
+            }
+            let head = parsed_head.as_mut().expect("validated HTTP request head");
             if !reading_body {
                 reading_body = true;
                 let deadline = std::time::Instant::now() + options.read_body_timeout;
@@ -2983,7 +3076,10 @@ fn jet_http_srv_read_buffered(
                 }
                 JetHTTPRequestFraming::Chunked => chunked
                     .get_or_insert_with(|| {
-                        JetHTTPChunkState::new(options.max_body_bytes, head.trailer_names.clone())
+                        JetHTTPChunkState::new(
+                            options.max_body_bytes,
+                            std::mem::take(&mut head.trailer_names),
+                        )
                     })
                     .advance(&pending[body_start..])?
                     .map(|body_end| body_start + body_end),
@@ -3573,6 +3669,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHTTPRequestHead, JetHTT
     let mut expectation = None;
     let mut host = None;
     let mut trailer_values = Vec::new();
+    let mut headers = JetHTTPHeaders::new();
     for line in lines {
         count += 1;
         if count > 100 {
@@ -3589,6 +3686,10 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHTTPRequestHead, JetHTT
         if !JetHTTPHeaders::valid_value(value) {
             return Err(JetHTTPReadError { status: 400, message: "request header value is malformed" });
         }
+        headers.append(name, jet_http_trim_ows_start(value)).map_err(|_| JetHTTPReadError {
+            status: 400,
+            message: "request header is malformed",
+        })?;
         if name.eq_ignore_ascii_case("connection") {
             if !jet_http_connection_options(value).all(JetHTTPHeaders::valid_name) {
                 return Err(JetHTTPReadError {
@@ -3691,7 +3792,10 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHTTPRequestHead, JetHTT
     Ok(JetHTTPRequestHead {
         framing,
         expect_continue,
+        method: method.to_string(),
+        version: version.to_string(),
         target,
+        headers,
         content_encoding_layers,
         trailer_names,
     })
@@ -3869,7 +3973,7 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHTTPRequest, JetHTTPReadError> {
         });
     }
     let header_part = &raw[..sep];
-    let head = jet_http_validate_headers(header_part)?;
+    let mut head = jet_http_validate_headers(header_part)?;
     let encoded_body = &raw[sep + 4..];
     let (body, trailers) = match head.framing {
         JetHTTPRequestFraming::ContentLength(content_length) => {
@@ -3888,7 +3992,7 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHTTPRequest, JetHTTPReadError> {
             (encoded_body.to_vec(), JetHTTPHeaders::new())
         }
         JetHTTPRequestFraming::Chunked => {
-            jet_http_decode_chunked_body(encoded_body, head.trailer_names.clone())?
+            jet_http_decode_chunked_body(encoded_body, std::mem::take(&mut head.trailer_names))?
         }
     };
     let body = jet_http_decode_request_bytes(
@@ -3896,27 +4000,9 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHTTPRequest, JetHTTPReadError> {
         head.content_encoding_layers,
         JET_HTTP_MAX_BODY_BYTES,
     )?;
-    let header_part = std::str::from_utf8(header_part).map_err(|_| JetHTTPReadError {
-        status: 400,
-        message: "request headers are not valid UTF-8",
-    })?;
-    let mut lines = header_part.lines();
-    let req_line = lines.next().unwrap_or("");
-    let mut parts = req_line.splitn(3, ' ');
-    let method = parts.next().unwrap_or("").to_string();
+    let method = head.method;
     let path = head.target;
-    let mut headers = JetHTTPHeaders::new();
-    for line in lines {
-        let (name, value) = line.split_once(':').ok_or(JetHTTPReadError {
-            status: 400,
-            message: "request header is malformed",
-        })?;
-        let value = jet_http_trim_ows_start(value);
-        headers.append(name, value).map_err(|_| JetHTTPReadError {
-            status: 400,
-            message: "request header is malformed",
-        })?;
-    }
+    let mut headers = head.headers;
     if head.content_encoding_layers > 0 {
         headers.remove("content-encoding");
         headers.remove("content-length");
@@ -3932,61 +4018,15 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHTTPRequest, JetHTTPReadError> {
 
 fn jet_http_mux_dispatch(
     mux: &JetHTTPMux,
-    req: JetHTTPRequest,
+    mut req: JetHTTPRequest,
 ) -> Result<JetHTTPResponse, JetHTTPError> {
+    let route_cache = mux.route_cache();
     let requested_method = req.method.as_str();
     let is_head = requested_method == "HEAD";
     if requested_method == "OPTIONS" && req.path == "*" {
-        let routes = mux.0.clone();
-        let handler: JetHTTPHandler = std::sync::Arc::new(move |_| {
-            let allow = {
-                let routes = routes.lock().unwrap();
-                jet_http_allowed_methods(routes.iter().map(|route| route.method.as_str()))
-            };
-            Ok(jet_http_srv_response_with_headers(
-                204,
-                "",
-                [("Allow".to_string(), allow)].into_iter().collect(),
-            ))
-        });
-        return Ok(jet_http_mux_run_handler(mux, req, handler));
-    }
-    // CONNECT authority-form has no path; route against "/{authority}" while
-    // leaving req.path as the normalized authority for handlers.
-    let route_target = if requested_method == "CONNECT" {
-        format!("/{}", req.path)
-    } else {
-        req.path.clone()
-    };
-    let path = match jet_http_route_path(&route_target) {
-        Ok(path) => path,
-        Err(_) => {
-            let handler: JetHTTPHandler = std::sync::Arc::new(|_| {
-                Ok(jet_http_srv_response(400, &"400 Bad Request".to_string()))
-            });
-            let response = jet_http_mux_run_handler(mux, req, handler);
-            return Ok(jet_http_srv_head_response(response, is_head));
-        }
-    };
-    // Route lookup is a short snapshot operation. Never retain the registry
-    // lock while composing middleware or running user code: handlers may
-    // overlap and may register another route on this same mux.
-    let path_matches: Vec<(usize, JetHTTPMuxRoute, std::collections::BTreeMap<String, String>, JetHTTPRoutePattern)> = {
-        let routes = mux.0.lock().unwrap();
-        routes
-            .iter()
-            .enumerate()
-            .filter_map(|(order, route)| {
-                let pattern = jet_http_route_parse(&route.pattern).ok()?;
-                jet_http_route_match(&pattern, &path).map(|params| (order, route.clone(), params, pattern))
-            })
-            .collect()
-    };
-    let effective_method = if requested_method == "HEAD"
-        && !path_matches.iter().any(|(_, route, _, _)| route.method == "HEAD")
-    { "GET" } else { requested_method };
-    if requested_method == "OPTIONS" && !path_matches.iter().any(|(_, route, _, _)| route.method == "OPTIONS") {
-        let allow = jet_http_allowed_methods(path_matches.iter().map(|(_, route, _, _)| route.method.as_str()));
+        let allow = jet_http_allowed_methods(
+            route_cache.routes.iter().map(|route| route.route.method.as_str()),
+        );
         let handler: JetHTTPHandler = std::sync::Arc::new(move |_| {
             Ok(jet_http_srv_response_with_headers(
                 204,
@@ -3996,22 +4036,80 @@ fn jet_http_mux_dispatch(
         });
         return Ok(jet_http_mux_run_handler(mux, req, handler));
     }
-    if let Some((_, route, params, _)) = path_matches.iter()
-        .filter(|(_, route, _, _)| route.method == effective_method)
-        .max_by(|(left_order, _, _, left), (right_order, _, _, right)| {
-            jet_http_route_selection_cmp(left, *left_order, right, *right_order)
-        })
-    {
-        let mut r2 = req.clone();
-        r2.params = params.clone();
-        r2.route_template = Some(route.pattern.clone());
-        let response = jet_http_mux_run_handler(mux, r2, route.handler.clone());
+    // CONNECT authority-form has no path; route against "/{authority}" while
+    // leaving req.path as the normalized authority for handlers.
+    let route_target = if requested_method == "CONNECT" {
+        std::borrow::Cow::Owned(format!("/{}", req.path))
+    } else {
+        std::borrow::Cow::Borrowed(req.path.as_str())
+    };
+    let path = match jet_http_route_path(route_target.as_ref()) {
+        Ok(path) => path,
+        Err(_) => {
+            let handler: JetHTTPHandler = std::sync::Arc::new(|_| {
+                Ok(jet_http_srv_response_owned(400, "400 Bad Request".to_string()))
+            });
+            let response = jet_http_mux_run_handler(mux, req, handler);
+            return Ok(jet_http_srv_head_response(response, is_head));
+        }
+    };
+    // Route lookup uses an immutable validated snapshot. Never retain the
+    // registry lock while composing middleware or running user code: handlers
+    // may overlap and may register another route on this same mux.
+    let mut path_match_count = 0usize;
+    let mut has_head = false;
+    let mut selected = None;
+    let mut selected_get = None;
+    for (order, route) in route_cache.routes.iter().enumerate() {
+        let Some(pattern) = route.pattern.as_ref() else {
+            continue;
+        };
+        if !jet_http_route_matches(pattern, &path) {
+            continue;
+        }
+        path_match_count += 1;
+        has_head |= route.route.method == "HEAD";
+        if route.route.method == requested_method {
+            let replace = match selected {
+                None => true,
+                Some((left_order, _, left_pattern)) => {
+                    jet_http_route_selection_cmp(pattern, order, left_pattern, left_order)
+                        == std::cmp::Ordering::Greater
+                }
+            };
+            if replace {
+                selected = Some((order, route, pattern));
+            }
+        }
+        if requested_method == "HEAD" && route.route.method == "GET" {
+            let replace = match selected_get {
+                None => true,
+                Some((left_order, _, left_pattern)) => {
+                    jet_http_route_selection_cmp(pattern, order, left_pattern, left_order)
+                        == std::cmp::Ordering::Greater
+                }
+            };
+            if replace {
+                selected_get = Some((order, route, pattern));
+            }
+        }
+    }
+    let selected = if requested_method == "HEAD" && !has_head {
+        selected_get
+    } else {
+        selected
+    };
+    if let Some((_, route, pattern)) = selected {
+        req.params = jet_http_route_params(pattern, &path);
+        req.route_template = Some(route.route.pattern.clone());
+        let response = jet_http_mux_run_handler(mux, req, route.route.handler.clone());
         return Ok(jet_http_srv_head_response(response, is_head));
     }
-    if !path_matches.is_empty() {
-        let allow = jet_http_allowed_methods(
-            path_matches.iter().map(|(_, route, _, _)| route.method.as_str()),
-        );
+    if path_match_count > 0 {
+        let allow = jet_http_allowed_methods(route_cache.routes.iter().filter_map(|route| {
+            let pattern = route.pattern.as_ref()?;
+            jet_http_route_matches(pattern, &path).then_some(route.route.method.as_str())
+        }));
         let handler: JetHTTPHandler = std::sync::Arc::new(move |_| {
             Ok(jet_http_srv_response_with_headers(
                 405,
@@ -4023,7 +4121,7 @@ fn jet_http_mux_dispatch(
         return Ok(jet_http_srv_head_response(response, is_head));
     }
     let handler: JetHTTPHandler = std::sync::Arc::new(|_| {
-        Ok(jet_http_srv_response(404, &"404 Not Found".to_string()))
+        Ok(jet_http_srv_response_owned(404, "404 Not Found".to_string()))
     });
     let response = jet_http_mux_run_handler(mux, req, handler);
     Ok(jet_http_srv_head_response(response, is_head))
@@ -4034,8 +4132,15 @@ fn jet_http_mux_run_handler(
     req: JetHTTPRequest,
     handler: JetHTTPHandler,
 ) -> JetHTTPResponse {
-    let mut handler = jet_http_mux_total_handler(handler);
     let middlewares = mux.1.lock().unwrap().clone();
+    if middlewares.is_empty() {
+        return match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => jet_http_srv_error_response(error),
+            Err(_) => jet_http_srv_internal_response(),
+        };
+    }
+    let mut handler = jet_http_mux_total_handler(handler);
     for middleware in middlewares.iter().rev() {
         let next = handler.clone();
         handler = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| middleware(next))) {
@@ -4057,7 +4162,7 @@ fn jet_http_mux_total_handler(handler: JetHTTPHandler) -> JetHTTPHandler {
 }
 
 fn jet_http_srv_internal_response() -> JetHTTPResponse {
-    jet_http_srv_response(500, &"500 Internal Server Error".to_string())
+    jet_http_srv_response_owned(500, "500 Internal Server Error".to_string())
 }
 
 fn jet_http_srv_error_response(error: JetHTTPError) -> JetHTTPResponse {
@@ -4088,14 +4193,10 @@ fn jet_http_allowed_methods<'a>(registered: impl Iterator<Item = &'a str>) -> St
 }
 
 fn jet_http_mux_validate(mux: &JetHTTPMux) -> Result<(), String> {
-    let routes = mux.0.lock().unwrap();
-    let mut seen = std::collections::BTreeSet::new();
-    for route in routes.iter() {
-        let pattern = jet_http_route_parse(&route.pattern)?;
-        let key = (route.method.clone(), jet_http_route_shape(&pattern));
-        if !seen.insert(key) { return Err(format!("E2804: HTTP route conflict for {} `{}`", route.method, route.pattern)); }
-    }
-    Ok(())
+    mux.route_cache()
+        .validation_error
+        .clone()
+        .map_or(Ok(()), Err)
 }
 
 fn jet_http_srv_format(resp: &JetHTTPResponse) -> String {
@@ -4115,6 +4216,7 @@ fn jet_http_srv_write_response(
     version: &str,
     close: bool,
 ) -> Result<(), JetHTTPError> {
+    use std::fmt::Write as _;
     let reason = match resp.status {
         100 => "Continue",
         101 => "Switching Protocols",
@@ -4166,27 +4268,33 @@ fn jet_http_srv_write_response(
         && !body_forbidden
         && !reset_content
         && known_length.is_none();
-    let mut out = format!("{} {} {}\r\n", version, resp.status, reason);
+    let mut out = String::with_capacity(128);
+    write!(&mut out, "{} {} {}\r\n", version, resp.status, reason).expect("response formatting cannot fail");
     if !body_forbidden {
         if reset_content {
             out.push_str("Content-Length: 0\r\n");
         } else if resp.suppress_body {
             if let Some(length) = known_length {
-                out.push_str(&format!("Content-Length: {length}\r\n"));
+                write!(&mut out, "Content-Length: {length}\r\n")
+                    .expect("response formatting cannot fail");
             }
         } else if chunked {
             out.push_str("Transfer-Encoding: chunked\r\n");
             if !trailer_names.is_empty() {
-                out.push_str(&format!("Trailer: {}\r\n", trailer_names.join(", ")));
+                write!(&mut out, "Trailer: {}\r\n", trailer_names.join(", "))
+                    .expect("response formatting cannot fail");
             }
         } else if !close_delimited {
-            out.push_str(&format!("Content-Length: {}\r\n", known_length.unwrap_or(0)));
+            write!(&mut out, "Content-Length: {}\r\n", known_length.unwrap_or(0))
+                .expect("response formatting cannot fail");
         }
     }
-    out.push_str(&format!(
+    write!(
+        &mut out,
         "Connection: {}\r\n",
         if close || close_delimited { "close" } else { "keep-alive" },
-    ));
+    )
+    .expect("response formatting cannot fail");
     let connection_headers = resp
         .headers
         .all("connection")
@@ -4204,7 +4312,8 @@ fn jet_http_srv_write_response(
             .iter()
             .any(|candidate| name.eq_ignore_ascii_case(candidate));
         if !framing && !nominated {
-            out.push_str(&format!("{}: {}\r\n", name, value));
+            write!(&mut out, "{}: {}\r\n", name, value)
+                .expect("response formatting cannot fail");
         }
     }
     out.push_str("\r\n");
@@ -4238,11 +4347,9 @@ fn jet_http_srv_write_response(
                 operation: "write response chunk terminator".to_string(),
             })?;
             for (name, value) in &resp.trailers {
-                writer
-                    .write_all(format!("{name}: {value}\r\n").as_bytes())
-                    .map_err(|_| JetHTTPError::IO {
-                        operation: "write response trailers".to_string(),
-                    })?;
+                write!(writer, "{name}: {value}\r\n").map_err(|_| JetHTTPError::IO {
+                    operation: "write response trailers".to_string(),
+                })?;
             }
             writer.write_all(b"\r\n").map_err(|_| JetHTTPError::IO {
                 operation: "write response trailer terminator".to_string(),
@@ -4340,7 +4447,7 @@ fn jet_http_srv_static_file_range(
         return Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime));
     };
     let Some((start, end)) = jet_http_static_range(&range, file_len) else {
-        return Ok(jet_http_srv_response(416, &"range not satisfiable".to_string()));
+        return Ok(jet_http_srv_response_owned(416, "range not satisfiable".to_string()));
     };
     use std::io::Seek;
     file.seek(std::io::SeekFrom::Start(start as u64))
@@ -5026,7 +5133,7 @@ where
 {
     jet_http_mux_add(mux, "POST", path, move |_| {
         handler();
-        jet_http_srv_response(200, &"ok".to_string())
+        jet_http_srv_response_owned(200, "ok".to_string())
     });
 }
 
@@ -5036,7 +5143,7 @@ where
 {
     jet_http_mux_add(mux, "POST", path, move |request| {
         handler(&request.path);
-        jet_http_srv_response(200, &"ok".to_string())
+        jet_http_srv_response_owned(200, "ok".to_string())
     });
 }
 
@@ -5281,7 +5388,7 @@ fn jet_http_router_dispatch(
 ) -> Result<JetHTTPResponse, JetHTTPError> {
     let path_segs = match jet_http_route_path(&req.path) {
         Ok(path) => path,
-        Err(_) => return Ok(jet_http_srv_response(400, &"400 bad request".to_string())),
+        Err(_) => return Ok(jet_http_srv_response_owned(400, "400 bad request".to_string())),
     };
     let mut candidates: Vec<(usize, std::collections::BTreeMap<String, String>)> = Vec::new();
     for (i, route) in router.routes.iter().enumerate() {
@@ -5291,7 +5398,7 @@ fn jet_http_router_dispatch(
         }
     }
     if candidates.is_empty() {
-        return Ok(jet_http_srv_response(404, &"404 not found".to_string()));
+        return Ok(jet_http_srv_response_owned(404, "404 not found".to_string()));
     }
     let method_match = candidates
         .iter()
@@ -5302,7 +5409,7 @@ fn jet_http_router_dispatch(
             jet_http_route_selection_cmp(&left_pattern, *left, &right_pattern, *right)
         });
     let Some((route_idx, params)) = method_match else {
-        return Ok(jet_http_srv_response(405, &"405 method not allowed".to_string()));
+        return Ok(jet_http_srv_response_owned(405, "405 method not allowed".to_string()));
     };
     let route = &router.routes[*route_idx];
     let mut req2 = req;
@@ -5315,7 +5422,7 @@ fn jet_http_serve_router(addr: &String, router: JetHTTPRouter) {
     let router = std::sync::Arc::new(router);
     jet_http_serve(addr, move |request| {
         jet_http_router_dispatch(&router, request)
-            .unwrap_or_else(|_| jet_http_srv_response(500, &"500 Internal Server Error".to_string()))
+            .unwrap_or_else(|_| jet_http_srv_response_owned(500, "500 Internal Server Error".to_string()))
     })
 }
 

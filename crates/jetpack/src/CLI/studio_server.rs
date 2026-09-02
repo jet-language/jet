@@ -23,6 +23,8 @@ pub(super) struct StudioContext {
 }
 
 const STUDIO_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const STUDIO_WORKER_COUNT: usize = 4;
+const STUDIO_CONNECTION_QUEUE: usize = 4;
 
 pub(super) fn studio_host(parsed: &Parsed) -> Option<String> {
     parsed.flags.studio_host.clone()
@@ -108,23 +110,70 @@ pub(super) fn serve_studio(
             }
         }
     }
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
-                let _ = configure_studio_stream(&stream);
-                let _ = handle_studio_request(&mut stream, app, meta, data, context, local_addr);
-            }
-            Err(e) => {
-                theme.error(
-                    "jetos Studio service connection failed",
-                    &format!("accepting a local connection failed: {e}"),
-                    "restart `jetos studio --serve`.",
-                );
-                return 2;
+    with_studio_workers(app, meta, data, context, local_addr, |sender| {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    let _ = queue_studio_connection(sender, stream);
+                }
+                Err(e) => {
+                    theme.error(
+                        "jetos Studio service connection failed",
+                        &format!("accepting a local connection failed: {e}"),
+                        "restart `jetos studio --serve`.",
+                    );
+                    return 2;
+                }
             }
         }
+        0
+    })
+}
+
+fn with_studio_workers<T>(
+    app: &Path,
+    meta: &Path,
+    data: &Path,
+    context: &StudioContext,
+    local_addr: SocketAddr,
+    serve: impl FnOnce(&std::sync::mpsc::SyncSender<std::net::TcpStream>) -> T,
+) -> T {
+    std::thread::scope(|scope| {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(STUDIO_CONNECTION_QUEUE);
+        let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
+        let mut workers = Vec::with_capacity(STUDIO_WORKER_COUNT);
+        for _ in 0..STUDIO_WORKER_COUNT {
+            let receiver = std::sync::Arc::clone(&receiver);
+            workers.push(scope.spawn(move || loop {
+                let stream = match receiver.lock() {
+                    Ok(receiver) => receiver.recv(),
+                    Err(_) => return,
+                };
+                let Ok(mut stream) = stream else {
+                    return;
+                };
+                let _ = handle_studio_request(&mut stream, app, meta, data, context, local_addr);
+            }));
+        }
+        let result = serve(&sender);
+        drop(sender);
+        for worker in workers {
+            let _ = worker.join();
+        }
+        result
+    })
+}
+
+fn queue_studio_connection(
+    sender: &std::sync::mpsc::SyncSender<std::net::TcpStream>,
+    stream: std::net::TcpStream,
+) -> bool {
+    let _ = configure_studio_stream(&stream);
+    match sender.try_send(stream) {
+        Ok(()) => true,
+        Err(std::sync::mpsc::TrySendError::Full(_))
+        | Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
     }
-    0
 }
 
 fn configure_studio_stream(stream: &std::net::TcpStream) -> std::io::Result<()> {
@@ -504,6 +553,21 @@ fn http_request_complete(buf: &[u8]) -> bool {
 mod tests {
     use super::*;
 
+    fn test_studio_context(session_secret: &str) -> StudioContext {
+        StudioContext {
+            config: PathBuf::from("missing/config.jet"),
+            host: "test".to_string(),
+            offline: true,
+            session_secret: session_secret.to_string(),
+            source_write: std::sync::Mutex::new(()),
+            sessions: std::sync::Mutex::new(std::collections::BTreeSet::new()),
+            changeset: std::sync::Mutex::new(None),
+            last_applied: std::sync::Mutex::new(None),
+            live_projection: std::sync::Mutex::new(None),
+            proved_source: std::sync::Mutex::new(None),
+        }
+    }
+
     #[test]
     fn studio_slowloris_connections_have_io_deadlines() {
         use std::io::Write;
@@ -543,5 +607,154 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_millis(500));
         drop(server);
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn studio_slowloris_does_not_starve_later_clients() {
+        use std::io::{Read, Write};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let context = test_studio_context("slowloris-secret");
+        let app = PathBuf::from("missing/studio/index.html");
+        let meta = PathBuf::from("missing/studio/app.json");
+        let data = PathBuf::from("missing/studio/data.json");
+        let partial_secret = context.session_secret.clone();
+        let complete_secret = context.session_secret.clone();
+        let (partial_ready_tx, partial_ready_rx) = mpsc::channel();
+        let (release_partial_tx, release_partial_rx) = mpsc::channel();
+        let (accepted_partial_tx, accepted_partial_rx) = mpsc::channel();
+        let (complete_result_tx, complete_result_rx) = mpsc::channel();
+
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let mut client = std::net::TcpStream::connect(local_addr).unwrap();
+                write!(
+                    client,
+                    "GET /studio/app.json?session={} HTTP/1.1\r\nHost: {local_addr}\r\n",
+                    partial_secret
+                )
+                .unwrap();
+                partial_ready_tx.send(()).unwrap();
+                release_partial_rx.recv().unwrap();
+            });
+            partial_ready_rx.recv().unwrap();
+
+            let server = scope.spawn(|| {
+                with_studio_workers(
+                    &app,
+                    &meta,
+                    &data,
+                    &context,
+                    local_addr,
+                    |sender| {
+                        let (stream, _) = listener.accept().unwrap();
+                        let accepted = queue_studio_connection(sender, stream);
+                        accepted_partial_tx.send(accepted).unwrap();
+                        let (stream, _) = listener.accept().unwrap();
+                        assert!(queue_studio_connection(sender, stream));
+                        0
+                    },
+                )
+            });
+            assert!(accepted_partial_rx.recv().unwrap());
+
+            let complete = scope.spawn(move || {
+                let result: Result<Duration, String> = (|| {
+                    let started = Instant::now();
+                    let mut client =
+                        std::net::TcpStream::connect(local_addr).map_err(|error| error.to_string())?;
+                    write!(
+                        client,
+                        "GET /studio/app.json?session={complete_secret} HTTP/1.1\r\nHost: {local_addr}\r\nConnection: close\r\n\r\n"
+                    )
+                    .map_err(|error| error.to_string())?;
+                    client
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .map_err(|error| error.to_string())?;
+                    let mut response = Vec::new();
+                    client
+                        .read_to_end(&mut response)
+                        .map_err(|error| error.to_string())?;
+                    if !response.starts_with(b"HTTP/1.1 200 OK\r\n") {
+                        return Err(format!(
+                            "complete Studio request failed: {}",
+                            String::from_utf8_lossy(&response)
+                        ));
+                    }
+                    Ok(started.elapsed())
+                })();
+                let _ = release_partial_tx.send(());
+                complete_result_tx.send(result).unwrap();
+            });
+
+            let elapsed = complete_result_rx.recv().unwrap().unwrap();
+            assert!(
+                elapsed < STUDIO_IO_TIMEOUT,
+                "later request waited {:?} behind the partial request",
+                elapsed
+            );
+            complete.join().unwrap();
+            assert_eq!(server.join().unwrap(), 0);
+        });
+    }
+
+    #[test]
+    fn studio_connection_cap_refuses_excess_without_leaking() {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{mpsc, Arc};
+
+        let total = STUDIO_WORKER_COUNT + STUDIO_CONNECTION_QUEUE + 1;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        let context = test_studio_context("cap-secret");
+        let app = PathBuf::from("missing/studio/index.html");
+        let meta = PathBuf::from("missing/studio/app.json");
+        let data = PathBuf::from("missing/studio/data.json");
+        let release = Arc::new(AtomicBool::new(false));
+        let (connected_tx, connected_rx) = mpsc::channel();
+
+        std::thread::scope(|scope| {
+            for _ in 0..total {
+                let connected_tx = connected_tx.clone();
+                let release = Arc::clone(&release);
+                scope.spawn(move || {
+                    let mut client = std::net::TcpStream::connect(local_addr).unwrap();
+                    client.write_all(b"G").unwrap();
+                    connected_tx.send(()).unwrap();
+                    while !release.load(Ordering::Acquire) {
+                        std::thread::yield_now();
+                    }
+                });
+            }
+            for _ in 0..total {
+                connected_rx.recv().unwrap();
+            }
+
+            let server = scope.spawn(|| {
+                with_studio_workers(
+                    &app,
+                    &meta,
+                    &data,
+                    &context,
+                    local_addr,
+                    |sender| {
+                        let mut rejected = 0;
+                        for _ in 0..total {
+                            let (stream, _) = listener.accept().unwrap();
+                            if !queue_studio_connection(sender, stream) {
+                                rejected += 1;
+                            }
+                        }
+                        release.store(true, Ordering::Release);
+                        rejected
+                    },
+                )
+            });
+            assert_eq!(server.join().unwrap(), 1);
+        });
     }
 }

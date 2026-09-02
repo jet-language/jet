@@ -1,6 +1,9 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::LockFile;
+use crate::Store;
+use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
+use std::io;
 
 // ──────────────────────────────────────────────
 // `jet registry vendor` — copy resolved deps into vendor/
@@ -21,19 +24,8 @@ pub fn vendor(
     vendor_dir: &Path,
 ) -> Result<Vec<String>, Diagnostic> {
     let _ = project_root; // resolved by the caller into `vendor_dir`
-    ensure_directory(vendor_dir).map_err(|e| {
-        Diagnostic::error(
-            "E2604",
-            format!(
-                "couldn't create vendor directory `{}`: {}",
-                vendor_dir.display(),
-                e
-            ),
-            "the vendor directory is where `jet registry vendor` writes offline copies of dependencies."
-                .into(),
-            "check write permissions, or pass a writable `--vendor-dir <path>`.".into(),
-            None,
-        )
+    let vendor = Store::ensure_directory_authority(vendor_dir).map_err(|error| {
+        vendor_io_error("creating vendor directory", vendor_dir, error)
     })?;
 
     let mut copied = Vec::new();
@@ -47,65 +39,131 @@ pub fn vendor(
                 None,
             ));
         }
-        validate_source_tree(src_dir).map_err(|e| {
-            Diagnostic::error(
-                "E2604",
-                format!("failed to inspect `{name}`: {e}"),
-                "vendored dependency trees must contain real files and directories".into(),
-                "remove symlinks from the dependency source and run `jet registry vendor` again"
-                    .into(),
-                None,
-            )
+
+        let source = Store::open_directory_authority(src_dir).map_err(|error| {
+            vendor_io_error("inspecting dependency source", src_dir, error)
         })?;
-        let dest = vendor_dir.join(name);
-        if let Ok(metadata) = std::fs::symlink_metadata(&dest) {
-            if metadata.file_type().is_symlink() {
-                return Err(Diagnostic::error(
-                    "E2604",
-                    format!("vendor destination `{}` is a symlink", dest.display()),
-                    "refusing to remove or overwrite a symlink while vendoring".into(),
-                    "replace the destination with a real directory and run `jet registry vendor` again".into(),
-                    None,
+        let source_hash = Store::hash_directory_authority(&source, true).map_err(|error| {
+            vendor_io_error("hashing dependency source", src_dir, error)
+        })?;
+        let destination_name = OsStr::new(name);
+
+        match vendor.open_child_directory(destination_name) {
+            Ok(existing) => {
+                let existing_hash =
+                    Store::hash_directory_authority(&existing, false).map_err(|error| {
+                        vendor_io_error(
+                            "checking existing vendor copy",
+                            &vendor_dir.join(name),
+                            error,
+                        )
+                    })?;
+                if existing_hash == source_hash {
+                    copied.push(name.clone());
+                    continue;
+                }
+                drop(existing);
+                vendor
+                    .remove_child_tree(destination_name)
+                    .map_err(|error| {
+                        vendor_io_error(
+                            "removing stale vendor copy",
+                            &vendor_dir.join(name),
+                            error,
+                        )
+                    })?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(vendor_io_error(
+                    "checking vendor destination",
+                    &vendor_dir.join(name),
+                    error,
+                ))
+            }
+        }
+
+        let (staging_name, staging) = vendor
+            .create_private_child("vendor")
+            .map_err(|error| vendor_io_error("creating vendor staging directory", vendor_dir, error))?;
+        let result = (|| {
+            Store::copy_directory_authority(&source, &staging, true).map_err(|error| {
+                vendor_io_error("copying dependency into vendor tree", src_dir, error)
+            })?;
+            let staging_hash =
+                Store::hash_directory_authority(&staging, false).map_err(|error| {
+                    vendor_io_error(
+                        "checking staged vendor copy",
+                        &vendor_dir.join(name),
+                        error,
+                    )
+                })?;
+            if staging_hash != source_hash {
+                return Err(vendor_io_error(
+                    "checking staged vendor copy",
+                    &vendor_dir.join(name),
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "staged vendor copy does not match the source tree",
+                    ),
                 ));
             }
-            // Remove stale copy.
-            std::fs::remove_dir_all(&dest).ok();
-        }
-        copy_dir_recursive(src_dir, &dest).map_err(|e| {
-            Diagnostic::error(
-                "E2604",
-                format!("failed to vendor `{}`: {}", name, e),
-                "jet registry vendor copies dependency source into the vendor tree for offline builds."
-                    .into(),
-                "check that the dependency is correctly fetched first with `jet store fetch`.".into(),
-                None,
-            )
-        })?;
+            match Store::publish_directory(&vendor, &staging_name, &vendor, destination_name) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    let winner = vendor
+                        .open_child_directory(destination_name)
+                        .map_err(|error| {
+                            vendor_io_error(
+                                "opening concurrent vendor copy",
+                                &vendor_dir.join(name),
+                                error,
+                            )
+                        })?;
+                    let winner_hash =
+                        Store::hash_directory_authority(&winner, false).map_err(|error| {
+                            vendor_io_error(
+                                "checking concurrent vendor copy",
+                                &vendor_dir.join(name),
+                                error,
+                            )
+                        })?;
+                    if winner_hash == source_hash {
+                        Ok(())
+                    } else {
+                        Err(vendor_io_error(
+                            "publishing vendor copy",
+                            &vendor_dir.join(name),
+                            io::Error::new(
+                                io::ErrorKind::AlreadyExists,
+                                "concurrent vendor copy has different contents",
+                            ),
+                        ))
+                    }
+                }
+                Err(error) => Err(vendor_io_error(
+                    "publishing vendor copy",
+                    &vendor_dir.join(name),
+                    error,
+                )),
+            }
+        })();
+        let _ = vendor.remove_child_tree(&staging_name);
+        result?;
         copied.push(name.clone());
     }
     copied.sort();
 
-    // Write the vendor manifest from the lock so offline builds can re-verify.
     let manifest = vendor_manifest_json(lock, &copied);
-    let manifest_path = vendor_dir.join("manifest.json");
-    reject_existing_symlink(&manifest_path).map_err(|e| {
-        Diagnostic::error(
-            "E2604",
-            format!("couldn't prepare the vendor manifest: {e}"),
-            "the vendor manifest must be a regular file inside the vendor directory".into(),
-            "replace a symlink at vendor/manifest.json with a regular file".into(),
-            None,
-        )
-    })?;
-    std::fs::write(&manifest_path, manifest).map_err(|e| {
-        Diagnostic::error(
-            "E2604",
-            format!("couldn't write the vendor manifest: {}", e),
-            "vendor/manifest.json records each dependency's name, version, and fingerprint.".into(),
-            "check write permissions on the vendor directory.".into(),
-            None,
-        )
-    })?;
+    vendor
+        .write_child_file(OsStr::new("manifest.json"), manifest.as_bytes())
+        .map_err(|error| {
+            vendor_io_error(
+                "writing vendor manifest",
+                &vendor_dir.join("manifest.json"),
+                error,
+            )
+        })?;
 
     Ok(copied)
 }
@@ -145,38 +203,16 @@ fn json_str(s: &str) -> String {
     out
 }
 
-/// Recursively copy a directory tree.
-fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
-    validate_source_tree(src)?;
-    ensure_directory(dest)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dest_path = dest.join(entry.file_name());
-        let metadata = std::fs::symlink_metadata(&src_path)?;
-        if metadata.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!(
-                    "refusing symlink in dependency tree: {}",
-                    src_path.display()
-                ),
-            ));
-        }
-        if metadata.is_dir() {
-            copy_dir_recursive(&src_path, &dest_path)?;
-        } else if metadata.is_file() {
-            reject_existing_symlink(&dest_path)?;
-            std::fs::copy(&src_path, &dest_path)?;
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("unsupported dependency tree entry: {}", src_path.display()),
-            ));
-        }
-    }
-    Ok(())
+fn vendor_io_error(action: &str, path: &Path, error: io::Error) -> Diagnostic {
+    Diagnostic::error(
+        "E2604",
+        format!("couldn't {} `{}`: {}", action, path.display(), error),
+        "vendored dependency trees must contain real files and directories.".into(),
+        "check the dependency source and vendor directory permissions.".into(),
+        None,
+    )
 }
+
 
 fn safe_component(value: &str) -> bool {
     !value.is_empty()
@@ -191,49 +227,3 @@ fn safe_component(value: &str) -> bool {
         && Path::new(value).components().nth(1).is_none()
 }
 
-fn validate_source_tree(path: &Path) -> std::io::Result<()> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "dependency tree root must be a real directory",
-        ));
-    }
-    Ok(())
-}
-
-fn reject_existing_symlink(path: &Path) -> std::io::Result<()> {
-    if let Ok(metadata) = std::fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "destination must not be a symlink",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn ensure_directory(path: &Path) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "directory must not be a symlink",
-        )),
-        Ok(metadata) if metadata.is_dir() => Ok(()),
-        Ok(_) => Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "directory path is not a directory",
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if let Some(parent) = path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-            {
-                ensure_directory(parent)?;
-            }
-            std::fs::create_dir(path)
-        }
-        Err(error) => Err(error),
-    }
-}

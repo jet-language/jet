@@ -81,8 +81,14 @@ pub fn definition_fingerprint_with_selections(
     requested_environment: Option<&str>,
 ) -> Option<String> {
     let env_path = root.join(Syntax::ENV_FILE);
-    let source = std::fs::read_to_string(&env_path).ok()?;
+    let source = crate::SHA256::read_file_nofollow(
+        &env_path,
+        crate::SHA256::MAX_TREE_FILE_BYTES,
+    )
+    .ok()?;
+    let source = std::str::from_utf8(&source).ok()?;
     let mut entries = Vec::<(String, Vec<u8>)>::new();
+    let mut budget = FingerprintBudget::default();
     if let Ok(plan) = jet_env_model::ModuleEval::evaluate_env_with_selections(
         &source,
         root,
@@ -90,25 +96,26 @@ pub fn definition_fingerprint_with_selections(
         requested_environment,
     ) {
         for relative in &plan.source_files {
-            add_input(root, relative, "source", &mut entries);
+            add_input(root, relative, "source", &mut budget, &mut entries);
         }
         for dotenv in &plan.lifecycle.dotenv {
-            add_input(root, &dotenv.file, "dotenv", &mut entries);
+            add_input(root, &dotenv.file, "dotenv", &mut budget, &mut entries);
         }
         if let jet_env_model::ModuleEval::ReloadPolicy::Watch { paths, .. } = &plan.lifecycle.reload
         {
             for path in paths {
-                add_input(root, path, "reload-watch", &mut entries);
+                add_input(root, path, "reload-watch", &mut budget, &mut entries);
             }
         }
         for file in &plan.files {
             if let Some(relative) = &file.source {
-                add_input(root, relative, "managed", &mut entries);
+                add_input(root, relative, "managed", &mut budget, &mut entries);
             }
-            entries.push((
+            budget.push(
+                &mut entries,
                 format!("managed-fact:{}", file.destination),
                 file.fingerprint().into_bytes(),
-            ));
+            );
         }
         // `--env` selects an environment module, not a package generation.
         // Shell activation always observes the canonical `profile.dev` root.
@@ -125,15 +132,18 @@ pub fn definition_fingerprint_with_selections(
                     Syntax::SOURCE_ROOT_DIR
                 ),
                 "package-profile-current",
+                &mut budget,
                 &mut entries,
             );
         }
-        entries.push((
+        budget.push(
+            &mut entries,
             "lifecycle".to_string(),
             plan.lifecycle.fingerprint().into_bytes(),
-        ));
+        );
         for preset in &plan.presets {
-            entries.push((
+            budget.push(
+                &mut entries,
                 format!("preset:{}", preset.name),
                 format!(
                     "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
@@ -145,9 +155,10 @@ pub fn definition_fingerprint_with_selections(
                     requested_preset,
                 )
                 .into_bytes(),
-            ));
+            );
         }
-        entries.push((
+        budget.push(
+            &mut entries,
             "languages".to_string(),
             plan.languages
                 .iter()
@@ -155,17 +166,18 @@ pub fn definition_fingerprint_with_selections(
                 .collect::<Vec<_>>()
                 .join("\n")
                 .into_bytes(),
-        ));
+        );
     } else {
         // Keep malformed/legacy files observable without allowing an
         // unrelated `.jet` file to become part of a valid environment graph.
         // The activation path still rejects the malformed plan below.
-        collect_definition_files(root, root, &mut entries);
+        collect_definition_files(root, root, &mut budget, &mut entries, 0);
     }
     for relative in [Syntax::UNIFIED_LOCK_FILE, "package.jet", "pkg.jet"] {
-        add_input(root, relative, "project", &mut entries);
+        add_input(root, relative, "project", &mut budget, &mut entries);
     }
-    entries.push((
+    budget.push(
+        &mut entries,
         "selection".to_string(),
         format!(
             "preset={};environment={};host={};user={}",
@@ -177,16 +189,25 @@ pub fn definition_fingerprint_with_selections(
                 .unwrap_or_default()
         )
         .into_bytes(),
-    ));
-    entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-    let mut canonical = Vec::new();
-    for (name, bytes) in entries {
-        canonical.extend_from_slice(name.as_bytes());
-        canonical.push(0);
-        canonical.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-        canonical.extend_from_slice(&bytes);
+    );
+    if budget.exceeded {
+        return None;
     }
-    Some(crate::SHA256::sha256_hex(&canonical))
+    entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let mut hasher = crate::SHA256::StreamingSha256::new();
+    for (name, bytes) in entries {
+        hasher.update(name.as_bytes());
+        hasher.update(&[0]);
+        hasher.update(&(bytes.len() as u64).to_le_bytes());
+        hasher.update(&bytes);
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    Some(hex)
 }
 
 /// Read the typed lifecycle policy without realizing packages or executing
@@ -200,7 +221,13 @@ pub fn reload_policy_with_environment(
     root: &Path,
     requested_environment: Option<&str>,
 ) -> jet_env_model::ModuleEval::ReloadPolicy {
-    let Ok(source) = std::fs::read_to_string(root.join(Syntax::ENV_FILE)) else {
+    let Ok(source) = crate::SHA256::read_file_nofollow(
+        &root.join(Syntax::ENV_FILE),
+        crate::SHA256::MAX_TREE_FILE_BYTES,
+    ) else {
+        return jet_env_model::ModuleEval::ReloadPolicy::default();
+    };
+    let Ok(source) = std::str::from_utf8(&source) else {
         return jet_env_model::ModuleEval::ReloadPolicy::default();
     };
     jet_env_model::ModuleEval::evaluate_env_with_selections(
@@ -252,20 +279,110 @@ pub fn clear_watch_reload(root: &Path) {
     );
 }
 
-fn add_input(root: &Path, relative: &str, kind: &str, entries: &mut Vec<(String, Vec<u8>)>) {
+#[derive(Default)]
+struct FingerprintBudget {
+    entries: usize,
+    nodes: usize,
+    bytes: u64,
+    exceeded: bool,
+}
+
+impl FingerprintBudget {
+    fn push(
+        &mut self,
+        entries: &mut Vec<(String, Vec<u8>)>,
+        name: String,
+        bytes: Vec<u8>,
+    ) {
+        let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if self.entries >= crate::SHA256::MAX_TREE_FILES
+            || self
+                .bytes
+                .checked_add(length)
+                .is_none_or(|total| total > crate::SHA256::MAX_TREE_TOTAL_BYTES)
+        {
+            self.exceeded = true;
+            return;
+        }
+        self.entries += 1;
+        self.bytes += length;
+        entries.push((name, bytes));
+    }
+
+    fn visit(&mut self) -> bool {
+        if self.nodes >= crate::SHA256::MAX_TREE_FILES {
+            self.exceeded = true;
+            false
+        } else {
+            self.nodes += 1;
+            true
+        }
+    }
+
+    fn allow_file(&mut self, length: u64) -> bool {
+        if length > crate::SHA256::MAX_TREE_FILE_BYTES
+            || self
+                .bytes
+                .checked_add(length)
+                .is_none_or(|total| total > crate::SHA256::MAX_TREE_TOTAL_BYTES)
+        {
+            self.exceeded = true;
+            false
+        } else {
+            true
+        }
+    }
+
+    fn exceed(&mut self) {
+        self.exceeded = true;
+    }
+}
+
+fn add_input(
+    root: &Path,
+    relative: &str,
+    kind: &str,
+    budget: &mut FingerprintBudget,
+    entries: &mut Vec<(String, Vec<u8>)>,
+) {
+    if budget.exceeded {
+        return;
+    }
     let path = Path::new(relative);
     if path.is_absolute()
         || path
             .components()
             .any(|component| component == std::path::Component::ParentDir)
     {
-        entries.push((format!("{kind}:unsafe:{relative}"), Vec::new()));
+        budget.push(
+            entries,
+            format!("{kind}:unsafe:{relative}"),
+            Vec::new(),
+        );
+        return;
+    }
+    if path
+        .components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .count()
+        > crate::SHA256::MAX_TREE_DEPTH
+    {
+        budget.exceed();
         return;
     }
     let path = root.join(path);
     let root_real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut visited = BTreeSet::new();
-    add_input_path(&root_real, &path, relative, kind, entries, &mut visited);
+    add_input_path(
+        &root_real,
+        &path,
+        relative,
+        kind,
+        budget,
+        entries,
+        &mut visited,
+        0,
+    );
 }
 
 fn add_input_path(
@@ -273,35 +390,50 @@ fn add_input_path(
     path: &Path,
     relative: &str,
     kind: &str,
+    budget: &mut FingerprintBudget,
     entries: &mut Vec<(String, Vec<u8>)>,
     visited: &mut BTreeSet<PathBuf>,
+    depth: usize,
 ) {
+    if budget.exceeded {
+        return;
+    }
+    if depth > crate::SHA256::MAX_TREE_DEPTH || !budget.visit() {
+        budget.exceed();
+        return;
+    }
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
-        entries.push((format!("{kind}:missing:{relative}"), Vec::new()));
+        budget.push(
+            entries,
+            format!("{kind}:missing:{relative}"),
+            Vec::new(),
+        );
         return;
     };
     if metadata.file_type().is_symlink() {
         let target = std::fs::read_link(path)
             .map(|target| target.to_string_lossy().into_owned().into_bytes())
             .unwrap_or_default();
-        entries.push((format!("{kind}:symlink:{relative}"), target));
+        budget.push(entries, format!("{kind}:symlink:{relative}"), target);
         return;
     }
     if let Ok(real) = path.canonicalize() {
         if !real.starts_with(root) {
-            entries.push((
+            budget.push(
+                entries,
                 format!("{kind}:unsafe:{relative}"),
                 real.to_string_lossy().as_bytes().to_vec(),
-            ));
+            );
             return;
         }
         if !visited.insert(real) {
-            entries.push((format!("{kind}:cycle:{relative}"), Vec::new()));
+            budget.push(entries, format!("{kind}:cycle:{relative}"), Vec::new());
             return;
         }
     }
     if metadata.is_dir() {
-        entries.push((
+        budget.push(
+            entries,
             format!("{kind}:directory:{relative}"),
             format!(
                 "readonly={};modified={:?}",
@@ -309,12 +441,38 @@ fn add_input_path(
                 metadata.modified().ok()
             )
             .into_bytes(),
-        ));
-        let Ok(read_dir) = std::fs::read_dir(&path) else {
-            entries.push((format!("{kind}:unreadable:{relative}"), Vec::new()));
+        );
+        if budget.exceeded {
+            return;
+        }
+        let Ok(read_dir) = std::fs::read_dir(path) else {
+            budget.push(
+                entries,
+                format!("{kind}:unreadable:{relative}"),
+                Vec::new(),
+            );
             return;
         };
-        let mut children = read_dir.filter_map(Result::ok).collect::<Vec<_>>();
+        let mut children = Vec::new();
+        for child in read_dir {
+            let Ok(child) = child else {
+                budget.push(
+                    entries,
+                    format!("{kind}:unreadable:{relative}"),
+                    Vec::new(),
+                );
+                return;
+            };
+            if children.len() >= crate::SHA256::MAX_TREE_FILES {
+                budget.exceed();
+                return;
+            }
+            children.push(child);
+        }
+        if depth >= crate::SHA256::MAX_TREE_DEPTH {
+            budget.exceed();
+            return;
+        }
         children.sort_by_key(|entry| entry.file_name());
         for child in children {
             let name = child.file_name().to_string_lossy().into_owned();
@@ -328,31 +486,71 @@ fn add_input_path(
                 &path.join(&name),
                 &child_relative,
                 kind,
+                budget,
                 entries,
                 visited,
+                depth + 1,
             );
+            if budget.exceeded {
+                return;
+            }
         }
     } else if metadata.is_file() {
-        match std::fs::read(path) {
-            Ok(bytes) => entries.push((format!("{kind}:file:{relative}"), bytes)),
-            Err(_) => entries.push((format!("{kind}:unreadable:{relative}"), Vec::new())),
+        if !budget.allow_file(metadata.len()) {
+            return;
+        }
+        match crate::SHA256::read_file_nofollow(
+            path,
+            crate::SHA256::MAX_TREE_FILE_BYTES,
+        ) {
+            Ok(bytes) => budget.push(entries, format!("{kind}:file:{relative}"), bytes),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::InvalidData
+                    && error.to_string().contains("bound") =>
+            {
+                budget.exceed();
+            }
+            Err(_) => budget.push(
+                entries,
+                format!("{kind}:unreadable:{relative}"),
+                Vec::new(),
+            ),
         }
     } else {
-        entries.push((
+        budget.push(
+            entries,
             format!("{kind}:special:{relative}"),
             format!("file-type={:?}", metadata.file_type()).into_bytes(),
-        ));
+        );
     }
 }
 
-fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(String, Vec<u8>)>) {
+fn collect_definition_files(
+    root: &Path,
+    current: &Path,
+    budget: &mut FingerprintBudget,
+    entries: &mut Vec<(String, Vec<u8>)>,
+    depth: usize,
+) {
+    if budget.exceeded || depth > crate::SHA256::MAX_TREE_DEPTH || !budget.visit() {
+        budget.exceed();
+        return;
+    }
     let Ok(read_dir) = std::fs::read_dir(current) else {
         return;
     };
-    let mut paths = read_dir
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    for entry in read_dir {
+        let Ok(entry) = entry else {
+            budget.exceed();
+            return;
+        };
+        if paths.len() >= crate::SHA256::MAX_TREE_FILES {
+            budget.exceed();
+            return;
+        }
+        paths.push(entry.path());
+    }
     paths.sort();
     for path in paths {
         if path.file_name().is_some_and(|name| name == ".jet") {
@@ -367,7 +565,11 @@ fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(Stri
             // walk only needs bounded, project-owned regular files.
             continue;
         } else if metadata.is_dir() {
-            collect_definition_files(root, &path, entries);
+            if depth >= crate::SHA256::MAX_TREE_DEPTH {
+                budget.exceed();
+                return;
+            }
+            collect_definition_files(root, &path, budget, entries, depth + 1);
         } else if metadata.is_file()
             && path
                 .extension()
@@ -378,7 +580,10 @@ fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(Stri
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/");
-            add_input(root, &relative, "source", entries);
+            add_input(root, &relative, "source", budget, entries);
+        }
+        if budget.exceeded {
+            return;
         }
     }
 }
@@ -772,6 +977,47 @@ mod tests {
         std::fs::write(root.join("nested/input.jet"), "// input\n").unwrap();
         symlink("..", root.join("nested/loop")).unwrap();
         assert!(definition_fingerprint(&root, None).is_some());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn malformed_env_fingerprint_fails_closed_on_deep_tree() {
+        let root = std::env::temp_dir().join(format!(
+            "jpk-envhook-deep-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(Syntax::ENV_FILE), "not a valid env plan\n").unwrap();
+        let mut current = root.clone();
+        for index in 0..=(crate::SHA256::MAX_TREE_DEPTH + 1) {
+            current.push(format!("d{index}"));
+            std::fs::create_dir(&current).unwrap();
+        }
+        std::fs::write(current.join("input.jet"), "// input\n").unwrap();
+        assert_eq!(definition_fingerprint(&root, None), None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn malformed_env_fingerprint_rejects_oversized_input_at_eof() {
+        let root = std::env::temp_dir().join(format!(
+            "jpk-envhook-oversized-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(Syntax::ENV_FILE), "not a valid env plan\n").unwrap();
+        let path = root.join("oversized.jet");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(crate::SHA256::MAX_TREE_FILE_BYTES + 1).unwrap();
+        assert_eq!(definition_fingerprint(&root, None), None);
         let _ = std::fs::remove_dir_all(root);
     }
 

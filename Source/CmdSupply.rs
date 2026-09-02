@@ -8,6 +8,72 @@ use jet::ExitCodes;
 use jet_foundation::Report::render_status_json;
 
 use crate::{find_project_entry, report_problems, OutputMode};
+struct PackageInput {
+    raw: String,
+    manifest: jet::Manifest::Manifest,
+}
+
+fn package_input(root: &Path) -> PackageInput {
+    let entry = find_project_entry(root);
+    let entry_raw = fs::read_to_string(&entry).unwrap_or_else(|error| {
+        crate::cli_error!("E2105", "couldn't read {}: {}", entry.display(), error);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let inline = jet::Package::extract_inline_package(&entry_raw).unwrap_or_else(|error| {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(
+                &entry.display().to_string(),
+                &entry_raw,
+                &[error.diagnostic()],
+            )
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
+    let facts = jet::Loader::package_facts_for_entry(&entry)
+        .unwrap_or_else(|diagnostics| {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(
+                    &entry.display().to_string(),
+                    &entry_raw,
+                    &diagnostics,
+                )
+            );
+            exit(ExitCodes::USER_ERROR);
+        })
+        .unwrap_or_else(|| {
+            crate::cli_error!("E2105", "couldn't resolve package facts for {}", entry.display());
+            exit(ExitCodes::USER_ERROR);
+        });
+    if let Some(block) = inline {
+        let raw = block.body(&entry_raw).to_string();
+        let manifest = jet::Package::to_manifest(&facts, &raw).unwrap_or_else(|diagnostic| {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(&entry.display().to_string(), &raw, &[diagnostic])
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+        return PackageInput { raw, manifest };
+    }
+    let path = jet::Loader::manifest_path(root).unwrap_or_else(|| {
+        crate::cli_error!("E2105", "couldn't locate {}", jet::Syntax::PACKAGE_FILE);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let raw = fs::read_to_string(&path).unwrap_or_else(|error| {
+        crate::cli_error!("E2105", "couldn't read {}: {}", path.display(), error);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let manifest = jet::Package::to_manifest(&facts, &raw).unwrap_or_else(|diagnostic| {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&path.display().to_string(), &raw, &[diagnostic])
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
+    PackageInput { raw, manifest }
+}
 
 // ──────────────────────────────────────────────
 // Git dirty-tree check
@@ -202,18 +268,9 @@ pub(crate) fn run_publish(
         }
     }
 
-    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
-    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
+    let input = package_input(&root);
+    let raw = input.raw;
+    let mf = input.manifest;
 
     let version = &mf.package.version;
     let name = &mf.package.name;
@@ -862,18 +919,9 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
         "error: no package.jet found — run `jet registry vendor` inside a project",
     );
 
-    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
-    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
+    let input = package_input(&root);
+    let raw = input.raw;
+    let mf = input.manifest;
 
     // Fetch first so we have the resolved dep dirs.
     let existing_lock = jet::Lock::load(&root);
@@ -945,18 +993,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         "error: no package.jet found — run `jet inspect audit` inside a project",
     );
 
-    let source_exceptions = match jet::Manifest::load(&root) {
-        Some(Ok(manifest)) => manifest.policy.exceptions,
-        Some(Err(diagnostic)) => audit_fail(&root.join(jet::Syntax::PACKAGE_FILE), "", diagnostic),
-        None => audit_fail(
-            &root.join(jet::Syntax::PACKAGE_FILE),
-            "",
-            jet::Publish::e2611(
-                "a readable package manifest",
-                "repair `package.jet` and run `jet inspect audit` again",
-            ),
-        ),
-    };
+    let source_exceptions = package_input(&root).manifest.policy.exceptions;
 
     let lock_path = root.join(".jet").join("lock");
     let lock_text = match fs::read_to_string(&lock_path) {
@@ -1224,18 +1261,8 @@ pub(crate) fn run_sbom(cyclonedx: bool) {
         "error: no package.jet found — run `jet inspect sbom` inside a project",
     );
 
-    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
-    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
+    let input = package_input(&root);
+    let mf = input.manifest;
 
     let lock = match jet::Lock::load(&root) {
         Some(l) => l,
@@ -1283,18 +1310,8 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         "error: no package.jet found — run `jet registry yank` inside a project",
     );
 
-    let pack_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
-    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    let mf = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
-        eprint!(
-            "{}",
-            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
-        );
-        exit(ExitCodes::USER_ERROR);
-    });
+    let input = package_input(&root);
+    let mf = input.manifest;
 
     let name = &mf.package.name;
 

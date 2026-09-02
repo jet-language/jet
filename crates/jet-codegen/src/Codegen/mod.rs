@@ -278,6 +278,8 @@ const PRELUDE_PARTS: &[&str] = &[
 
 const OUTCOME_SOURCE: &str = include_str!("../../../jet-foundation/src/Outcome.rs");
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
+const HOST_RUNTIME_SENTRY_BEGIN: &str = "// JET_HOST_RUNTIME_SENTRY_BEGIN";
+const HOST_RUNTIME_SENTRY_END: &str = "// JET_HOST_RUNTIME_SENTRY_END";
 const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
 
 /// Embedded Prelude parts are a dependency graph, not a list of incidental
@@ -410,23 +412,57 @@ fn runtime_diagnostic_projection() -> String {
                  jet_runtime_diagnostic_row(code), code, file, line, fn_name, src_line,\n\
                  col, caret_len, message, locals,\n\
              )\n\
+         }\n\n\
+         pub fn jet_render_runtime_sentry(\n\
+             code: &'static str, file: &str, line: u32, gate: &str,\n\
+             operation: &str, obligation: &str, detail: &str,\n\
+         ) -> JetRuntimeDiagnostic {\n\
+             jet_render_runtime_sentry_with_context(\n\
+                 code, file, line, gate, operation, obligation, detail,\n\
+                 \"false\", None, None,\n\
+             )\n\
+         }\n\n\
+         pub fn jet_render_runtime_sentry_with_context(\n\
+             code: &'static str, file: &str, line: u32, gate: &str,\n\
+             operation: &str, obligation: &str, detail: &str,\n\
+             obligation_status: &str, foreign_component: Option<&str>,\n\
+             foreign_fenced: Option<bool>,\n\
+         ) -> JetRuntimeDiagnostic {\n\
+             jet_render_runtime_sentry_from_row(\n\
+                 jet_runtime_diagnostic_row(code), code, file, line, gate,\n\
+                 operation, obligation, detail, obligation_status,\n\
+                 foreign_component, foreign_fenced,\n\
+             )\n\
          }\n\n",
     );
     out
 }
 
 fn push_embedded_outcome(out: &mut String) {
-    let start = OUTCOME_SOURCE
+    let stop_start = OUTCOME_SOURCE
         .find(HOST_RUNTIME_STOP_BEGIN)
-        .expect("Outcome host wrapper marker missing");
-    let end = OUTCOME_SOURCE
+        .expect("Outcome host runtime-stop wrapper marker missing");
+    let stop_end = OUTCOME_SOURCE
         .find(HOST_RUNTIME_STOP_END)
-        .expect("Outcome host wrapper end marker missing")
+        .expect("Outcome host runtime-stop wrapper end marker missing")
         + HOST_RUNTIME_STOP_END.len();
-    out.push_str(&OUTCOME_SOURCE[..start]);
-    out.push_str(&OUTCOME_SOURCE[end..]);
+    let sentry_start = OUTCOME_SOURCE
+        .find(HOST_RUNTIME_SENTRY_BEGIN)
+        .expect("Outcome host sentry wrapper marker missing");
+    let sentry_end = OUTCOME_SOURCE
+        .find(HOST_RUNTIME_SENTRY_END)
+        .expect("Outcome host sentry wrapper end marker missing")
+        + HOST_RUNTIME_SENTRY_END.len();
+    assert!(
+        stop_end <= sentry_start && sentry_start <= sentry_end,
+        "Outcome host wrappers are out of order"
+    );
+    out.push_str(&OUTCOME_SOURCE[..stop_start]);
+    out.push_str(&OUTCOME_SOURCE[stop_end..sentry_start]);
+    out.push_str(&OUTCOME_SOURCE[sentry_end..]);
     out.push_str(&runtime_diagnostic_projection());
 }
+
 
 fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
     let Some(link) = link else {
@@ -645,6 +681,44 @@ fn jet_test_print(s: String) {
 }
 fn jet_test_take_output() -> String {
     JET_TEST_OUT.with(|buf| buf.borrow_mut().split_off(0))
+}
+/// Install the test harness panic hook once. Runtime-stop carriers are an
+/// internal transport detail: the harness turns them into the canonical Jet
+/// report, so the previous Rust hook must not print a second panic voice.
+/// Every other payload delegates to the hook that was installed before the
+/// harness, preserving ordinary Rust diagnostics for generated-code defects.
+static JET_TEST_PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+fn jet_test_install_panic_hook() {
+    JET_TEST_PANIC_HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if info.payload().is::<JetRenderedRuntimeStop>()
+                || info.payload().is::<JetRuntimeDiagnostic>()
+            {
+                return;
+            }
+            previous(info);
+        }));
+    });
+}
+
+/// Catch a runtime stop inside a test and retain its product diagnostic. The
+/// normal program boundary owns process exit; this test-only boundary converts
+/// the same typed carrier into the runner's ordinary failure result.
+fn jet_test_run<F>(run: F) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(result) => result,
+        Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
+            Ok(report) => Err(report.rendered),
+            Err(payload) => match payload.downcast::<JetRuntimeDiagnostic>() {
+                Ok(report) => Err(report.rendered),
+                Err(payload) => std::panic::resume_unwind(payload),
+            },
+        },
+    }
 }
 /// D-E3-1905: the test child is an AOT binary. The release profile is encoded
 /// at compile time so `jet test --release --trace-tiers` proves which binary
@@ -2830,14 +2904,15 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         }
     }
     if uses("core.db") {
-        // D-DBPOLICY-BIND1: `Driver` is a policy-bearing scope, never the raw
-        // connection. Generic calls use the same policy-enforcing helpers as
-        // concrete `DBScope` calls.
+        // D-TYPEDSQL-SINK1=A: `SQL` is the only database sink carrier. The
+        // policy layer may inspect its two tuple fields internally, but every
+        // public/generated sink receives one value and final driver marshalling
+        // is the only place that splits text from ordered binds.
         out.push_str(&format!(
             "trait JetDBDriver {{\n\
-             \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError>;\n\
-             \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError>;\n\
-             \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError>;\n\
+             \tfn query(&mut self, sql: {root}jet_std::SQL) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError>;\n\
+             \tfn query_one(&mut self, sql: {root}jet_std::SQL) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError>;\n\
+             \tfn execute(&mut self, sql: {root}jet_std::SQL) -> Result<i64, {root}jet_std::DBError>;\n\
              \tfn begin(&mut self) -> bool;\n\
              \tfn commit(&mut self) -> bool;\n\
              \tfn rollback(&mut self) -> bool;\n\
@@ -2846,14 +2921,14 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         if let Some(ffi) = &cx.ffi_crate {
             out.push_str(&format!(
                 "impl JetDBDriver for {root}JetDbScope {{\n\
-                 \tfn query(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-                 \t\tjet_db_scope_query(self, &sql, &params)\n\
+                 \tfn query(&mut self, sql: {root}jet_std::SQL) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
+                 \t\tjet_db_scope_query(self, &sql)\n\
                  \t}}\n\
-                 \tfn query_one(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError> {{\n\
-                 \t\tjet_db_scope_query(self, &sql, &params).map({root}jet_std::jet_db_first_row)\n\
+                 \tfn query_one(&mut self, sql: {root}jet_std::SQL) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError> {{\n\
+                 \t\tjet_db_scope_query(self, &sql).map({root}jet_std::jet_db_first_row)\n\
                  \t}}\n\
-                 \tfn execute(&mut self, sql: String, params: Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
-                 \t\tjet_db_scope_execute(self, &sql, &params)\n\
+                 \tfn execute(&mut self, sql: {root}jet_std::SQL) -> Result<i64, {root}jet_std::DBError> {{\n\
+                 \t\tjet_db_scope_execute(self, &sql)\n\
                  \t}}\n\
                  \tfn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.handle) }}\n\
                  \tfn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.handle) }}\n\
@@ -2861,23 +2936,13 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
                  }}\n"
             ));
             out.push_str(&format!(
-                "fn jet_db_scope_execute(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, params, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?.into_parts()?;\n\
-{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+                "fn jet_db_scope_execute(scope: &{root}JetDbScope, sql: &{root}jet_std::SQL) -> Result<i64, {root}jet_std::DBError> {{\n\
+let __sql = {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?.into_sql()?;\n\
+{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql.0, &{root}jet_std::jet_db_encode_params(&__sql.1)))\n\
 }}\n\
-fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, params, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?.into_parts()?;\n\
-{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
-}}\n"
-            ));
-            out.push_str(&format!(
-                "fn jet_db_scope_execute_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = {root}jet_std::jet_db_apply_compiled_migration_policy_with_proof(sql, params, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?.into_parts()?;\n\
-{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
-}}\n\
-fn jet_db_scope_query_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = {root}jet_std::jet_db_apply_compiled_migration_policy_with_proof(sql, params, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?.into_parts()?;\n\
-{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &{root}jet_std::SQL) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
+let __sql = {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?.into_sql()?;\n\
+{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql.0, &{root}jet_std::jet_db_encode_params(&__sql.1)))\n\
 }}\n"
             ));
             out.push_str(&format!(
@@ -2886,22 +2951,22 @@ impl {root}jet_std::JetDBBackend for JetDbScopeBackend<'_> {{\n\
 fn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.scope.handle) }}\n\
 fn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.scope.handle) }}\n\
 fn rollback(&mut self) {{ let _ = {ffi}::jet_db_rollback(self.scope.handle); }}\n\
-fn execute(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<i64, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_compiled_migration_policy_with_proof(sql, params, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_parts()? }} else {{ {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, params, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_parts()? }};\n\
-{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+fn execute(&mut self, sql: &{root}jet_std::SQL, allow_schema: bool) -> Result<i64, {root}jet_std::DBError> {{\n\
+let __sql = if allow_schema {{ {root}jet_std::jet_db_apply_compiled_migration_policy_with_proof(sql, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()? }} else {{ {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()? }};\n\
+{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.scope.handle, &__sql.0, &{root}jet_std::jet_db_encode_params(&__sql.1)))\n\
 }}\n\
-fn query(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_compiled_migration_policy_with_proof(sql, params, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_parts()? }} else {{ {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, params, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_parts()? }};\n\
-{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
+fn query(&mut self, sql: &{root}jet_std::SQL, allow_schema: bool) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
+let __sql = if allow_schema {{ {root}jet_std::jet_db_apply_compiled_migration_policy_with_proof(sql, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()? }} else {{ {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()? }};\n\
+{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.scope.handle, &__sql.0, &{root}jet_std::jet_db_encode_params(&__sql.1)))\n\
 }}\n\
 }}\n\
-fn jet_db_scope_transaction(scope: &{root}JetDbScope, label: &String, steps: &Vec<String>) -> Result<i64, {root}jet_std::DBError> {{\n\
+fn jet_db_scope_transaction(scope: &{root}JetDbScope, label: &String, steps: &Vec<{root}jet_std::SQL>) -> Result<i64, {root}jet_std::DBError> {{\n\
 let mut backend = JetDbScopeBackend {{ scope }};\n\
 {root}jet_std::jet_db_transaction(&mut backend, label, steps)\n\
 }}\n"
             ));
             out.push_str(&format!(
-                "fn jet_db_scope_migrate(scope: &{root}JetDbScope, name: &String, steps: &Vec<String>) -> Result<i64, {root}jet_std::DBError> {{\n\
+                "fn jet_db_scope_migrate(scope: &{root}JetDbScope, name: &String, steps: &Vec<{root}jet_std::SQL>) -> Result<i64, {root}jet_std::DBError> {{\n\
 let mut backend = JetDbScopeBackend {{ scope }};\n\
 {root}jet_std::jet_db_migrate(&mut backend, name, steps)\n\
 }}\n"
@@ -4643,6 +4708,7 @@ fn emit_test_main_cov_mode(
         out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
     } else {
         out.push_str("fn main() {\n");
+        out.push_str("    jet_test_install_panic_hook();\n");
         out.push_str("    jet_std_env_init();\n");
         if Items::sentry_runtime_needed(out) {
             out.push_str(&format!(
@@ -4718,7 +4784,7 @@ fn emit_test_main_cov_mode(
         "            let mut exact_samples: Vec<u128> = Vec::with_capacity(JET_MEASURE_SAMPLES);\n",
     );
     out.push_str("            let mut allocation_samples: Vec<(usize, usize)> = Vec::with_capacity(JET_MEASURE_SAMPLES);\n");
-    out.push_str("            let run_once = || -> Result<(), String> { let result = (slot.run)(); let _ = jet_test_take_output(); result };\n");
+    out.push_str("            let run_once = || -> Result<(), String> { let result = jet_test_run(|| (slot.run)()); let _ = jet_test_take_output(); result };\n");
     out.push_str("            for _ in 0..JET_MEASURE_WARMUPS {\n");
     out.push_str("                if let Err(message) = run_once() { eprintln!(\"{}: FAIL during measurement [tier={}, profile={}, serial={}]: {}\", slot.name, tier, profile, serial, message);\n");
     if override_entry.is_some() {
@@ -4780,7 +4846,7 @@ fn emit_test_main_cov_mode(
     out.push_str("    let serial = std::env::var(\"JET_TEST_SERIAL\").is_ok();\n");
     out.push_str("    let results: Vec<(String, bool, bool, bool, Option<Result<(), String>>, String, Option<JetTestFailure>)> = if serial || slots.len() <= 1 {\n");
     out.push_str("        slots.iter().map(|s| {\n");
-    out.push_str("            let res = if s.skip { None } else { Some((s.run)()) };\n");
+    out.push_str("            let res = if s.skip { None } else { Some(jet_test_run(s.run)) };\n");
     out.push_str("            let output = jet_test_take_output();\n");
     out.push_str("            let failure = jet_test_take_failure();\n");
     out.push_str("            (s.name.to_string(), s.skip, s.property, s.expected_fail, res, output, failure)\n");
@@ -4793,7 +4859,7 @@ fn emit_test_main_cov_mode(
     out.push_str("            let expected_fail = s.expected_fail;\n");
     out.push_str("            let run = s.run;\n");
     out.push_str("            std::thread::spawn(move || {\n");
-    out.push_str("                let res = if skip { None } else { Some(run()) };\n");
+                out.push_str("                let res = if skip { None } else { Some(jet_test_run(run)) };\n");
     out.push_str("                let output = jet_test_take_output();\n");
     out.push_str("                let failure = jet_test_take_failure();\n");
     out.push_str("                (name, skip, property, expected_fail, res, output, failure)\n");
@@ -4875,6 +4941,7 @@ fn emit_command_override_main(
     out: &mut String,
 ) {
     out.push_str("\nfn main() {\n");
+    out.push_str("    jet_test_install_panic_hook();\n");
     out.push_str("    jet_std_env_init();\n");
     if Items::sentry_runtime_needed(out) {
         out.push_str(&format!(
@@ -5163,16 +5230,7 @@ fn push_package_edition(out: &mut String, bundle: &ProgramBundle) {
 // `Secret` type.
 fn push_secret_decode_impl(out: &mut String, bundle: &ProgramBundle, link: Option<&FfiLink>) {
     let Some(link) = link else { return };
-    if !core_usage_matches(
-        &bundle.used_core,
-        &[
-            "core.crypto",
-            "core.crypto.expert",
-            "core.crypto.random",
-            "core.crypto.vault",
-            "core.crypto.uuid",
-        ],
-    ) {
+    if !core_usage_matches(&bundle.used_core, &["core.crypto::__nominal__"]) {
         return;
     }
     out.push_str(&format!(
@@ -5256,6 +5314,7 @@ fn emit_bundle_dbg_inner(
         }
         push_program_allocator_prelude(&mut out, bundle);
         push_cached_runtime_begin(&mut out, link);
+        push_target_dossier_runtime_identity(&mut out, bundle);
         out.push_str(CACHED_RUNTIME_END);
         push_core_runtime(&mut out, bundle, false);
         out.push('\n');
@@ -5440,6 +5499,15 @@ fn emit_bundle_dbg_inner(
         )))
     })
 }
+fn push_target_dossier_runtime_identity(out: &mut String, bundle: &ProgramBundle) {
+    out.push_str(&format!(
+        "// jet:target-dossier layer={} provider={} closure={} artifact={}\n",
+        bundle.build_facts.target_dossier.layer.as_str(),
+        &bundle.build_facts.target_dossier.provider_identity,
+        &bundle.build_facts.target_dossier.closure_identity,
+        crate::SHA256::sha256_hex(&bundle.build_facts.artifact_identity_bytes()),
+    ));
+}
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
     emit_bundle_tests_cov(bundle, link, false)
@@ -5544,6 +5612,7 @@ fn emit_bundle_tests_cov_inner(
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     push_cached_runtime_begin(&mut out, link);
+    push_target_dossier_runtime_identity(&mut out, bundle);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(REPORT_PRELUDE);
@@ -5836,6 +5905,7 @@ pub fn emit_bundle_fuzz(
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     push_cached_runtime_begin(&mut out, link);
+    push_target_dossier_runtime_identity(&mut out, bundle);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(REPORT_PRELUDE);

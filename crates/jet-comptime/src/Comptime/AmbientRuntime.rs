@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use crate::Comptime::DevSink;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CtValue, Type};
 use crate::AST::ComptimeInput;
+use crate::AST::{CtValue, Type};
 
 pub type AmbientCoreCall = fn(
     &str,
@@ -32,7 +32,19 @@ thread_local! {
     static EXTERN_CALL: Cell<Option<AmbientExternCall>> = const { Cell::new(None) };
     static PACKAGE_READ_CONTEXT: RefCell<Option<PackageReadContext>> = const { RefCell::new(None) };
 }
+struct AmbientHooksGuard {
+    core_call: Option<AmbientCoreCall>,
+    handle: Option<AmbientHandle>,
+    extern_call: Option<AmbientExternCall>,
+}
 
+impl Drop for AmbientHooksGuard {
+    fn drop(&mut self) {
+        CORE_CALL.with(|slot| slot.set(self.core_call));
+        HANDLE.with(|slot| slot.set(self.handle));
+        EXTERN_CALL.with(|slot| slot.set(self.extern_call));
+    }
+}
 #[derive(Debug, Default)]
 struct PackageReadContext {
     root: PathBuf,
@@ -44,7 +56,10 @@ struct PackageReadContext {
 /// the callback stays a function pointer, while package reads need the
 /// selected build root and must append their hashes to the existing input
 /// provenance stream.
-pub fn with_package_read_context<R>(root: &Path, body: impl FnOnce() -> R) -> (R, Vec<ComptimeInput>) {
+pub fn with_package_read_context<R>(
+    root: &Path,
+    body: impl FnOnce() -> R,
+) -> (R, Vec<ComptimeInput>) {
     let previous = PACKAGE_READ_CONTEXT.with(|slot| {
         slot.replace(Some(PackageReadContext {
             root: root.to_path_buf(),
@@ -59,7 +74,11 @@ pub fn with_package_read_context<R>(root: &Path, body: impl FnOnce() -> R) -> (R
     PACKAGE_READ_CONTEXT.with(|slot| {
         if let Some(parent) = slot.borrow_mut().as_mut() {
             for input in &inputs {
-                if !parent.inputs.iter().any(|existing| existing.path == input.path) {
+                if !parent
+                    .inputs
+                    .iter()
+                    .any(|existing| existing.path == input.path)
+                {
                     parent.inputs.push(input.clone());
                 }
             }
@@ -86,27 +105,30 @@ pub fn record_package_input(path: impl Into<String>, hash: impl Into<String>) {
             path: path.into(),
             hash: hash.into(),
         };
-        if !context.inputs.iter().any(|existing| existing.path == input.path) {
+        if !context
+            .inputs
+            .iter()
+            .any(|existing| existing.path == input.path)
+        {
             context.inputs.push(input);
         }
     });
 }
 
-/// Install ambient hooks for the duration of `body`, then clear them.
+/// Install ambient hooks for the duration of `body`, then restore the hooks
+/// that were active before this scope.
 pub fn with_ambient<R>(
     core_call: Option<AmbientCoreCall>,
     handle: Option<AmbientHandle>,
     extern_call: Option<AmbientExternCall>,
     body: impl FnOnce() -> R,
 ) -> R {
-    CORE_CALL.with(|slot| slot.set(core_call));
-    HANDLE.with(|slot| slot.set(handle));
-    EXTERN_CALL.with(|slot| slot.set(extern_call));
-    let out = body();
-    CORE_CALL.with(|slot| slot.set(None));
-    HANDLE.with(|slot| slot.set(None));
-    EXTERN_CALL.with(|slot| slot.set(None));
-    out
+    let _previous = AmbientHooksGuard {
+        core_call: CORE_CALL.with(|slot| slot.replace(core_call)),
+        handle: HANDLE.with(|slot| slot.replace(handle)),
+        extern_call: EXTERN_CALL.with(|slot| slot.replace(extern_call)),
+    };
+    body()
 }
 
 /// Copy the current callbacks into a worker thread before evaluating a
@@ -176,4 +198,86 @@ pub fn try_extern_call(
     EXTERN_CALL
         .with(|slot| slot.get())
         .and_then(|hook| hook(wrapper, args, span, resolved_ret))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    fn outer_core(
+        _: &str,
+        _: &str,
+        _: Vec<CtValue>,
+        _: Span,
+        _: Option<Type>,
+        _: Option<&mut DevSink>,
+    ) -> Option<Result<CtValue, Diagnostic>> {
+        None
+    }
+
+    fn inner_core(
+        _: &str,
+        _: &str,
+        _: Vec<CtValue>,
+        _: Span,
+        _: Option<Type>,
+        _: Option<&mut DevSink>,
+    ) -> Option<Result<CtValue, Diagnostic>> {
+        None
+    }
+
+    fn outer_handle(
+        _: &str,
+        _: &mut CtValue,
+        _: &mut [CtValue],
+        _: Span,
+    ) -> Option<Result<CtValue, Diagnostic>> {
+        None
+    }
+
+    fn outer_extern(
+        _: &str,
+        _: Vec<CtValue>,
+        _: Span,
+        _: Option<Type>,
+    ) -> Option<Result<CtValue, Diagnostic>> {
+        None
+    }
+
+    #[test]
+    fn nested_ambient_scopes_restore_previous_hooks() {
+        assert_eq!(ambient_hooks(), (None, None, None));
+        let outer = (
+            Some(outer_core as AmbientCoreCall),
+            Some(outer_handle as AmbientHandle),
+            Some(outer_extern as AmbientExternCall),
+        );
+        let inner = (Some(inner_core as AmbientCoreCall), None, None);
+
+
+        with_ambient(
+            Some(outer_core),
+            Some(outer_handle),
+            Some(outer_extern),
+            || {
+                assert_eq!(ambient_hooks(), outer);
+
+                with_ambient(Some(inner_core), None, None, || {
+                    assert_eq!(ambient_hooks(), inner);
+                });
+                assert_eq!(ambient_hooks(), outer);
+
+                let unwound = catch_unwind(AssertUnwindSafe(|| {
+                    with_ambient(None, Some(outer_handle), None, || {
+                        panic!("ambient scope unwind");
+                    });
+                }));
+                assert!(unwound.is_err());
+                assert_eq!(ambient_hooks(), outer);
+            },
+        );
+
+        assert_eq!(ambient_hooks(), (None, None, None));
+    }
 }

@@ -1,0 +1,63 @@
+use core.math.[clamp]
+
+#CLI struct Args { ticks: Int }
+
+fn crc16(word: Int) Int -> {
+    crc := 65535
+    value := word
+    loop _ in 0..<16 {
+        crc = (crc * 2 + if (crc /% 32768 + value) % 2 == 1 -> 4129 else -> 0) % 65536
+        value /%= 2
+    }
+    crc
+}
+
+fn signed_div8(value: Int) Int -> if value >= 0 -> value /% 8 else -> -((-value) /% 8)
+
+fn run(args: Args) {
+    ring := [Int#16]{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+    control_reg := 4095
+    @[ring_position, running_sum, integrator, actuator, watchdog, watchdog_resets, accepted, rejected, faults, status_reg, mmio_checksum]@ := 0
+
+    loop tick in 0..<args.ticks {
+        raw :: (tick * 73 + 19) % 4096
+        expected_crc :: crc16((raw * 17 + tick * 31 + 7) % 65536)
+        received_crc :: (expected_crc + if tick % 127 == 0 -> 1 else -> 0) % 65536
+        watchdog += 1
+
+        if {
+            received_crc != expected_crc -> {
+                rejected += 1
+                faults += 1
+                status_reg = 2
+            }
+            else -> {
+                sample :: (raw * 3 + 11) % 4096
+                old := ring[ring_position]
+                ring[ring_position] = sample
+                ring_position = (ring_position + 1) % 16
+                running_sum += sample - old
+                mean :: running_sum /% 16
+                error :: 2048 - mean
+                integrator += error
+                integrator = clamp(integrator, -8192, 8192)
+                command := error * 4 + signed_div8(integrator)
+                command = clamp(command, -4095, 4095)
+                actuator = command
+                accepted += 1
+                status_reg = 1
+            }
+        }
+
+        control_reg = actuator + 4095
+        mmio_checksum = (mmio_checksum * 33 + status_reg * 257 + control_reg + received_crc) % 1000000007
+        if watchdog == 64 {
+            watchdog = 0
+            watchdog_resets += 1
+        }
+    }
+
+    ring_checksum := 0
+    loop sample in ring -> ring_checksum = (ring_checksum * 131 + sample) % 1000000007
+    print("ticks {args.ticks}\naccepted {accepted} rejected {rejected}\nwatchdog_resets {watchdog_resets} faults {faults}\nactuator {actuator}\nmmio_checksum {mmio_checksum}\nring_checksum {ring_checksum}")
+}

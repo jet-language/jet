@@ -1,0 +1,40 @@
+{
+  "name": "embedded-sensor-ring",
+  "tier": "micro",
+  "cells": ["embedded.kernel"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c", "zig", "node"],
+  "spec": {
+    "behavior": "Replay a deterministic sensor-ring firmware core for N ticks. Each tick synthesizes a 12-bit ADC sample, validates a CRC-16 frame, writes valid samples into a fixed 16-slot ring, updates a fixed-point controller and simulated MMIO status/control registers, services a watchdog, and reports checksums over the register trace and final ring.",
+    "args": ["12000"],
+    "fixtureGen": null,
+    "expected": "expected.out",
+    "boundary": {
+      "kind": "host-simulation",
+      "firmware_core": "The tick loop models a no-OS core with fixed storage, deterministic arithmetic, and simulated registers; it performs no filesystem, network, clock, entropy, thread, or allocator operation.",
+      "host_adapter": "The command-line argument and stdout are host replay adapters only. They are not a freestanding firmware or board-boot claim.",
+      "hardware": "No physical MMIO, interrupt, DMA, board, or RTOS service is used; register addresses are represented by scalar state so every port has the same boundary."
+    }
+  },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs; no binary is built or measured."}
+    }
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host-side replay keeps the modeled firmware core fixed-memory and deterministic; matched execution is intentionally deferred to the gauntlet owner."},
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm."},
+    "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "C is the embedded domain peer; this row remains a hosted replay, not a freestanding board build."},
+    "zig": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm."}
+  }
+}

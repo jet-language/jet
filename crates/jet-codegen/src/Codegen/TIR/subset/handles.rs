@@ -484,11 +484,10 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("ServiceRuntime", "retry", 1) => THandleOp::ServiceRuntimeRetry,
         ("ServiceRuntime", "dead_letter", 1) => THandleOp::ServiceRuntimeDeadLetter,
         ("ServiceRuntime", "retain", 1) => THandleOp::ServiceRuntimeRetain,
-        ("ServiceRuntime", "commit", 1) => THandleOp::ServiceRuntimeCommit,
-        ("DBScope", "query", 2) => THandleOp::DBQuery,
-        ("DBScope", "query_one", 2) => THandleOp::DBQueryOne,
-        ("DBScope", "execute", 2) => THandleOp::DBExecute,
-        ("DBScope", "live", 2) => THandleOp::DBLive,
+        ("DBScope", "query", 1) => THandleOp::DBQuery,
+        ("DBScope", "query_one", 1) => THandleOp::DBQueryOne,
+        ("DBScope", "execute", 1) => THandleOp::DBExecute,
+        ("DBScope", "live", 1) => THandleOp::DBLive,
         ("DBConnection", "begin", 0) => THandleOp::DBBegin,
         ("DBConnection", "commit", 0) => THandleOp::DBCommit,
         ("DBConnection", "rollback", 0) => THandleOp::DBRollback,
@@ -913,7 +912,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.http.client", "get") | ("core.http.client", "post") => {
             return Type::Result {
                 ok: Box::new(Type::Named("HTTPResponse".to_string())),
-                err: Box::new(Type::String),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             }
         }
         ("core.http.client", "request") => return Type::Named("HTTPRequest".to_string()),

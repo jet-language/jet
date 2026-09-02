@@ -56,6 +56,17 @@ fn jet_http_route_decode_segment(segment: &str) -> Result<String, String> {
     }
     Ok(decoded)
 }
+fn jet_http_route_decode_path_segment<'a>(
+    segment: &'a str,
+) -> Result<std::borrow::Cow<'a, str>, String> {
+    if !segment.as_bytes().contains(&b'%') {
+        if segment == "." || segment == ".." {
+            return Err("dot traversal segment is not allowed".to_string());
+        }
+        return Ok(std::borrow::Cow::Borrowed(segment));
+    }
+    jet_http_route_decode_segment(segment).map(std::borrow::Cow::Owned)
+}
 
 fn jet_http_route_parse(pattern: &str) -> Result<JetHTTPRoutePattern, String> {
     if !pattern.starts_with('/') {
@@ -106,43 +117,81 @@ fn jet_http_route_parse(pattern: &str) -> Result<JetHTTPRoutePattern, String> {
     Ok(JetHTTPRoutePattern { segments })
 }
 
-fn jet_http_route_path(path: &str) -> Result<Vec<String>, String> {
+fn jet_http_route_path<'a>(path: &'a str) -> Result<Vec<std::borrow::Cow<'a, str>>, String> {
     let path = path.split('?').next().unwrap_or(path);
     if !path.starts_with('/') {
         return Err("request path must start with `/`".to_string());
     }
-    let raw: Vec<&str> = path.split('/').skip(1).collect();
-    if raw.len() == 1 && raw[0].is_empty() {
+    let mut segments = path.split('/').skip(1);
+    let Some(first) = segments.next() else {
+        return Ok(Vec::new());
+    };
+    if first.is_empty() && segments.next().is_none() {
         return Ok(Vec::new());
     }
-    raw.into_iter().map(jet_http_route_decode_segment).collect()
+    let mut decoded = Vec::new();
+    decoded.push(jet_http_route_decode_path_segment(first)?);
+    for segment in segments {
+        decoded.push(jet_http_route_decode_path_segment(segment)?);
+    }
+    Ok(decoded)
 }
 
-fn jet_http_route_match(
+fn jet_http_route_matches<'a>(
     pattern: &JetHTTPRoutePattern,
-    path: &[String],
-) -> Option<std::collections::BTreeMap<String, String>> {
+    path: &[std::borrow::Cow<'a, str>],
+) -> bool {
     let has_catch_all = matches!(pattern.segments.last(), Some(JetHTTPRouteSegment::CatchAll(_)));
     let required = pattern.segments.len() - usize::from(has_catch_all);
     if path.len() < required || !has_catch_all && path.len() != required {
-        return None;
+        return false;
     }
+    pattern.segments.iter().enumerate().all(|(index, segment)| {
+        match segment {
+            JetHTTPRouteSegment::Static(expected) => {
+                path.get(index).is_some_and(|candidate| candidate.as_ref() == expected)
+            }
+            JetHTTPRouteSegment::Param(_) | JetHTTPRouteSegment::CatchAll(_) => true,
+        }
+    })
+}
+
+fn jet_http_route_params<'a>(
+    pattern: &JetHTTPRoutePattern,
+    path: &[std::borrow::Cow<'a, str>],
+) -> std::collections::BTreeMap<String, String> {
     let mut params = std::collections::BTreeMap::new();
     for (index, segment) in pattern.segments.iter().enumerate() {
         match segment {
-            JetHTTPRouteSegment::Static(expected) if path.get(index) == Some(expected) => {}
-            JetHTTPRouteSegment::Static(_) => return None,
             JetHTTPRouteSegment::Param(name) => {
-                params.insert(name.clone(), path[index].clone());
+                if let Some(value) = path.get(index) {
+                    params.insert(name.clone(), value.as_ref().to_string());
+                }
             }
             JetHTTPRouteSegment::CatchAll(name) => {
-                params.insert(name.clone(), path[index..].join("/"));
+                let mut value = String::new();
+                for (offset, segment) in path[index..].iter().enumerate() {
+                    if offset > 0 {
+                        value.push('/');
+                    }
+                    value.push_str(segment.as_ref());
+                }
+                params.insert(name.clone(), value);
                 break;
             }
+            JetHTTPRouteSegment::Static(_) => {}
         }
     }
-    Some(params)
+    params
 }
+
+fn jet_http_route_match<'a>(
+    pattern: &JetHTTPRoutePattern,
+    path: &[std::borrow::Cow<'a, str>],
+) -> Option<std::collections::BTreeMap<String, String>> {
+    jet_http_route_matches(pattern, path).then(|| jet_http_route_params(pattern, path))
+}
+
 
 fn jet_http_route_rank(segment: &JetHTTPRouteSegment) -> u8 {
     match segment {

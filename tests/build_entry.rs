@@ -3,13 +3,17 @@
 mod common;
 
 use jet::Comptime::Build::{ActionOutcome, BuildCapability, BuildPolicy, CacheHitReason};
-use jet::Driver::{compile_bundle_path_build, BuildQueryExpression, BuildRunOptions};
+use jet::Driver::{
+    compile_bundle_path_build, compile_bundle_path_build_with_front_end, prepare_build_front_end,
+    BuildQueryExpression, BuildRunOptions, FrontEndInputs,
+};
 use std::collections::BTreeSet;
 use std::fs;
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -33,7 +37,7 @@ fn opts() -> BuildRunOptions {
         inspect_only: false,
         emit_generated: false,
         locked: false,
-        freestanding: false,
+        no_os: false,
         web_target: false,
         plugin_target: false,
         cross_target: None,
@@ -134,7 +138,7 @@ fn root_fn_build_executes_graph_materializes_and_frontend_checks_generated_sourc
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     b.generate("generated_message") {
         fn generated_message() String -> "built";
-    }?
+    }
     #Impure("write declared build output") {
     stamp :: b.action(
         "stamp",
@@ -506,7 +510,7 @@ fn compiler_speed_plan_and_corpus_are_removal_sensitive() {
         "The active corpus rows are ordered",
         "`examples/features/devloop/job_runner.jet`; the representative job is fifth.",
         "changes the selected `greet` job output and its checked golden.",
-        "warm default-tier edit-to-output",
+        "warm\ndefault-tier edit-to-output",
         "the `jet run run.jet -- greet`",
         "through `jet dev` by the parity rail",
         "The named-job contract also runs",
@@ -522,8 +526,8 @@ fn compiler_speed_plan_and_corpus_are_removal_sensitive() {
     assert!(plan_is_intact(PLAN), "compiler-speed plan contract is incomplete");
 
     let bypassed = PLAN.replacen(
-        "warm default-tier edit-to-output",
-        "warm default-tier timing",
+        "warm\ndefault-tier edit-to-output",
+        "warm\ndefault-tier timing",
         1,
     );
     assert_ne!(bypassed, PLAN, "compiler-speed plan canary mutation did not apply");
@@ -581,6 +585,36 @@ fn package_build_entry_is_discovered_from_one_unimported_source_file() {
     let output = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
         .expect("an unimported package source may own fn build");
     assert_eq!(output.build.unwrap().plan.targets()[0].name, "discovered");
+}
+
+#[test]
+fn prepared_front_end_mismatch_fails_closed_after_source_and_policy_swap() {
+    let root = project("prepared-front-end-toctou");
+    let entry = root.join("run.jet");
+    write(&root.join("package.jet"), "name: \"prepared-front-end-toctou\"\nversion: \"0.1.0\"\n");
+    write(&entry, "fn run() {}\n");
+
+    let options = opts();
+    let inputs = FrontEndInputs::for_build(entry.to_str().unwrap(), &options);
+    let prepared = prepare_build_front_end(inputs).expect("prepare trusted front end");
+
+    write(&entry, "fn run() { this is hostile replacement source }\n");
+    let mut changed = options;
+    changed.profile = "debug".to_string();
+
+    let errors = compile_bundle_path_build_with_front_end(
+        entry.to_str().unwrap(),
+        changed,
+        Some(prepared),
+    )
+    .expect_err("a prepared input mismatch must not reload and continue");
+    assert_eq!(errors.first().map(|diagnostic| diagnostic.code.as_str()), Some("E2105"));
+    assert!(
+        errors
+            .first()
+            .is_some_and(|diagnostic| diagnostic.what.contains("prepared build front end does not match")),
+        "mismatch must explain the fail-closed action",
+    );
 }
 
 #[test]
@@ -1131,7 +1165,7 @@ fn malformed_generated_body_is_a_jet_diagnostic_before_codegen() {
 fn build(b: BuildContext) BuildPlan -> {
     b.generate("broken") {
         fn nope(
-    }?
+    }
         app :: b.add_executable("app", ["main.jet", ".jet/generated/main/broken.jet"], [])
     return b.plan(app)
 }
@@ -1157,7 +1191,7 @@ fn imported_fn_build_never_runs_and_ordinary_build_name_stays_runtime() {
 fn build(b: BuildContext) BuildPlan -> {
     b.generate("should_not_exist") {
         fn hidden() {}
-    }?
+    }
     return b.plan()
 }
 pub fn helper() {}
@@ -1297,7 +1331,7 @@ fn jet_build_positional_name_resolves_one_workspace_member() {
     );
     write(
         &member.join("package.jet"),
-        "name: \"one\"\nversion: \"0.1.0\"\n",
+        "name: \"one\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
     );
     write(&member.join("run.jet"), "fn run() { print(\"one\") }\n");
     fs::create_dir_all(member.join("tools")).unwrap();
@@ -1900,7 +1934,7 @@ fn generated_sources_materialize_and_compile_as_one_program() {
 fn build(b: BuildContext) BuildPlan -> {
     b.generate("consumer") {
         pub fn generated_value() String -> "round two";
-    }?
+    }
     b.generate("provider") {
         pub fn message() String -> "round two";
         }
@@ -1928,7 +1962,7 @@ fn duplicate_generated_modules_fail_before_any_file_is_written() {
 fn build(b: BuildContext) BuildPlan -> {
     b.generate("alpha") {
         pub fn alpha() {}
-    }?
+    }
     b.generate("alpha") {
         pub fn beta() {}
         }
@@ -1952,7 +1986,7 @@ fn run() {}
 fn emit_generated_exports_the_exact_materialized_source() {
     let root = project("emit-generated");
     let entry = root.join("main.jet");
-    let generated = "fn exported_generated() String -> { return \"exported\" }\n";
+    let generated = "fn exported_generated() String -> { \"exported\" }\n";
     write(
         &entry,
         &format!(
@@ -2025,7 +2059,7 @@ fn run() {}
     fs::remove_file(root.join("stamp")).unwrap();
     write(
         &root.join("workspace.jet"),
-        "module workspace { policy: .{ deny: #(Exec) } }\n",
+        "module workspace { policy: { deny: #(Exec) } }\n",
     );
     let errors = jet::compile_programmable_build_opts(
         entry.to_str().unwrap(),
@@ -2052,7 +2086,7 @@ fn workspace_subject_grant_authorizes_a_package_without_cli_flags() {
     );
     write(
         &root.join("authority.jet"),
-        "module workspace { policy: .{ grants: .{ \"workspace-app\": #(Exec) } } }\n",
+        "module workspace { policy: { grants: { \"workspace-app\": #(Exec) } } }\n",
     );
     write(
         &entry,
@@ -2127,7 +2161,7 @@ fn run() {}
     );
     write(
         &root.join("workspace.jet"),
-        "module workspace { policy: .{ deny: Exec } }\n",
+        "module workspace { policy: { deny: Exec } }\n",
     );
     let errors = jet::compile_programmable_build_opts(
         entry.to_str().unwrap(),
@@ -2142,9 +2176,14 @@ fn run() {}
     .unwrap_err();
     assert!(errors.iter().any(|diagnostic| {
         diagnostic.code == "E3503"
-            && diagnostic.what == "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy."
-            && diagnostic.why == "Build authority must pass all three independent checks before any probe or action executes."
-            && diagnostic.fix == "Declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy."
+            && diagnostic.what
+                == "this root build asks for authority missing from its declaration, `#Impure` gate, or effective policy."
+            && diagnostic.why.starts_with("workspace build policy in `")
+            && diagnostic
+                .why
+                .ends_with("`policy.deny:` must contain an effect tuple like `#(Net, Exec)`")
+            && diagnostic.fix
+                == "declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy."
     }), "{errors:#?}");
     assert!(!root.join("stamp").exists());
 
@@ -2175,7 +2214,7 @@ fn unsupported_workspace_policy_allow_is_e3503() {
     let entry = root.join("run.jet");
     write(
         &root.join("authority.jet"),
-        "module workspace { policy: .{ allow: #(Exec) } }\n",
+        "module workspace { policy: { allow: #(Exec) } }\n",
     );
     write(
         &entry,
@@ -2227,7 +2266,7 @@ fn nested_workspace_is_the_module_import_root() {
     );
     write(
         &child.join("boundary.jet"),
-        "module workspace { policy: .{ deny: #(FS) } }\n",
+        "module workspace { policy: { deny: #(FS) } }\n",
     );
     let entry = child.join("run.jet");
     write(
@@ -2290,7 +2329,7 @@ fn outer_package_grant_cannot_override_inner_workspace_deny() {
         &root.join("package.jet"),
         "name: \"parent\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n",
     );
-    write(&child.join("boundary.jet"), "module workspace { policy_note: .{ deny: #(FS) }, policy: .{ trust: .{ nested: .{ deny: #(FS) } }, deny: #(Exec) } }\n");
+    write(&child.join("boundary.jet"), "module workspace { policy_note: { deny: #(FS) }, policy: { trust: { nested: { deny: #(FS) } }, deny: #(Exec) } }\n");
     let entry = child.join("run.jet");
     write(
         &entry,
@@ -2331,11 +2370,11 @@ fn outer_workspace_grant_does_not_cross_inner_workspace_boundary() {
     fs::create_dir_all(&child).unwrap();
     write(
         &root.join("outer-authority.jet"),
-        "module workspace { policy: .{ grants: .{ \"run\": #(Exec) } } }\n",
+        "module workspace { policy: { grants: { \"run\": #(Exec) } } }\n",
     );
     write(
         &child.join("inner-authority.jet"),
-        "module workspace { policy: .{ deny: #(FS) } }\n",
+        "module workspace { policy: { deny: #(FS) } }\n",
     );
     let entry = child.join("run.jet");
     write(
@@ -2378,7 +2417,7 @@ fn inner_workspace_grant_overrides_outer_workspace_deny_from_canonical_run() {
     fs::create_dir_all(&child).unwrap();
     write(
         &root.join("outer-authority.jet"),
-        "module workspace { policy: .{ deny: #(Exec) } }\n",
+        "module workspace { policy: { deny: #(Exec) } }\n",
     );
     write(
         &child.join("package.jet"),
@@ -2386,7 +2425,7 @@ fn inner_workspace_grant_overrides_outer_workspace_deny_from_canonical_run() {
     );
     write(
         &child.join("authority.jet"),
-        "module workspace { policy: .{ grants: .{ \"run\": #(Exec) } } }\n",
+        "module workspace { policy: { grants: { \"run\": #(Exec) } } }\n",
     );
     let entry = child.join("run.jet");
     write(
@@ -2419,7 +2458,7 @@ fn run() {}
 }
 
 #[test]
-fn programmable_staging_preserves_web_cross_freestanding_and_plugin_modes() {
+fn programmable_staging_preserves_web_cross_no_os_and_plugin_modes() {
     let root = project("target-modes");
     let entry = root.join("main.jet");
     write(
@@ -2448,13 +2487,13 @@ fn run() {}
         .rust
         .contains("fn main"));
 
-    let mut freestanding = BuildRunOptions::default();
-    freestanding.freestanding = true;
-    let freestanding_result = compile_bundle_path_build(entry.to_str().unwrap(), freestanding);
+    let mut no_os = BuildRunOptions::default();
+    no_os.no_os = true;
+    let no_os_result = compile_bundle_path_build(entry.to_str().unwrap(), no_os);
     assert!(
-        freestanding_result.is_ok(),
+        no_os_result.is_ok(),
         "{:#?}",
-        freestanding_result.err()
+        no_os_result.err()
     );
 
     write(
@@ -2576,6 +2615,126 @@ fn run() {{}}
     );
     let lock = fs::read_to_string(root.join(".jet/lock")).unwrap();
     assert!(lock.contains(&input_key), "{lock}");
+}
+
+#[test]
+fn build_context_fetch_rejects_private_networks_before_connecting() {
+    let root = project("build-context-fetch-loopback");
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match listener.accept() {
+                Ok(_) => return true,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return false;
+                    }
+                    std::thread::yield_now();
+                }
+                Err(_) => return false,
+            }
+        }
+    });
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        &format!(
+            r#"
+fn build(b: BuildContext) BuildPlan -> {{
+    _ :: b.fetch("http://127.0.0.1:{port}/secret", "{}")
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}}
+fn run() {{}}
+"#,
+            "0".repeat(64)
+        ),
+    );
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
+        .expect_err("BuildContext.fetch must reject loopback before connecting");
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E3414"),
+        "unexpected diagnostics: {errors:#?}"
+    );
+    assert!(
+        !server.join().unwrap(),
+        "BuildContext.fetch contacted a private destination"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn build_context_fetch_rejects_outside_files_before_reading() {
+    let root = project("build-context-fetch-outside");
+    let outside = std::env::temp_dir().join(format!(
+        "jet-build-context-fetch-outside-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&outside);
+    fs::write(&outside, "hello").unwrap();
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        &format!(
+            r#"
+fn build(b: BuildContext) BuildPlan -> {{
+    _ :: b.fetch("file://{}", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}}
+fn run() {{}}
+"#,
+            outside.display()
+        ),
+    );
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
+        .expect_err("BuildContext.fetch must reject files outside the source root");
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E3414"),
+        "unexpected diagnostics: {errors:#?}"
+    );
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_file(outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn build_context_fetch_rejects_hardlinks_to_outside_inodes() {
+    let root = project("build-context-fetch-hardlink");
+    let outside = std::env::temp_dir().join(format!(
+        "jet-build-context-fetch-hardlink-outside-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&outside);
+    fs::write(&outside, "hello").unwrap();
+    let hardlink = root.join("linked-secret");
+    fs::hard_link(&outside, &hardlink).unwrap();
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        &format!(
+            r#"
+fn build(b: BuildContext) BuildPlan -> {{
+    _ :: b.fetch("file://{}", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}}
+fn run() {{}}
+"#,
+            hardlink.display()
+        ),
+    );
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
+        .expect_err("BuildContext.fetch must reject hardlinks to outside inodes");
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E3414"),
+        "unexpected diagnostics: {errors:#?}"
+    );
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_file(outside);
 }
 
 #[test]

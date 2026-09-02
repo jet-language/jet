@@ -165,6 +165,23 @@ mod collection_semantics {
     {
         jet_list_position(xs, |value| f(value)).is_ok()
     }
+    pub(super) fn list_closure_count_where<F>(xs: Vec<i64>, mut f: F) -> i64
+    where
+        F: FnMut(&i64) -> bool,
+    {
+        jet_list_count_where_kernel(&xs, |value| f(value))
+    }
+
+    pub(super) fn list_closure_update_first<F>(
+        xs: &mut Vec<i64>,
+        f: F,
+        replacement: i64,
+    ) -> bool
+    where
+        F: FnMut(&i64) -> bool,
+    {
+        jet_list_update_first_kernel(xs, f, replacement)
+    }
 
     pub(super) fn list_closure_all<F>(xs: Vec<i64>, mut f: F) -> bool
     where
@@ -541,6 +558,14 @@ mod collection_semantics {
 
     pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
         jet_list_pop_kernel(values).ok()
+    }
+
+    pub(super) fn list_insert<T>(
+        values: &mut Vec<T>,
+        index: i64,
+        value: T,
+    ) -> Result<(), JetListInsertError> {
+        jet_list_insert_kernel(values, index, value)
     }
 
     pub(super) fn list_remove_value<T: Clone + PartialEq>(
@@ -1514,51 +1539,27 @@ fn jet_jit_list_get_range_exclusive(list: i64, idx: i64, line: u32) -> i8 {
     i8::from(jet_jit_list_get_range(list, idx, line).2)
 }
 
-/// Packed Option carrier: `0` = absent, otherwise `value + 1`.
+/// Result-arena Option carrier: a one-based `rt.results` handle carrying
+/// `(ok, bits)`. The payload bits are the exact integer or floating-point
+/// representation selected by the typed lowerer.
 ///
-/// Deliberately *not* the carrier `jet_jit_map_get_opt` returns. These two are
-/// siblings in name only: this one is packed, that one is a result-arena
-/// handle, and the JIT lowering discriminates with `uses_result_option_abi`
-/// rather than assuming the family is uniform.
-///
-/// The packed carrier is retained here (it allocates nothing on a hot lookup)
-/// but it is *not* free of representational limits, and this comment used to
-/// claim otherwise. `Type::Int` is not `Type::IntN`, so a plain `Int` element
-/// does reach this path, and `value + 1` then aliases a `-1` element onto
-/// `None` and overflows at `i64::MAX`. `[-1].get(0)` decoding as absent is a
-/// live defect of this encoding, independent of the map carrier above; fixing
-/// it means moving this producer to the arena carrier and updating the
-/// `GetList` arm of `uses_result_option_abi` with it.
-///
-/// #1995 sibling: the carrier is *kind*-sensitive, not int-only. Its gates are
-/// float-capable — `TBuiltinOp::GetList` (`jit/safety.rs`, `jit_list_native_type`
-/// minus `IntN`) and `TBuiltinOp::Last` (same gate) both admit a `[Float]`, and
-/// both lower straight to this host. `list_get_int` answers `None` for a
-/// `JetVal::Float`, so reading only through it made every `[Float].get(i)` and
-/// `[Float].last()` decode as absent: a silent wrong answer on the native tier,
-/// with no trap and no deopt to reveal it. The consumer already knows better —
-/// `lower_ctx.rs::unpack_option_payload_with_abi` bitcasts `packed - 1` to
-/// `f64` for a float payload, and the sibling producer `jet_jit_list_pop`
-/// already packs `f64::to_bits() + 1`. This producer now agrees with both.
+/// `GetList` and list `Last` are both declared result-arena producers in
+/// `LowerCtx::uses_result_option_abi`; using a packed `value + 1` word here
+/// aliases `-1` and overflows at `i64::MAX`.
 fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         if rt.heap.list_len(list).is_none() {
             // An impossible handle is an engine fault, not a program stop.
-            // Recording it beats panicking even now that the generated
-            // `host_seam` boundary would convert a panic (#1997): the fault
-            // rail names the defect, an unwind only reports "a seam panicked".
             rt.set_host_fault("jit list get_opt: bad list handle");
-            return 0;
+            return option_i64(rt, None);
         }
         if let Some(value) = rt.heap.list_get_int(list, idx) {
-            return value.wrapping_add(1);
+            return option_i64(rt, Some(value));
         }
-        // `list_get_float` is strict (`JetVal::Float` only), so the two reads
-        // are disjoint and the int carrier keeps its exact prior encoding.
         if let Some(value) = rt.heap.list_get_float(list, idx) {
-            return (value.to_bits() as i64).wrapping_add(1);
+            return option_i64(rt, Some(value.to_bits() as i64));
         }
-        0
+        option_i64(rt, None)
     })
 }
 
@@ -1683,6 +1684,48 @@ fn jet_jit_list_count(list: i64, value: i64) -> i64 {
         };
         collection_semantics::list_count(&values, &value)
     })
+}
+fn jet_jit_list_closure_count_where(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    collection_semantics::list_closure_count_where(values, |value| {
+        if closure_trapped() {
+            return false;
+        }
+        let matched = unsafe { invoke_closure_bool(slot, *value) };
+        !closure_trapped() && matched
+    })
+}
+
+fn jet_jit_list_closure_update_first(list: i64, callback: i64, replacement: i64) -> i8 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut values = clone_list_ints(list);
+    let changed = collection_semantics::list_closure_update_first(
+        &mut values,
+        |value| {
+            if closure_trapped() {
+                return false;
+            }
+            let matched = unsafe { invoke_closure_bool(slot, *value) };
+            !closure_trapped() && matched
+        },
+        replacement,
+    );
+    if closure_trapped() {
+        return 0;
+    }
+    if changed {
+        Concurrency::with_runtime_mut(|rt| {
+            if rt.heap.replace_int_list(list, values).is_none() {
+                jet_foundation::ice!(None, "jit list update_first: bad handle");
+            }
+        });
+    }
+    i8::from(changed)
 }
 
 fn jet_jit_list_counts(list: i64) -> i64 {
@@ -3624,24 +3667,20 @@ fn jet_jit_list_pop(list: i64) -> i64 {
     })
 }
 
-/// `list.insert(i, v)` — AOT `Vec::insert`; OOB traps like remove.
-///
-/// # ponytail: same JetArena layout poke as `list_remove`.
+/// `list.insert(i, v)` — shared Prelude bounds semantics, with the JIT only
+/// marshalling the list handle and runtime-stop boundary.
 fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some(xs) = rt.heap.list_values_mut(list) else {
             jet_foundation::ice!(None, "jit list insert: bad handle");
         };
-        let len = xs.len() as i64;
-        if idx < 0 || idx > len {
-            rt.set_runtime_stop(
-                "E3010",
-                0,
-                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
-            );
-            return;
+        match collection_semantics::list_insert(xs, idx, jet_rt::JetVal::Int(v)) {
+            Ok(()) => {}
+            Err(error) => {
+                let message = error.message();
+                rt.set_runtime_stop(error.code(), 0, &message);
+            }
         }
-        xs.insert(idx as usize, jet_rt::JetVal::Int(v));
     });
 }
 
@@ -5339,7 +5378,7 @@ fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) ->
                         n
                     }
                     Err(_) => {
-                        rt.trapped = Some(format!("cannot parse `{text}` as an integer"));
+                        rt.set_trap_message(format!("cannot parse `{text}` as an integer"));
                         0
                     }
                 }
@@ -5756,6 +5795,11 @@ host_fns! {
             .params
             .extend([AbiParam::new(types::I64); 2]);
         sig_closure_predicate.returns.push(AbiParam::new(types::I8));
+        let mut sig_closure_count_where = sig_closure_predicate.clone();
+        sig_closure_count_where.returns.clear();
+        sig_closure_count_where.returns.push(AbiParam::new(types::I64));
+        let mut sig_closure_update_first = sig_closure_predicate.clone();
+        sig_closure_update_first.params.push(AbiParam::new(types::I64));
         let mut sig_closure_value = sig_closure_predicate.clone();
         sig_closure_value.returns.clear();
         sig_closure_value.returns.push(AbiParam::new(types::I64));
@@ -5799,6 +5843,8 @@ host_fns! {
     list_len: "jet_jit_list_len" => jet_jit_list_len: sig_len;
     list_closure_any: "jet_jit_list_closure_any" => jet_jit_list_closure_any: sig_closure_predicate;
     list_closure_all: "jet_jit_list_closure_all" => jet_jit_list_closure_all: sig_closure_predicate;
+    list_closure_count_where: "jet_jit_list_closure_count_where" => jet_jit_list_closure_count_where: sig_closure_count_where;
+    list_closure_update_first: "jet_jit_list_closure_update_first" => jet_jit_list_closure_update_first: sig_closure_update_first;
     list_closure_map: "jet_jit_list_closure_map" => jet_jit_list_closure_map: sig_closure_value;
     list_closure_map_mut: "jet_jit_list_closure_map_mut" => jet_jit_list_closure_map_mut: sig_closure_value;
     list_closure_para_map: "jet_jit_list_closure_para_map" => jet_jit_list_closure_para_map: sig_closure_value_limit;

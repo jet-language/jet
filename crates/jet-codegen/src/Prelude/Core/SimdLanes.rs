@@ -470,6 +470,34 @@ mod jet_simd_f64x4_avx {
             }
         }
     }
+    /// Multiply a vector by a scalar times one lane of another vector.
+    ///
+    /// This preserves the source operation order `scale * lane` followed by
+    /// `value * factor`, while keeping the lane broadcast in the native
+    /// carrier. The fixed-array branch is the exact semantic fallback used by
+    /// non-AVX targets and the other execution tiers.
+    #[inline(always)]
+    pub(super) fn mul_lane_scale<const INDEX: usize>(
+        value: Native,
+        scale: f64,
+        lane_source: Native,
+    ) -> Native {
+        unsafe {
+            let pair = match INDEX {
+                0 | 2 => arch::_mm256_unpacklo_pd(lane_source, lane_source),
+                1 | 3 => arch::_mm256_unpackhi_pd(lane_source, lane_source),
+                _ => unreachable!("F64x4 lane index validated before native access"),
+            };
+            let lane = match INDEX {
+                0 | 1 => arch::_mm256_permute2f128_pd::<0x00>(pair, pair),
+                2 | 3 => arch::_mm256_permute2f128_pd::<0x11>(pair, pair),
+                _ => unreachable!("F64x4 lane index validated before native access"),
+            };
+            let factor = arch::_mm256_mul_pd(arch::_mm256_set1_pd(scale), lane);
+            arch::_mm256_mul_pd(value, factor)
+        }
+    }
+
 
     /// Transpose one lane from four resident vectors. The AVX unpack/permute
     /// sequence keeps the four source carriers in registers; scalar extraction
@@ -659,6 +687,34 @@ pub(crate) fn jet_simd_f64x4_lane_const_native<const INDEX: usize>(value: JetF64
         value[INDEX]
     }
 }
+#[inline(always)]
+pub(crate) fn jet_simd_f64x4_mul_lane_scale_native<const INDEX: usize>(
+    value: JetF64x4,
+    scale: f64,
+    lane_source: JetF64x4,
+) -> JetF64x4 {
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx"
+    ))]
+    {
+        return jet_simd_f64x4_avx::mul_lane_scale::<INDEX>(value, scale, lane_source);
+    }
+    #[cfg(not(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx"
+    )))]
+    {
+        let factor = scale * lane_source[INDEX];
+        [
+            value[0] * factor,
+            value[1] * factor,
+            value[2] * factor,
+            value[3] * factor,
+        ]
+    }
+}
+
 
 #[inline(always)]
 pub(crate) fn jet_simd_f64x4_gather_lane_native<const INDEX: usize>(
@@ -1203,7 +1259,7 @@ pub(crate) fn jet_simd_f32_binary_slice(
     }
     let mut out = Vec::with_capacity(left.len());
     let mut index = 0;
-    while index <= left.len().saturating_sub(8) {
+    while left.len().saturating_sub(index) >= 8 {
         let mut left_chunk = [0.0; 8];
         let mut right_chunk = [0.0; 8];
         left_chunk.copy_from_slice(&left[index..index + 8]);
@@ -1211,7 +1267,7 @@ pub(crate) fn jet_simd_f32_binary_slice(
         out.extend_from_slice(&jet_simd_f32x8_binary(&left_chunk, &right_chunk, op));
         index += 8;
     }
-    while index <= left.len().saturating_sub(4) {
+    while left.len().saturating_sub(index) >= 4 {
         let mut left_chunk = [0.0; 4];
         let mut right_chunk = [0.0; 4];
         left_chunk.copy_from_slice(&left[index..index + 4]);
@@ -1239,7 +1295,7 @@ pub(crate) fn jet_simd_f64_binary_slice(
     }
     let mut out = Vec::with_capacity(left.len());
     let mut index = 0;
-    while index <= left.len().saturating_sub(4) {
+    while left.len().saturating_sub(index) >= 4 {
         let mut left_chunk = [0.0; 4];
         let mut right_chunk = [0.0; 4];
         left_chunk.copy_from_slice(&left[index..index + 4]);
@@ -1247,7 +1303,7 @@ pub(crate) fn jet_simd_f64_binary_slice(
         out.extend_from_slice(&jet_simd_f64x4_binary(&left_chunk, &right_chunk, op));
         index += 4;
     }
-    while index <= left.len().saturating_sub(2) {
+    while left.len().saturating_sub(index) >= 2 {
         let mut left_chunk = [0.0; 2];
         let mut right_chunk = [0.0; 2];
         left_chunk.copy_from_slice(&left[index..index + 2]);
@@ -1497,3 +1553,4 @@ pub(crate) fn jet_simd_lane_index(
         Ok(index as usize)
     }
 }
+

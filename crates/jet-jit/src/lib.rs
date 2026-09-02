@@ -285,7 +285,7 @@ pub mod jet_xml_pull {
 // The root package depends on jet-jit; jet-jit depends on cranelift-*.
 // D-JITDEP1 approved this as a scoped runtime-side exception.
 
-use std::cell::RefCell;
+use std::cell::{Cell as StdCell, RefCell};
 
 use runtime_host::ResidentModule;
 
@@ -294,6 +294,65 @@ thread_local! {
     static RESIDENT_MODULE: RefCell<Option<ResidentModule>> = const { RefCell::new(None) };
     /// Live heap preserved across type-stable hot_swap; reset on restart.
     static RESIDENT_RUNTIME: RefCell<Option<JitRuntime>> = const { RefCell::new(None) };
+}
+
+type AmbientCoreCall = fn(
+    &str,
+    &str,
+    Vec<jet_foundation::AST::CtValue>,
+    jet_foundation::Diagnostics::Span,
+    Option<jet_foundation::AST::Type>,
+    Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Option<Result<jet_foundation::AST::CtValue, jet_foundation::Diagnostics::Diagnostic>>;
+
+thread_local! {
+    /// Callback that was active before the runtime adapters were installed.
+    ///
+    /// The compiler owns `core.compiler.*`; the JIT owns the other ambient
+    /// routes. A run must expose both without making either crate depend on the
+    /// other, so the runtime callback delegates to this slot before its own
+    /// dispatch.
+    static AMBIENT_CORE_FALLBACK: StdCell<Option<AmbientCoreCall>> = const { StdCell::new(None) };
+}
+
+struct AmbientCoreFallbackGuard(Option<AmbientCoreCall>);
+
+impl Drop for AmbientCoreFallbackGuard {
+    fn drop(&mut self) {
+        AMBIENT_CORE_FALLBACK.with(|slot| slot.set(self.0));
+    }
+}
+
+fn combined_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<jet_foundation::AST::CtValue>,
+    span: jet_foundation::Diagnostics::Span,
+    resolved_ret: Option<jet_foundation::AST::Type>,
+    mut sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Option<Result<jet_foundation::AST::CtValue, jet_foundation::Diagnostics::Diagnostic>> {
+    let fallback = AMBIENT_CORE_FALLBACK.with(|slot| slot.get());
+    if let Some(fallback) = fallback {
+        // Nested runtime scopes already point at this combiner. Do not recurse
+        // through the same function; its own runtime dispatch runs below.
+        let is_runtime_callback =
+            fallback as usize == ambient_interp::ambient_core_call as *const () as usize;
+        let is_combiner =
+            fallback as usize == combined_ambient_core_call as *const () as usize;
+        if !is_runtime_callback && !is_combiner {
+            if let Some(result) = fallback(
+                module,
+                method,
+                args.clone(),
+                span,
+                resolved_ret.clone(),
+                sink.as_deref_mut(),
+            ) {
+                return Some(result);
+            }
+        }
+    }
+    ambient_interp::ambient_core_call(module, method, args, span, resolved_ret, sink)
 }
 
 /// Serializes whole resident JIT runs across the process.
@@ -331,8 +390,10 @@ pub fn reset_one_shot_core_state() {
 /// interpreter run, matching whole-program deopt.
 pub fn with_interpreter_ambient<R>(body: impl FnOnce() -> R) -> R {
     jet_codegen::scheduler::jet_observe_runtime_start();
+    let previous = jet_codegen::Comptime::ambient_hooks().0;
+    let _fallback = AmbientCoreFallbackGuard(AMBIENT_CORE_FALLBACK.with(|slot| slot.replace(previous)));
     jet_codegen::Comptime::with_ambient(
-        Some(ambient_interp::ambient_core_call),
+        Some(combined_ambient_core_call),
         Some(ambient_interp::ambient_handle),
         Some(ambient_interp::ambient_extern_call),
         body,
@@ -514,8 +575,8 @@ pub use backend::CraneliftBackend;
 pub use gap::{entry_run_name, is_e2211, JitGap};
 pub use tier_cache::{run_cached_module, take_last_tier_artifact};
 pub use tiers::{
-    publish_trace, record_trace, set_trace_tiers, take_last_trace, trace_tiers_enabled, Tier,
-    TierPlan, TierRow,
+    publish_trace, record_trace, set_trace_tiers, take_last_trace, take_trace_aggregate,
+    trace_tiers_enabled, write_trace_sidecar, Tier, TierPlan, TierRow, TierTraceAggregate,
 };
 pub use trace::{
     deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test,

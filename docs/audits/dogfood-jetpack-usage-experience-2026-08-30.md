@@ -2,34 +2,47 @@
 
 ## Executive decision
 
-Jet proved that a small team of agents can build a real package-manager slice in 3,064 lines of Jet. The result is compact, fast at runtime, and green through three dogfood phases on the default and AOT tiers.
+This report's mechanical audit counted 3,064 physical lines in the integrated Jet canary. That is a retrospective scope count, not a matched language or phase-success result. The campaign ledger records Phase 1 as `blocked; not green`, and Phases 2 and 3 as `not reached; not measured` (`dogfood/jetpack/METRICS.md:28-32`).
 
-The authoring experience was not yet better than Rust overall. Jet was easiest to read. It was harder to create, modify, and debug than its final source size suggests. Compiler defects, Core coverage gaps, ownership edits, failure-domain rules, weak project-aware checking, and non-idiomatic branch-heavy code all added friction.
+The retrospective scorecard rated Jet reading highest among its activities. It did not compare equivalent Rust work. Jet was harder to create, modify, and debug than its final source size suggests. Compiler defects, Core coverage gaps, ownership edits, failure-domain rules, weak project-aware checking, and non-idiomatic branch-heavy code all added friction.
 
-No implementing agent claimed a measured preference for Jet over Rust. Every agent either said “conditional yes” for using Jet again or limited the answer to small typed tools. None had built the matched Rust slice, so a stronger preference claim would be invented.
+The original implementing-agent survey made no matched preference claim. The sealed `2393-r1` run recorded 9/9 measured blind choices for Rust; A04 had no answer. No campaign preference or success is claimed.
 
-The language ideas are good. The current product loop does not yet make those ideas feel effortless. Jet is concise after convergence, but convergence took too many correction passes.
+The final source contains the language ideas discussed below. Its final size does not measure development speed. The current product loop still requires too many correction passes.
 
 The owner has paused this parity drive. The Rust Jetpack is now the sole active implementation until it is fully functional, reliable, and stable. The existing Jet canary remains evidence. It must not become a second maintenance stream. This pause does not reject eventual replacement.
 
 ## What this report measures
 
-This report combines four evidence sets:
+This report combines five evidence sets:
 
 1. The integrated Jet source under `dogfood/jetpack/`.
-2. The campaign ledger in `dogfood/jetpack/METRICS.md` and the measured comparison in `docs/audits/dogfood-jetpack-2026-08-28.md`.
+2. The campaign ledger in `dogfood/jetpack/METRICS.md` and the comparison report in `docs/audits/dogfood-jetpack-2026-08-28.md`.
 3. Tower findings `#1310`, `#2252`, `#2350`, `#2352`, `#2354`, `#2355`, `#2368`, `#2369`, `#2370`, and `#2371`.
 4. Retrospectives from ten agents that wrote or corrected the model, plan, CLI, entry, and parity-test slices.
+5. The sealed `2393-r1` verdict and raw receipt manifest for the 2026-08-31 execution.
 
 The agent survey is retrospective. It records model preference and willingness to use Jet again. It does not claim human emotion. Some lanes were explicitly forbidden from running validation, so their diagnostics scores describe limited direct exposure.
 
-No surveyed agent implemented the equivalent Rust slice. Rust comparisons below therefore use measured repository facts, not agent preference claims.
+No surveyed agent implemented the equivalent Rust slice. `METRICS.md` marks Rust matched source counts and the current binary, startup, latency, build, LSP, and error-cascade rows `not measured` (`dogfood/jetpack/METRICS.md:51-70,102-149`). The only matched Jet/Rust results added here are the sealed `2393-r1` task outcomes and blind choices, reported in the addendum below.
+
+## Sealed `2393-r1` result (2026-08-31)
+
+The frozen rerun produced a valid partial execution, not a passing 5/5 campaign. The sealed [verdict](fresh-agent-5-of-5-rerun-2026-08-31.md) and [receipt manifest](raw/2393-r1/manifest.json) report:
+
+| Measure | Result | Meaning |
+| --- | --- | --- |
+| Jet project-green tasks | 27/36 measured tasks green | Jet task gate fails. |
+| Rust project-green tasks | 36/36 measured tasks green | Rust task evidence only; it is not the Jet gate. |
+| Blind preference | 9/9 measured choices were Rust; A04 had no measured choice | The preference gate fails. |
+
+The fixed participant denominator remains 10. A04 is not treated as zero or omitted. These measurements do not establish Jet preference, performance, source-density, or campaign success (`fresh-agent-5-of-5-rerun-2026-08-31.md:10-20,126-138`).
 
 ## The short answer: did agents enjoy Jet more than Rust?
 
 Not established.
 
-The strongest common answer was: Jet is pleasant to read and promising for small typed tools, but not yet the safer choice for load-bearing package tooling. Agents liked the compact data model, explicit error types, records, collection literals, `#Codable`, `#Test`, `??`, and visible copy boundaries. They disliked correction churn around `~`, error-domain propagation, package entry resolution, module checking, direct Result matching, and tier-specific compiler failures.
+The strongest common retrospective answer was: Jet was pleasant to read and promising for small typed tools, but not yet ready for load-bearing package tooling. Agents liked the compact data model, explicit error types, records, collection literals, `#Codable`, `#Test`, `??`, and visible copy boundaries. They disliked correction churn around `~`, error-domain propagation, package entry resolution, module checking, direct Result matching, and tier-specific compiler failures.
 
 The ten-agent scorecard was:
 
@@ -43,23 +56,23 @@ The ten-agent scorecard was:
 | Diagnostics and debugging | 2.6/5 | 2.5 | 1–4 | Exact checks could be excellent; root-cause localization and tier coverage were uneven. |
 | Tooling and docs | 2.7/5 | 2.5 | 2–4 | Examples were useful; project-aware checking and authoring guidance were incomplete. |
 
-These numbers are more useful than a synthetic “fun” score. Reading crossed the positive threshold. Every other authoring activity clustered around neutral.
+Reading was the only activity above the report's positive threshold. This scorecard measured Jet activity ratings only, not a matched Jet/Rust preference.
 
 ## What agents liked
 
 ### Typed failure is visible and compact
 
-Agents repeatedly preferred signatures such as `String !ParseError` to spelling `Result<String, ParseError>` throughout Rust APIs. A local `#Error` record made the failure role visible beside the data model.
+Agents repeatedly described signatures such as `String !ParseError` as compact within the Jet port. A local `#Error` record made the failure role visible beside the data model.
 
 `??` also read well at Core boundaries. It kept the success path short and made fallback or error conversion local.
 
-This strength weakened when helpers that looked pure also needed the caller’s failure domain. `Bool !ParseError` plus `Ok(false)` surprised several agents. The concept remained understandable after discovery, but it was not self-teaching.
+This strength weakened when helpers that looked pure also needed the caller's failure domain. `Bool !ParseError` plus `Ok(false)` surprised several agents. The concept remained understandable after discovery, but it was not self-teaching.
 
 ### Data declarations are dense
 
 Jet records, list and map literals, interpolation, `#Codable`, and `#Test` made models and test fixtures short. The read-only report path showed the intended result: typed report records serialized with little visible plumbing.
 
-The source-size result supports this observation, with an important caveat. Jet used 3,064 physical lines and 11,839 whitespace tokens. The Rust comparison envelope used 14,875 lines and 43,612 tokens. The Rust envelope includes behavior beyond the three canary phases, so the ratio is directional rather than a language-density proof.
+The report's broader mechanical audit counted 3,064 Jet lines. The current `METRICS.md` capture covers nine implementation files and records 1,961 Jet lines and 6,379 whitespace tokens; its matched Rust LOC and tokens are `not measured` (`dogfood/jetpack/METRICS.md:51-70`). These scopes differ, so this report makes no Jet/Rust source-density claim.
 
 ### Ownership is auditable
 
@@ -71,17 +84,15 @@ The cost appeared during editing. `trim`, `split_once`, `.before`, `.after`, pat
 
 Agents with a complete `jet check` loop scored diagnostics as high as 4/5. `E0209`, `E2404`, `E0109`, `E0121`, `E0602`, `E0358`, and `L0507` often named the exact site and a concrete fix.
 
-The seeded error-cascade comparison was also good. Jet and Rust each emitted one diagnostic, and each named the seeded cause first.
+The original report described a seeded error-cascade comparison, but the current `METRICS.md` error-cascade rows are `not measured` (`dogfood/jetpack/METRICS.md:144-149`). In `2393-r1`, seeded duplicate, unknown, and rename failures were named and resolved in the measured command set. This does not establish a cross-language diagnostic advantage (`fresh-agent-5-of-5-rerun-2026-08-31.md:109-115`).
 
 This strength was inconsistent. Several root causes appeared as many downstream errors, or only after default-tier or AOT execution.
 
-### Runtime and cold-build results were strong
+### Runtime and build measurements are unavailable
 
-The prebuilt Jet binary was 1,377,432 bytes. The Rust binary was 65,947,688 bytes. Jet won the measured empty-store startup, first output, and read-only verb latency rows by 2.09 to 4.77 times.
+`METRICS.md` marks binary size, startup, verb latency, cold and warm build, first-result, and LSP rows `not measured` at the current integration point (`dogfood/jetpack/METRICS.md:102-149`). The earlier draft's binary, startup, latency, build, and peak-memory figures therefore do not count as measurements here. They are not used as results in this report.
 
-Jet’s measured cold build was 19.695 seconds against Rust’s 121.942 seconds. Jet also used less peak memory in both cold and warm captures.
-
-Those results matter. They show that Jet’s compact source did not require a slow runtime or a large deliverable.
+The sealed rerun preserved per-command timers where supplied, but its published cross-language result is the 27/36 versus 36/36 project-green task count, not a binary or build-speed comparison (`fresh-agent-5-of-5-rerun-2026-08-31.md:10-22,33-50`).
 
 ## Where authoring was difficult
 
@@ -119,15 +130,15 @@ This was not only compiler friction. The dogfood port could not reuse Jetpack’
 
 A typed source-backed package/profile parser and deterministic JSON or framing builder would remove much of this work. Such an API should preserve spans, ordering, exact bytes, and error provenance.
 
-### Warm rebuilds still lose to Rust
+### Warm rebuilds remain unmeasured
 
-The native-cache identity bug is fixed. A comment-only rebuild now reports a final-binary cache hit with `backend=0` and `link=0`.
+The native-cache identity bug is recorded as fixed in the bug table. That closure does not provide a warm timing result.
 
-The warm median is still 8.096 seconds. Rust’s measured warm rebuild is 3.622 seconds.
+`METRICS.md` marks both cold and warm build rows `not measured` at the current integration point (`dogfood/jetpack/METRICS.md:123-128`). This report makes no Jet/Rust warm-speed claim.
 
-The reason is architectural. Before the final cache lookup, Jet still performs package entry discovery, the programmable-build front end, semantic-index program-value construction, and native key or fingerprint derivation. The backend and linker are no longer the warm bottleneck.
+Source inspection identifies package entry discovery, the programmable-build front end, semantic-index program-value construction, and native key or fingerprint derivation before the final cache lookup. This is a design observation, not timing evidence.
 
-This is the clearest evidence that Jet’s compact source and fast runtime do not yet produce the Python-like development loop promised by the compiler-speed law.
+Demand-driven graph work remains a recommendation. It must not be presented as a measured performance result.
 
 ## The non-idiomatic Jet problem
 
@@ -208,7 +219,7 @@ This is a campaign-process confound. It made Jet feel worse, but it is not solel
 | Parsing APIs | No public typed package/profile parser or deterministic framing builder served the port. | Hundreds of lines of scanners and string dispatch. | Expose one source-backed model with spans and deterministic encoding. |
 | Project checks | File checks and package runtime exercise different reachability. | Clean checks can precede JIT or AOT failures. | Make the normal project check cover output resolution, module graph, Core closure, and tier lowering. |
 | Module architecture | One package and one 832-line plan module carry many responsibilities. | Local reasoning is good; change isolation is weaker. | Deepen modules inside the user-declared package. Never auto-change package boundaries. |
-| Incrementality | Final cache lookup follows substantial front-end work. | Comment-only builds remain slower than Rust despite zero backend and link work. | Use one demand-driven query and action graph with layered invalidation. |
+| Incrementality | Final cache lookup follows substantial front-end work by source inspection. | Warm-build effect is not measured. | Use one demand-driven query and action graph with layered invalidation. |
 
 ### Compiler, Core, and tooling bugs found by dogfood
 
@@ -222,34 +233,34 @@ This is a campaign-process confound. It made Jet feel worse, but it is not solel
 | `#2368` | Formatter rewrote return match arms into invalid Jet. | Formatting could break compiling source. | P0 fixed and closed. |
 | `#2369` | Compiler `--version` handling intercepted application argv after `--`. | Valid Jetpack commands never reached the program. | P0 fixed and closed. |
 | `#2370` | LSP returned no symbols for an imported package module. | The 832-line plan file had no symbol navigation. | Fixed and closed; 75 symbols now return. |
-| `#2371` | Hidden Rust FFI bridge identity bypassed the native cache. | A comment-only build was slower than cold. | Cache bug fixed and closed; front-end warm cost remains. |
+| `#2371` | Hidden Rust FFI bridge identity bypassed native cache keys. | The cache key omitted this identity; current cold and warm timings remain `not measured`. | Cache-key bug fixed and closed; no performance result claimed. |
 | `#2355` | Shipped Rust Jetpack created a lock file during read-only list. | The oracle changed the store during inspection. | Rust bug fixed; dogfood normalization deleted. |
+
+The companion ledger maps these ten rows as F29-F38 in table order. In particular, F34 owns `#2368`, and F38 owns `#2355`.
 
 The bug count matters because it contaminated every subjective judgment. Agents were not only learning a new language. They were also crossing incorrect compiler behavior, incomplete tier support, broken formatter output, missing LSP symbols, and package-entry defects.
 
-## Jet versus Rust: what the evidence supports
+## Jet versus Rust: measured limits
 
-### Jet wins today
+### Sealed task and preference measurements
 
-- Final source is much smaller in the measured conservative envelope.
-- The optimized executable is much smaller.
-- Startup, first output, and measured read-only verbs are faster.
-- Cold build time and peak memory are better in the captured environment.
-- Typed failure signatures and data records are more compact at the source surface.
-- Explicit ownership and effects give agents audit facts that Rust often expresses with more syntax.
+The only matched cross-language measurements in this report are from sealed `2393-r1` receipts:
 
-### Rust wins today
+- Jet reached 27/36 measured project-green task receipts.
+- Rust reached 36/36 measured project-green task receipts.
+- Nine of nine measured blind choices selected Rust. A04 had no measured choice.
 
-- The measured comment-only rebuild is 3.622 seconds versus Jet’s 8.096 seconds.
-- The Rust implementation is the complete, established product. The Jet port covers three canary phases.
-- Rust’s package and module workflow did not expose the same entry, AOT, default-tier, formatter, and LSP defects during this campaign.
-- No implementing agent was ready to prefer Jet for load-bearing package tooling.
+The verdict is `FAIL — fixed 5/5 gate not met`. These results do not establish a Jet preference, a product-wide Rust advantage, or campaign success (`fresh-agent-5-of-5-rerun-2026-08-31.md:10-20,126-138`).
+
+### Original retrospective evidence
+
+The original ten-agent table records Jet activity ratings and qualitative testimony. It does not contain matched Rust authoring tasks. Those rows support claims about the reported Jet experience, not a Jet-over-Rust preference.
 
 ### Not measured
 
 - Matched full-feature LOC and token counts.
+- Binary size, startup, verb latency, cold build, warm build, first-result latency, peak memory, and LSP timing at the current integration point.
 - Matched authoring time by equally experienced Jet and Rust developers.
-- Rust LSP latency on this workstation.
 - Long-term maintenance cost.
 - A complete network-provider and package-universe parity run.
 - Whether experts prefer Jet after compiler bugs and idiom problems are removed.
@@ -277,6 +288,8 @@ The current Jet source remains a useful canary, benchmark fixture, and compiler 
 
 ## Implementer testimony by slice
 
+These are original retrospective answers. They are not matched measurements and do not override the sealed `2393-r1` result above.
+
 | Agent | Slice | Would use Jet again? | Strongest positive | Strongest friction | Highest-value improvement |
 | --- | --- | --- | --- | --- | --- |
 | `JetpackModelMax` | Manifest, reference, lock models | Yes for small deterministic parsers; no production preference | Compact structs, arrays, and fallible signatures | Hand-written state machines and brace or interpolation confusion | Canonical table-driven parsing guidance |
@@ -292,8 +305,10 @@ The current Jet source remains a useful canary, benchmark fixture, and compiler 
 
 ## Final assessment
 
-Jet is already capable of expressing this software with far less source than the Rust implementation envelope. Its best ideas are visible in the final code: explicit effects, compact models, executable tests, small binaries, and fast runtime behavior.
+Jet can express the canary workload, and the retrospective report records specific Jet activity ratings and source observations. `METRICS.md` does not provide matched Rust source or current runtime measurements.
+
+The sealed `2393-r1` run measured 27/36 Jet project-green tasks, 36/36 Rust project-green tasks, and 9/9 measured blind choices for Rust. Its verdict is `FAIL`, not campaign success.
 
 The experience still falls short of “simple, enjoyable, and frictionless.” The final source hides how much correction work occurred. The most important gap is not syntax volume. It is the distance between the first plausible Jet implementation and an idiomatic, cross-tier-correct, project-green implementation.
 
-That distance must shrink before Jet can honestly beat Rust as a language people prefer to use. The route is concrete: canonical branch tables, typed public package models, better ownership and failure diagnostics, project-wide tier-aware checks, and earlier demand-driven cache gates.
+That distance must shrink before Jet can honestly claim a user preference over Rust. The route is concrete: canonical branch tables, typed public package models, better ownership and failure diagnostics, project-wide tier-aware checks, and earlier demand-driven cache gates.

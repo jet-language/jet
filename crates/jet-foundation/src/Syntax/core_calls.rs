@@ -486,6 +486,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.process", "args"),
     ("core.plugin", "load"),
     ("core.mod", "load"),
+    ("core.testing", "temp_dir"),
     ("core.math", "from_bits"),
     ("core.math.random", "int"),
     ("core.math.random", "float"),
@@ -501,6 +502,14 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.math.random", "sample"),
     ("core.crypto.random", "bytes"),
     ("core.crypto", "hmac_sha256"),
+    ("core.crypto", "sha1"),
+    ("core.crypto", "sha224"),
+    ("core.crypto", "sha384"),
+    ("core.crypto", "sha3_224"),
+    ("core.crypto", "sha3_256"),
+    ("core.crypto", "sha3_384"),
+    ("core.crypto", "sha3_512"),
+    ("core.crypto", "pbkdf2_hmac"),
     ("core.time", "now"),
     ("core.time", "sleep"),
     ("core.time", "start"),
@@ -556,8 +565,16 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.net", "udp_receive"),
     ("core.net.ws", "connect"),
     ("core.net.ws", "upgrade"),
+    ("core.db", "row_value"),
+    ("core.db", "row_int"),
+    ("core.db", "row_float"),
+    ("core.db", "row_text"),
+    ("core.db", "row_bool"),
     ("core.db", "transaction"),
     ("core.db", "migrate"),
+    ("core.ui", "tui_backend"),
+    ("core.ui", "button"),
+    ("core.ui", "key_event"),
     ("app", "live_get"),
     ("core.web", "live_get"),
     ("app", "live_show"),
@@ -859,8 +876,8 @@ impl CoreCallRecord {
                 "core.files",
                 "read" | "read_bytes" | "exists" | "is_dir" | "remove" | "remove_dir"
                 | "remove_all" | "list_dir" | "create_dir" | "create_dir_all" | "stat" | "set_mode"
-                | "canonicalize" | "absolute" | "walk" | "walk_parallel" | "walk_files" | "glob" | "fsync"
-                | "lock" | "open" | "create" | "append",
+                | "canonicalize" | "absolute" | "walk" | "walk_parallel" | "walk_files" | "glob"
+                | "fsync" | "lock" | "open" | "create" | "append",
             ) => &[true],
             ("core.files", "write" | "write_bytes" | "append_all" | "write_atomic") => &[true],
             ("core.files", "copy" | "copy_dir" | "rename" | "symlink" | "hard_link") => {
@@ -3858,46 +3875,44 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     .with_pure_route(CoreCallPureRoute::Raylib),
     CoreCallRecord::new(
         "core.db",
-        "params",
-        "jet_std::jet_db_params_from_sql",
-        true,
-        &[true],
-    ),
-    CoreCallRecord::new(
-        "core.db",
         "row_value",
         "jet_std::jet_db_row_value",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.db",
         "row_int",
         "jet_std::jet_db_row_int",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.db",
         "row_float",
         "jet_std::jet_db_row_float",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.db",
         "row_text",
         "jet_std::jet_db_row_text",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.db",
         "row_bool",
         "jet_std::jet_db_row_bool",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.db",
         "transaction",
@@ -3957,7 +3972,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[],
     ),
     CoreCallRecord::new("core.ui", "null_backend", "jet_ui_null", true, &[]), // D-RENDERTGT2=A (c133 M1): UI backend seam constructors.
-    CoreCallRecord::new("core.ui", "tui_backend", "jet_ui_tui", true, &[]),
+    CoreCallRecord::new("core.ui", "tui_backend", "jet_ui_tui", true, &[])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "gtk_backend", "jet_ui_gtk", true, &[]), // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
     CoreCallRecord::new("core.ui", "point", "jet_ui_point", true, &[false, false])
         .with_pure_route(CoreCallPureRoute::Ui),
@@ -3993,9 +4009,11 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     // bespoke sema/codegen path after the one-label core row is checked.
     CoreCallRecord::new("core.ui", "button", "jet_ui_button", true, &[true])
         .with_max_arity(2)
-        .with_pure_route(CoreCallPureRoute::Ui),
+        .with_pure_route(CoreCallPureRoute::Ui)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.ui", "key_event", "jet_ui_key_event", true, &[true])
-        .with_pure_route(CoreCallPureRoute::Ui),
+        .with_pure_route(CoreCallPureRoute::Ui)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.ui",
         "resize_event",

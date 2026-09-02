@@ -20,18 +20,19 @@ The scan covered the full repository. It includes compiler code, Jetpack, Tower,
 
 | Campaign | Candidates | Tower card | Tower milestone |
 |---|---:|---:|---|
-| [Tower authorization, CSRF, and document containment](#tower-control-plane) | 11 | #1377 | `e12-security-boundaries` |
-| [JIT, WebAssembly, FFI, and ABI memory safety](#memory-abi-safety) | 9 | #1378 | `e12-security-runtime` |
-| [Identity, tokens, secrets, and cryptography](#identity-secrets-crypto) | 12 | #1379 | `e12-security-data` |
-| [Resource bounds, parser depth, and service availability](#resource-bounds) | 35 | #1380 | `e12-security-runtime` |
-| [Network egress, SSRF, HTTP framing, and local disclosure](#network-boundaries) | 6 | #1381 | `e12-security-data` |
-| [Filesystem roots, symlinks, temporary files, and path containment](#filesystem-containment) | 22 | #1382 | `e12-security-data` |
-| [Devserver, Canvas, Studio, and notebook control planes](#devtools-control-plane) | 10 | #1383 | `e12-security-boundaries` |
-| [Command, shell, editor, and generated-code injection](#command-code-injection) | 20 | #1384 | `e12-security-runtime` |
-| [Package, Git, provider, store, and dependency integrity](#package-supply-chain) | 7 | #1385 | `e12-security-data` |
-| [Trust policy, sandbox claims, concurrency, and remaining integrity gaps](#policy-integrity) | 2 | #1386 | `e12-security-validation` |
+| [Tower authorization, CSRF, and document containment](#tower-control-plane) | 11 | #1377 | `e12-m01-control-planes` |
+| [JIT, WebAssembly, FFI, and ABI memory safety](#memory-abi-safety) | 9 | #1378 | `e12-m03-memory-safe-execution` |
+| [Identity, tokens, secrets, and cryptography](#identity-secrets-crypto) | 12 | #1379 | `e12-m02-identity-secrets` |
+| [Resource bounds, parser depth, and service availability](#resource-bounds) | 35 | #1380 | `e12-m04-bounded-services` |
+| [Network egress, SSRF, HTTP framing, and local disclosure](#network-boundaries) | 6 | #1381 | `e12-m05-network-filesystem-containment` |
+| [Filesystem roots, symlinks, temporary files, and path containment](#filesystem-containment) | 22 | #1382 | `e12-m05-network-filesystem-containment` |
+| [Devserver, Canvas, and Studio control planes](#devtools-control-plane) | 10 | #1383 | `e12-m01-control-planes` |
+| [Command, shell, editor, and generated-code injection](#command-code-injection) | 20 | #1384 | `e12-m06-command-supply-chain` |
+| [Package, Git, provider, store, and dependency integrity](#package-supply-chain) | 7 | #1385 | `e12-m06-command-supply-chain` |
+| [Trust policy, sandbox claims, concurrency, and remaining integrity gaps](#policy-integrity) | 2 | #1385 (absorbed #1386) | `e12-m06-command-supply-chain` |
 
-Card #1387 is the final security gate. It depends on all ten campaign cards.
+Card #1387 is the final security gate. It depends on all ten campaign scopes
+(#1377-#1386); #1386's two candidates are absorbed into #1385.
 
 ## Required disposition
 
@@ -94,7 +95,7 @@ cases are evidence only until the integrated verification pass.
 
 ### Tower authorization, CSRF, and document containment
 
-11 candidates. Priority P0. Milestone `e12-security-boundaries`.
+11 candidates. Priority P0. Milestone `e12-m01-control-planes`.
 
 The detailed [Tower source artifact](security-deep-scan-2026-08-03-full-tower-control-plane.md)
 is authoritative for #1377 source traces and blocker evidence. This table is
@@ -121,7 +122,7 @@ Host does not authenticate a request: the no-token server trusts only a loopback
 
 ### JIT, WebAssembly, FFI, and ABI memory safety
 
-9 candidates. Priority P0. Milestone `e12-security-runtime`.
+9 candidates. Priority P0. Milestone `e12-m03-memory-safe-execution`.
 
 | Candidate ID | Discovery title | Primary locations | Source reports |
 |---|---|---|---:|
@@ -168,11 +169,27 @@ run in this pass.
 
 Remaining live findings: **0**.
 
+### Current-revision memory/ABI recitation (2026-09-01)
+
+This table supersedes only the source coordinates in the earlier current-dispositions table. It does not change any disposition or historical discovery record.
+
+| Candidate ID | Disposition | Current root, hostile proof, and tiers |
+|---|---|---|
+| `jit-jetarena-vec-layout-casts` | `already-fixed` | Root: `crates/jet-rt/src/lib.rs:466-480` and `crates/jet-jit/src/Collections.rs:1761-1770,3680-3726`. Hostile proof: `tests/jit_run.rs:1884-1943`. Tiers: release AOT, resident Cranelift JIT, forced interpreter. |
+| `wasm-list-i64-untrusted-ownership` | `already-fixed` | Root: `crates/jet-codegen/src/Codegen/Web.rs:4407-4453,4508-4553`. Hostile proof: `tests/web_build.rs:4677-4746`. Tier: generated WebAssembly under the Node/JavaScript host. |
+| `wasm-list-string-untrusted-ownership` | `already-fixed` | Root: `crates/jet-codegen/src/Codegen/Web.rs:4407-4453,4622-4691`. Hostile proof: `tests/web_build.rs:4750-4924`. Tier: generated WebAssembly under the Node/JavaScript host. |
+| `wasm-map-untrusted-ownership` | `already-fixed` | Root: `crates/jet-codegen/src/Codegen/Web.rs:4407-4453,4694-4776` and `crates/jet-codegen/src/Prelude/DomRuntime.js:817-870`. Hostile proof: `tests/web_build.rs:4928-5169`. Tier: generated WebAssembly under the Node/JavaScript host. |
+| `wasm-string-untrusted-ownership` | `already-fixed` | Root: `crates/jet-codegen/src/Codegen/Web.rs:4407-4497` and `crates/jet-codegen/src/Prelude/DomRuntime.js:720-738,884-894`. Hostile proof: `tests/web_build.rs:4501-4592`. Tier: generated WebAssembly under the Node/JavaScript host. |
+| `d0017-s1-aot-termios-layout` | `already-fixed` | Shared root: `crates/jet-codegen/src/Prelude/Term.rs:438-728`; AOT caller: `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:323-343`. Proof: `tests/os_native.rs:281-330,510-705`. Tiers: release AOT, resident Cranelift JIT, forced interpreter. |
+| `d0017-s1-jit-termios-layout` | `duplicate-of-d0017-s1-aot-termios-layout` | Adapters: `crates/jet-jit/src/IO.rs:21-23,267-282` and `crates/jet-jit/src/ambient_interp.rs:5314-5321`; shared root: `crates/jet-codegen/src/Prelude/Term.rs:438-728`. Proof: `tests/os_native.rs:690-705`. Tiers: resident Cranelift JIT and forced interpreter. |
+| `jit-http-worker-runtime-uaf` | `already-fixed` | Roots: `crates/jet-jit/src/Concurrency.rs:420-522`, `crates/jet-jit/src/net_http_hosts.rs:58-77,615-664,2426-2468,2493-2544`, `crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:1964-1990,2510-2519,2611-2615`, and `crates/jet-jit/src/jit/resident.rs:525-548,877-899`. Hostile proof: `tests/jit_run.rs:283-323`. Tier: resident Cranelift JIT, including HTTP/1 and HTTP/2 teardown. |
+| `jit-event-four-capture-abi` | `already-fixed` | Roots: `crates/jet-jit/src/jit/lower_ctx.rs:25124-25173`, `crates/jet-jit/src/jit/functions_compile.rs:455-468`, `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3779-3845`, `crates/jet-jit/src/Reactive.rs:30-95,360-408,752-803`, and `crates/jet-jit/src/jit/backend.rs:104-135`. Hostile proof: `tests/jit_run.rs:199-279`. Tiers: release AOT, forced interpreter, default-run deopt, and direct JIT preflight rejection. |
+
 ## identity-secrets-crypto
 
 ### Identity, tokens, secrets, and cryptography
 
-12 candidates. Priority P0. Milestone `e12-security-data`.
+12 candidates. Priority P0. Milestone `e12-m02-identity-secrets`.
 
 | Candidate ID | Discovery title | Primary locations | Source reports |
 |---|---|---|---:|
@@ -218,7 +235,7 @@ These dispositions trace each candidate through the current source. `confirmed` 
 
 ### Resource bounds, parser depth, and service availability
 
-35 candidates. Priority P1. Milestone `e12-security-runtime`.
+35 candidates. Priority P1. Milestone `e12-m04-bounded-services`.
 
 | Candidate ID | Discovery title | Primary locations | Source reports |
 |---|---|---|---:|
@@ -342,51 +359,88 @@ The source spans above were checked against the current tree. `present` names a 
 | `worktree-tar-entry-count-dos` | `present` — `tests/archive.rs:491-509`, `archive_public_tar_reader_rejects_an_entry_count_bomb`, feeds 4097 entries and requires both TAR readers to fail closed. |
 | `module-discovery-symlink-recursion-dos` | `present` — `crates/jet-pkg-model/src/Package/Discovery.rs:204-220`, `recursive_symlink_is_rejected_before_discovery_descent`, creates a parent-link cycle and requires discovery to stop before descent. |
 
+### Current-revision resource-bounds recitation (2026-09-01)
+
+A fresh-context security review retraced all 35 resource-bounds candidates through
+their current shared roots, cleanup paths, deadlines, parser-depth controls, and
+applicable-tier hostile regressions. No candidate remains live.
+
+The final package-tree correction defines file, aggregate-byte, file-count,
+node-count, and depth bounds at
+`crates/jet-foundation/src/SHA256.rs:19-25`. `try_tree_hash` creates and threads
+one node budget at `crates/jet-foundation/src/SHA256.rs:722-739`. The traversal
+charges every directory entry, including empty and ignored entries, before
+metadata inspection or descent at
+`crates/jet-foundation/src/SHA256.rs:763-835`.
+`crates/jet-driver/src/Loader.rs:2868-2903` contains no duplicate pre-walk. It
+delegates locked-source verification directly to the bounded hash.
+
+Current hostile proofs are
+`crates/jet-foundation/src/SHA256.rs:1019-1089,1192-1213` and
+`tests/pkg.rs:3622-3729`. At this revision, `jet-foundation tree_hash_` passed
+4/4 tests. The locked wide-tree and deep-tree fail-before-manifest tests each
+passed 1/1. Earlier dated evidence remains historical. This recitation is the
+current-revision authority for card #1380.
+
 ## network-boundaries
 
 ### Network egress, SSRF, HTTP framing, and local disclosure
 
-6 candidates. Priority P1. Milestone `e12-security-data`.
+6 candidates. Priority P1. Milestone `e12-m05-network-filesystem-containment`.
 
 | Candidate ID | Discovery title | Primary locations | Disposition | File:line evidence | Source reports |
 |---|---|---|---|---|---:|
-| `comptime-fetch-ssrf` | Hash-pinned compile-time fetch permits arbitrary outbound requests before verification | crates/jet-comptime/src/Comptime/Methods/dispatch.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs | already-fixed | The AST and build-method routes both pass the source root through `crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs:763-771,2198-2205`; the shared evaluator fetches before hash comparison at `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:776-795`. The compile-time agent is redirect-free and its resolver rejects every DNS answer outside the existing public-address policy at `crates/jet-net/src/lib.rs:23-30,621-650`; hostile no-connect and reserved-address proofs are `tests/net_tls.rs:40-95` and `crates/jet-net/src/lib.rs:1036-1057`. | 11 |
-| `cd005-comptime-fetch-local-disclosure` | Hermetic compile-time fetch can disclose arbitrary local text files | crates/jet-net/src/lib.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch.rs | already-fixed | `crates/jet-net/src/lib.rs:205-324,326-545` resolves containment, then opens the final file through a held root with descriptor-relative/no-follow access, rejects shared hardlink inodes, and performs Windows reparse-safe handle validation; `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:776-790` routes the caller through that check; `crates/jet-net/src/lib.rs:953-980,989-1027` rejects absolute/symlink escapes and exercises mutation during resolution; `tests/net_tls.rs:98-120` rejects a hardlink to an outside file through the compile-time route. | 9 |
-| `provider-registry-private-network-ssrf` | Project provider policy can authorize private-network HTTPS fetches | crates/jetpack/src/Provider/fetch.rs<br>crates/jetpack/src/Provider/script_registry.rs | already-fixed | Provider fetch rechecks the allowlist on every redirect, resolves every answer with the shared public-address policy, pins curl with `--resolve`, and disables redirects and ambient proxy/configuration at `crates/jetpack/src/Provider/fetch.rs:137-217,221-258,530-557`; script-registry realization reaches that policy at `crates/jetpack/src/Provider/script_registry.rs:194-228,369-396`. Hostile authority proof, including loopback, link-local, reserved, credentials, and CRLF inputs, is `crates/jetpack/src/Provider/fetch.rs:711-719`; the shared resolver policy is `crates/jet-net/src/lib.rs:578-650`. | 5 |
-| `jit-http-crlf-injection` | JIT generic HTTP request serialization permits CRLF request injection | crates/jet-jit/src/net_http_hosts.rs<br>crates/jet-pkg-model/src/Prelude/HTTP.rs | already-fixed | `crates/jet-pkg-model/src/Prelude/HTTP.rs:1578-1644,3064-3078` rejects control bytes in URL targets, methods, header names, and values before serialization and rejects caller framing headers before `connect` at `:3110-3123`; `crates/jet-jit/src/net_http_hosts.rs:2634-2641,4925-4932` marshals resident-JIT requests to that sender; `tests/http_client_law.rs:97-183` are hostile AOT/JIT/interpreter witnesses. | 4 |
-| `jit-websocket-handshake-crlf-injection` | WebSocket URL permits HTTP handshake CRLF injection | crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs | already-fixed | `crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:247-291,554-609` rejects control and whitespace bytes before connecting or interpolating URL parts into the handshake; the AOT/TIR registry and subset route are `crates/jet-foundation/src/Syntax/core_calls.rs:557-558,4197-4198` and `crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs:212-214`. Resident-JIT and interpreter adapters call the same Prelude function at `crates/jet-jit/src/net_http_hosts.rs:2243-2250,4971-4977` and `crates/jet-jit/src/ambient_interp.rs:4082-4105`; hostile proofs are `tests/ws_law.rs:681-691` and `tests/http_i9.rs:130-147,182-194`. | 1 |
-| `git-dependency-transport-ssrf` | Git dependency fetch allows attacker-selected network destinations | Source/Fetch.rs | already-fixed | Validation runs before either sink at `Source/Fetch.rs:842-858,2980-3057`, with the SSH user-info allowlist at `Source/Fetch.rs:3016-3024`; `:2466-2471,2545-2555` carry only the validated transport to `ls-remote` and clone. HTTP(S) keeps the TLS host while pins `http.curloptResolve`, SSH pins `-oHostName`, and Git config/env are scrubbed at `Source/Fetch.rs:2807-2908,2969-2984` plus `crates/jetpack/src/Provider.rs:36-105`. Hostile regressions are `tests/pkg.rs:3768-3803,3805-3834,3838-4050,4367-4453` and `Source/Fetch.rs:3419-3478`, covering private/reserved destinations, option-shaped input, transport pinning, and config/env/cwd input. | 1 |
+| `comptime-fetch-ssrf` | Hash-pinned compile-time fetch permits arbitrary outbound requests before verification | crates/jet-comptime/src/Comptime/Methods/dispatch.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs | already-fixed | AST and BuildContext routes pass the source root to the shared evaluator at `crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs:763-771,2198-2205`; fetch is redirect-free and uses the shared public-address policy at `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:776-795` and `crates/jet-net/src/lib.rs:23-30,621-650`. Hostile direct and BuildContext no-connect proofs are `tests/net_tls.rs:40-120` and `tests/build_entry.rs:2543-2700` (`build_context_fetch_rejects_private_networks_before_connecting`, `build_context_fetch_rejects_outside_files_before_reading`, `build_context_fetch_rejects_hardlinks_to_outside_inodes`). | 4 |
+| `cd005-comptime-fetch-local-disclosure` | Hermetic compile-time fetch can disclose arbitrary local text files | crates/jet-net/src/lib.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch.rs | already-fixed | `crates/jet-net/src/lib.rs:205-324,326-545` resolves containment, held-root descriptor access, no-follow checks, and hardlink identity before reading; `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:776-790` routes callers through it. Direct and BuildContext hostile outside-file/hardlink witnesses are `tests/net_tls.rs:98-120` and `tests/build_entry.rs:2631-2700` (`build_context_fetch_rejects_outside_files_before_reading`, `build_context_fetch_rejects_hardlinks_to_outside_inodes`). | 4 |
+| `provider-registry-private-network-ssrf` | Project provider policy can authorize private-network HTTPS fetches | crates/jetpack/src/Provider/fetch.rs<br>crates/jetpack/src/Provider/script_registry.rs | already-fixed | Provider fetch rechecks every redirect, resolves public addresses, pins curl, and disables redirects/proxies/configuration at `crates/jetpack/src/Provider/fetch.rs:137-217,221-258`; script-registry realization reaches `Authority::to_path` at `crates/jetpack/src/Provider/script_registry.rs:194-228,369-396`. Hostile policy/helper coverage is `crates/jetpack/src/Provider/fetch.rs:714-752`; executable fake-curl redirect and configured-credential source-to-sink witnesses are `crates/jetpack/src/Provider/fetch.rs:843-959` (`authority_to_path_rejects_redirect_before_second_curl_request`, `configured_provider_credentials_fail_before_curl_execution`). | 4 |
+| `jit-http-crlf-injection` | JIT generic HTTP request serialization permits CRLF request injection | crates/jet-jit/src/net_http_hosts.rs<br>crates/jet-pkg-model/src/Prelude/HTTP.rs | already-fixed | `crates/jet-pkg-model/src/Prelude/HTTP.rs:1578-1644,3064-3078` rejects control bytes in URL targets, methods, header names, and values and rejects caller framing headers before connect. `crates/jet-jit/src/net_http_hosts.rs:2206-2214` now returns the existing request header error before the native bridge, while resident-JIT send reaches it at `:4977-4984`; hostile exact AOT method/header/framing/url and cross-origin credential proofs are `tests/http_client_law.rs:97-225,2924-2987`, and resident-JIT plus forced-interpreter proofs are `tests/http_i9.rs:288-337`. | 4 |
+| `jit-websocket-handshake-crlf-injection` | WebSocket URL permits HTTP handshake CRLF injection | crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs | already-fixed | `crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:247-291,554-609` rejects control and whitespace bytes before connecting or interpolating URL parts into the handshake; AOT public no-connect proof is `tests/ws_law.rs:681-737` (`public_aot_ws_connect_rejects_url_controls_before_connecting`), and resident-JIT/forced-interpreter public-connect proof is `tests/http_i9.rs:288-337` (`hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers`). | 4 |
+| `git-dependency-transport-ssrf` | Git dependency fetch allows attacker-selected network destinations | Source/Fetch.rs | already-fixed | Validation runs before Git availability or either sink at `Source/Fetch.rs:842-858,2987-3061`; validated transports alone reach `ls-remote` and clone at `:2466-2471,2545-2555`, with HTTP(S) resolve pinning and SSH host pinning at `:2807-2908,2969-2984`. Source-to-sink package-resolution witnesses install a fake Git marker and assert exact E1203 policy rejection with no execution for private, reserved, link-local, outside-local, unscoped-local, and credential-bearing URLs in `tests/pkg.rs:4367-4488` (`git_dep_hostile_transports_reject_before_fake_git_execution`); existing transport-pin and SSH-option witnesses remain at `tests/pkg.rs:3905-4112,4490-4578`. | 4 |
+
+### Current-revision network-boundaries recitation (2026-09-01)
+
+This table supersedes only the source coordinates in the earlier network table.
+It does not change the six dispositions or their historical records.
+
+| Candidate ID | Disposition | Current root and hostile proof |
+|---|---|---|
+| `comptime-fetch-ssrf` | `already-fixed` | Roots: `crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs:763-771,2198-2200`, `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:759-827`, and `crates/jet-net/src/lib.rs:23-30,609-711`. Proof: `tests/net_tls.rs:40-121` and `tests/build_entry.rs:2583-2700`. |
+| `cd005-comptime-fetch-local-disclosure` | `already-fixed` | Root: `crates/jet-net/src/lib.rs:201-346,354-607`. Proof: `tests/net_tls.rs:40-121` and `tests/build_entry.rs:2583-2700`. |
+| `provider-registry-private-network-ssrf` | `already-fixed` | Roots: `crates/jetpack/src/Provider/fetch.rs:137-258,530-564` and `crates/jetpack/src/Provider/script_registry.rs:194-228,369-396`. Proof: `crates/jetpack/src/Provider/fetch.rs:714-752,843-967`. |
+| `jit-http-crlf-injection` | `already-fixed` | Roots: `crates/jet-pkg-model/src/Prelude/HTTP.rs:1628-1693,2440-2486,2495-2525,3164-3212` and `crates/jet-jit/src/net_http_hosts.rs:2246-2274`. Proof: `tests/http_client_law.rs:98-338,3153-3243` and `tests/http_i9.rs:354-539,924-970`. The shared validator rejects caller framing, hop-by-hop, connection-nominated, and proxy-authentication headers before any connection. |
+| `jit-websocket-handshake-crlf-injection` | `already-fixed` | Root: `crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:247-291,554-609`. Proof: `tests/ws_law.rs:681-737` and `tests/http_i9.rs:354-539,924-970`. |
+| `git-dependency-transport-ssrf` | `already-fixed` | Root: `Source/Fetch.rs:843-864,2480-2486,2610-2626,2894-2968,3032-3048,3050-3128`. Proof: `tests/pkg.rs:4074-4090,4095-4300,4557-4676,4680-4766`. Git transport validation calls the canonical `jet_net::is_public_ip` policy and contains no duplicate address table. |
 
 ## filesystem-containment
 
 ### Filesystem roots, symlinks, temporary files, and path containment
 
-22 candidates. Priority P1. Milestone `e12-security-data`.
+22 candidates. Priority P1. Milestone `e12-m05-network-filesystem-containment`.
 
 | Candidate ID | Discovery title | Primary locations | Source reports |
 |---|---|---|---:|
 | `package-store-install-symlink-escape` | Package-store installation follows dependency symlinks outside the source tree | Source/Fetch.rs<br>Source/Store.rs | 20 |
-| `canvas-create-package-symlink-write` | Canvas `create_package` writes outside the project through symlink ancestors | crates/jet-devserver/src/Canvas/schema_api.rs<br>crates/jet-devserver/src/Canvas/project_transactions.rs | 15 |
-| `dependency-name-path-traversal` | Unvalidated package identifiers escape store, project, and registry roots | crates/jet-pkg-model/src/PackageManifest/ParseBlocks.rs<br>crates/jet-pkg-model/src/PackageManifest/Convert.rs | 13 |
+| `canvas-create-package-symlink-write` | Canvas `create_package` writes outside the project through symlink ancestors | crates/jet-devserver/src/Canvas/schema_api.rs<br>crates/jet-devserver/src/Canvas/project_transactions.rs<br>crates/jet-devserver/src/Canvas/source_model.rs | 15 |
+| `dependency-name-path-traversal` | Unvalidated package identifiers escape store, project, and registry roots | crates/jet-pkg-model/src/Package/Blocks.rs<br>crates/jet-pkg-model/src/Package/Convert.rs | 13 |
 | `devserver-static-symlink-escape` | Devserver static reads follow symlinks outside the build directory | crates/jet-devserver/src/lib.rs<br>crates/jet-devserver/src/WebHost.rs | 7 |
 | `d0002-s2-sparse-copy-symlink` | Sparse remote fetch fallback follows dependency-controlled symlinks while copying | crates/jetpack/src/Provider/remote.rs<br>crates/jetpack/src/Provider/package.rs | 6 |
 | `s0-web-test-prefix-traversal` | Web-test file server uses prefix-only path containment | scripts/web-test/serve.mjs | 4 |
-| `vendor-symlink-escape` | Vendoring follows dependency symlinks outside the source tree | Source/Publish/Vendor.rs<br>Source/Fetch.rs | 4 |
+| `vendor-symlink-escape` | Vendoring follows dependency symlinks outside the source tree | Source/Publish/Vendor.rs | 4 |
 | `cd005-comptime-embed-file-symlink` | Compile-time embed_file follows project symlinks outside the source root | crates/jet-comptime/src/Comptime/Methods/dispatch.rs | 2 |
 | `cd005-comptime-embed-bytes-symlink` | Compile-time embed_bytes follows project symlinks outside the source root | crates/jet-comptime/src/Comptime/Methods/dispatch.rs | 2 |
-| `cd005-build-embed-symlink` | BuildContext embed follows project symlinks outside the source root | crates/jet-comptime/src/Comptime/Methods/dispatch.rs<br>crates/jet-comptime/src/Comptime/eval_method.rs | 2 |
-| `git-revision-cache-path-traversal` | Manifest Git revisions escape the cache root and shape recursive deletion | crates/jet-pkg-model/src/PackageManifest/ParseBlocks.rs<br>Source/Fetch.rs | 2 |
+| `cd005-build-embed-symlink` | BuildContext embed follows project symlinks outside the source root | crates/jet-comptime/src/Comptime/Methods/dispatch.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs | 2 |
+| `git-revision-cache-path-traversal` | Manifest Git revisions escape the cache root and shape recursive deletion | Source/Fetch.rs | 2 |
 | `jetpack-dotenv-symlink-read` | Project-relative dotenv validation follows symlinks outside the project | crates/jetpack/src/CLI/trust_env_build.rs<br>crates/jet-env-model/src/ModuleEval/Environment.rs | 2 |
 | `jetpack-image-files-read-traversal` | Image files entries can read arbitrary host paths outside the project | crates/jetpack/src/CLI/add_remove_push_image.rs<br>crates/jetpack/src/Image.rs | 2 |
 | `jetpack-image-layer-path-traversal` | OCI tar builder emits unvalidated and silently truncated attacker-controlled paths | crates/jetpack/src/Image.rs<br>crates/jet-env-model/src/ModuleEval/System.rs | 2 |
 | `canvas-action-temp-symlink-overwrite` | Predictable Canvas check file follows workspace symlinks | crates/jet-devserver/src/Canvas/edit_actions.rs | 2 |
 | `jetpack-overlay-patch-path-traversal` | A malicious overlay patch can overwrite files outside the source root | crates/jetpack/src/Overlay.rs | 2 |
 | `trust-prefix-sibling-overmatch` | Trust path prefix matching authorizes sibling project names | crates/jetpack/src/Trust.rs | 1 |
-| `devserver-build-symlink-overwrite` | Project-controlled build symlink redirects finalized web outputs to host paths | Source/CmdCompile.rs<br>crates/jet-codegen/src/Prelude/DevServer.rs | 1 |
+| `devserver-build-symlink-overwrite` | Project-controlled build symlink redirects finalized web outputs to host paths | Source/CmdCompile.rs<br>crates/jet-devserver/src/WebHost.rs | 1 |
 | `lsp-predictable-log-symlink-write` | LSP panic logging follows a predictable shared temporary symlink | Source/LSP/Server.rs | 1 |
-| `canvas-source-symlink-read` | Canvas projected-source scan follows directory symlinks and can disclose an external Jet file | crates/jet-devserver/src/Canvas/project_scan.rs<br>crates/jet-devserver/src/Canvas/schema_api.rs | 1 |
-| `jetpack-remote-symlink-fingerprint-escape` | Remote package fingerprint traversal follows symlinks outside the checkout | crates/jetpack/src/Provider/remote.rs<br>crates/jetpack/src/Provider.rs | 1 |
-| `repl-run-temp-symlink-overwrite` | REPL :run writes predictable files in the shared temporary directory |  | 1 |
+| `canvas-source-symlink-read` | Canvas projected-source scan follows directory symlinks and can disclose an external Jet file | crates/jet-devserver/src/Canvas/project_scan.rs<br>crates/jet-devserver/src/Canvas/schema_api.rs<br>crates/jet-devserver/src/Canvas/source_model.rs | 1 |
+| `jetpack-remote-symlink-fingerprint-escape` | Remote package fingerprint traversal follows symlinks outside the checkout | crates/jetpack/src/Provider/remote.rs | 1 |
+| `repl-run-temp-symlink-overwrite` | REPL :run writes predictable files in the shared temporary directory | crates/jet-repl/src/lib.rs | 1 |
 
 ### Current dispositions
 
@@ -395,40 +449,40 @@ These dispositions are source-backed traces against the current tree. `confirmed
 The similarly named `security-deep-scan-2026-08-03-full.md` in this checkout is
 the memory/ABI report for #1378, not the filesystem-containment source artifact
 for #1382. The rows below are the complete current-tree traces for all 22
-owned candidates. This lane ran no build or test commands under the card's
-explicit rule; the cited hostile tests remain source evidence until the epoch
-verification pass.
+owned candidates. Focused hostile-path proofs now cover the listed package,
+Canvas, devserver, image, comptime, dotenv, Jetpack, REPL, and LSP paths;
+integrated milestone verification remains with Main.
 
 | Candidate ID | Disposition | Current source evidence |
 |---|---|---|
-| `package-store-install-symlink-escape` | already-fixed | `Source/Fetch.rs:723-822` snapshots path dependencies before reading their manifest, hash, or transitive sources; `Source/Store.rs:65-150,206-390,492-587,640-771` validates real roots, rejects symlinks/special files during recursive copy or link, and checks store containment; `tests/pkg.rs:2887-2916` is the hostile source/destination regression. |
-| `canvas-create-package-symlink-write` | already-fixed | `crates/jet-devserver/src/Canvas/project_transactions.rs:530-630,1117-1188,1397-1453` validates package paths against lexical and real project roots and revalidates every guarded source write; `crates/jet-devserver/src/Canvas/source_model.rs:34-62,167-465` performs no-symlink compare-and-publish with exclusive temporary creation; `tests/canvas.rs:5046-5081` covers package-path symlink rejection. |
-| `dependency-name-path-traversal` | already-fixed | `crates/jet-pkg-model/src/Package/Blocks.rs:361-428` validates dependency names as one safe component before retaining them; `crates/jet-pkg-model/src/Package/Convert.rs:19-28` repeats the boundary at conversion; `tests/pkg.rs:1857-1862` rejects traversal names. |
-| `devserver-static-symlink-escape` | already-fixed | `crates/jet-devserver/src/lib.rs:237-274,469-475,569-685,768-1090` performs lexical selection, then opens the root, ancestors, and final regular file through held platform no-follow authority with identity and relocation checks; `crates/jet-devserver/src/WebHost.rs:2399-2406` serves only that opened result. Hostile symlink, hardlink, special-file, relocation, and oversize sources are covered at `crates/jet-devserver/src/lib.rs:1240-1353`; the public static route proof is `tests/web_dev.rs:600-657,2618-2755,2830-3018`. |
-| `d0002-s2-sparse-copy-symlink` | already-fixed | The sparse fallback publishes only after the shared `crates/jetpack/src/Provider/remote.rs:285-307` gate validates the complete checkout and cache parent before rename; its recursive `copy_tree` sink at `:857-974` rejects symlink or non-file source entries and destination escapes; `crates/jetpack/src/Provider/remote.rs:667-719,762-785` is the hostile source/destination and fast-rename regression. |
-| `s0-web-test-prefix-traversal` | already-fixed | `scripts/web-test/serve.mjs:17-95` resolves the real root, uses component-boundary `relative` checks, walks real ancestors, and rejects outside or final symlinks before `createReadStream`; `tests/web_dev.rs:600-657` covers the hostile server path. |
-| `vendor-symlink-escape` | already-fixed | `Source/Publish/Vendor.rs:39-100,148-179,181-239` validates source roots, rejects source/destination symlinks and non-regular entries, and refuses symlink replacement; `tests/pkg.rs:5792-5833` covers source symlink and traversal-name inputs. |
-| `cd005-comptime-embed-file-symlink` | already-fixed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:400-452,560-570` routes `embed_file` through a canonical real-root check before `read`; `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1673-1711` rejects the hostile link. |
-| `cd005-comptime-embed-bytes-symlink` | already-fixed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:400-452,560-570` is the shared checked path for text and bytes embeds; `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:1673-1711` exercises the symlink escape. |
-| `cd005-build-embed-symlink` | already-fixed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:496-554,560-570` routes `b.embed` through the same canonical real-root check; `crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs:2207-2208` reaches that evaluator and `dispatch.rs:1673-1711` rejects the hostile link. |
-| `git-revision-cache-path-traversal` | already-fixed | `Source/Fetch.rs:2436-2455,2502-2607,2678-2771` requires one safe revision component and validates every existing cache ancestor before creation, clone, rename, or cleanup; `tests/pkg.rs:4333-4363` rejects traversal-shaped revisions before filesystem access. |
-| `jetpack-dotenv-symlink-read` | already-fixed | `crates/jet-env-model/src/ModuleEval/Environment.rs:2470-2495` accepts only normal relative paths and canonicalizes them below a real project root; `crates/jetpack/src/CLI/trust_env_build.rs:831-860` reads only that checked path; `Environment.rs:3661-3687` covers a symlink escape. |
-| `jetpack-image-files-read-traversal` | already-fixed | `crates/jetpack/src/CLI/add_remove_push_image.rs:1121-1210` rejects unsafe components, symlink targets, and multiple-link files, canonicalizes the source, checks root containment, and applies the bounded read; `tests/image.rs:929-961,963-1044` covers traversal, symlink, and hardlink file inputs. |
-| `jetpack-image-layer-path-traversal` | already-fixed | `crates/jetpack/src/Image.rs:364-377,1362-1400` checks every layer path for absolute, parent, prefix, control-byte, length, duplicate, and collision violations before tar emission; `tests/image.rs:929-961` covers a hostile project escape. |
-| `canvas-action-temp-symlink-overwrite` | already-fixed | `crates/jet-devserver/src/Canvas/edit_actions.rs:1260-1326` checks the candidate through Driver's in-memory overlay bound to the canonical source before projection, so no attacker-controlled temporary pathname is created, reopened, or cleaned up; `edit_actions.rs:4233-4288` covers final and ancestor swaps at the legacy temp location without altering or removing outside files. |
-| `jetpack-overlay-patch-path-traversal` | already-fixed | `crates/jetpack/src/Overlay.rs:21-44,67-124,268-309,340-378` rejects unsafe/symlink components, requires canonical containment, and commits staged bytes atomically; `Overlay.rs:858-875` proves a traversal patch leaves the source unchanged. |
-| `trust-prefix-sibling-overmatch` | already-fixed | `crates/jetpack/src/Trust.rs:616-676` requires an exact match or a `/`/`\` component boundary for raw and canonical subjects; `Trust.rs:1428-1435` covers sibling-name regression. |
-| `devserver-build-symlink-overwrite` | already-fixed | `Source/CmdCompile.rs:6252-6471` preflights the real output root and every output path before reads/writes; `Source/CmdCompile.rs:7310-7313,8376-8448` rejects a symlinked build root and prepositioned output symlink or hardlink before any artifact write. `crates/jet-devserver/src/WebHost.rs:1083-1155,1158-1307` validates staging/final members and journals publication; `crates/jet-codegen/src/Prelude/DevServer.rs:242-378,415-778,1040-1055` uses held descriptor-relative output authority. Hostile publication and parent-swap coverage is `WebHost.rs:2857-2881` and `tests/web_dev.rs:2618-3018,3058-3151`. |
-| `lsp-predictable-log-symlink-write` | already-fixed | `Source/LSP/Server.rs:291-323` rejects a symlink and opens the fixed log with Unix `O_NOFOLLOW` or the Windows reparse-point flag; `Source/LSP/Server.rs:4018-4035` covers the prepositioned link. |
-| `canvas-source-symlink-read` | already-fixed | `crates/jet-devserver/src/Canvas/source_model.rs:34-62,167-465` opens ancestors and final entries componentwise with no-follow authority and performs writes/removes relative to held parents; `source_model.rs:723-886` proves final and ancestor swaps stay inside the pinned object/tree. `project_scan.rs:29-83,387-529`, `schema_api.rs:157-191,444-452,501-572`, and `crates/jet-pkg-model/src/Authority.rs:548-590,776-800,1008-1067` keep selection and discovery on checked files; `tests/canvas.rs:5563-5594` rejects a symlink source alias. |
-| `jetpack-remote-symlink-fingerprint-escape` | already-fixed | Both sparse and normal remote checkout publication call the shared `crates/jetpack/src/Provider/remote.rs:285-307,502-585` gate, which fingerprints the complete checkout before rename and falls back only to the checked copy; `remote.rs:793-974` requires a real root, canonical containment, regular files, and no symlink entries. Hostile publication proof is `remote.rs:762-785`. |
-| `repl-run-temp-symlink-overwrite` | already-fixed | `crates/jet-repl/src/lib.rs:1232-1264` creates a process/counter-unique temporary source exclusively with no-follow flags and removes only a file it created; `lib.rs:4025-4045` covers the symlink collision. |
+| `package-store-install-symlink-escape` | already-fixed | `Source/Fetch.rs:737-757,789-815` rejects lexical/canonical transitive escapes and freezes each path source before manifest, dependency, hash, and store reads; `Source/Store.rs:502-551,871-1057,1113-1158,1210-1295` uses descriptor-relative no-follow opens, identity checks, snapshot copies, and safe publication; `Source/Store.rs:1812-1897` proves a held authority retains the verified root across an active ancestor swap; `tests/pkg.rs:2889-2916,2926-2974,3287-3369` covers source/destination symlinks, multiply-linked source entry points, and transitive symlink escapes. |
+| `canvas-create-package-symlink-write` | already-fixed | `crates/jet-devserver/src/Canvas/schema_api.rs:157-191` and `project_transactions.rs:378-410,1397-1454` enforce project-root containment; `source_model.rs:34-63,181-235` reads and publishes through no-follow authorities; `tests/canvas.rs:5046-5081` rejects a package-path symlink. |
+| `dependency-name-path-traversal` | already-fixed | `crates/jet-pkg-model/src/Package/Blocks.rs:407-474` validates manifest keys as one safe component before resolver use and `Package/Convert.rs:19-28` repeats the conversion boundary; `tests/pkg.rs:1857-1862` rejects traversal names. |
+| `devserver-static-symlink-escape` | already-fixed | `crates/jet-devserver/src/lib.rs:238-265,474-735` performs normalized component checks, held-directory no-follow opens, identity checks, and bounded reads; `WebHost.rs:3383-3442` serves only the opened result; hostile symlink, hardlink, relocation, and size tests are `lib.rs:1275-1382`, with public race coverage at `tests/web_dev.rs:2926-3063`. |
+| `d0002-s2-sparse-copy-symlink` | already-fixed | `crates/jetpack/src/Provider/remote.rs:160-334` validates the held checkout before fast rename and falls back only to checked copy; `remote.rs:1735-1852` rejects symlink, special, and multiply-linked entries during fingerprint/copy; `remote.rs:719-826,849-868` covers hostile source, destination, and hardlink cases. |
+| `s0-web-test-prefix-traversal` | already-fixed | `scripts/web-test/serve.mjs:18-107,122-236,238-275` resolves component-boundary containment, pins the root, rejects symlinked ancestors/final entries, and streams only the held regular file; `tests/web_dev.rs:665-758` covers symlink escape and sibling-prefix traversal. |
+| `vendor-symlink-escape` | already-fixed | `Source/Publish/Vendor.rs:20-47,86-153,206-228` opens each dependency source, hashes it with hardlink rejection, stages and publishes only checked copies, and validates safe names; that source walk calls `Store::hash_directory_authority` at `Vendor.rs:46-47`, which reaches `Store.rs:947-1003` and `871-944`; `tests/pkg.rs:2926-2974,6204-6246` covers multiply-linked and symlinked sources plus traversal names. |
+| `cd005-comptime-embed-file-symlink` | already-fixed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:403-456,574-585` routes `embed_file` through checked no-follow-root reads and records only accepted bytes; `dispatch.rs:1685-1764` rejects final and ancestor symlink escapes without recording outside input. |
+| `cd005-comptime-embed-bytes-symlink` | already-fixed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:403-456,422-445` shares the checked `embed_file`/`embed_bytes` path; `dispatch.rs:1685-1764` rejects symlink escapes and `dispatch.rs:1768-1803` rejects hardlinked inputs before hashing. |
+| `cd005-build-embed-symlink` | already-fixed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:514-568` checks `b.embed` paths and uses bounded no-follow reads; `Comptime/Methods/dispatch/eval_method.rs:2198-2204` reaches that evaluator; `dispatch.rs:1685-1764` covers the hostile link. |
+| `git-revision-cache-path-traversal` | already-fixed | `Source/Fetch.rs:1450-1478,2451-2469,2516-2674,2771-2787` validates one safe revision component, holds cache parents, and snapshots/ publishes only through descriptor-relative authorities; `tests/pkg.rs:4702-4731` rejects traversal-shaped revisions before cache creation. |
+| `jetpack-dotenv-symlink-read` | already-fixed | `crates/jet-env-model/src/ModuleEval/Environment.rs:2438-2501` validates normal relative declarations, reads through a pinned authority, rejects hardlinks, and revalidates identity; `crates/jetpack/src/CLI/trust_env_build.rs:1118-1132` consumes those bytes; `Environment.rs:3687-3809` covers final/ancestor symlink swaps and hardlinks. |
+| `jetpack-image-files-read-traversal` | already-fixed | `crates/jetpack/src/CLI/add_remove_push_image.rs:1121-1184` normalizes safe project-relative names and calls the bounded no-follow root reader; `tests/image.rs:929-1085` covers project traversal, final/ancestor symlinks, and hardlinks without reading outside bytes. |
+| `jetpack-image-layer-path-traversal` | already-fixed | `crates/jetpack/src/Image.rs:362-376,1362-1400` validates OCI path components, size, duplicate, and file/directory collision constraints before tar emission; `crates/jet-env-model/src/ModuleEval/System.rs:435-464` supplies sorted declarations; `tests/image.rs:929-961` rejects a hostile layer path. |
+| `canvas-action-temp-symlink-overwrite` | already-fixed | `crates/jet-devserver/src/Canvas/edit_actions.rs:1260-1326` checks staged source through Driver's in-memory overlay instead of reopening a predictable scratch pathname; `edit_actions.rs:4233-4288` covers final and ancestor swaps at the legacy temp name. |
+| `jetpack-overlay-patch-path-traversal` | already-fixed | `crates/jetpack/src/Overlay.rs:403-418,494-590,617-735` rejects unsafe patch components, validates the current target through held parents, and stages/replaces bytes with exclusive no-follow files; `Overlay.rs:1258-1274,1418-1449` covers traversal and final-target symlink replacement. |
+| `trust-prefix-sibling-overmatch` | already-fixed | `crates/jetpack/src/Trust.rs:616-676` matches exact subjects or component boundaries for raw and canonical paths; `Trust.rs:1428-1435` proves a sibling name is not authorized by a project prefix. |
+| `devserver-build-symlink-overwrite` | already-fixed | `Source/CmdCompile.rs:6479-6499,7625-7631` opens staging/build roots through `WebOutputAuthority` before artifact writes and publication; `crates/jet-devserver/src/WebHost.rs:1083-1160,1300-1623,2038-2170` validates held output members and journals swaps; `WebHost.rs:3818-3926` covers symlinked roots, staging ancestors, destinations, and hardlinks. |
+| `lsp-predictable-log-symlink-write` | already-fixed | `Source/LSP/Server.rs:366-584` selects Linux/Android or macOS/iOS descriptor-relative no-follow flags, opens each parent component and the final file with no-follow semantics, validates held metadata, and returns `Unsupported` on Windows or other Unix targets without equivalent support; `Server.rs:4383-4411` deterministically rejects an ancestor swap before open, `4457-4466` proves unsupported platforms fail closed, and `4469-4491` proves the opened handle remains safe after a later path swap. |
+| `canvas-source-symlink-read` | already-fixed | `crates/jet-devserver/src/Canvas/source_model.rs:34-63,181-235` opens Canvas sources componentwise without following links; `project_scan.rs:29-83,387-529` and `schema_api.rs:157-191,444-452` keep discovery and reads on checked paths; `tests/canvas.rs:5563-5594` rejects a symlink source alias. |
+| `jetpack-remote-symlink-fingerprint-escape` | already-fixed | `crates/jetpack/src/Provider/remote.rs:316-334,1735-1852` fingerprints complete held trees and permits publication only through checked rename/copy paths, rejecting symlink and special entries; `remote.rs:802-825,849-868` covers hostile publication and multiply-linked source files. |
+| `repl-run-temp-symlink-overwrite` | already-fixed | Native `:run` no longer creates or reopens a temporary pathname: `crates/jet-repl/src/lib.rs:1290-1313` sends the materialized source to the private `__jet_repl_run_stdin` child over a pipe, and `lib.rs:1362-1366` runs that exact stdin snapshot; `tests/repl.rs:1102-1140` plants a replaced predictable temp path and proves that the authoritative stdin snapshot runs instead. |
 
 ## devtools-control-plane
 
-### Devserver, Canvas, Studio, and notebook control planes
+### Devserver, Canvas, and Studio control planes
 
-10 candidates. Priority P0. Milestone `e12-security-boundaries`.
+10 candidates. Priority P0. Milestone `e12-m01-control-planes`.
 
 | Candidate ID | Discovery title | Primary locations | Source reports |
 |---|---|---|---:|
@@ -464,7 +518,7 @@ These dispositions trace all 10 candidates through the current source. Each row 
 
 ### Command, shell, editor, and generated-code injection
 
-20 candidates. Priority P1. Milestone `e12-security-runtime`.
+20 candidates. Priority P1. Milestone `e12-m06-command-supply-chain`.
 
 | Candidate ID | Discovery title | Primary locations | Source reports |
 |---|---|---|---:|
@@ -495,32 +549,32 @@ These dispositions trace all 20 candidates through the current source. `confirme
 
 | Candidate ID | Disposition | File:line evidence |
 |---|---|---|
-| `git-ls-remote-option-injection` | `already-fixed` | `crates/jet-pkg-model/src/Package/Blocks.rs:497-531` carries the URL and selector as data; `Source/Fetch.rs:2458-2471,2671-2675,2987-3015` validates the revision/transport and places `--` before Git operands. Hostile option rejection is covered by `Source/Fetch.rs:3400-3404` and `tests/pkg.rs:4318-4351`. |
-| `git-clone-option-injection` | `already-fixed` | `Source/Fetch.rs:2502-2557,2572-2579,2671-2693,2987-3015` rejects unsafe URL/revision values and invokes `git clone` with `--` before the URL; checkout receives only the validated revision. Hostile option rejection is covered by `Source/Fetch.rs:3400-3404` and `tests/pkg.rs:4318-4351`. |
+| `git-ls-remote-option-injection` | `already-fixed` | `crates/jet-pkg-model/src/Package/Blocks.rs:558-594` parses the manifest URL and selector as data; `Source/Fetch.rs:842-846,1449-1450,2458-2471,2987-2993` validates a manifest URL before resolving a selector and places `--` before `ls-remote` operands. Hostile leading-option URL rejection through the real fetch boundary is covered by `tests/pkg.rs:4580-4654` (`git_dep_rejects_option_url_before_ls_remote_execution`). |
+| `git-clone-option-injection` | `already-fixed` | `Source/Fetch.rs:842-846,2502-2556,2572-2579,2987-2993` validates a manifest URL before cloning, places `--` before the clone URL, and checks out only the validated revision. Hostile leading-option URL rejection through the real fetch boundary is covered by `tests/pkg.rs:4580-4645,4656-4663` (`git_dep_rejects_option_url_before_clone_execution`). |
 | `s0-bash-prompt-label-injection` | `already-fixed` | `crates/jetpack/src/Shell.rs:802-805,997-1003` keeps the label in `JETPACK_PROMPT_LABEL` and renders it through quoted `printf`; `crates/jetpack/src/Shell.rs:1426-1495` proves hostile Bash labels do not execute. |
 | `s0-zsh-prompt-label-injection` | `already-fixed` | `crates/jetpack/src/Shell.rs:802-805,1038-1043` keeps the label in the environment and renders it through `print -r --`; `crates/jetpack/src/Shell.rs:1460-1526` proves hostile Zsh labels do not execute. |
 | `s0-fish-prompt-label-injection` | `already-fixed` | `crates/jetpack/src/Shell.rs:802-805,1073-1077` keeps the label in the environment and renders it as a quoted `printf` argument; `crates/jetpack/src/Shell.rs:1528-1554` proves hostile Fish labels do not execute. |
 | `package-git-fetch-option-injection` | `already-fixed` | `crates/jetpack/src/Provider/remote.rs:160-217,461-489` routes sparse fetch through the shared Git policy and rejects control characters or leading `-` in the revision; hostile parser/allowlist coverage is `crates/jetpack/src/Provider/remote.rs:624-632`. |
 | `package-git-checkout-option-injection` | `already-fixed` | `crates/jetpack/src/Provider/remote.rs:491-565` validates the parsed revision and rechecks it immediately before the `git checkout` argument; hostile parser/allowlist coverage is `crates/jetpack/src/Provider/remote.rs:624-632`. |
 | `lldb-breakpoint-command-injection` | `already-fixed` | `crates/jet-debug/src/Inferior.rs:523-533,1214-1225` quotes breakpoint paths and rejects controls; `crates/jet-debug/src/Inferior.rs:1871-1876` proves the hostile path case. |
-| `web-codegen-template-injection` | `already-fixed` | `crates/jet-codegen/src/Codegen/Web.rs:2939-2957` escapes backslashes, backticks, `${`, controls, and line separators; `crates/jet-codegen/src/Codegen/Web.rs:11190-11229` applies it to literal template parts, with hostile coverage at `12668-12680` and `tests/web_build.rs:1013-1032`. |
-| `rustc-build-profile-env-injection` | `already-fixed` | `crates/jet-pkg-model/src/Package/Blocks.rs:841-847` rejects retired profile `env`; `Source/main.rs:430-487` derives only typed profile flags, and `Source/CmdCompile.rs:7463-7489,7575-7589` builds rustc flags with an empty profile environment. Hostile profile rejection is `crates/jet-pkg-model/src/Package/Blocks.rs:2404-2413`. |
+| `web-codegen-template-injection` | `already-fixed` | `crates/jet-codegen/src/Codegen/Web.rs:2945-2965` escapes backslashes, backticks, `${`, controls, and line separators; `crates/jet-codegen/src/Codegen/Web.rs:11190-11229` applies it to literal template parts, with hostile coverage at `12668-12680` and `tests/web_build.rs:1013-1032`. |
+| `rustc-build-profile-env-injection` | `already-fixed` | `crates/jet-pkg-model/src/Package/Blocks.rs:904-910` rejects retired profile `env`; `Source/main.rs:430-487` derives only typed profile flags, while `Source/CmdCompile.rs:7504-7514,7604-7618` passes those flags to `rustc` with no profile environment. Hostile profile rejection is `crates/jet-pkg-model/src/Package/Blocks.rs:2469-2477`. |
 | `jetpack-self-authorized-build-script` | `already-fixed` | `crates/jetpack/src/CLI/realize.rs:597-619` gates Core Cargo before Store realization; `crates/jetpack/src/Trust.rs:927-960` requires an exact build identity grant or explicit approval; `crates/jetpack/src/Provider.rs:511-518` dispatches to `Provider::approval_facts`, and `crates/jetpack/src/Provider/core.rs:376-443` derives the identity from the resolved upstream, validated source tree, source digest, Cargo recipe, platform, and exec capability. Hostile identity-mismatch proof is `tests/jetpack_trust_root.rs:445-472`. |
 | `package-git-kind-probe-option-injection` | `already-fixed` | `crates/jetpack/src/Provider.rs:2189-2243` rejects an unsafe probe revision and routes every probe command through the hardened Git policy; `crates/jetpack/src/Provider/remote.rs:406-489` validates the parsed remote first, with hostile parser/allowlist coverage at `crates/jetpack/src/Provider/remote.rs:624-632`. |
-| `jetos-storage-disk-command-injection` | `already-fixed` | `crates/jetpack/src/JetOS/module_storage_workload.rs:48-127` quotes the generated default and emits the apply script; `129-142` allowlists disk-size/filesystem tokens, with hostile coverage at `151-188`; `tests/jetpack_jetos.rs:1439-1450` proves a hostile disk cannot create a marker. |
+| `jetos-storage-disk-command-injection` | `already-fixed` | `crates/jetpack/src/JetOS/module_storage_workload.rs:48-127` emits the storage plan/apply script and quotes the disk value; `129-142` allowlist storage sizes and filesystem tokens. Hostile disk execution is rejected with no marker by `tests/jetpack_jetos.rs:1429-1440`; generator coverage is `crates/jetpack/src/JetOS/module_storage_workload.rs:150-188`. |
 | `jetos-storage-esp-command-injection` | `already-fixed` | `crates/jetpack/src/JetOS/module_storage_workload.rs:61-63,114-119` accepts only allowlisted storage sizes before script interpolation; `129-137,151-157` enforce and test the boundary. |
 | `envhook-profile-var-name-shell-injection` | `already-fixed` | `crates/jet-env-model/src/ModuleEval/Environment.rs:1614-1618,2497-2501,2673-2681` validates environment names; `crates/jetpack/src/EnvHook.rs:470-477,579-587` validates again before rendering; hostile variable-name proof is `tests/env_hook.rs:186-222`. |
 | `envhook-unset-name-shell-injection` | `already-fixed` | `crates/jet-env-model/src/ModuleEval/Environment.rs:2309-2325,2653-2663` validates lifecycle unset names; `crates/jetpack/src/EnvHook.rs:569-587` enforces the render boundary; hostile unset-name proof is `tests/env_hook.rs:186-222`. |
-| `claude-hook-relative-path-rce` | `already-fixed` | `.claude/settings.json:30-34,45` requires a non-empty `CLAUDE_PROJECT_DIR` and constructs each hook path from that absolute project root before invoking `bash`; no cwd-relative fallback remains. |
-| `vscode-workspace-lsp-rce` | `already-fixed` | `editors/vscode/extension.js:25-52,115-159,206-211` limits workspace/server selection and debugger use to trusted workspaces; `editors/vscode/package.json:21-25` disables the extension in untrusted workspaces before activation. |
-| `zed-worktree-lsp-rce` | `already-fixed` | `editors/zed/wasm-src/src/lib.rs:12-24` returns only the literal approved `jet self lsp` command; rebuilt tracked artifact `editors/zed/extension.wasm` contains neither `worktree.which` nor `/target/debug/jet` (`grep -a -o -c -F`: 0 and 0); permanent byte-level regression is `tests/zed_extension_security.rs:44-51`. Zed's process capability and Worktree Trust controls are recorded at `editors/zed/extension.toml.in:15-18` and `editors/zed/README.md:62-67`. |
-| `perl-bind-compile-exec` | `already-fixed` | `Source/CmdDevTools.rs:4073-4140` invokes `PerlBind::bind`; `crates/jet-pkg-model/src/PerlBind.rs:57-68,131-194` parses source without `perl -c`, with hostile `BEGIN`/`use` coverage at `tests/cli_parts/bindings.rs:1317-1343`. |
+| `claude-hook-relative-path-rce` | `already-fixed` | `.claude/settings.json:30-34,45` anchors each hook at the absolute `CLAUDE_PROJECT_DIR` and passes the resulting script path as a quoted argument to `bash`/`exec bash`, without treating the path as shell source. The hostile project/cwd witness is `tests/event_hooks.rs:220-291`, which confirms project scripts run and the injected marker stays absent; no `shell:false` claim is made. |
+| `vscode-workspace-lsp-rce` | `already-fixed` | `editors/vscode/extension.js:25-59` refuses all server discovery in untrusted workspaces; `98-109` refuses manual terminal launches; `147-179,209-217` create and start the LSP only when a server path exists; `editors/vscode/package.json:21-25` disables activation in untrusted workspaces. The hostile PATH/marker and zero-launch LSP, terminal, and debug witness is `tests/zed_extension_security.rs:68-331`, with debug registration/descriptor records at `165-193` and assertions at `242-284`. |
+| `zed-worktree-lsp-rce` | `already-fixed` | `editors/zed/wasm-src/src/lib.rs:12-24` returns only the literal approved `jet self lsp` command; source/manifest checks are `tests/zed_extension_security.rs:39-50`, and the tracked `editors/zed/extension.wasm` is checked for neither `worktree.which` nor `/target/debug/jet` at `tests/zed_extension_security.rs:51-58`. Zed's process capability and Worktree Trust controls are recorded at `editors/zed/extension.toml.in:15-18` and `editors/zed/README.md:62-67`. |
+| `perl-bind-compile-exec` | `already-fixed` | `Source/CmdDevTools.rs:4091-4106` reads the script and invokes `PerlBind::bind`; `crates/jet-pkg-model/src/PerlBind.rs:57-68,131-194` parses source without `perl -c`, with hostile `BEGIN` and `use` import coverage at `tests/cli_parts/bindings.rs:1317-1389` (`perl_bind_does_not_execute_compile_time_code`, `perl_bind_does_not_execute_use_imports`). |
 
 ## package-supply-chain
 
 ### Package, Git, provider, store, and dependency integrity
 
-7 candidates. Priority P1. Milestone `e12-security-data`.
+7 candidates. Priority P1. Milestone `e12-m06-command-supply-chain`.
 
 | Candidate ID | Discovery title | Primary locations | Source reports |
 |---|---|---|---:|
@@ -538,9 +592,9 @@ These dispositions trace the seven owned candidates against the current source. 
 
 | Candidate ID | Disposition | Current source evidence |
 |---|---|---|
-| `locked-dependency-integrity-bypass` | `already-fixed` | Locked compiler entry points call `crates/jet-driver/src/Loader.rs:2060-2097` before loading; `:2111-2212` compares exact manifest/lock path and Git identities, rejects a dependency name resolving to multiple source identities, `:2222-2344` verifies the selected immutable source tree against its recorded hash, and `:2347-2371` derives the store path only from validated lock identity. The compiler calls this gate at `crates/jet-driver/src/Driver/mod.rs:2749-2751,3467-3469,5425-5427`; E1204 remains the refusal path. |
+| `locked-dependency-integrity-bypass` | `already-fixed` | Locked compiler entry points call `crates/jet-driver/src/Loader.rs:2060-2097` before loading; `:2111-2212` compares exact manifest/lock path and Git identities, with the Git branch at `:2151-2187` checking the URL, selector kind/value, and explicit revision as exact canonical lock identities rather than normalized values; `:2440-2455` rejects a dependency name resolving to multiple source identities; `:2222-2344` verifies the selected immutable source tree against its recorded hash, and `:2347-2371` derives the store path only from validated lock identity. The compiler calls this gate at `crates/jet-driver/src/Driver/mod.rs:2760-2762,3482-3484,5438-5440`; E1204 remains the refusal path. Hostile URL, selector-kind/value, and explicit-revision lock mutations are covered by `tests/pkg.rs:8729-8918` (`locked_build_rejects_manifest_lock_git_identity_mismatches`). |
 | `package-store-incomplete-content-hash` | `already-fixed` | `Source/Store.rs:62-80,100-139,393-431,492-551` hashes the copied store tree, while `crates/jet-foundation/src/SHA256.rs:336-440` includes every regular non-hidden file, not only `.jet`; `tests/pkg.rs:3041-3070` proves tampering `runtime.data` returns E1204. |
-| `git-revision-utf8-slice-panic` | `already-fixed` | `crates/jet-pkg-model/src/Package/Blocks.rs:82-88,495-531` keeps revision text intact, and `Source/Fetch.rs:2436-2455` builds the cache prefix with `char_indices`, not a byte-invalid slice; `tests/pkg.rs:3799-3835` proves the multibyte revision returns an error without panic. This was a crash/DoS path, not code execution. |
+| `git-revision-utf8-slice-panic` | `already-fixed` | `crates/jet-pkg-model/src/Package/Blocks.rs:82-88,558-595` strips only surrounding quotes and parses exactly one Git URL selector (tag, branch, or revision), retaining the resulting identity as exact lock text; `Source/Fetch.rs:2436-2455` builds the cache prefix with `char_indices`, not a byte-invalid slice; `tests/pkg.rs:3799-3835` proves the multibyte revision returns an error without panic. This was a crash/DoS path, not code execution. |
 | `jetpack-typed-environment-trust-bypass` | `already-fixed` | `crates/jetpack/src/Trust.rs:849-925,1012-1069` classifies typed facts independently of package/secret presence and requires an external exact grant; `crates/jetpack/src/CLI/run_enter_dev.rs:95-104,201-210,323-332,1718-1727,2293-2303,2381-2392,3393-3425,3679-3688` routes selected and ordinary `jet run`, project jobs, `env`, `env test`, `env sync`, `env export`, and `dev` through that gate; `tests/jetpack_engine.rs:4146-4261` proves a service-only environment gets E1255 on `env`, ordinary `run`, and selected-workspace `run`, without running its command. |
 | `buildrecipe-exec-unsandboxed` | `already-fixed` | `crates/jetpack/src/Recipe.rs:971-995,1127-1133,2520-2635` sends ordinary recipe execution through the native child sandbox and maps unavailable enforcement to E1275; `crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:239-357` has no unsandboxed fallback; hostile coverage is `tests/build_sandbox.rs:249-305,852-897`. |
 | `buildrecipe-logged-unsandboxed` | `already-fixed` | `crates/jetpack/src/Provider/adapter.rs:57-72` reaches `Recipe::run_logged`; `crates/jetpack/src/Recipe.rs:1039-1110,2542-2635` sends logged execution through the same native sandbox; `tests/build_sandbox.rs:307-363` attacks the logged path and checks host non-write. |
@@ -550,7 +604,7 @@ These dispositions trace the seven owned candidates against the current source. 
 
 ### Trust policy, sandbox claims, concurrency, and remaining integrity gaps
 
-2 candidates. Priority P1. Milestone `e12-security-validation`.
+2 candidates. Priority P1. Milestone `e12-m06-command-supply-chain`.
 
 | Candidate ID | Discovery title | Primary locations | Source reports |
 |---|---|---|---:|
@@ -596,6 +650,6 @@ pass runs them.
 | `DEVTOOLS-CONTROL-PLANE` | card | #1383 |
 | `COMMAND-CODE-INJECTION` | card | #1384 |
 | `PACKAGE-SUPPLY-CHAIN` | card | #1385 |
-| `POLICY-INTEGRITY` | card | #1386 |
+| `POLICY-INTEGRITY` | card | #1385 (absorbed #1386) |
 | `SECURITY-GATE` | card | #1387 |
 <!-- /audit-dispositions -->

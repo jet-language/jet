@@ -2129,6 +2129,162 @@ fn run() {
 }
 
 #[test]
+fn post_contract_success_and_failure_match_on_all_tiers() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let src = r#"
+#[Post(result > 0, "post sees the successful payload")]
+fn counted(value: Int) Int -> {
+    print("body:{value}")
+    if value > 0 {
+        return value
+    }
+    return Err("sentinel")
+}
+
+fn run() {
+    good :: counted(7)
+    good ? value -> print("good:{value}") ! error -> print("good-error:{error.message}")
+    bad :: counted(0)
+    bad ? value -> print("bad:{value}") ! error -> print("bad-error:{error.message}")
+}
+"#;
+    let expected = ProgramOutput::ran(
+        "body:7\ngood:7\nbody:0\nbad-error:sentinel\n".to_string(),
+        String::new(),
+        0,
+    );
+    let dir = std::env::temp_dir().join(format!(
+        "jet_contract_success_failure_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("post_contract_success_failure.jet");
+    fs::write(&file, src).unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(ds) => panic!("contract interpreter failed: {ds:?}"),
+    };
+    let resident = run_cranelift_resident(src, "contracts_success_failure");
+    let default = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(ds) => panic!("contract default run failed: {ds:?}"),
+    };
+    let aot = compiled_binary_output(
+        &dir,
+        "post_contract_success_failure",
+        0,
+        "contracts/post_contract_success_failure",
+        &shown,
+    );
+
+    assert_eq!(interpreted, expected, "contract interpreter output drifted");
+    assert_eq!(resident, expected, "contract resident JIT output drifted");
+    assert_eq!(default, expected, "contract default JIT output drifted");
+    assert_eq!(aot, expected, "contract AOT output drifted");
+
+    let have_node = Command::new("node")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    let have_wasm_target = Command::new("rustc")
+        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if have_node && have_wasm_target {
+        let output = jet::compile_web_with_path(src, &shown)
+            .unwrap_or_else(|diags| panic!("contract web source failed: {diags:?}"));
+        let web = output.web.expect("contract web output should be present");
+        let scratch = common::Scratch::new("contract-success-failure-web");
+        fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+        fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+        fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+
+        let wasm = Command::new("rustc")
+            .current_dir(&scratch.path)
+            .args([
+                "--edition",
+                "2021",
+                "--target",
+                "wasm32-unknown-unknown",
+                "--crate-type",
+                "cdylib",
+                "-O",
+                "app_wasm.rs",
+                "-o",
+                "app.wasm",
+            ])
+            .output()
+            .expect("spawn contract web wasm rustc");
+        assert!(
+            wasm.status.success(),
+            "rustc rejected contract web output: {}",
+            String::from_utf8_lossy(&wasm.stderr)
+        );
+
+        let js = Command::new("node")
+            .current_dir(&scratch.path)
+            .arg("app.js")
+            .output()
+            .expect("run contract web JS");
+        assert!(
+            js.status.success(),
+            "contract web JS failed: {}",
+            String::from_utf8_lossy(&js.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&js.stdout),
+            expected.stdout.as_str(),
+            "contract JavaScript output drifted"
+        );
+
+        fs::write(
+            scratch.join("wasm.mjs"),
+            r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+const status = instance.exports.jet_export_run();
+if (status !== 0) throw new Error(`contract Wasm status: ${status}`);
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("contract Wasm stopped");
+"#,
+        )
+        .unwrap();
+        let wasm_run = Command::new("node")
+            .current_dir(&scratch.path)
+            .arg("wasm.mjs")
+            .output()
+            .expect("run contract web Wasm");
+        assert!(
+            wasm_run.status.success(),
+            "contract web Wasm failed: {}",
+            String::from_utf8_lossy(&wasm_run.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&wasm_run.stdout),
+            expected.stdout.as_str(),
+            "contract Wasm output drifted"
+        );
+    } else {
+        eprintln!("note: skipping contract web execution (need node and wasm32 target)");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn unicode_16_string_and_core_text_match_aot_comptime_and_resident_jit() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

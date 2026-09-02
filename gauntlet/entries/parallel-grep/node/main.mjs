@@ -1,16 +1,23 @@
-import { readFile } from "node:fs/promises";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 
 const root = process.argv[2] ?? "files";
 const needle = process.argv[3] ?? "needle-7f";
-const entries = await readdir(root, { withFileTypes: true });
-const files = entries
-  .filter((entry) => entry.isFile() && entry.name.endsWith(".txt"))
-  .map((entry) => entry.name)
-  .sort();
+
+async function collectFiles(directory, files = []) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  for (const entry of entries) {
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) await collectFiles(full, files);
+    else if (entry.isFile() && entry.name.endsWith(".txt")) files.push(full);
+  }
+  return files;
+}
 
 function countOccurrences(text, value) {
+  if (value.length === 0) return 0;
   let count = 0;
   let offset = 0;
   while (true) {
@@ -21,18 +28,25 @@ function countOccurrences(text, value) {
   }
 }
 
-const results = await Promise.all(files.map(async (name) => {
-  const text = await readFile(path.join(root, name), "utf8");
-  let count = 0;
-  for (const line of text.split(/\r?\n/)) count += countOccurrences(line, needle);
-  return [name, count];
-}));
-let total = 0;
-let matched = 0;
-for (const [name, count] of results) {
-  if (count === 0) continue;
-  console.log(`${path.join(root, name)}:${count}`);
-  total += count;
-  matched += 1;
+const files = await collectFiles(root);
+let cursor = 0;
+const matches = [];
+
+async function scan() {
+  while (cursor < files.length) {
+    const file = files[cursor++];
+    const text = await readFile(file, "utf8");
+    let count = 0;
+    for (const line of text.split(/\r?\n/)) count += countOccurrences(line, needle);
+    if (count > 0) matches.push([file, count]);
+  }
 }
-console.log(`files ${matched}/${files.length} total ${total}`);
+
+await Promise.all(Array.from({ length: Math.min(32, availableParallelism()) }, scan));
+matches.sort((left, right) => left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0);
+let total = 0;
+for (const [file, count] of matches) {
+  console.log(`${file}:${count}`);
+  total += count;
+}
+console.log(`files ${matches.length}/${files.length} total ${total}`);

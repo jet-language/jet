@@ -431,7 +431,7 @@ impl CorpusPolicy {
             };
             let programs = sources
                 .iter()
-                .map(|source| parse_program(source))
+                .map(|source| parse_program(&entry.path, source))
                 .collect::<Result<Vec<_>, _>>()?;
             let valid = match recipe {
                 CliRecipe::Typed => {
@@ -600,7 +600,7 @@ impl CorpusPolicy {
         };
         let mut all = Vec::new();
         for program_source in programs {
-            let program = parse_program(&program_source)?;
+            let program = parse_program(path, &program_source)?;
             self.validate_maintained_lint_allows(path, row, &program)?;
             all.extend(evaluate_program(&self.manifest, path, row, &program));
         }
@@ -608,7 +608,7 @@ impl CorpusPolicy {
             && path == "docs/first-hour.md"
         {
             let typed = jet_fences(source).iter().any(|fence| {
-                parse_program(fence)
+                parse_program(path, fence)
                     .map(|program| has_typed_cli_entry(&program))
                     .unwrap_or(false)
             });
@@ -722,7 +722,7 @@ impl CorpusPolicy {
                 "inventory:producer",
             ));
         };
-        let program = parse_program(source)?;
+        let program = parse_program(producer, source)?;
         let decoders = program
             .items
             .iter()
@@ -1535,7 +1535,7 @@ fn has_raw_process_boundary(program: &Program) -> bool {
     program_expressions(program)
         .iter()
         .copied()
-        .any(|expr| is_process_argv(expr, &aliases))
+        .any(|expr| is_process_input(expr, &aliases))
 }
 
 enum CorpusWalkNode<'a> {
@@ -2150,8 +2150,24 @@ fn proof_matches(proof: &str, gate: &str) -> bool {
 fn skip_directory(name: &str) -> bool {
     matches!(
         name,
-        ".git" | ".claude" | ".agent-worktrees" | "plugins" | "node_modules" | "target"
+        ".git"
+            | ".claude"
+            | ".opencode"
+            | ".tmp"
+            | ".jet"
+            | ".tower"
+            | ".cache"
+            | ".agent-worktrees"
+            | "plugins"
+            | "node_modules"
+            | "target"
+            | "build"
+            | "cache"
+            | "dist"
+            | "result"
     ) || name.starts_with("target-")
+        || name.starts_with("build-")
+        || name.starts_with("result-")
 }
 
 fn discover_manifest_files(
@@ -2270,16 +2286,17 @@ fn has_jet_run_command(source: &str) -> bool {
     })
 }
 
-fn parse_program(source: &str) -> Result<Program, String> {
+fn parse_program(source_label: &str, source: &str) -> Result<Program, String> {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
         if !lexer_diagnostics.is_empty() {
             return Err(format!(
-                "Jet lexer rejected corpus source: {lexer_diagnostics:?}"
+                "Jet lexer rejected corpus source `{source_label}`: {lexer_diagnostics:?}"
             ));
         }
-        jet::Parser::parse(&tokens)
-            .map_err(|diagnostics| format!("Jet parser rejected corpus source: {diagnostics:?}"))
+        jet::Parser::parse(&tokens).map_err(|diagnostics| {
+            format!("Jet parser rejected corpus source `{source_label}`: {diagnostics:?}")
+        })
     })
 }
 
@@ -2325,10 +2342,10 @@ fn evaluate_program(
     }
 
     for expr in &expressions {
-        if is_process_argv(expr, &aliases) {
+        if is_process_input(expr, &aliases) {
             argv_sites.push(expr.span());
         }
-        if applies(manifest, path, row, "raw-cli-fixed-shape") && is_process_argv(expr, &aliases) {
+        if applies(manifest, path, row, "raw-cli-fixed-shape") && is_process_input(expr, &aliases) {
             violations.push(SemanticViolation::new(
                 path,
                 "raw-cli-fixed-shape",
@@ -2839,6 +2856,14 @@ fn receiver_is(expr: &Expr, expected: &str, aliases: &BTreeMap<String, String>) 
             .is_some_and(|module| module == &format!("core.{expected}")),
         _ => false,
     }
+}
+
+fn is_process_input(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {
+    matches!(
+        expr.without_parens(),
+        Expr::MethodCall { receiver, method, .. }
+            if matches!(method.as_str(), "argv" | "args") && receiver_is(receiver, "process", aliases)
+    )
 }
 
 fn is_process_argv(expr: &Expr, aliases: &BTreeMap<String, String>) -> bool {

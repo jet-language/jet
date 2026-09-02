@@ -1,11 +1,11 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability, LegacyWrapperKind};
 use super::cache_cas::{
     atomic_restore_file, ensure_real_directory, hex_decode, hex_encode, remote_execution_identity,
-    remote_policy_digest,
-    secure_read_file, ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey,
-    ActionOutcome, ActionOutputRecord, ActionResultRecord, CacheHitReason, CacheMissReason,
-    ContentDigest, FrontEndCompletion, LocalCas, RemoteBuildBinding, RemoteCacheError,
-    RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest,
+    remote_policy_digest, secure_read_file, ActionCacheProvenance, ActionCacheStatus,
+    ActionInputSnapshot, ActionKey, ActionOutcome, ActionOutputRecord, ActionResultRecord,
+    CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion, LocalCas,
+    RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
+    RemoteDeniedReason, RemoteExecutionRequest,
 };
 use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
@@ -118,7 +118,11 @@ impl BuildExecutionError {
     }
 }
 
-fn action_failure_report(action: &str, exit_code: i32, stderr: &str) -> jet_foundation::Outcome::JetErrorReport {
+fn action_failure_report(
+    action: &str,
+    exit_code: i32,
+    stderr: &str,
+) -> jet_foundation::Outcome::JetErrorReport {
     let mut error = jet_foundation::Outcome::jet_err_with_identity(
         format!("build action `{action}` exited with status {exit_code}"),
         Ok("E3505".to_string()),
@@ -150,10 +154,7 @@ fn action_failure_report(action: &str, exit_code: i32, stderr: &str) -> jet_foun
 }
 
 fn report_json_string(value: &str) -> String {
-    format!(
-        "\"{}\"",
-        jet_foundation::JSON::json_escape(value)
-    )
+    format!("\"{}\"", jet_foundation::JSON::json_escape(value))
 }
 
 /// The one native child-isolation substrate shared by hermetic build actions
@@ -917,8 +918,7 @@ fn execute_one_action(
         grants.contains(&BuildCapability::Net) && action.caps.contains(&BuildCapability::Net),
         &mounts,
         Some(jet_process_sandbox::DEFAULT_ACTION_TIMEOUT),
-    )
-    {
+    ) {
         Ok(result) => result.output,
         Err(error) => {
             let _ = fs::remove_dir_all(&sandbox);
@@ -1190,7 +1190,9 @@ fn execute_remote_attempt(
                 .map_err(RemoteAttemptFailure::terminal)?;
             let stderr = transport
                 .download_execution_blob(&result.stderr_digest, policy)
-                .map_err(|error| RemoteAttemptFailure::terminal(remote_action(action, error.to_string())))?;
+                .map_err(|error| {
+                    RemoteAttemptFailure::terminal(remote_action(action, error.to_string()))
+                })?;
             let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
             let report = action_failure_report(&action.name, exit_code, &stderr);
             if action.cache == ActionCache::Cached {
@@ -1205,13 +1207,16 @@ fn execute_remote_attempt(
                     .check(super::cache_cas::RemoteActionRequest::CacheWrite)
                     .is_ok()
                 {
-                    publish_remote_outputs(transport, policy, project_root, &record)
-                        .map_err(|detail| RemoteAttemptFailure::terminal(remote_action(action, detail)))?;
+                    publish_remote_outputs(transport, policy, project_root, &record).map_err(
+                        |detail| RemoteAttemptFailure::terminal(remote_action(action, detail)),
+                    )?;
                 }
                 write_action_record(record_path, &record)
                     .map_err(|error| RemoteAttemptFailure::terminal(io_action(action, error)))?;
             }
-            Err(RemoteAttemptFailure::terminal(BuildExecutionError::Reported { report }))
+            Err(RemoteAttemptFailure::terminal(
+                BuildExecutionError::Reported { report },
+            ))
         }
         ActionOutcome::RestoredFromCache => Err(RemoteAttemptFailure::terminal(remote_action(
             action,
@@ -2105,14 +2110,11 @@ fn runtime_mount_path(
         if value == destination {
             return Some(mount.source.clone());
         }
-        let Some(relative) = value
-            .strip_prefix(destination)
-            .and_then(|suffix| {
-                suffix
-                    .strip_prefix('/')
-                    .or_else(|| suffix.strip_prefix('\\'))
-            })
-        else {
+        let Some(relative) = value.strip_prefix(destination).and_then(|suffix| {
+            suffix
+                .strip_prefix('/')
+                .or_else(|| suffix.strip_prefix('\\'))
+        }) else {
             continue;
         };
         let path = Path::new(&mount.source).join(relative);
@@ -2181,7 +2183,10 @@ fn parse_local_outcome(value: &str) -> io::Result<ActionOutcome> {
         return Ok(ActionOutcome::RestoredFromCache);
     }
     let (kind, code) = value.split_once(':').ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "action record outcome is malformed")
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "action record outcome is malformed",
+        )
     })?;
     let exit_code = code.parse::<i32>().map_err(|_| {
         io::Error::new(
@@ -2247,11 +2252,13 @@ pub(super) fn read_action_record(
                     "action record has an invalid failure report",
                 ));
             }
-            let bytes = hex_decode(value).map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, error)
-            })?;
+            let bytes = hex_decode(value)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             let text = String::from_utf8(bytes).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidData, "action failure report is not UTF-8")
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "action failure report is not UTF-8",
+                )
             })?;
             failure_report = Some(
                 jet_foundation::Outcome::JetErrorReport::from_json(&text).map_err(|error| {
@@ -2283,10 +2290,7 @@ pub(super) fn read_action_record(
         });
     }
     let outcome = outcome.ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "action record has no outcome",
-        )
+        io::Error::new(io::ErrorKind::InvalidData, "action record has no outcome")
     })?;
     if matches!(outcome, ActionOutcome::Failed { .. }) != failure_report.is_some() {
         return Err(io::Error::new(
@@ -2805,6 +2809,71 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn native_sandbox_exit_reaps_pipe_holding_descendant() {
+        let shell = std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("sh"))
+        .find(|candidate| candidate.is_file())
+        .or_else(|| {
+            std::env::split_paths(
+                &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+            )
+            .map(|directory| directory.join("bash"))
+            .find(|candidate| candidate.is_file())
+        })
+        .expect("a shell is required for the exit cleanup regression");
+        let root = std::env::temp_dir().join(format!(
+            "jet-build-action-exit-tree-{}-{}",
+            std::process::id(),
+            REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let descendant_marker = root.join("exit-descendant-marker");
+        fs::create_dir_all(&root).unwrap();
+
+        let started = Instant::now();
+        let result = run_native_sandboxed_with_timeout(
+            &shell,
+            &[
+                "-c".to_string(),
+                "(sleep 5; printf leaked > exit-descendant-marker) & exit 0".to_string(),
+            ],
+            &root,
+            None,
+            &BTreeMap::new(),
+            false,
+            Some(Duration::from_secs(5)),
+        );
+        let elapsed = started.elapsed();
+        let status = native_sandbox_status();
+        if !status.available {
+            assert!(
+                matches!(result, Err(NativeSandboxError::Unsupported(_))),
+                "unsupported backend must refuse the exit action: {result:?}"
+            );
+        } else {
+            let output = result.expect("exit cleanup regression should run");
+            assert!(
+                output.output.status.success(),
+                "exit cleanup regression failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.output.stdout),
+                String::from_utf8_lossy(&output.output.stderr)
+            );
+            assert!(
+                elapsed < Duration::from_secs(3),
+                "exit cleanup waited for the pipe holder: {elapsed:?}"
+            );
+            assert!(
+                !descendant_marker.exists(),
+                "normal exit left a pipe-holding descendant alive"
+            );
+        }
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn native_sandbox_timeout_stops_a_hanging_build_action() {
         let shell = std::env::split_paths(
             &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
@@ -2824,12 +2893,17 @@ mod tests {
             std::process::id(),
             REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
         ));
+        let descendant_marker = root.join("timeout-descendant-marker");
         fs::create_dir_all(&root).unwrap();
 
         let started = Instant::now();
         let result = run_native_sandboxed_with_timeout(
             &shell,
-            &["-c".to_string(), "while :; do :; done".to_string()],
+            &[
+                "-c".to_string(),
+                "(sleep 5; printf leaked > timeout-descendant-marker) & while :; do :; done"
+                    .to_string(),
+            ],
             &root,
             None,
             &BTreeMap::new(),
@@ -2854,8 +2928,12 @@ mod tests {
                 other => panic!("hanging action was not stopped: {other:?}"),
             }
             assert!(
-                elapsed < Duration::from_secs(5),
+                elapsed < Duration::from_secs(3),
                 "timeout took too long: {elapsed:?}"
+            );
+            assert!(
+                !descendant_marker.exists(),
+                "timeout left a pipe-holding descendant alive"
             );
         }
 
@@ -2883,12 +2961,17 @@ mod tests {
             std::process::id(),
             REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
         ));
+        let descendant_marker = root.join("output-descendant-marker");
         fs::create_dir_all(&root).unwrap();
 
         let started = Instant::now();
         let result = run_native_sandboxed_with_timeout(
             &shell,
-            &["-c".to_string(), "printf '%70000000s' x".to_string()],
+            &[
+                "-c".to_string(),
+                "(sleep 5; printf leaked > output-descendant-marker) & printf '%70000000s' x"
+                    .to_string(),
+            ],
             &root,
             None,
             &BTreeMap::new(),
@@ -2913,8 +2996,12 @@ mod tests {
                 other => panic!("flooding action was not stopped: {other:?}"),
             }
             assert!(
-                elapsed < Duration::from_secs(5),
+                elapsed < Duration::from_secs(3),
                 "output limit took too long: {elapsed:?}"
+            );
+            assert!(
+                !descendant_marker.exists(),
+                "output limit left a pipe-holding descendant alive"
             );
         }
 

@@ -73,32 +73,18 @@ pub fn from_checked(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemI
 /// ambiguous package sources are returned as errors instead of becoming an
 /// empty projection.
 pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, String> {
-    let dir = match jet_pkg_model::Authority::AuthorityResolver::open(entry) {
-        Ok(resolver) => resolver.root().to_path_buf(),
-        Err(jet_pkg_model::Authority::AuthorityError::WrongKind { .. }) => {
-            let parent = entry
-                .parent()
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or(Path::new("."));
-            jet_pkg_model::Authority::AuthorityResolver::open(parent)
-                .map_err(|error| error.to_string())?
-                .root()
-                .to_path_buf()
-        }
-        Err(error) if error.is_missing() => return Ok(None),
-        Err(error) => return Err(error.to_string()),
-    };
-    let Some(root) =
-        jet_driver::Loader::find_manifest_root_checked(&dir).map_err(|diagnostic| {
-            format!(
-                "{}: {} — {}",
-                diagnostic.code, diagnostic.what, diagnostic.why
-            )
-        })?
-    else {
-        return Ok(None);
-    };
-    PackageFacts::load_checked(&root).map_err(|error| error.to_string())
+    jet_driver::Loader::package_facts_for_entry(entry).map_err(|diagnostics| {
+        diagnostics
+            .into_iter()
+            .map(|diagnostic| {
+                format!(
+                    "{}: {} — {}",
+                    diagnostic.code, diagnostic.what, diagnostic.why
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    })
 }
 
 /// Render the registered package-shape diagnostic shared by semantic-index
@@ -108,8 +94,7 @@ pub fn package_facts_diagnostic(entry: &Path, error: &str) -> Diagnostic {
         "E1206",
         format!("package facts for `{}` have a shape error", entry.display()),
         format!("one typed Package fact graph must own this projection; {error}"),
-        "fix package.jet or its declared Config files before tooling uses package facts"
-            .to_string(),
+        "fix package.jet, the inline Package carrier, or its declared Config files before tooling uses package facts".to_string(),
         None,
     )
 }

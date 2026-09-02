@@ -1813,9 +1813,6 @@ fn jet_jit_math_degrees(x: f64) -> f64 {
 fn jet_jit_math_radians(x: f64) -> f64 {
     x.to_radians()
 }
-fn jet_jit_math_is_finite(x: f64) -> i8 {
-    i8::from(x.is_finite())
-}
 fn jet_jit_math_sign(x: f64) -> i64 {
     if x > 0.0 {
         1
@@ -2290,7 +2287,6 @@ host_fns! {
     math_lerp: "jet_jit_math_lerp" => jet_jit_math_lerp: sig_lerp;
     math_degrees: "jet_jit_math_degrees" => jet_jit_math_degrees: sig_f64_f64;
     math_radians: "jet_jit_math_radians" => jet_jit_math_radians: sig_f64_f64;
-    math_is_finite: "jet_jit_math_is_finite" => jet_jit_math_is_finite: sig_f64_i8;
     math_sign: "jet_jit_math_sign" => jet_jit_math_sign: sig_f64_i64;
     math_checked_add: "jet_jit_math_checked_add" => jet_jit_math_checked_add: sig_i64_i64_i64;
     math_saturating_add: "jet_jit_math_saturating_add" => jet_jit_math_saturating_add: sig_i64_i64_i64;

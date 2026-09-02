@@ -2407,4 +2407,109 @@ mod tests {
             .collect();
         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     }
+    #[test]
+    fn locked_nix_cas_replay_is_cold_and_warm_stable() {
+        let (source_roots, _source_guard) = temp_roots();
+        let source_project = source_roots.root.join("project");
+        std::fs::create_dir_all(&source_project).unwrap();
+        let source = ingest_fixture(&source_roots, "locked-nix", &[("out", "portable")], vec![]);
+        let mut source_entry = source.entry.clone();
+        assert!(remove_closure_record(&source_roots, &source_entry.id).unwrap());
+
+        let revision = "a".repeat(40);
+        let signed_manifest = "b".repeat(64);
+        let derivation = "c".repeat(64);
+        let nar_hash = format!("sha256:{}", "d".repeat(64));
+        let upstream_proof = format!("sha256-{}", "e".repeat(64));
+        let cache_key = "f".repeat(64);
+        let system = crate::Envelope::host_platform();
+        let mut producer = ProducerRecord::decode(&source_entry.producer_record).unwrap();
+        producer.provider = "nix".into();
+        producer.immutable_source = "nix-source-locked-nix".into();
+        producer.source_digest = source_entry.envelope.output_hash.clone();
+        producer.facts.extend(BTreeMap::from([
+            ("nix.index.channel".into(), "nixpkgs-unstable".into()),
+            ("nix.index.revision".into(), revision.clone()),
+            ("nix.index.system".into(), system.clone()),
+            ("nix.index.manifest.sha256".into(), signed_manifest.clone()),
+            ("nix.derivation.sha256".into(), derivation.clone()),
+            ("nix.output.out".into(), source_entry.out.clone()),
+            ("nix.store-path".into(), "/nix/store/locked-nix".into()),
+            ("nix.proof".into(), upstream_proof.clone()),
+            ("nix.nar-hash".into(), nar_hash.clone()),
+            ("nix.nar-size".into(), "1".into()),
+            ("nix.compression".into(), "none".into()),
+            ("nix.cache.key".into(), cache_key.clone()),
+        ]));
+        source_entry.producer_record = producer.encode();
+        assert!(crate::RuntimePolicy::with_lock(&source_roots.root, "hangar", || {
+            register_admitted_nix_entries_unlocked(&source_roots, &[source_entry.clone()])
+        })
+        .unwrap());
+
+        let bundle =
+            publish_nix_cas_bundle(&source_project, &source_roots, &source_entry.id).unwrap();
+        let imported_root = tempdir::Guard::new("jpk-locked-nix-import");
+        let imported_roots = Roots {
+            root: imported_root.path.clone(),
+            dev_mode: true,
+        };
+        let (_, object_digests) =
+            import_nix_cas_bundle(&source_project, &imported_roots, &bundle).unwrap();
+        let closure = crate::Lock::NixClosureRecord {
+            channel: "nixpkgs-unstable".into(),
+            revision,
+            system: system.clone(),
+            signed_index_manifest: signed_manifest,
+            derivation,
+            output: source_entry.envelope.output_hash.clone(),
+            nar_hash,
+            size: 1,
+            compression: "none".into(),
+            references: Vec::new(),
+            upstream_proof,
+            cache_key,
+            project_cas_bundle: bundle,
+        };
+        let envelope = crate::Lock::LockEnvelope {
+            output_hash: closure.output.clone(),
+            platform: closure.system.clone(),
+            signature: String::new(),
+            provenance: "locked-nix".into(),
+            catalog_tier: "official-signed".into(),
+            catalog_trust: "verified".into(),
+        };
+        let first = record_locked_nix(
+            &imported_roots,
+            "locked-nix",
+            "1",
+            "locked-nix@nixpkgs",
+            &envelope,
+            &closure,
+            &object_digests,
+            "lock-digest",
+        )
+        .unwrap();
+        let second = record_locked_nix(
+            &imported_roots,
+            "locked-nix",
+            "1",
+            "locked-nix@nixpkgs",
+            &envelope,
+            &closure,
+            &object_digests,
+            "lock-digest",
+        )
+        .unwrap();
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.envelope.output_hash, second.envelope.output_hash);
+        assert_eq!(
+            list_checked(&imported_roots)
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.reference == "locked-nix@nixpkgs")
+                .count(),
+            1
+        );
+    }
 }

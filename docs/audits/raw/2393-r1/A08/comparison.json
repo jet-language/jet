@@ -1,0 +1,59 @@
+{
+  "schema_version": "2393-r1-comparison-v1",
+  "card": 2393,
+  "run_id": "2393-r1",
+  "participant": "A08",
+  "status": "measured",
+  "mapping": {
+    "digest": "e7c551b15131885a216a6ccdd0a427abc35a9599e0f9bedeb77bc3699db9f1e4",
+    "first_bit": 1,
+    "second_bit": 1,
+    "jet_label": "Arm B",
+    "rust_label": "Arm A",
+    "option_order": [
+      "Arm B",
+      "Arm A",
+      "no preference"
+    ]
+  },
+  "prompt_path": ".tmp/2393-r1/participants/A08/compare/prompt.txt",
+  "prompt_sha256": "9d2dd076abc232e5bde56b263e7dd6edfe425f8bc98f59d4b42339d962c1a34f",
+  "preference": "Arm A",
+  "mapped_choice": "Rust",
+  "reason": "Arm A passes all four tasks completely; Arm B fails T1 AOT with an internal compiler error (exit 101), making it less reliable for this class of work.",
+  "response_raw": "Looking at the observations:\n\n**Arm A** — all 26 steps pass. Every task (T1–T4) produces correct stdout, correct failure exits, zero stderr noise. Compile steps ~1.3s.\n\n**Arm B** — T2, T3, T4 produce correct output in both JIT and AOT modes. **T1 AOT fails**: steps 20–21 exit 101 (internal compiler error). JIT mode for T1 works (steps 18–19 correct), but AOT is broken. Additionally, AOT builds take 20–28s each vs ~1.3s for Arm A, and every run emits copious L2510/L0507 warnings to stderr.\n\nCritical difference: Arm B has a hard failure — T1 cannot be AOT-compiled, producing an ICE. 4/4 vs 3.5/4 (T1 JIT works, AOT doesn't).\n\n```json\n{\"preference\":\"Arm A\",\"reason\":\"Arm A passes all four tasks completely; Arm B fails T1 AOT with an internal compiler error (exit 101), making it less reliable for this class of work.\"}\n```\n",
+  "session": {
+    "adapter": "omp-command",
+    "model_family": "Anthropic",
+    "model": "claude-opus-4-6",
+    "argv": [
+      "/etc/profiles/per-user/nate/bin/omp",
+      "--model",
+      "claude-opus-4-6",
+      "--thinking",
+      "high",
+      "--no-session",
+      "--no-skills",
+      "--no-rules",
+      "--no-extensions",
+      "--no-title",
+      "--no-lsp",
+      "--tools=read",
+      "--auto-approve",
+      "--cwd",
+      "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A08",
+      "--print",
+      "@/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A08/compare/prompt.txt"
+    ],
+    "cwd": "/home/nate/Projects/Github/jet/.tmp/2393-r1/participants/A08",
+    "started_at": "2026-09-01T00:07:24.193Z",
+    "ended_at": "2026-09-01T00:08:07.960Z",
+    "wall_seconds": 43.76662587999925,
+    "time_to_first_stdout_seconds": 43.74024625900015,
+    "peak_rss_kb": 342260,
+    "exit_status": 0,
+    "timed_out": false,
+    "stderr": "Working...\n",
+    "response_ref": ".tmp/2393-r1/runs/A08-comparison.omp.json"
+  }
+}

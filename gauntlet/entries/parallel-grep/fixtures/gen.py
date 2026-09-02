@@ -1,30 +1,23 @@
-import random
-import sys
 from pathlib import Path
+import sys
 
 
-WORDS = (
-    "amber birch cedar delta ember fern granite hazel ivory juniper kelp linen maple"
-    " nickel olive pebble quartz river saffron thistle umber velvet willow xenon yarrow"
-).split()
+GROUPS = 200
+FILES_PER_GROUP = 1000
+MATCHING_TEXT = "needle-7fneedle-7f\n"
+NON_MATCHING_TEXT = "no match\n"
 
 
 def main() -> None:
     root = Path(sys.argv[1])
     root.mkdir(parents=True, exist_ok=True)
-    rng = random.Random(31)
-    for index in range(240):
-        lines = []
-        matched = rng.random() < 0.4
-        needle_lines = set()
-        if matched:
-            needle_lines = set(rng.sample(range(2000), 1 + rng.randrange(4)))
-        for line_no in range(2000):
-            words = [rng.choice(WORDS) for _ in range(8)]
-            if line_no in needle_lines:
-                words[rng.randrange(len(words))] = "needle-7f"
-            lines.append(" ".join(words))
-        (root / f"f{index:03}.txt").write_text("\n".join(lines) + "\n", encoding="ascii")
+    for group in range(GROUPS):
+        directory = root / f"d{group:03}"
+        directory.mkdir()
+        for index in range(FILES_PER_GROUP):
+            text = MATCHING_TEXT if group == 0 and index == 0 else NON_MATCHING_TEXT
+            (directory / f"f{index:04}.txt").write_text(text, encoding="ascii")
+        (directory / "ignored.md").write_text("not scanned\n", encoding="ascii")
 
 
 if __name__ == "__main__":

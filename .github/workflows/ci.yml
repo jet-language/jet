@@ -125,10 +125,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+          - os: macos-15-intel
+            label: macos-x86_64
+          - os: windows-latest
+            label: windows-x86_64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,6 +146,46 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+
+      - name: Pin compiled-workload cross Rust on Linux
+        if: matrix.os == 'ubuntu-latest'
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install compiled-workload cross compiler on Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-aarch64-linux-gnu
+
+      - name: Pin compiled-workload Node on Windows
+        if: matrix.os == 'windows-latest'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+
+      - name: Pin compiled-workload Go on Windows
+        if: matrix.os == 'windows-latest'
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.5
+
+      - name: Pin compiled-workload Rust on Windows
+        if: matrix.os == 'windows-latest'
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Pin compiled-workload Zig on Windows
+        if: matrix.os == 'windows-latest'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Pin compiled-workload Clang on Windows
+        if: matrix.os == 'windows-latest'
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: 21.1.8
 
       - name: Allow unprivileged user namespaces (bubblewrap sandbox)
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
@@ -213,16 +256,114 @@ jobs:
         if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
         run: nix develop .#full -c bash tools/ci/test-agent-workload-gate.sh
 
-      # Card #1414: keep the hosted compiled-workload contract and all seven
-      # validator removal canaries in CI. No measurement report is checked in;
-      # a real report still requires clean-machine runs and fresh review.
-      - name: Compiled workload gate (Unix)
+      # Card #1414: produce a release-optimized host report. The report is an
+      # unreviewed handoff; independent review is consumed only by Release.
+      - name: Compiled workload peer isolation self-test (Unix)
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            toolchain_bin="$HOME/.rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin"
+            run_full() {
+              # shellcheck disable=SC2016
+              nix develop .#full -c bash -c \
+                'export PATH="$1:$PATH"; shift; exec "$@"' bash "$toolchain_bin" "$@"
+            }
+          else
+            run_full() {
+              nix develop .#full -c "$@"
+            }
+          fi
+          run_full node tools/ci/test-compiled-workload-peer-launcher.mjs
+
+      # Card #1414: produce a release-optimized host report. The report is an
+      # unreviewed handoff; independent review is consumed only by Release.
+      - name: Compiled workload measurements (Unix)
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        env:
+          JET_COMPILED_WORKLOAD_JET_BIN: ${{ github.workspace }}/target/release/jet
+          JET_COMPILED_WORKLOAD_PEER_LAUNCHER: ${{ runner.temp }}/compiled-workload-peer-launcher
+        run: |
+          report="$GITHUB_WORKSPACE/compiled-workload-report"
+          rm -rf "$report"
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            toolchain_bin="$HOME/.rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin"
+            export RUSTC="$toolchain_bin/rustc"
+            export RUSTC_LINKER_CROSS=aarch64-linux-gnu-gcc
+            export CXX_CROSS=aarch64-linux-gnu-g++
+            run_full() {
+              # shellcheck disable=SC2016
+              nix develop .#full -c bash -c \
+                'export PATH="$1:$PATH"; shift; exec "$@"' bash "$toolchain_bin" "$@"
+            }
+          else
+            run_full() {
+              nix develop .#full -c "$@"
+            }
+          fi
+          run_full rustc --edition=2021 -O tools/ci/compiled-workload-peer-launcher.rs \
+            -o "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER"
+          test -x "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER"
+          run_full cargo build --release --locked --bin jet
+          run_full node tools/ci/compiled-workload-runner.mjs \
+            --platform "${{ matrix.label == 'macos-x86_64' && 'macos' || 'linux' }}" \
+            --report-dir "$report"
+      - name: Upload compiled workload producer report (Unix)
+        if: ${{ always() && matrix.os != 'windows-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-workload-${{ matrix.label }}-${{ github.sha }}
+          path: |
+            compiled-workload-report/
+            target/release/jet
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Compiled workload peer isolation self-test (Windows)
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
+        shell: bash
+        run: node tools/ci/test-compiled-workload-peer-launcher.mjs
+
+      - name: Compiled workload measurements (Windows)
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
+        shell: bash
+        env:
+          CXX: clang++
+          JET_COMPILED_WORKLOAD_JET_BIN: ${{ github.workspace }}/target/release/jet.exe
+          JET_COMPILED_WORKLOAD_PEER_LAUNCHER: ${{ runner.temp }}/compiled-workload-peer-launcher.exe
+        run: |
+          report="$GITHUB_WORKSPACE/compiled-workload-report"
+          rm -rf "$report"
+          rustc --edition=2021 -O tools/ci/compiled-workload-peer-launcher.rs \
+            -o "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER"
+          test -x "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER"
+          cargo build --release --locked --bin jet
+          node tools/ci/compiled-workload-runner.mjs \
+            --platform windows \
+            --report-dir "$report"
+
+      - name: Upload compiled workload producer report (Windows)
+        if: ${{ always() && matrix.os == 'windows-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiled-workload-${{ matrix.label }}-${{ github.sha }}
+          path: |
+            compiled-workload-report/
+            target/release/jet.exe
+          retention-days: 30
+          if-no-files-found: error
+
+      # Card #1414: the producer artifact is intentionally unreviewed. The
+      # external reviewer publishes a complete immutable bundle for release;
+      # these commands only exercise the contract and validator canaries.
+      - name: Compiled workload contract and validator self-check (Unix)
         if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
         run: |
           nix develop .#full -c bash tools/ci/compiled-workload-gate.sh --contract
           nix develop .#full -c bash tools/ci/test-compiled-workload-gate.sh
 
-      - name: Compiled workload gate (Windows)
+      - name: Compiled workload contract and validator self-check (Windows)
         if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         shell: bash
         run: |
@@ -243,7 +384,7 @@ jobs:
         include:
           - os: ubuntu-latest
             label: linux-x86_64
-          - os: macos-13
+          - os: macos-15-intel
             label: macos-x86_64
           - os: windows-latest
             label: windows-x86_64
@@ -290,15 +431,6 @@ jobs:
 
       - name: Cargo check
         run: nix develop .#full -c cargo check --workspace --all-targets --locked
-
-      - name: Install aarch64 cross tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user gcc-aarch64-linux-gnu
-          rustup target add aarch64-unknown-linux-gnu
-
-      - name: aarch64 freestanding QEMU smoke
-        run: nix develop .#full -c bash tools/ci/aarch64-qemu-freestanding.sh
 
   # D-CI1=A: grammar drift and the Rust documentation build are explicit
   # change-gate inputs. The direct grammar target must fail if tests/grammar.rs
@@ -351,14 +483,15 @@ jobs:
       - name: Install WASI Preview 2 target
         run: nix develop .#full -c rustup toolchain install stable --target wasm32-wasip2
 
-      - name: Build Jet
-        run: nix develop .#full -c cargo build
+      - name: Build release Jet
+        run: nix develop .#full -c cargo build --release --locked
 
       - name: Build and serve WASI Component
         run: |
+          # shellcheck disable=SC2016
           nix develop .#full -c bash -euo pipefail -c '
             export PATH="$(dirname "$(rustup which rustc --toolchain stable)"):$PATH"
-            ./target/debug/jet build \
+            ./target/release/jet build \
               examples/features/net/http_server_wasip2.jet \
               --target=wasm32-wasip2
             wasm-tools validate build/http_server_wasip2

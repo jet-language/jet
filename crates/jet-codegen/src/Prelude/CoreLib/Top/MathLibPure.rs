@@ -94,6 +94,19 @@ pub fn jet_std_math_abs_f32(value: f32) -> f32 {
     value.abs()
 }
 
+/// Scalar IEEE-754 predicates shared by AOT, resident JIT, and comptime.
+pub fn jet_std_math_is_nan(value: f64) -> bool {
+    value.is_nan()
+}
+
+pub fn jet_std_math_is_infinite(value: f64) -> bool {
+    value.is_infinite()
+}
+
+pub fn jet_std_math_is_finite(value: f64) -> bool {
+    value.is_finite()
+}
+
 /// IEEE-754 bit conversions share this Prelude symbol across AOT, resident
 /// JIT, and the evaluator.  The integer carrier is intentionally word-sized;
 /// the evaluator projects larger exact `Int` values modulo two's-complement

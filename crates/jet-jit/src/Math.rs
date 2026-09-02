@@ -287,10 +287,14 @@ fn from_int_lanes(type_name: &str, lanes: &[i64]) -> Option<MathVal> {
 
 fn type_name_of(v: MathVal) -> &'static str {
     match v {
-        MathVal::F32(x) => simd_type_name(jet_foundation::Syntax::SimdLaneKind::F32, x.len as usize)
-            .expect("known F32 lane layout"),
-        MathVal::F64(x) => simd_type_name(jet_foundation::Syntax::SimdLaneKind::F64, x.len as usize)
-            .expect("known F64 lane layout"),
+        MathVal::F32(x) => {
+            simd_type_name(jet_foundation::Syntax::SimdLaneKind::F32, x.len as usize)
+                .expect("known F32 lane layout")
+        }
+        MathVal::F64(x) => {
+            simd_type_name(jet_foundation::Syntax::SimdLaneKind::F64, x.len as usize)
+                .expect("known F64 lane layout")
+        }
         MathVal::Int(x) => {
             let kind = match (x.signed, x.bits) {
                 (true, 8) => jet_foundation::Syntax::SimdLaneKind::I8,
@@ -441,7 +445,10 @@ fn f32_lanes_binary(
         }
         _ => return None,
     }
-    Some(MathVal::F32(F32Lanes { lanes: out, len: left.len }))
+    Some(MathVal::F32(F32Lanes {
+        lanes: out,
+        len: left.len,
+    }))
 }
 
 fn f64_lanes_binary(
@@ -494,7 +501,10 @@ fn f64_lanes_binary(
         }
         _ => return None,
     }
-    Some(MathVal::F64(F64Lanes { lanes: out, len: left.len }))
+    Some(MathVal::F64(F64Lanes {
+        lanes: out,
+        len: left.len,
+    }))
 }
 
 fn math_binary_value(
@@ -506,9 +516,7 @@ fn math_binary_value(
         (MathVal::F32(left), MathVal::F32(right)) => f32_lanes_binary(left, right, op),
         (MathVal::F64(left), MathVal::F64(right)) => f64_lanes_binary(left, right, op),
         (MathVal::Int(left), MathVal::Int(right))
-            if left.len == right.len
-                && left.signed == right.signed
-                && left.bits == right.bits =>
+            if left.len == right.len && left.signed == right.signed && left.bits == right.bits =>
         {
             let name = type_name_of(MathVal::Int(left));
             let result = zip_int_binop(
@@ -521,12 +529,14 @@ fn math_binary_value(
             from_int_lanes(name, &result)
         }
         (MathVal::Mat3(matrix), MathVal::Vec3(vector))
-            if op == simd_lanes::JetSimdBinaryOp::Mul => {
+            if op == simd_lanes::JetSimdBinaryOp::Mul =>
+        {
             let out = mat_vec(3, &matrix.0, &vector.0);
             from_lanes("Vec3", &out)
         }
         (MathVal::Mat4(matrix), MathVal::Vec4(vector))
-            if op == simd_lanes::JetSimdBinaryOp::Mul => {
+            if op == simd_lanes::JetSimdBinaryOp::Mul =>
+        {
             let out = mat_vec(4, &matrix.0, &vector.0);
             from_lanes("Vec4", &out)
         }
@@ -692,24 +702,22 @@ fn jet_jit_math_reduce(value: i64, op: i64) -> i64 {
         return 0;
     };
     match value {
-        MathVal::F32(value) => simd_lanes::jet_simd_reduce_slice(
-            &value.lanes[..value.len as usize],
-            op,
-        )
-        .map(|value| pack_float(f64::from(value)))
-        .unwrap_or_else(|| {
-            trap("math reduce: empty lanes");
-            0
-        }),
-        MathVal::F64(value) => simd_lanes::jet_simd_reduce_slice(
-            &value.lanes[..value.len as usize],
-            op,
-        )
-        .map(pack_float)
-        .unwrap_or_else(|| {
-            trap("math reduce: empty lanes");
-            0
-        }),
+        MathVal::F32(value) => {
+            simd_lanes::jet_simd_reduce_slice(&value.lanes[..value.len as usize], op)
+                .map(|value| pack_float(f64::from(value)))
+                .unwrap_or_else(|| {
+                    trap("math reduce: empty lanes");
+                    0
+                })
+        }
+        MathVal::F64(value) => {
+            simd_lanes::jet_simd_reduce_slice(&value.lanes[..value.len as usize], op)
+                .map(pack_float)
+                .unwrap_or_else(|| {
+                    trap("math reduce: empty lanes");
+                    0
+                })
+        }
         MathVal::Int(value) => reduce_int_op(
             &value.lanes[..value.len as usize],
             match op {
@@ -767,13 +775,7 @@ fn jet_jit_math_length(value: i64) -> i64 {
     pack_float(value)
 }
 
-fn zip_int_binop(
-    op: &str,
-    a: &[i64],
-    b: &[i64],
-    signed: bool,
-    bits: u8,
-) -> Option<Vec<i64>> {
+fn zip_int_binop(op: &str, a: &[i64], b: &[i64], signed: bool, bits: u8) -> Option<Vec<i64>> {
     simd_lanes::jet_simd_integer_binary(a, b, simd_binary_op(op)?, signed, bits)
 }
 
@@ -806,10 +808,7 @@ fn mat_vec(n: usize, m: &[f64], v: &[f64]) -> Vec<f64> {
 fn reduce_op(lanes: &[f64], op: &str, f32_lanes: bool) -> Option<f64> {
     let op = simd_reduce_op(op)?;
     if f32_lanes {
-        let lanes = lanes
-            .iter()
-            .map(|value| *value as f32)
-            .collect::<Vec<_>>();
+        let lanes = lanes.iter().map(|value| *value as f32).collect::<Vec<_>>();
         return simd_lanes::jet_simd_reduce_slice(&lanes, op).map(f64::from);
     }
     simd_lanes::jet_simd_reduce_slice(lanes, op)
@@ -843,8 +842,8 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
     });
 
     let simd_layout = jet_foundation::Syntax::simd_lane_layout(&ty);
-    let f32_lanes = simd_layout
-        .is_some_and(|(kind, _)| kind == jet_foundation::Syntax::SimdLaneKind::F32);
+    let f32_lanes =
+        simd_layout.is_some_and(|(kind, _)| kind == jet_foundation::Syntax::SimdLaneKind::F32);
     let int_layout = simd_layout.and_then(|(kind, _)| integer_lane_info(kind));
     let result = match (ty.as_str(), func.as_str()) {
         (_, "new") => {
@@ -1219,6 +1218,21 @@ fn require_string_list(list: i64) -> Option<Vec<String>> {
     values
 }
 
+fn require_bool_list(list: i64) -> Option<Vec<bool>> {
+    let values: Option<Vec<bool>> = Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list)?;
+        (0..len)
+            .map(|index| rt.heap.list_get_int(list, index).map(|value| value != 0))
+            .collect()
+    });
+    if values.is_none() {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("typed HTML trust list contains a non-boolean value")
+        });
+    }
+    values
+}
+
 /// D-BOUND-HEAD1=A: these are marshalling adapters only. Encoding and hole
 /// policy live in the same Prelude functions emitted by AOT and used by the
 /// interpreter.
@@ -1265,55 +1279,27 @@ fn alloc_string_list(values: Vec<String>) -> i64 {
     })
 }
 
-fn alloc_sql_value(value: (String, Vec<String>)) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let record = rt.heap.alloc_record(2);
-        let template = rt.heap.alloc_string(value.0);
-        let params = rt.heap.alloc_empty_list();
-        for param in value.1 {
-            let value = rt.heap.alloc_string(param);
-            let _ = rt.heap.list_push_int(params, value);
-        }
-        let _ = rt.heap.record_set_string(record, 0, template);
-        let _ = rt.heap.record_set_int(record, 1, params);
-        record
-    })
-}
-
-fn clone_sql_value(value: i64) -> Option<(String, Vec<String>)> {
-    Concurrency::with_runtime_mut(|rt| {
-        let template_handle = rt.heap.record_get_string(value, 0)?;
-        let template = rt.heap.clone_string(template_handle)?;
-        let params_handle = rt.heap.record_get_int(value, 1)?;
-        let len = rt.heap.list_len(params_handle)?;
-        let mut params = Vec::with_capacity(len as usize);
-        for index in 0..len {
-            params.push(rt.heap.list_get_string(params_handle, index)?);
-        }
-        Some((template, params))
-    })
-}
-
 fn jet_jit_typed_sql_raw(s: i64) -> i64 {
-    alloc_sql_value(typed_text_semantics::jet_typed_sql_raw(clone_string(s)))
+    super::DB::alloc_sql_value(typed_text_semantics::jet_typed_sql_raw(clone_string(s)))
 }
 
 fn jet_jit_typed_sql_interpolate(literals: i64, holes: i64) -> i64 {
     let Some(literals) = require_string_list(literals) else {
         return 0;
     };
-    let Some(holes) = require_string_list(holes) else {
+    let Some(holes) = super::DB::values_from_list_checked(holes) else {
+        trap("typed-text SQL bindings are malformed");
         return 0;
     };
     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
-    alloc_sql_value(typed_text_semantics::jet_typed_sql_interpolate(
+    super::DB::alloc_sql_value(typed_text_semantics::jet_typed_sql_interpolate(
         &literal_refs,
         holes,
     ))
 }
 
 fn jet_jit_typed_sql_template(value: i64) -> i64 {
-    let Some(value) = clone_sql_value(value) else {
+    let Some(value) = super::DB::clone_sql_value(value) else {
         trap("typed-text SQL value is malformed");
         return 0;
     };
@@ -1321,11 +1307,11 @@ fn jet_jit_typed_sql_template(value: i64) -> i64 {
 }
 
 fn jet_jit_typed_sql_params(value: i64) -> i64 {
-    let Some(value) = clone_sql_value(value) else {
+    let Some(value) = super::DB::clone_sql_value(value) else {
         trap("typed-text SQL value is malformed");
         return 0;
     };
-    alloc_string_list(typed_text_semantics::jet_typed_sql_params(&value))
+    super::DB::alloc_dbvalue_list(typed_text_semantics::jet_typed_sql_params(&value))
 }
 
 fn jet_jit_typed_sh_raw(s: i64) -> i64 {
@@ -1346,17 +1332,21 @@ fn jet_jit_typed_sh_interpolate(literals: i64, holes: i64) -> i64 {
     ))
 }
 
-fn jet_jit_typed_html_interpolate(literals: i64, holes: i64) -> i64 {
+fn jet_jit_typed_html_interpolate(literals: i64, holes: i64, trusted_html: i64) -> i64 {
     let Some(literals) = require_string_list(literals) else {
         return 0;
     };
     let Some(holes) = require_string_list(holes) else {
         return 0;
     };
+    let Some(trusted_html) = require_bool_list(trusted_html) else {
+        return 0;
+    };
     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
     alloc_string(typed_text_semantics::jet_typed_html_interpolate(
         &literal_refs,
         holes,
+        &trusted_html,
     ))
 }
 
@@ -1412,6 +1402,8 @@ host_fns! {
         sig_binary.params.push(AbiParam::new(types::I64));
         sig_binary.params.push(AbiParam::new(types::I64));
         sig_binary.returns.push(AbiParam::new(types::I64));
+        let mut sig_ternary = sig_binary.clone();
+        sig_ternary.params.push(AbiParam::new(types::I64));
 
     }
     call: "jet_jit_math_call" => jet_jit_math_call: sig_call;
@@ -1434,7 +1426,42 @@ host_fns! {
     typed_sh_interp: "jet_jit_typed_sh_interpolate" => jet_jit_typed_sh_interpolate: sig_binary;
     typed_html_raw: "jet_jit_typed_html_raw" => jet_jit_typed_html_raw: sig_unary;
     typed_html_text: "jet_jit_typed_html_text" => jet_jit_typed_html_text: sig_unary;
-    typed_html_interp: "jet_jit_typed_html_interpolate" => jet_jit_typed_html_interpolate: sig_binary;
+    typed_html_interp: "jet_jit_typed_html_interpolate" => jet_jit_typed_html_interpolate: sig_ternary;
     typed_path_interp: "jet_jit_typed_path_interpolate" => jet_jit_typed_path_interpolate: sig_binary;
     typed_datetime_interp: "jet_jit_typed_datetime_interpolate" => jet_jit_typed_datetime_interpolate: sig_binary;
+}
+
+#[cfg(test)]
+mod shared_simd_tests {
+    use super::simd_lanes;
+
+    #[test]
+    fn f64_binary_slice_handles_vec2_lanes() {
+        let result = simd_lanes::jet_simd_f64_binary_slice(
+            &[1.0, 2.0],
+            &[3.0, 4.0],
+            simd_lanes::JetSimdBinaryOp::Add,
+        );
+        assert_eq!(result, Some(vec![4.0, 6.0]));
+    }
+
+    #[test]
+    fn f64_binary_slice_handles_vec3_lanes() {
+        let result = simd_lanes::jet_simd_f64_binary_slice(
+            &[1.0, 2.0, 3.0],
+            &[4.0, 5.0, 6.0],
+            simd_lanes::JetSimdBinaryOp::Add,
+        );
+        assert_eq!(result, Some(vec![5.0, 7.0, 9.0]));
+    }
+
+    #[test]
+    fn f32_binary_slice_handles_vec3_lanes() {
+        let result = simd_lanes::jet_simd_f32_binary_slice(
+            &[1.0, 2.0, 3.0],
+            &[4.0, 5.0, 6.0],
+            simd_lanes::JetSimdBinaryOp::Add,
+        );
+        assert_eq!(result, Some(vec![5.0, 7.0, 9.0]));
+    }
 }

@@ -43,6 +43,61 @@ fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IO
             "fault injected: FS.Read",
         ));
     }
+    let root = std::path::PathBuf::from(path);
+    jet_fs_validate_walk_root(&root)
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
+    let mut out = Vec::new();
+    fn walk_dir(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        depth: i64,
+        out: &mut Vec<jet_std::WalkEntry>,
+        shown: &str,
+    ) -> Result<(), jet_std::IOError> {
+        jet_fs_validate_walk_root(dir)
+            .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error))?;
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(dir)
+            .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error))?
+        {
+            entries.push(
+                entry
+                    .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error))?,
+            );
+        }
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let child = entry.path();
+            let is_dir = entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false);
+            let relative = child
+                .strip_prefix(root)
+                .unwrap_or(&child)
+                .to_string_lossy()
+                .to_string();
+            out.push(jet_std::WalkEntry {
+                path: child.to_string_lossy().to_string(),
+                relative,
+                is_dir,
+                depth,
+            });
+            if is_dir {
+                walk_dir(root, &child, depth + 1, out, shown)?;
+            }
+        }
+        Ok(())
+    }
+    walk_dir(&root, &root, 0, &mut out, path)?;
+    Ok(out)
+}
+
+fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
     let mut out = jet_fs_walk_parallel(
         path,
         path,
@@ -58,9 +113,6 @@ fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IO
     Ok(out)
 }
 
-fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
-    jet_std_fs_walk(path)
-}
 
 fn jet_std_fs_walk_files(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {

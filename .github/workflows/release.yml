@@ -22,13 +22,13 @@ jobs:
         include:
           - os: ubuntu-latest
             label: linux-x86_64
-          - os: macos-13
+          - os: macos-15-intel
             label: macos-x86_64
           - os: windows-latest
             label: windows-x86_64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Strict JIT/AOT differential gate (#727)
         shell: bash
@@ -40,16 +40,295 @@ jobs:
 
       - name: Upload parity report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-jit-aot-parity-${{ matrix.label }}-${{ github.sha }}
           path: jit-aot-parity-report/
           retention-days: 30
           if-no-files-found: error
 
+  compiled-workload:
+    name: Compiled workload gate (${{ matrix.label }})
+    needs: jit-aot-parity
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+            platform: linux
+            build: nix
+          - os: macos-15-intel
+            label: macos-x86_64
+            platform: macos
+            build: nix
+          - os: windows-latest
+            label: windows-x86_64
+            platform: windows
+            build: native
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install Nix
+        if: matrix.build == 'nix'
+        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Pin compiled-workload cross Rust on Linux
+        if: matrix.platform == 'linux'
+        uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install compiled-workload cross compiler on Linux
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-aarch64-linux-gnu
+
+      - name: Pin compiled-workload Node on Windows
+        if: matrix.build == 'native'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.2
+
+      - name: Pin compiled-workload Go on Windows
+        if: matrix.build == 'native'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: 1.26.5
+
+      - name: Pin compiled-workload Rust on Windows
+        if: matrix.build == 'native'
+        uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
+
+      - name: Pin compiled-workload Zig on Windows
+        if: matrix.build == 'native'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.16.0
+
+      - name: Pin compiled-workload Clang on Windows
+        if: matrix.build == 'native'
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0
+        with:
+          version: 21.1.8
+
+
+      - name: Build optimized compiled-workload compiler (Unix)
+        if: matrix.build == 'nix'
+        shell: bash
+        env:
+          JET_COMPILED_WORKLOAD_JET_BIN: ${{ github.workspace }}/target/release/jet
+          JET_COMPILED_WORKLOAD_PEER_LAUNCHER: ${{ runner.temp }}/compiled-workload-peer-launcher
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            toolchain_bin="$HOME/.rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin"
+            export RUSTC="$toolchain_bin/rustc"
+            export RUSTC_LINKER_CROSS=aarch64-linux-gnu-gcc
+            export CXX_CROSS=aarch64-linux-gnu-g++
+            run_full() {
+              # shellcheck disable=SC2016
+              nix develop .#full -c bash -c \
+                'export PATH="$1:$PATH"; shift; exec "$@"' bash "$toolchain_bin" "$@"
+            }
+          else
+            run_full() {
+              nix develop .#full -c "$@"
+            }
+          fi
+          run_full rustc --edition=2021 -O tools/ci/compiled-workload-peer-launcher.rs \
+            -o "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER"
+          test -x "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER"
+          run_full "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER" --contract
+          run_full cargo build --release --locked --bin jet
+          test -x "$JET_COMPILED_WORKLOAD_JET_BIN"
+
+      - name: Build optimized compiled-workload compiler (Windows)
+        if: matrix.build == 'native'
+        shell: bash
+        env:
+          CXX: clang++
+          JET_COMPILED_WORKLOAD_JET_BIN: ${{ github.workspace }}/target/release/jet.exe
+          JET_COMPILED_WORKLOAD_PEER_LAUNCHER: ${{ runner.temp }}/compiled-workload-peer-launcher.exe
+        run: |
+          set -euo pipefail
+          rustc --edition=2021 -O tools/ci/compiled-workload-peer-launcher.rs \
+            -o "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER"
+          test -x "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER"
+          "$JET_COMPILED_WORKLOAD_PEER_LAUNCHER" --contract
+          cargo build --release --locked --bin jet
+          test -x "$JET_COMPILED_WORKLOAD_JET_BIN"
+
+      - name: Download immutable reviewed compiled-workload bundle (Unix)
+        if: matrix.build == 'nix'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_name="compiled-workload-reviewed-${{ matrix.label }}-${{ github.sha }}"
+          artifact_response="$(gh api --paginate --slurp \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100")"
+          artifact_ids="$(
+            jq -r --arg name "$artifact_name" --arg sha "$GITHUB_SHA" '
+              [.[] | .artifacts[] |
+                select(.name == $name and .expired == false and .workflow_run.head_sha == $sha)] |
+              .[].id
+            ' <<<"$artifact_response"
+          )"
+          artifact_count="$(printf '%s\n' "$artifact_ids" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+          test "$artifact_count" -eq 1 || {
+            echo "expected exactly one unexpired reviewed artifact for ${artifact_name}" >&2
+            exit 1
+          }
+          artifact_id="$(printf '%s\n' "$artifact_ids" | sed -n '1p')"
+          bundle="$RUNNER_TEMP/compiled-workload-reviewed"
+          archive="$RUNNER_TEMP/${artifact_name}.zip"
+          rm -rf "$bundle"
+          mkdir -p "$bundle"
+          gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            >"$archive"
+          unzip -q "$archive" -d "$bundle"
+          file_count="$(find "$bundle" -type f | wc -l | tr -d '[:space:]')"
+          test "$file_count" -eq 11
+          for file in identity.tsv samples.tsv statistics.tsv outcomes.tsv measurements.tsv tiers.tsv receipts.tsv tier_receipts.tsv peer_coverage.tsv peer_measurements.tsv review.tsv; do
+            test -f "$bundle/$file"
+          done
+          rm -rf compiled-workload-report
+          mkdir -p compiled-workload-report
+          cp "$bundle"/*.tsv compiled-workload-report/
+
+      - name: Download immutable reviewed compiled-workload bundle (Windows)
+        if: matrix.build == 'native'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_name="compiled-workload-reviewed-${{ matrix.label }}-${{ github.sha }}"
+          artifact_response="$(gh api --paginate --slurp \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100")"
+          artifact_ids="$(
+            jq -r --arg name "$artifact_name" --arg sha "$GITHUB_SHA" '
+              [.[] | .artifacts[] |
+                select(.name == $name and .expired == false and .workflow_run.head_sha == $sha)] |
+              .[].id
+            ' <<<"$artifact_response"
+          )"
+          artifact_count="$(printf '%s\n' "$artifact_ids" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+          test "$artifact_count" -eq 1 || {
+            echo "expected exactly one unexpired reviewed artifact for ${artifact_name}" >&2
+            exit 1
+          }
+          artifact_id="$(printf '%s\n' "$artifact_ids" | sed -n '1p')"
+          bundle="$RUNNER_TEMP/compiled-workload-reviewed"
+          archive="$RUNNER_TEMP/${artifact_name}.zip"
+          rm -rf "$bundle"
+          mkdir -p "$bundle"
+          gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            >"$archive"
+          unzip -q "$archive" -d "$bundle"
+          file_count="$(find "$bundle" -type f | wc -l | tr -d '[:space:]')"
+          test "$file_count" -eq 11
+          for file in identity.tsv samples.tsv statistics.tsv outcomes.tsv measurements.tsv tiers.tsv receipts.tsv tier_receipts.tsv peer_coverage.tsv peer_measurements.tsv review.tsv; do
+            test -f "$bundle/$file"
+          done
+          rm -rf compiled-workload-report
+          mkdir -p compiled-workload-report
+          cp "$bundle"/*.tsv compiled-workload-report/
+
+      - name: Validate reviewed compiled-workload report and compiler (Unix)
+        if: matrix.build == 'nix'
+        shell: bash
+        env:
+          JET_COMPILED_WORKLOAD_JET_BIN: ${{ github.workspace }}/target/release/jet
+        run: |
+          set -euo pipefail
+          report=compiled-workload-report
+          reviewed_hash="$(node -e 'const fs=require("node:fs"); const row=fs.readFileSync(process.argv[1],"utf8").split(/\r?\n/).find(line => line.split("\t")[1] === "jet_binary_sha256"); if (!row) process.exit(1); process.stdout.write(row.split("\t")[2] || "");' "$report/identity.tsv")"
+          local_hash="$(node -e 'const fs=require("node:fs"); const crypto=require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$JET_COMPILED_WORKLOAD_JET_BIN")"
+          [[ "$reviewed_hash" =~ ^[0-9a-f]{64}$ ]]
+          test "$reviewed_hash" = "$local_hash"
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            toolchain_bin="$HOME/.rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin"
+            run_full() {
+              # shellcheck disable=SC2016
+              nix develop .#full -c bash -c \
+                'export PATH="$1:$PATH"; shift; exec "$@"' bash "$toolchain_bin" "$@"
+            }
+          else
+            run_full() {
+              nix develop .#full -c "$@"
+            }
+          fi
+          run_full env JET_COMPILED_WORKLOAD_JET_BIN="$JET_COMPILED_WORKLOAD_JET_BIN" \
+            bash tools/ci/compiled-workload-gate.sh --check "$report"
+
+      - name: Validate reviewed compiled-workload report and compiler (Windows)
+        if: matrix.build == 'native'
+        shell: bash
+        env:
+          JET_COMPILED_WORKLOAD_JET_BIN: ${{ github.workspace }}/target/release/jet.exe
+        run: |
+          set -euo pipefail
+          report=compiled-workload-report
+          reviewed_hash="$(node -e 'const fs=require("node:fs"); const row=fs.readFileSync(process.argv[1],"utf8").split(/\r?\n/).find(line => line.split("\t")[1] === "jet_binary_sha256"); if (!row) process.exit(1); process.stdout.write(row.split("\t")[2] || "");' "$report/identity.tsv")"
+          local_hash="$(node -e 'const fs=require("node:fs"); const crypto=require("node:crypto"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$JET_COMPILED_WORKLOAD_JET_BIN")"
+          [[ "$reviewed_hash" =~ ^[0-9a-f]{64}$ ]]
+          test "$reviewed_hash" = "$local_hash"
+          bash tools/ci/compiled-workload-gate.sh --check "$report"
+
+      - name: Upload reviewed compiled-workload report (Unix)
+        if: ${{ always() && matrix.build == 'nix' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-compiled-workload-${{ matrix.label }}-${{ github.sha }}
+          path: compiled-workload-report/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload reviewed compiled-workload report (Windows)
+        if: ${{ always() && matrix.build == 'native' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-compiled-workload-${{ matrix.label }}-${{ github.sha }}
+          path: compiled-workload-report/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload exact compiled-workload compiler (Unix)
+        if: ${{ success() && matrix.build == 'nix' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-compiled-workload-jet-${{ matrix.label }}-${{ github.sha }}
+          path: target/release/jet
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload exact compiled-workload compiler (Windows)
+        if: ${{ success() && matrix.build == 'native' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-compiled-workload-jet-${{ matrix.label }}-${{ github.sha }}
+          path: target/release/jet.exe
+          retention-days: 30
+          if-no-files-found: error
+
   build:
     name: Build (${{ matrix.label }})
-    needs: jit-aot-parity
+    needs: [jit-aot-parity, compiled-workload]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -61,7 +340,7 @@ jobs:
             label: linux-x86_64
             target: x86_64-unknown-linux-gnu
             build: nix
-          - os: macos-13
+          - os: macos-15-intel
             artifact: jet-macos-x86_64
             label: macos-x86_64
             target: x86_64-apple-darwin
@@ -73,48 +352,62 @@ jobs:
             build: native
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Install Nix
         if: matrix.build == 'nix'
-        uses: cachix/install-nix-action@v27
+        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Build jet
-        if: matrix.build == 'nix'
-        run: nix build .#jet
+      - name: Download exact compiled-workload compiler
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-compiled-workload-jet-${{ matrix.label }}-${{ github.sha }}
+          path: release-compiled-workload-jet
 
-      - name: Build jet on Windows
+      - name: Build release companion binaries (Unix)
+        if: matrix.build == 'nix'
+        run: nix develop .#full -c cargo build --release --locked --bin jetpack --bin jet-cc --bin jet-cxx
+
+      - name: Build release companion binaries (Windows)
         if: matrix.build == 'native'
         shell: bash
-        run: cargo build --release --locked --bin jet --bin jetpack --bin jet-cc --bin jet-cxx
+        run: cargo build --release --locked --bin jetpack --bin jet-cc --bin jet-cxx
 
       - name: Package artifact
         shell: bash
         run: |
+          set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          if [ "${{ matrix.build }}" = native ]; then
-            mv target/release/jet-cxx.exe target/release/jet-c++.exe
-          fi
           mkdir -p dist/package
-          if [ "${{ matrix.build }}" = nix ]; then
-            binary="result/bin/jet"
-            cp result/bin/jet result/bin/jetpack result/bin/jet-cc result/bin/jet-c++ dist/package/
+          if [ "${{ matrix.build }}" = native ]; then
+            jet_bin="release-compiled-workload-jet/jet.exe"
+            jetpack_bin="target/release/jetpack.exe"
+            jetcc_bin="target/release/jet-cc.exe"
+            jetcxx_bin="target/release/jet-c++.exe"
+            mv target/release/jet-cxx.exe "$jetcxx_bin"
           else
-            binary="target/release/jet.exe"
-            cp target/release/jet.exe target/release/jetpack.exe target/release/jet-cc.exe target/release/jet-c++.exe dist/package/
+            jet_bin="release-compiled-workload-jet/jet"
+            jetpack_bin="target/release/jetpack"
+            jetcc_bin="target/release/jet-cc"
+            jetcxx_bin="target/release/jet-c++"
+            mv target/release/jet-cxx "$jetcxx_bin"
           fi
+          for binary in "$jet_bin" "$jetpack_bin" "$jetcc_bin" "$jetcxx_bin"; do
+            test -f "$binary"
+          done
+          cp "$jet_bin" "$jetpack_bin" "$jetcc_bin" "$jetcxx_bin" dist/package/
           capsule_bytes="$(wc -c < tools/agent-eval/jet-context-capsule.md)"
           test "$capsule_bytes" -le 32768
           cp tools/agent-eval/jet-context-capsule.md dist/package/
           tar -C dist/package -czf "dist/${{ matrix.artifact }}.tar.gz" .
           mkdir -p dist/toolchain
-          cp "$binary" "dist/toolchain/jet-${version}-${{ matrix.target }}"
+          cp "$jet_bin" "dist/toolchain/jet-${version}-${{ matrix.target }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ matrix.artifact }}
           path: dist/
@@ -127,10 +420,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Download native toolchain inputs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: dist
           pattern: jet-*
@@ -153,31 +446,31 @@ jobs:
           tar -C channel-staging -czf "dist/channel/toolchain-channel-requests-${version}.tar.gz" .
 
       - name: Upload unsigned channel requests
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: toolchain-channel-requests
           path: dist/channel/toolchain-channel-requests-*.tar.gz
 
   release:
     name: Publish GitHub release
-    needs: [jit-aot-parity, build, prepare-channel]
+    needs: [jit-aot-parity, compiled-workload, build, prepare-channel]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: dist
           pattern: jet-*
           merge-multiple: true
 
       - name: Download unsigned channel requests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: toolchain-channel-requests
           path: dist/channel
