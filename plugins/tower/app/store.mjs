@@ -1944,8 +1944,9 @@ export function plainLanguageGaps(p) {
 
 // The reading surface: the short owner-facing layer the UI shows first. Caps are
 // owner law (2026-09-02): one question, one plain lesson, a current / proposed /
-// in-the-wild code trio, one to three gains and losses per option, why-not for
-// every losing option, and no project jargon.
+// in-the-wild code trio, real gains and losses per option (never padded), why-not
+// for every losing option, no project jargon, and the recommended option is
+// always A, listed first, so it sits next to the current and in-the-wild code.
 const SURFACE_GIST_WORDS = 22;
 const SURFACE_LESSON_WORDS = 70;
 const SURFACE_WHY_WORDS = 40;
@@ -1955,7 +1956,7 @@ const SURFACE_TOTAL_WORDS = 430;
 const SURFACE_CODE_LINES = 14;
 const SURFACE_JARGON = /\b(ratchet|seam|facet|substrate|tier[- ]parity|ring [01]|RINGS)\b/i;
 
-export function surfaceGaps(p) {
+export function surfaceGaps(p, { requireRecFirst = false } = {}) {
   const s = p.surface;
   if (!plainObject(s)) return ['surface (object)'];
   const gaps = [];
@@ -1988,7 +1989,7 @@ export function surfaceGaps(p) {
     need(`options[${key}].gist`, o?.gist);
     for (const list of ['gains', 'losses']) {
       const items = Array.isArray(o?.[list]) ? o[list] : [];
-      if (items.length < 1 || items.length > 3) gaps.push(`surface.options[${key}].${list} (need 1-3 items)`);
+      if (items.length > 3 || (list === 'gains' && items.length < 1)) gaps.push(`surface.options[${key}].${list} (${list === 'gains' ? 'need 1-3 real items' : 'at most 3 real items'})`);
       items.forEach((item, i) => {
         need(`options[${key}].${list}[${i + 1}]`, item);
         if (count(item) > SURFACE_BULLET_WORDS) gaps.push(`surface.options[${key}].${list}[${i + 1}] has ${count(item)} words (max ${SURFACE_BULLET_WORDS})`);
@@ -2000,10 +2001,13 @@ export function surfaceGaps(p) {
   }
   const r = plainObject(s.recommendation) ? s.recommendation : {};
   if (r.rec !== p.rec) gaps.push('surface.recommendation.rec (must equal rec)');
+  // New ballots only (owner, 2026-09-02): the recommended option is A and listed first so it sits next to the current and in-the-wild code. Ballots already open keep their letters.
+  if (requireRecFirst && optionKeys.length && (optionKeys[0] !== 'A' || p.rec !== 'A')) gaps.push('rec (new ballots list the recommended option first, as A)');
   need('recommendation.why', r.why, SURFACE_WHY_WORDS);
   for (const list of ['gains', 'losses']) {
     const items = Array.isArray(r[list]) ? r[list] : [];
-    if (!items.length) gaps.push(`surface.recommendation.${list}`);
+    if (list === 'gains' && !items.length) gaps.push('surface.recommendation.gains');
+    if (items.length > 3) gaps.push(`surface.recommendation.${list} (at most 3 real items)`);
     items.forEach((item, i) => {
       need(`recommendation.${list}[${i + 1}]`, item);
       if (count(item) > SURFACE_BULLET_WORDS) gaps.push(`surface.recommendation.${list}[${i + 1}] has ${count(item)} words (max ${SURFACE_BULLET_WORDS})`);
@@ -2029,9 +2033,9 @@ export function surfaceGaps(p) {
   return gaps;
 }
 
-export function ballotGaps(p, { requireBeginner = Number(p.ballotProcessVersion || 0) >= BEGINNER_PROCESS_VERSION, requireSurface = Number(p.ballotProcessVersion || 0) >= BALLOT_PROCESS_VERSION } = {}) {
+export function ballotGaps(p, { requireBeginner = Number(p.ballotProcessVersion || 0) >= BEGINNER_PROCESS_VERSION, requireSurface = Number(p.ballotProcessVersion || 0) >= BALLOT_PROCESS_VERSION, requireRecFirst = false } = {}) {
   const missing = [];
-  if (p.surface != null || requireSurface) missing.push(...surfaceGaps(p));
+  if (p.surface != null || requireSurface) missing.push(...surfaceGaps(p, { requireRecFirst }));
   const ballotMode = p.ballotMode || 'full';
   if (!['full', 'short'].includes(ballotMode)) missing.push('ballotMode (full or short)');
   if (!p.gist || !String(p.gist).trim()) missing.push('gist');
@@ -2112,7 +2116,7 @@ export function addDecision(s, p) {
     fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
   const draft = !!p.draft;
   if (!systemAcceptance && p.group !== 'acceptance') {
-    const gaps = ballotGaps(p, { requireBeginner: true, requireSurface: true });
+    const gaps = ballotGaps(p, { requireBeginner: true, requireSurface: true, requireRecFirst: true });
     const metadataGaps = (p.ballotMode || 'full') === 'full'
       ? [...beginnerMetadataGaps(p), ...dissentMetadataGaps(p)]
       : [];

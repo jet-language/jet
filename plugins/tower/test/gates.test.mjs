@@ -68,6 +68,17 @@ test('addDecision requires a reading surface and names its gaps', () => {
   assert.equal(result.surface.gist, 'Which option should Jet ship?');
 });
 
+test('new ballots list the recommended option first as A; open ballots keep their letters', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const recB = ballot({ rec: 'B', recommendation: { why: 'B wins here.', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }], tradeoff: 'B adds one visible step.' } });
+  recB.surface.recommendation = { ...recB.surface.recommendation, rec: 'B', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }] };
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Rec B', ...recB })),
+    (e) => e.code === 'E_BALLOT' && /recommended option first, as A/.test(e.message));
+  assert.deepEqual(db.ballotGaps({ ...recB, ballotProcessVersion: 3 }, { requireBeginner: true, requireSurface: true }), [], 'edits of an open ballot do not enforce A-first');
+});
+
 test('surface option keys and rec must match the ballot; drafts may omit it; older ballots are not forced', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));

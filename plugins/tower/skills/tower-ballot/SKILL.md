@@ -61,11 +61,23 @@ rest can be hidden." Tower refuses a ballot without a valid `surface`.
   (the real error or the workaround). `trio.wild` — `{lang, note, code}`: the
   best-in-the-wild tool doing the same job, real API, cited in a code comment.
 - **`options[]`** — one per ballot option, same keys and order:
-  `{key, name, gist, gains[1-3], losses[1-3], proposed: {code}}`. `proposed.code`
+  `{key, name, gist, gains[1-3], losses[0-3], proposed: {code}}`. `proposed.code`
   is the same workload as `trio.current` and `trio.wild`, at most 14 lines.
+  **The recommended option is `A` and listed first** in every new ballot, so
+  it sits next to the current and in-the-wild code (owner, 2026-09-02; Tower
+  refuses a new ballot that recommends anything else; ballots already open
+  keep their letters). Gains and losses are the reality only: each bullet is a
+  concrete fact the long form or the code supports. Never pad a list; an
+  option with no known loss lists none.
 - **`recommendation`** — `{rec, why, gains[], losses[], whyNot[{key, reason}], tradeoff}`.
   `rec` equals the ballot `rec`; `why` under 40 words; `whyNot` names every
   losing option.
+
+How the owner sees it (Tower Focus Mode and the html skill's ballot page):
+the question, the lesson, then the code stacked full width with no sideways
+scrolling: `Current`, `In the wild` (side by side only when both fit), then
+the options with `A` first, each the same shape: name, gist, gains and losses,
+proposed code. Then the recommendation and, folded, the long form.
 
 Caps Tower enforces: sentences under 24 words, bullets under 14 words, the
 whole surface under 430 words of prose, and no project jargon ("ratchet",

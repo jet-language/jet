@@ -121,21 +121,27 @@ Name the subject, its audience, and the page's single job in one sentence each. 
 
 For reports, the hero is fixed by the shape above: thesis plus journey or findings. For tools, open with the most characteristic thing in the subject's world: the one screen, diff, trace, or interactive moment the reader must see first. The header is: a legend line (source and date), the placard title, the ignition line, and the thesis.
 
-### Palette: jet black and signal red
+### Palette: the Tower board's own
 
-Named in `theme.css`; use the tokens, never raw hex in page rules.
+Named in `theme.css`; use the tokens, never raw hex in page rules. The values are shared with `plugins/tower/app/ui/tower.css` so reports and the board read as one product.
 
 | Token | Value | Role |
 |---|---|---|
-| `--jet` | `#060606` | page background: the material, not charcoal |
-| `--soot` / `--ash` | `#111111` / `#1A1A1A` | panels / raised cards, code, inputs |
-| `--seam` | `#262626` | borders and rules; no drop shadows |
-| `--bone` / `--bone-dim` | `#EFEAE2` / `#BDB7AE` | primary / secondary text, warm, never pure white |
-| `--smoke` | `#8E8A83` | captions, legends, muted values |
-| `--ember` | `#FF3D2E` | the one saturated color: emphasis, live, critical, links, the ignition line |
-| `--oxblood` | `#6E1B14` | deep red surfaces: selected rows, attention fills, low-emphasis chart series |
+| `--jet` | `#060608` | page background |
+| `--soot` / `--ash` | `#0E0E12` / `#16161C` | panels / raised cards, code, inputs |
+| `--seam` / `--seam-hi` | `#232330` / `#343444` | borders and rules; hover borders; no drop shadows |
+| `--bone` / `--bone-dim` | `#F4F3F5` / `#C9C7D1` | primary / secondary text |
+| `--smoke` | `#9D9CA8` | captions, legends, muted values |
+| `--ember` | `#FF2E4D` | signal red: emphasis, live, critical, links, the ignition line, keywords |
+| `--oxblood` | `#B3122D` | deep red surfaces: selected rows, attention fills |
+| `--ok` / `--amber` | `#43C78C` / `#DFA14F` | green for healthy, added, strings; amber for caution, numbers |
+| `--cyan` / `--blue` / `--frost` | `#45B8CA` / `#6A8EF2` / `#8D92C9` | types and in-the-wild chips; calls; low-emphasis series |
 
-Status logic is an instrument panel: quiet by default (`.status`, bone outline), `attention` (oxblood fill), `critical` (ember fill). Healthy is the absence of red; there is no green. Diffs: removed is oxblood, added is a bone tint. Chart series in order: ember, bone, smoke, oxblood; grid lines are seam.
+Accents mean something or they are not used: green is healthy or added, amber is caution, cyan is a type or an outside reference, blue is a call. Status chips: `.status` quiet outline, `attention` (oxblood fill), `critical` (ember fill), `ok` (green outline), `wild` (cyan outline). Diffs: removed is oxblood tint, added is a green tint. Chart series in order: ember, bone, cyan, amber, frost; grid lines are seam.
+
+### Code: full width, colored, never scrolled sideways
+
+Every code block is highlighted with `hl.js` (paste it inside the single `<script>`; it is the same tokenizer Tower uses, classes `hl-k` keyword, `hl-s` string, `hl-n` number, `hl-c` comment, `hl-f` call, `hl-t` type). `pre` takes the full width of its container and wraps (`white-space: pre-wrap`); never `overflow-x: auto`. Two code blocks sit side by side only when neither has a line over 72 characters and the container is at least 900px wide; otherwise stack them. The checker enforces highlighting and wrapping.
 
 ### Typography carries the personality
 
@@ -260,6 +266,12 @@ Every asset is a complete page in this identity. Read the closest one for layout
 | 22 | Interactive table | `assets/22-interactive-table.html` | Search box + filter buttons. Sortable headers with `aria-sort`. Row hover. Vanilla JS search, filter, sort. |
 | 23 | System architecture | `assets/23-system-architecture.html` | Layered node diagram (clients → gateway → services → data → external). SVG connectors. Legend bar. |
 | 24 | Timeline / Gantt | `assets/24-timeline-gantt.html` | CSS grid gantt by week. Group headers. Task bars with progress. Milestone marks. "Today" highlight. |
+
+### Tower
+
+| # | Use case | File | Pattern summary |
+|---|---|---|---|
+| 25 | Ballot reading surface | `docs/proposals/prototypes/ballot-surface.html` | One decision, the owner-ruled order: question, lesson, Current and In the wild (side by side only when both fit), every option in one shape with recommended first and full-width highlighted code, recommendation panel, folded long form. Tower Focus Mode renders the same layout. |
 
 `assets/index.html` is the gallery of all 24.
 
