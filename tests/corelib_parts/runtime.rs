@@ -889,7 +889,8 @@ fn game_headless_scene_replay_transcript_is_deterministic() {
     let (code, stdout, stderr) = build_and_run(
         &dir,
         "game_headless",
-        r#"
+        {
+            let source = r#"
 use core.game as game
 
 module perf.game {
@@ -930,7 +931,10 @@ fn run() {
     replay :: game.Replay.record("runs/demo.jetreplay")
     print(game.run(scene, replay: replay))
 }
-"#,
+"#;
+            fs::write(dir.join("game_headless_dev.jet"), source).unwrap();
+            source
+        },
         &[],
         None,
     );
@@ -940,6 +944,94 @@ fn run() {
         "query 1\nrow Position{x:0},Velocity{dx:0}\nbudget 3\nhook jump 1\nscene:arcade\nbackend:headless/none/none\nreplay:runs/demo.jetreplay\nassets:image:assets/player.png,sound:assets/jump.wav\ninput:jump=Space\ncomponents:Position,Velocity\nframe:0 input:none\nframe:1 input:jump\nframe:2 input:none\n"
     );
     assert_eq!(stderr, "");
+    let dev_path = dir.join("game_headless_dev.jet");
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: interpreted_stdout,
+            stderr: interpreted_stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "forced interpreter failed: {interpreted_stderr}");
+            assert_eq!(interpreted_stderr, "");
+            assert_eq!(interpreted_stdout, stdout, "forced interpreter output drifted");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected game fixture: {diagnostics:?}");
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_data_lazy_and_join_routes_match_aot_in_forced_interpreter() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping data evaluator parity test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_data_eval_routes_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.data as data
+
+struct LeftRow {
+    key: String
+    value: Int
+}
+
+struct RightRow {
+    key: String
+    owner: String
+}
+
+fn run() {
+    left :: [LeftRow]{LeftRow{key: "a", value: 1}, LeftRow{key: "b", value: 2}}
+    right :: [RightRow]{RightRow{key: "b", owner: "Ada"}, RightRow{key: "c", owner: "Lin"}}
+    frame :: data.lazy(data.table(left))
+    filtered :: data.lazy_filter(frame, row -> row.value > 1)
+    sorted :: data.lazy_sort_by(filtered, row -> row.key)
+    collected :: data.collect(sorted) ?? panic("collect")
+    print(data.count(data.rows(collected)))
+    print(data.plan(sorted)[2])
+    joined :: data.inner_join(left, right, row -> row.key, row -> row.key) ?? panic("join")
+    print(data.count(joined))
+    lefted :: data.left_join(left, right, row -> row.key, row -> row.key) ?? panic("left")
+    print(data.count(lefted))
+    loop pair in lefted {
+        if pair.right == {
+            Val(_) -> print("hit")
+            None -> print("miss")
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "data_eval_routes", source, &[], None);
+    assert_eq!(code, 0, "AOT data evaluator fixture failed: {stderr}");
+    assert_eq!(stderr, "");
+    assert_eq!(stdout, "1\nsort_by\n1\n2\nmiss\nhit\n");
+
+    let dev_path = dir.join("data_eval_routes.jet");
+    fs::write(&dev_path, source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: interpreted_stdout,
+            stderr: interpreted_stderr,
+            exit_code,
+        } => {
+            assert_eq!(
+                exit_code, 0,
+                "forced interpreter failed: {interpreted_stderr}"
+            );
+            assert_eq!(interpreted_stderr, "");
+            assert_eq!(interpreted_stdout, stdout, "forced interpreter output drifted");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected data fixture: {diagnostics:?}");
+        }
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 

@@ -5551,6 +5551,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         if let Some(diagnostic) = self.comptime_core_fold_diagnostic(module, method, source_span) {
             return Err(diagnostic);
         }
+        if module == "core.game" && method == "run" {
+            return self.eval_core_game_call(args, scope);
+        }
         if module == "core.data" {
             return self.eval_core_data_call(method, args, &expr.ty, scope);
         }

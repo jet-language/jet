@@ -56,6 +56,180 @@ fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
             .collect(),
     }
 }
+fn game_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
+    ct_struct(type_name, fields)
+}
+
+#[allow(dead_code)]
+mod game_kernel {
+    trait JetShow {
+        fn jet_show(&self) -> String;
+    }
+
+    trait JetDebug {
+        fn jet_debug(&self) -> String;
+    }
+
+    include!("../../../Prelude/CoreLib/Top/Game.rs");
+
+    pub(crate) fn run_erased(
+        name: String,
+        assets: Vec<(String, String)>,
+        bindings: Vec<(String, String)>,
+        components: Vec<String>,
+        replay_path: Option<String>,
+        backend: Option<(String, String, String, Option<i64>)>,
+        callback_count: usize,
+    ) -> String {
+        let mut scene = jet_game_scene_new(&name);
+        for (kind, path) in assets {
+            match kind.as_str() {
+                "image" => {
+                    let _ = jet_game_assets_image(&scene.assets, &path);
+                }
+                "sound" => {
+                    let _ = jet_game_assets_sound(&scene.assets, &path);
+                }
+                _ => {}
+            }
+        }
+        for (action, key) in bindings {
+            jet_game_input_bind(&scene.input, &action, &key);
+        }
+        for component in components {
+            jet_game_scene_component(&mut scene, &component);
+        }
+        for _ in 0..callback_count {
+            jet_game_scene_on_frame(&mut scene, Box::new(|_| {}));
+        }
+        let replay = replay_path.map(|path| jet_game_replay_record(&path));
+        let backend = backend.map(|(renderer, audio, editor, frame_budget)| GameBackend {
+            renderer,
+            audio,
+            editor,
+            frame_budget,
+        });
+        jet_game_run(&mut scene, replay.as_ref(), backend.as_ref())
+    }
+}
+
+fn game_value(value: &CtValue) -> Option<&CtValue> {
+    match value {
+        CtValue::Present(inner) => game_value(inner),
+        CtValue::Failed(_) => None,
+        _ => Some(value),
+    }
+}
+fn game_optional_value(value: Option<&CtValue>) -> Option<&CtValue> {
+    let value = value?;
+    match value {
+        CtValue::Unit | CtValue::Failed(CtReport::Clean(_)) => None,
+        _ => game_value(value),
+    }
+}
+
+fn game_field<'a>(value: &'a CtValue, name: &str) -> Option<&'a CtValue> {
+    match game_value(value)? {
+        CtValue::Struct { fields, .. } => fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then_some(value)),
+        _ => None,
+    }
+}
+
+fn game_string_field(value: &CtValue, name: &str, span: Span) -> Result<String, Diagnostic> {
+    match game_field(value, name) {
+        Some(CtValue::Str(value)) => Ok(value.clone()),
+        _ => Err(unsupported(&format!("game value field `{name}`"), span)),
+    }
+}
+
+fn game_frame(index: i64, pressed: &[String]) -> CtValue {
+    let pressed = CtValue::List(pressed.iter().cloned().map(CtValue::Str).collect());
+    game_struct(
+        "GameFrame",
+        vec![
+            ("index", CtValue::Int(index)),
+            ("user_index", CtValue::Int(index)),
+            (
+                "input",
+                game_struct(
+                    "GameInputSnapshot",
+                    vec![("pressed", pressed.clone())],
+                ),
+            ),
+            (
+                "user_input",
+                game_struct("GameInputSnapshot", vec![("pressed", pressed)]),
+            ),
+        ],
+    )
+}
+
+fn game_backend_parts(
+    value: &CtValue,
+    span: Span,
+) -> Result<(String, String, String, Option<i64>), Diagnostic> {
+    let renderer = game_string_field(value, "renderer", span)?;
+    let audio = game_string_field(value, "audio", span)?;
+    let editor = game_string_field(value, "editor", span)?;
+    let frame_budget = match game_field(value, "frame_budget") {
+        Some(CtValue::Int(value)) => Some(*value),
+        Some(_) => return Err(unsupported("GameBackend.frame_budget", span)),
+        None => None,
+    };
+    Ok((renderer, audio, editor, frame_budget))
+}
+
+fn game_assets(value: &CtValue, span: Span) -> Result<Vec<(String, String)>, Diagnostic> {
+    let Some(CtValue::List(values)) = game_field(value, "assets") else {
+        return Err(unsupported("GameAssets.assets", span));
+    };
+    values
+        .iter()
+        .map(|value| {
+            Ok((
+                game_string_field(value, "kind", span)?,
+                game_string_field(value, "path", span)?,
+            ))
+        })
+        .collect()
+}
+
+fn game_bindings(value: &CtValue, span: Span) -> Result<Vec<(String, String)>, Diagnostic> {
+    let Some(CtValue::List(values)) = game_field(value, "bindings") else {
+        return Err(unsupported("GameInputMap.bindings", span));
+    };
+    values
+        .iter()
+        .map(|value| {
+            Ok((
+                game_string_field(value, "action", span)?,
+                game_string_field(value, "key", span)?,
+            ))
+        })
+        .collect()
+}
+
+fn game_components(value: &CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
+    let Some(CtValue::List(values)) = game_field(value, "components") else {
+        return Err(unsupported("GameScene.components", span));
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Str(value) => Ok(value.clone()),
+            _ => Err(unsupported("GameScene component", span)),
+        })
+        .collect()
+}
+
+fn data_join_key(value: CtValue, span: Span) -> Result<String, Diagnostic> {
+    match value {
+        CtValue::Str(value) => Ok(value),
+        _ => Err(unsupported("core.data join key", span)),
+    }
+}
 
 impl<'a, 'debug> EvalCtx<'a, 'debug> {
     /// Evaluate `core.data.*` without pre-evaluating lambda arguments.
@@ -669,6 +843,112 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 let value = CtValue::List(keyed.into_iter().map(|(_, row)| row).collect());
                 Ok(if checked { ok(value) } else { value })
             }
+            "inner_join" | "left_join" => {
+                let operation = method;
+                let left = match args.first() {
+                    Some(arg) => match self.eval_expr(arg, scope)? {
+                        CtValue::List(rows) => rows,
+                        _ => {
+                            return Err(unsupported(
+                                &format!("`data.{operation}()` needs left rows"),
+                                span,
+                            ));
+                        }
+                    },
+                    None => {
+                        return Err(unsupported(
+                            &format!("`data.{operation}()` needs left rows"),
+                            span,
+                        ));
+                    }
+                };
+                let right = match args.get(1) {
+                    Some(arg) => match self.eval_expr(arg, scope)? {
+                        CtValue::List(rows) => rows,
+                        _ => {
+                            return Err(unsupported(
+                                &format!("`data.{operation}()` needs right rows"),
+                                span,
+                            ));
+                        }
+                    },
+                    None => {
+                        return Err(unsupported(
+                            &format!("`data.{operation}()` needs right rows"),
+                            span,
+                        ));
+                    }
+                };
+                let left_key = args.get(2).ok_or_else(|| {
+                    unsupported(
+                        &format!("`data.{operation}()` needs a left key"),
+                        span,
+                    )
+                })?;
+                let right_key = args.get(3).ok_or_else(|| {
+                    unsupported(
+                        &format!("`data.{operation}()` needs a right key"),
+                        span,
+                    )
+                })?;
+                let mut right_callable = None;
+                let mut right_rows = BTreeMap::<String, Vec<CtValue>>::new();
+                for row in right {
+                    let key = self.apply_callable_once(
+                        right_key,
+                        &mut right_callable,
+                        vec![row.clone()],
+                        scope,
+                    )?;
+                    right_rows
+                        .entry(data_join_key(key, span)?)
+                        .or_default()
+                        .push(row);
+                }
+                let mut left_callable = None;
+                let mut joined = Vec::new();
+                for left_row in left {
+                    let key = self.apply_callable_once(
+                        left_key,
+                        &mut left_callable,
+                        vec![left_row.clone()],
+                        scope,
+                    )?;
+                    match right_rows.get(&data_join_key(key, span)?) {
+                        Some(matches) => {
+                            for right_row in matches {
+                                joined.push(ct_struct(
+                                    "DataJoin",
+                                    vec![
+                                        ("left", left_row.clone()),
+                                        (
+                                            "right",
+                                            if operation == "left_join" {
+                                                CtValue::Present(Box::new(right_row.clone()))
+                                            } else {
+                                                right_row.clone()
+                                            },
+                                        ),
+                                    ],
+                                ));
+                            }
+                        }
+                        None if operation == "left_join" => joined.push(ct_struct(
+                            "DataJoin",
+                            vec![
+                                ("left", left_row),
+                                (
+                                    "right",
+                                    CtValue::absent(Type::Named("Unknown".to_string())),
+                                ),
+                            ],
+                        )),
+                        None => {}
+                    }
+                }
+                let value = CtValue::List(joined);
+                Ok(if checked { ok(value) } else { value })
+            }
             "query" => {
                 let rows = self.eval_expr(&args[0], scope)?;
                 let query = self.eval_expr(&args[1], scope)?;
@@ -735,5 +1015,86 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             self.span(),
             self.repl_mode,
         )
+    }
+}
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
+    /// Evaluate `core.game.run` by marshalling the structural evaluator
+    /// carrier into the exact Prelude game kernel used by AOT. User callbacks
+    /// remain evaluator callables, so this adapter drives their frame values
+    /// before asking the Prelude to render the canonical run result.
+    pub(super) fn eval_core_game_call(
+        &mut self,
+        args: &'a [TExpr],
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let span = self.span();
+        let values = args
+            .iter()
+            .map(|arg| self.eval_expr(arg, scope))
+            .collect::<Result<Vec<_>, _>>()?;
+        let scene = values
+            .first()
+            .and_then(game_value)
+            .ok_or_else(|| unsupported("core.game.run scene", span))?;
+        if !matches!(
+            scene,
+            CtValue::Struct { type_name, .. } if type_name == "GameScene"
+        ) {
+            return Err(unsupported("core.game.run scene", span));
+        }
+        let name = game_string_field(scene, "name", span)?;
+        let assets_value = game_field(scene, "assets")
+            .ok_or_else(|| unsupported("core.game.run scene assets", span))?;
+        let assets = game_assets(assets_value, span)?;
+        let input_value = game_field(scene, "input")
+            .ok_or_else(|| unsupported("core.game.run scene input", span))?;
+        let bindings = game_bindings(input_value, span)?;
+        let components = game_components(scene, span)?;
+        let callbacks = match game_field(scene, "callbacks") {
+            Some(CtValue::List(values)) => values.clone(),
+            _ => return Err(unsupported("core.game.run scene callbacks", span)),
+        };
+        let replay_path = game_optional_value(values.get(1))
+            .map(|value| game_string_field(value, "path", span))
+            .transpose()?;
+        let backend = game_optional_value(values.get(2))
+            .map(|value| game_backend_parts(value, span))
+            .transpose()?;
+        let frame_budget = backend
+            .as_ref()
+            .and_then(|(_, _, _, budget)| *budget)
+            .unwrap_or(3);
+        let measuring = std::env::var("JET_SCENE_PROBE")
+            .ok()
+            .is_some_and(|probe| probe == name);
+        let frame_count = if measuring {
+            120usize.saturating_add(600)
+        } else {
+            usize::try_from(frame_budget.max(0)).unwrap_or(usize::MAX)
+        };
+        for index in 0..frame_count {
+            let pressed = if index == 1 {
+                bindings
+                    .iter()
+                    .map(|(action, _)| action.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let frame = game_frame(index as i64, &pressed);
+            for callback in &callbacks {
+                self.call_callable(callback, vec![frame.clone()])?;
+                self.sync_callable_captures(callback, scope);
+            }
+        }
+        Ok(CtValue::Str(game_kernel::run_erased(
+            name,
+            assets,
+            bindings,
+            components,
+            replay_path,
+            backend,
+            callbacks.len(),
+        )))
     }
 }
