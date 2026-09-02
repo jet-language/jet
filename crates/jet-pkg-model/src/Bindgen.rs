@@ -211,8 +211,14 @@ mod tests {
                 "{} renderer probe has lexer diagnostics: {diagnostics:#?}",
                 renderer.language.root()
             );
+            let parse_ok = std::thread::Builder::new()
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || crate::Parser::parse(&tokens).is_ok())
+                .expect("generated parser thread should start")
+                .join()
+                .expect("generated parser thread should finish");
             assert!(
-                crate::Parser::parse(&tokens).is_ok(),
+                parse_ok,
                 "{} renderer probe does not parse:\n{source}",
                 renderer.language.root()
             );
@@ -229,9 +235,10 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(!response_externs.is_empty());
             for name in response_externs {
-                let marker = format!("pub fn {name}(");
+                let marker = format!("pub fn {name}");
                 let start = source
-                    .find(&marker)
+                    .find(&format!("{marker}("))
+                    .or_else(|| source.find(&format!("{marker}<")))
                     .expect("every response extern has a generated wrapper");
                 let body = &source[start..];
                 let body = body

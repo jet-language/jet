@@ -4736,6 +4736,7 @@ mod a4_envelope_tests {
                 .unwrap()
                 .as_nanos()
         ));
+        std::fs::create_dir_all(&dir).unwrap();
         let source = LockedSourceChannel {
             name: "stable".to_string(),
             channel: "stable".to_string(),

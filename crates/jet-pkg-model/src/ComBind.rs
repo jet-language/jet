@@ -877,7 +877,29 @@ fn render_c(lib: &str, s: &Schema) -> String {
             m.flags,
             m.params.len()
         ));
-        let ret=match &m.result{Kind::Unit=>"VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return;",Kind::Int=>"int64_t value=variant_int(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Float=>"double value=variant_float(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Bool=>"int64_t value=variant_bool(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Text=>"const char*value=variant_text(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Data=>"const char*value=variant_json(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Object(_)=>"int64_t value=variant_object(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"};
+        let ret = match &m.result {
+            Kind::Unit => {
+                "VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return;"
+            }
+            Kind::Int => {
+                "int64_t value=variant_int(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"
+            }
+            Kind::Float => {
+                "double value=variant_float(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"
+            }
+            Kind::Bool => {
+                "int64_t value=variant_bool(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"
+            }
+            Kind::Text => {
+                "const char*value=variant_text(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"
+            }
+            Kind::Data => {
+                "const char*value=variant_json(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"
+            }
+            Kind::Object(_) => {
+                "int64_t value=variant_object(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"
+            }
+        };
         wrappers.push_str(ret);
         wrappers
             .push_str("bad:VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));");
@@ -931,6 +953,7 @@ static int64_t variant_int(VARIANT*v){VARIANT x;if(!change(v,VT_I8,&x))return 0;
 static double variant_float(VARIANT*v){VARIANT x;if(!change(v,VT_R8,&x))return 0;double n=V_R8(&x);VariantClear(&x);return n;}
 static int64_t variant_bool(VARIANT*v){VARIANT x;if(!change(v,VT_BOOL,&x))return 0;int64_t n=V_BOOL(&x)!=VARIANT_FALSE;VariantClear(&x);return n;}
 static const char* bstr_text(BSTR b){int n=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,b,SysStringLen(b),0,0,0,0);if(n<0||n>LIMIT){failed=6;text[0]=0;return text;}WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,b,SysStringLen(b),text,n,0,0);text[n]=0;return text;}
+static const char* variant_text(VARIANT*v){VARIANT x;if(!change(v,VT_BSTR,&x)){text[0]=0;return text;}const char*value=bstr_text(V_BSTR(&x));VariantClear(&x);return value;}
 static int64_t variant_object(VARIANT*v){IUnknown*u=0;HRESULT hr;if(V_VT(v)==VT_DISPATCH&&V_DISPATCH(v))hr=IUnknown_QueryInterface((IUnknown*)V_DISPATCH(v),&IID_IUnknown,(void**)&u);else if(V_VT(v)==VT_UNKNOWN&&V_UNKNOWN(v))hr=IUnknown_QueryInterface(V_UNKNOWN(v),&IID_IUnknown,(void**)&u);else{failed=5;return 0;}if(FAILED(hr)||!u){if(u)IUnknown_Release(u);if(SUCCEEDED(hr))hr=E_NOINTERFACE;fail_hr(hr);return 0;}HRESULT apartment=CoInitializeEx(0,COINIT_APARTMENTTHREADED);if(FAILED(apartment)){IUnknown_Release(u);fail_hr(apartment);return 0;}int64_t h=store(u);IUnknown_Release(u);if(!h)CoUninitialize();return h;}
 typedef struct{char*p;size_t n;} Out;
 static int put(Out*o,const char*s,size_t n){if(o->n+n>LIMIT){failed=6;return 0;}memcpy(o->p+o->n,s,n);o->n+=n;return 1;}
@@ -1039,13 +1062,28 @@ mod tests {
     }
 
     #[cfg(not(target_os = "windows"))]
+    fn have_winegcc() -> bool {
+        match std::process::Command::new("winegcc").arg("--version").output() {
+            Ok(output) if output.status.success() => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!(
+                    "note: skipping generated_windows_sources_cross_compile_with_winegcc \
+                     (winegcc is not installed)"
+                );
+                false
+            }
+            Ok(output) => panic!(
+                "winegcc --version failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ),
+            Err(error) => panic!("winegcc probe failed: {error}"),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn generated_windows_sources_cross_compile_with_winegcc() {
-        if std::process::Command::new("winegcc")
-            .arg("--version")
-            .output()
-            .is_err()
-        {
+        if !have_winegcc() {
             return;
         }
         let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tTitle\t1\t2\ttext\n";

@@ -4285,7 +4285,7 @@ outputs: { core: .Library{ native: "yes" } }"#,
             r#"
 name: "demo"
 outputs: {
-    app: .Environment{ name: "dev", tools: ["a", "b"], services: { db: .{ enable: true, ports: [5432] } }, secrets: { token: "x" } }
+    app: Environment{ name: "dev", tools: ["a", "b"], services: { db: { enable: true, ports: [5432] } }, secrets: { token: "x" } }
 }
 "#,
             "package.jet",
@@ -4657,6 +4657,9 @@ fn run() {}
         assert_eq!(facts.semantic_digest(), file_facts.semantic_digest());
         assert_eq!(facts.name, "inline-demo");
         assert_eq!(facts.version.as_deref(), Some("1.2.3"));
-        assert_eq!(block.body(source).trim_start(), "name: \"inline-demo\"");
+        assert_eq!(
+            block.body(source).trim_start(),
+            "name: \"inline-demo\"\nversion: \"1.2.3\"\n"
+        );
     }
 }
