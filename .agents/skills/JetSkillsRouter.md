@@ -159,7 +159,7 @@ Source keys:
 | A+F | R | `research` | keep | Research a topic, docs, API fact, or source-backed question | Use high-trust primary sources and one cited Markdown result. |
 | A+F | R | `resolving-merge-conflicts` | keep | In-progress merge or rebase conflict | Trace both intents, resolve every hunk, and never abort the merge. |
 | A+F | R | `rli5` | keep | `rli5`, “read like I’m five”, beginner lens, or learnability review | Read as a genuine newcomer and report where the artifact fails to teach itself. |
-| A+F | R | `show-html` | narrow | Explicit `/show-html`, “show as HTML”, or an explicitly requested visual HTML artifact | Keep self-contained zero-dependency HTML; do not auto-convert another skill's output. |
+| A+F | R | `html` | narrow | Explicit `/html`, “show as HTML”, or an explicitly requested visual HTML artifact | Keep self-contained zero-dependency HTML in the skill's jet-black/red identity; do not auto-convert another skill's output. |
 | A+F | R | `simple` | keep | Docs, specs, ballots, reports, commits, or `simple`/`STE` request | Use clear controlled prose while preserving technical tokens, diagnostics, quotes, and ratified wording. |
 | F | R | `setup-matt-pocock-skills` | retire | Set up the generic engineering-skill tracker or docs layout | Jet already has Tower and its own domain layout; keep this one-time installer out of the Jet route. |
 | A+F | R | `spec-compliance-audit` | keep | Ratified syntax/spec versus parser, sema, tests, or examples | Measure shipped, partial, gap, gated, declined, and stale-doc states; do not reopen syntax. |

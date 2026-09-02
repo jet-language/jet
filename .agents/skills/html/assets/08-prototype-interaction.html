@@ -1,0 +1,486 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark">
+<title>Acme — Sidebar drag-to-reorder</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+/* interaction prototype */
+.interaction-page { max-width: 1280px; padding: 48px 32px 96px; }
+.interaction-page > header { margin-bottom: 48px; }
+.proto-shell { min-height: 720px; display: flex; flex-direction: column; overflow: hidden; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.proto-body { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr) 320px; min-height: 680px; }
+.left-panel { overflow-y: auto; padding: 24px 0; background: var(--soot); border-right: 1px solid var(--seam); }
+.lp-section { margin-bottom: 28px; }
+.lp-label { padding: 0 20px; margin-bottom: 8px; color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.lp-item { display: flex; align-items: center; gap: 10px; padding: 8px 20px; color: var(--bone-dim); font-size: 13px; cursor: pointer; transition: background 0.12s ease, color 0.12s ease; }
+.lp-item:hover { background: var(--ash); color: var(--bone); }
+.lp-item.active { background: var(--oxblood-tint); color: var(--ember); font-weight: 600; }
+.lp-item .lp-icon { width: 6px; height: 6px; flex-shrink: 0; background: var(--seam); border-radius: 2px; }
+.lp-item.active .lp-icon { background: var(--ember); }
+.center-stage { position: relative; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 32px; background: var(--jet); }
+.center-stage::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(var(--seam) 1px, transparent 1px), linear-gradient(90deg, var(--seam) 1px, transparent 1px); background-size: 20px 20px; opacity: 0.35; pointer-events: none; }
+.device-frame { position: relative; z-index: 1; width: 380px; max-width: 100%; overflow: hidden; background: var(--ash); border: 1px solid var(--seam); border-radius: 16px; animation: deviceIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: translateY(16px); }
+@keyframes deviceIn { to { opacity: 1; transform: translateY(0); } }
+.device-notch { height: 32px; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--soot); }
+.device-notch-dot { width: 6px; height: 6px; background: var(--smoke); border-radius: 50%; }
+.device-titlebar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 10px; }
+.device-titlebar-label { color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.device-titlebar-dots { display: flex; gap: 5px; }
+.device-titlebar-dot { width: 8px; height: 8px; background: var(--seam); border-radius: 50%; }
+.device-content { padding: 0 12px 16px; }
+.sidebar { padding: 0; background: var(--ash); }
+.sidebar-title { padding: 4px 14px 10px; color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.list { position: relative; margin: 0; padding: 0; list-style: none; }
+.item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin: 1px 0; background: var(--ash); border-radius: 4px; cursor: grab; user-select: none; transition: background 0.12s ease, transform 0.12s ease-out, opacity 0.12s ease; }
+.item:hover { background: var(--soot); }
+.item.dragging { opacity: 0.3; transform: rotate(2deg); background: var(--oxblood-tint); cursor: grabbing; }
+.item .label { color: var(--bone); font-size: 14px; font-weight: 500; }
+.item .count { min-width: 28px; margin-left: auto; padding: 2px 8px; color: var(--smoke); background: var(--soot); border-radius: 3px; font: 11px/1.4 var(--label); text-align: center; }
+.grip { flex: none; width: 10px; height: 16px; display: grid; grid-template-columns: repeat(2, 3px); grid-template-rows: repeat(3, 3px); gap: 2px; align-content: center; }
+.grip i { width: 3px; height: 3px; background: var(--seam); border-radius: 50%; transition: background 0.12s ease; }
+.item:hover .grip i { background: var(--smoke); }
+.indicator { position: absolute; left: 6px; right: 6px; height: 2px; display: none; background: var(--ember); border-radius: 2px; pointer-events: none; }
+.indicator::before { content: ""; position: absolute; left: -5px; top: -3px; width: 9px; height: 9px; background: var(--ember); border-radius: 50%; }
+.indicator.on { display: block; }
+.device-footnote { padding: 12px 14px 0; margin-top: 8px; color: var(--smoke); border-top: 1px solid var(--seam); font: 10px/1.5 var(--label); letter-spacing: 0.02em; }
+.right-panel { display: flex; flex-direction: column; gap: 24px; overflow-y: auto; padding: 28px 24px; background: var(--soot); border-left: 1px solid var(--seam); }
+.rp-title { margin: 0 0 4px; padding-left: 14px; color: var(--bone); border-left: 3px solid var(--ember); font: 600 17px/1.3 var(--display); }
+.rp-lede { margin: 0 0 16px; padding-left: 17px; color: var(--smoke); font-size: 13px; line-height: 1.6; }
+.rp-list { padding: 0; list-style: none; }
+.rp-list li { position: relative; padding: 12px 0 12px 22px; border-top: 1px solid var(--seam); color: var(--bone-dim); font-size: 13px; line-height: 1.6; }
+.rp-list li:first-child { border-top: 0; }
+.rp-list li::before { content: ""; position: absolute; left: 3px; top: 18px; width: 7px; height: 7px; background: var(--ember); border-radius: 2px; opacity: 0.6; }
+.rp-list li b { color: var(--bone); font-weight: 600; }
+.rp-questions-title { margin: 0 0 12px; padding-left: 14px; color: var(--bone); border-left: 3px solid var(--bone); font: 600 17px/1.3 var(--display); }
+.rp-questions ol { margin: 0; padding-left: 20px; }
+.rp-questions li { padding: 5px 0; color: var(--bone-dim); font-size: 13px; line-height: 1.6; }
+.rp-questions li b { color: var(--bone); font-weight: 600; }
+.rp-questions li::marker { color: var(--bone); font: 600 11px/1 var(--label); }
+code.inline { padding: 1px 5px; color: var(--bone); background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; font: 11px/1.4 var(--label); }
+.rp-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
+.compare-card { padding: 14px 16px; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); }
+.compare-card h4 { margin: 0 0 8px; font: 600 11px/1.4 var(--label); text-transform: uppercase; letter-spacing: 0.08em; }
+.compare-card:first-child h4 { color: var(--ember); }
+.compare-card:last-child h4 { color: var(--bone); }
+.compare-card ul { margin: 0; padding: 0; list-style: none; }
+.compare-card li { display: flex; align-items: flex-start; gap: 6px; padding: 3px 0; color: var(--smoke); font-size: 12px; line-height: 1.5; }
+.compare-card li::before { content: ""; width: 4px; height: 4px; flex-shrink: 0; margin-top: 6px; background: var(--seam); border-radius: 50%; }
+.compare-card:first-child li::before { background: var(--ember); opacity: 0.5; }
+.compare-card:last-child li::before { background: var(--bone); opacity: 0.5; }
+.flow-label { position: absolute; z-index: 2; padding: 2px 8px; color: var(--smoke); background: var(--soot); border: 1px dashed var(--seam); border-radius: 3px; font: 10px/1.4 var(--label); letter-spacing: 0.04em; }
+.flow-label-top { top: 16px; left: 50%; transform: translateX(-50%); }
+.flow-label-left { top: 50%; left: 8px; transform: translateY(-50%) rotate(-90deg); transform-origin: center; white-space: nowrap; }
+@media (max-width: 1100px) {
+  .proto-body { grid-template-columns: 1fr; }
+  .left-panel { display: none; }
+  .right-panel { border-top: 1px solid var(--seam); border-left: 0; }
+  .center-stage { min-height: 60vh; }
+}
+@media (max-width: 640px) {
+  .interaction-page { padding: 40px 18px 72px; }
+  .center-stage { padding: 24px 16px; }
+  .device-frame { width: 100%; border-radius: var(--radius); }
+  .right-panel { padding: 20px 16px; }
+  .rp-compare { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .device-frame { animation: none; opacity: 1; transform: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="page interaction-page">
+  <header>
+    <p class="legend rise"><span class="live">Live</span><span>Acme · interaction prototype</span><span>2026-09-02</span></p>
+    <h1 class="rise">Sidebar drag-to-reorder</h1>
+    <div class="ignition"></div>
+    <p class="thesis rise">Drag a row to a new slot; the indicator snaps to the nearest gap so the gesture stays decisive.</p>
+  </header>
+  <section class="reveal">
+    <div class="section-head"><h2>Drag-to-reorder states</h2></div>
+    <div class="proto-shell">
+      <!-- ===== MAIN ===== -->
+      <div class="proto-body">
+
+    <!-- ===== LEFT PANEL: Flow Steps ===== -->
+    <nav class="left-panel">
+      <div class="lp-section">
+        <div class="lp-label">Flow steps</div>
+        <div class="lp-item active">
+          <div class="lp-icon"></div>
+          Drag start
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Drag over
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Drop indicator
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Drop complete
+        </div>
+      </div>
+
+      <div class="lp-section">
+        <div class="lp-label">Triggers</div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          On drag start
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          On drag over
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          On drop
+        </div>
+      </div>
+
+      <div class="lp-section">
+        <div class="lp-label">Properties</div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Easing: ease-out
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Duration: 120ms
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Ghost opacity: 30%
+        </div>
+      </div>
+    </nav>
+
+    <!-- ===== CENTER: DEVICE FRAME ===== -->
+    <div class="center-stage">
+      <div class="flow-label flow-label-top">drag to reorder</div>
+
+      <div class="device-frame">
+        <div class="device-notch">
+          <div class="device-notch-dot"></div>
+          <div class="device-notch-dot"></div>
+          <div class="device-notch-dot"></div>
+        </div>
+        <div class="device-titlebar">
+          <div class="device-titlebar-label">Views</div>
+          <div class="device-titlebar-dots">
+            <div class="device-titlebar-dot"></div>
+            <div class="device-titlebar-dot"></div>
+          </div>
+        </div>
+        <div class="device-content">
+          <nav class="sidebar">
+            <ul class="list" id="list">
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Inbox</span>
+                <span class="count">14</span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Today</span>
+                <span class="count">3</span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Upcoming</span>
+                <span class="count">21</span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Projects</span>
+                <span class="count">8</span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Archive</span>
+                <span class="count"></span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Trash</span>
+                <span class="count"></span>
+              </li>
+              <div class="indicator" id="indicator"></div>
+            </ul>
+          </nav>
+          <div class="device-footnote">Order persists in the DOM only. Refresh to reset.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== RIGHT PANEL: Annotations ===== -->
+    <aside class="right-panel">
+      <div class="rp-block">
+        <h2 class="rp-title">What you're feeling</h2>
+        <p class="rp-lede">Design decisions baked into this prototype, so you can push back on them.</p>
+        <ul class="rp-list">
+          <li>
+            <b>Drop indicator snaps to the nearest gap</b>, not the raw cursor Y.
+            It only moves when you cross a row's midpoint &mdash; feels more decisive,
+            less jittery.
+          </li>
+          <li>
+            <b>Dragged row stays in place at 30% opacity</b> with a 2&deg; tilt.
+            Keeping the ghost in the list preserves your sense of where you
+            started; the tilt reads as "lifted."
+          </li>
+          <li>
+            <b>Grip dots are the affordance, but the whole row is draggable.</b>
+            Dots darken on hover to teach the gesture without forcing a
+            tiny hit target.
+          </li>
+          <li>
+            <b>No auto-scroll, no drop animation.</b> Left out on purpose so the
+            core feel is easy to judge &mdash; say the word and we add them next.
+          </li>
+        </ul>
+      </div>
+
+      <div class="rp-questions">
+        <h2 class="rp-questions-title">Open questions</h2>
+        <ol>
+          <li>Should <b>Trash</b> (and maybe <b>Archive</b>) be pinned to the bottom and excluded from reordering?</li>
+          <li>Do we want rows to <b>slide</b> to their new slot on drop, or is the instant snap acceptable?</li>
+          <li>Keyboard path: is <code class="inline">Alt + Arrow</code> to move the focused row enough for the first ship?</li>
+        </ol>
+      </div>
+
+      <div class="rp-compare">
+        <div class="compare-card">
+          <h4>Current</h4>
+          <ul>
+            <li>Ghost stays at 30% opacity</li>
+            <li>2 degree tilt on drag</li>
+            <li>Instant snap on drop</li>
+            <li>No keyboard support</li>
+          </ul>
+        </div>
+        <div class="compare-card">
+          <h4>Proposed</h4>
+          <ul>
+            <li>Smooth slide on drop</li>
+            <li>Pin Trash/Archive to bottom</li>
+            <li>Alt+Arrow keyboard reorder</li>
+            <li>Haptic feedback on mobile</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  var list = document.getElementById('list');
+  var indicator = document.getElementById('indicator');
+  var dragging = null;
+  var dropBefore = null;
+
+  list.addEventListener('dragstart', function (e) {
+    var item = e.target.closest('.item');
+    if (!item) return;
+    dragging = item;
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  });
+
+  list.addEventListener('dragover', function (e) {
+    if (!dragging) return;
+    e.preventDefault();
+    var siblings = Array.prototype.filter.call(
+      list.children,
+      function (el) { return el.classList && el.classList.contains('item'); }
+    );
+    dropBefore = null;
+    for (var i = 0; i < siblings.length; i++) {
+      var r = siblings[i].getBoundingClientRect();
+      if (e.clientY < r.top + r.height / 2) { dropBefore = siblings[i]; break; }
+    }
+    var listRect = list.getBoundingClientRect();
+    var edge = dropBefore
+      ? dropBefore.getBoundingClientRect().top
+      : siblings[siblings.length - 1].getBoundingClientRect().bottom;
+    indicator.style.top = (edge - listRect.top - 1) + 'px';
+    indicator.classList.add('on');
+  });
+
+  list.addEventListener('drop', function (e) {
+    e.preventDefault();
+    if (!dragging) return;
+    if (dropBefore) list.insertBefore(dragging, dropBefore);
+    else list.insertBefore(dragging, indicator);
+    cleanup();
+  });
+
+  list.addEventListener('dragleave', function (e) {
+    if (list.contains(e.relatedTarget)) return;
+    indicator.classList.remove('on');
+  });
+  document.addEventListener('dragend', cleanup);
+
+  function cleanup() {
+    if (dragging) dragging.classList.remove('dragging');
+    dragging = null;
+    dropBefore = null;
+    indicator.classList.remove('on');
+  }
+
+
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) {
+    els.forEach((e) => e.classList.add('is-visible'));
+  } else {
+    document.documentElement.classList.add('js');
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) if (en.isIntersecting) {
+        en.target.classList.add('is-visible');
+        io.unobserve(en.target);
+      }
+    }, { rootMargin: '0px 0px -8% 0px' });
+    els.forEach((e) => io.observe(e));
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,250 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Acme — Q2 2026 Project Timeline</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+
+/* timeline layout */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; overflow: hidden; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.stat { min-width: 0; padding: 16px 18px; border-right: 1px solid var(--seam); }
+.stat:last-child { border-right: 0; }
+.stat-num { color: var(--bone); font: 700 28px/1 var(--display); }
+.stat-label { margin-top: 6px; color: var(--smoke); font: 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; }
+.gantt-panel { padding: 0; overflow: hidden; }
+.gantt-header, .group-header, .gantt-row { display: grid; }
+.gantt-header { border-bottom: 1px solid var(--seam); background: var(--soot); }
+.gantt-header-label { display: flex; align-items: center; padding: 12px 16px; border-right: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; }
+.gantt-weeks { display: grid; grid-template-columns: repeat(12, minmax(48px, 1fr)); }
+.gantt-week { position: relative; padding: 10px 4px; border-right: 1px solid var(--seam); color: var(--smoke); font: 10px/1.2 var(--label); letter-spacing: 0.06em; text-align: center; text-transform: uppercase; }
+.gantt-week small { display: block; margin-top: 4px; color: var(--smoke); font-size: 9px; letter-spacing: 0; }
+.gantt-week.today { background: var(--oxblood-tint); color: var(--ember); }
+.gantt-week.today::after { content: ""; position: absolute; right: 25%; bottom: 0; left: 25%; height: 2px; background: var(--ember); }
+.group-header { border-bottom: 1px solid var(--seam); background: var(--soot); }
+.group-label { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-right: 1px solid var(--seam); color: var(--bone-dim); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; }
+.group-label-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--smoke); }
+.gantt-row { align-items: center; border-bottom: 1px solid var(--seam); }
+.gantt-row:last-child { border-bottom: 0; }
+.gantt-task { display: flex; align-items: center; gap: 10px; min-width: 200px; padding: 14px 16px; border-right: 1px solid var(--seam); }
+.task-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.task-name { color: var(--bone); font-size: 13px; font-weight: 600; line-height: 1.3; }
+.task-owner { margin-top: 3px; color: var(--smoke); font: 10px/1.3 var(--label); }
+.gantt-bar-area { display: grid; grid-template-columns: repeat(12, minmax(48px, 1fr)); position: relative; min-height: 46px; padding: 10px 0; background: linear-gradient(to right, transparent 0, transparent calc(50% - 1px), var(--seam) 50%, transparent calc(50% + 1px), transparent 100%); }
+.gantt-bar-area::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: calc(100% / 12); background: var(--oxblood-tint); pointer-events: none; }
+.gantt-bar { z-index: 1; display: flex; align-items: center; justify-content: center; min-width: 0; height: 26px; overflow: hidden; position: relative; border-radius: 3px; background: var(--ash); color: var(--bone); font: 10px/1 var(--label); letter-spacing: 0.02em; }
+.gantt-bar.progress-100 { opacity: 0.7; }
+.gantt-bar .progress-fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px 0 0 3px; background: var(--ember); }
+.gantt-bar > :not(.progress-fill) { position: relative; z-index: 1; }
+.milestone { z-index: 2; position: absolute; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 2px; background: var(--ember); transform: rotate(45deg); }
+.today-line { z-index: 2; position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--ember); opacity: 0.75; }
+.today-line::before { content: "Today"; position: absolute; top: -16px; left: 50%; color: var(--ember); font: 8px/1 var(--label); letter-spacing: 0.08em; text-transform: uppercase; transform: translateX(-50%); }
+.milestone-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.ms-card { min-width: 0; }
+.ms-date { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; color: var(--ember); font: 11px/1.4 var(--label); letter-spacing: 0.08em; text-transform: uppercase; }
+.ms-date-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ember); }
+.ms-title { margin-bottom: 6px; color: var(--bone); font: 600 16px/1.3 var(--display); }
+.ms-desc { color: var(--bone-dim); font-size: 13px; line-height: 1.5; }
+@media (max-width: 768px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .stat:nth-child(2) { border-right: 0; } .stat:nth-child(-n + 2) { border-bottom: 1px solid var(--seam); } .milestone-cards { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .gantt-panel { overflow-x: auto; } .gantt-header, .group-header, .gantt-row { min-width: 780px; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <p class="legend rise"><span class="live">Live</span><span>Source · Acme Planning</span><span>May 19, 2026</span></p>
+    <h1 class="rise">Q2 2026 roadmap</h1>
+    <div class="ignition"></div>
+    <p class="thesis rise">Planned features and milestones for April through June 2026; bars show duration and diamonds mark key milestones.</p>
+  </header>
+
+  <section class="reveal">
+    <div class="section-head"><h2>Delivery status</h2></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-num">8</div><div class="stat-label">Tasks</div></div>
+      <div class="stat"><div class="stat-num">3</div><div class="stat-label">Milestones</div></div>
+      <div class="stat"><div class="stat-num">5</div><div class="stat-label">People</div></div>
+      <div class="stat"><div class="stat-num">37%</div><div class="stat-label">Complete</div></div>
+    </div>
+  </section>
+
+  <section class="reveal">
+    <div class="section-head"><h2>Project timeline</h2></div>
+    <div class="gantt-panel panel">
+      <div class="gantt-header" style="grid-template-columns:200px 1fr">
+        <div class="gantt-header-label">Task</div>
+        <div class="gantt-weeks">
+          <div class="gantt-week">W1<small>Apr 7</small></div><div class="gantt-week">W2<small>Apr 14</small></div><div class="gantt-week">W3<small>Apr 21</small></div><div class="gantt-week">W4<small>Apr 28</small></div><div class="gantt-week">W5<small>May 5</small></div><div class="gantt-week">W6<small>May 12</small></div><div class="gantt-week today">W7<small>May 19</small></div><div class="gantt-week">W8<small>May 26</small></div><div class="gantt-week">W9<small>Jun 2</small></div><div class="gantt-week">W10<small>Jun 9</small></div><div class="gantt-week">W11<small>Jun 16</small></div><div class="gantt-week">W12<small>Jun 23</small></div>
+        </div>
+      </div>
+
+      <div class="group-header" style="grid-template-columns:200px 1fr"><div class="group-label"><span class="group-label-dot"></span>Authentication</div></div>
+      <div class="gantt-row" style="grid-template-columns:200px 1fr"><div class="gantt-task"><span class="task-dot" style="background:var(--ember)"></span><div><div class="task-name">OAuth2 migration</div><div class="task-owner">Alice</div></div></div><div class="gantt-bar-area"><div class="gantt-bar progress-100" style="grid-column:1/4"><div class="progress-fill" style="width:100%"></div></div></div></div>
+      <div class="gantt-row" style="grid-template-columns:200px 1fr"><div class="gantt-task"><span class="task-dot" style="background:var(--ember)"></span><div><div class="task-name">SSO integration</div><div class="task-owner">Alice · Carol</div></div></div><div class="gantt-bar-area"><div class="gantt-bar" style="grid-column:3/6">SSO</div><div class="milestone" style="left:calc((6 - 0.5) / 12 * 100%)"></div></div></div>
+
+      <div class="group-header" style="grid-template-columns:200px 1fr"><div class="group-label"><span class="group-label-dot"></span>Payments</div></div>
+      <div class="gantt-row" style="grid-template-columns:200px 1fr"><div class="gantt-task"><span class="task-dot" style="background:var(--bone)"></span><div><div class="task-name">Stripe v3 upgrade</div><div class="task-owner">Bob</div></div></div><div class="gantt-bar-area"><div class="gantt-bar" style="grid-column:1/5"><div class="progress-fill" style="width:80%"></div><span>80%</span></div></div></div>
+      <div class="gantt-row" style="grid-template-columns:200px 1fr"><div class="gantt-task"><span class="task-dot" style="background:var(--bone)"></span><div><div class="task-name">Subscription billing</div><div class="task-owner">Bob · Dan</div></div></div><div class="gantt-bar-area"><div class="gantt-bar" style="grid-column:5/9">Planned</div></div></div>
+
+      <div class="group-header" style="grid-template-columns:200px 1fr"><div class="group-label"><span class="group-label-dot"></span>Search &amp; discovery</div></div>
+      <div class="gantt-row" style="grid-template-columns:200px 1fr"><div class="gantt-task"><span class="task-dot" style="background:var(--smoke)"></span><div><div class="task-name">Elasticsearch reindex</div><div class="task-owner">Hassan</div></div></div><div class="gantt-bar-area"><div class="gantt-bar" style="grid-column:2/4"><div class="progress-fill" style="width:60%"></div><span>60%</span></div></div></div>
+      <div class="gantt-row" style="grid-template-columns:200px 1fr"><div class="gantt-task"><span class="task-dot" style="background:var(--smoke)"></span><div><div class="task-name">Faceted filters UI</div><div class="task-owner">Eva</div></div></div><div class="gantt-bar-area"><div class="gantt-bar" style="grid-column:5/8">Planned</div></div></div>
+      <div class="gantt-row" style="grid-template-columns:200px 1fr"><div class="gantt-task"><span class="task-dot" style="background:var(--smoke)"></span><div><div class="task-name">Autocomplete</div><div class="task-owner">Eva · Hassan</div></div></div><div class="gantt-bar-area"><div class="gantt-bar" style="grid-column:8/11">Planned</div><div class="milestone" style="left:calc((11 - 0.5) / 12 * 100%)"></div></div></div>
+
+      <div class="group-header" style="grid-template-columns:200px 1fr"><div class="group-label"><span class="group-label-dot"></span>Infrastructure</div></div>
+      <div class="gantt-row" style="grid-template-columns:200px 1fr"><div class="gantt-task"><span class="task-dot" style="background:var(--oxblood)"></span><div><div class="task-name">K8s cluster upgrade</div><div class="task-owner">Leo</div></div></div><div class="gantt-bar-area"><div class="gantt-bar" style="grid-column:7/10">Planned</div><div class="today-line" style="left:calc(7 / 12 * 100%)"></div></div></div>
+    </div>
+  </section>
+
+  <section class="reveal">
+    <div class="section-head"><h2>Key milestones</h2></div>
+    <div class="milestone-cards">
+      <article class="ms-card card"><div class="ms-date"><span class="ms-date-dot"></span>May 2 · Week 5</div><div class="ms-title">Auth milestone</div><div class="ms-desc">SSO live for internal teams. OAuth2 migration complete.</div></article>
+      <article class="ms-card card"><div class="ms-date"><span class="ms-date-dot"></span>Jun 5 · Week 9</div><div class="ms-title">Payments GA</div><div class="ms-desc">Subscription billing in production. Stripe v3 fully rolled out.</div></article>
+      <article class="ms-card card"><div class="ms-date"><span class="ms-date-dot"></span>Jun 19 · Week 11</div><div class="ms-title">Search v2 launch</div><div class="ms-desc">Faceted filters + autocomplete shipped. New ES cluster live.</div></article>
+    </div>
+  </section>
+</div>
+<script>
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
+})();
+</script>
+</body>
+</html>

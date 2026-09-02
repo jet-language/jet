@@ -1,0 +1,328 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Consistent hashing — an interactive explainer</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+/* page rules: the concept is an instrument you can turn */
+.page { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 0 44px; }
+main { position: relative; min-width: 0; padding: 0 0 80px 28px; }
+main::before { content: ""; position: absolute; left: 10px; top: 0; bottom: 0; width: 1px; background: var(--seam); }
+header { padding-bottom: 30px; border-bottom: 1px solid var(--seam); }
+section[id] { scroll-margin-top: 24px; }
+section p { max-width: 680px; }
+section code, p code { padding: 1px 5px; background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; }
+.term { border-bottom: 1px dotted var(--ember); color: var(--bone); cursor: help; }
+.term:hover { background: var(--oxblood-tint); }
+.demo { margin: 16px 0 10px; padding: 24px; }
+.demo-grid { display: grid; grid-template-columns: 300px 1fr; gap: 32px; align-items: center; }
+svg.ring { display: block; width: 100%; max-width: 300px; }
+.ring .track { fill: none; stroke: var(--seam); stroke-width: 14; }
+.ring .arc { fill: none; stroke-width: 14; transition: stroke-dasharray 300ms var(--ease); }
+.ring .node { stroke: var(--bone); stroke-width: 2.5; }
+.ring .key { stroke: var(--jet); stroke-width: 1; }
+.ring .lbl { fill: var(--smoke); font: 10px var(--label); }
+.controls { font-size: 13px; }
+.controls .row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.controls label { width: 56px; color: var(--smoke); font: 600 11px var(--label); letter-spacing: 0.04em; text-transform: uppercase; }
+.controls .val { width: 28px; color: var(--bone); font: 600 13px var(--label); text-align: center; }
+.controls input[type=range] { flex: 1; height: 4px; accent-color: var(--ember); }
+.controls .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.controls button { padding: 7px 12px; }
+.readout { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--seam); font: 13px var(--label); }
+.readout b { color: var(--bone); }.moved { color: var(--ember); font-weight: 600; }
+.demo-caption { max-width: 640px; margin: 10px 0 0; color: var(--smoke); font-size: 13px; font-style: italic; }
+.table-wrap { max-width: 700px; margin-top: 16px; }
+table { min-width: 600px; }
+td.bad { color: var(--ember); font-weight: 600; } td.good { color: var(--bone); font-weight: 500; }
+aside { position: sticky; top: 32px; align-self: start; padding: 28px 0; }
+.gloss-panel { padding: 20px 18px 12px; }
+.gloss-panel .label { margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 10px var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+aside dl dt { margin: 0 0 0 -6px; padding: 2px 6px; border-radius: 3px; color: var(--bone); font: 600 15px/1.4 var(--display); }
+aside dl dd { margin: 3px 0 16px; padding-left: 6px; border-left: 2px solid transparent; color: var(--bone-dim); font-size: 12px; line-height: 1.55; }
+aside dl dt.hl { background: var(--oxblood-tint); } aside dl dt.hl + dd { border-left-color: var(--ember); }
+aside dl dd code { padding: 0 4px; background: var(--ash); border: 1px solid var(--seam); border-radius: 2px; font-size: 11px; }
+.progress-bar { position: fixed; top: 0; left: 0; z-index: 100; width: 0%; height: 2px; background: var(--ember); transition: width 100ms linear; }
+@media (max-width: 960px) { .page { grid-template-columns: 1fr; } aside { order: 2; position: static; padding: 0 0 60px 28px; } main { padding-right: 0; } }
+@media (max-width: 760px) { .demo-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { main { padding-left: 18px; } aside { padding-left: 18px; } .demo { padding: 18px; } }
+
+</style>
+</head>
+<body>
+  <div class="progress-bar" id="progressBar"></div>
+  <div class="page">
+    <main>
+      <header>
+        <p class="legend rise"><span class="live">Live</span><span>Source · research note</span><span>2026-09-02</span></p>
+        <h1 class="rise">Consistent hashing, in one ring</h1>
+        <div class="ignition"></div>
+        <p class="thesis rise">Consistent hashing keeps a node change near K / N keys instead of moving almost all of them.</p>
+      </header>
+
+      <section class="reveal" id="trick"><div class="section-head"><h2>The trick: hash onto a circle, not a line</h2></div><p>You have <em>K</em> keys spread across <em>N</em> cache servers. A server dies, or you add one. How many keys have to move? With naive <code>hash(key) mod N</code> the answer is “almost all of them.” Consistent hashing gets it down to roughly <code>K&nbsp;/&nbsp;N</code>. Here's why.</p><p>Map both <span class="term" data-term="node">nodes</span> and keys onto the same <span class="term" data-term="ring">ring</span> (the hash output space, wrapped around). A key belongs to the first node found by walking clockwise from the key's position. When a node leaves, only the keys in its <span class="term" data-term="arc">arc</span> reassign — to the next node round — and everything else stays put.</p>
+        <div class="demo panel"><div class="demo-grid"><svg class="ring" id="ring" viewBox="0 0 260 260" aria-label="Interactive consistent hashing ring"></svg><div class="controls"><div class="row"><label for="nSlider">nodes</label><input id="nSlider" type="range" min="2" max="8" value="4"><span class="val" id="nVal">4</span></div><div class="row"><label for="kSlider">keys</label><input id="kSlider" type="range" min="10" max="60" value="32" step="2"><span class="val" id="kVal">32</span></div><div class="btn-row"><button type="button" id="rm">remove a node</button><button type="button" id="add">add a node</button><button type="button" id="reset">reset</button></div><div class="readout" id="readout"><b>4</b> nodes · <b>32</b> keys · <span class="moved">—</span> moved on last change</div></div></div></div>
+        <p class="demo-caption">Colored arcs show ownership. Removing a node hands its arc to its clockwise neighbor; every dot outside that arc keeps its color. That's the whole idea.</p>
+      </section>
+
+      <section class="reveal" id="compare"><div class="section-head"><h2>Versus <code>mod N</code></h2></div><div class="table-wrap"><table><thead><tr><th></th><th>hash mod N</th><th>consistent hashing</th></tr></thead><tbody><tr><td>Keys moved when N→N+1</td><td class="bad">~ (N−1)/N of all keys</td><td class="good">~ 1/(N+1)</td></tr><tr><td>Hot-spot risk</td><td class="good">even by construction</td><td>uneven — fix with <span class="term" data-term="vnode">virtual nodes</span></td></tr><tr><td>Lookup cost</td><td class="good">O(1)</td><td>O(log N) (binary search on ring)</td></tr><tr><td>Used by</td><td>array sharding, simple LB</td><td>Dynamo, Cassandra, Memcached clients, Envoy</td></tr></tbody></table></div></section>
+
+      <section class="reveal" id="meet"><div class="section-head"><h2>Where you'll meet it</h2></div><p>Any time you're spreading state across a pool that changes size: cache fleets, partitioned queues, object storage, request routing with sticky sessions. The <span class="term" data-term="vnode">virtual-node</span> variant (each physical node owns many small arcs instead of one big one) is what production systems actually run, because it smooths out load and makes rebalancing even gentler.</p></section>
+      <footer>Source: consistent hashing concept note — interactive rendering.</footer>
+    </main>
+    <aside><div class="gloss-panel panel"><div class="label">Glossary</div><dl id="gloss"><dt data-g="ring">Ring</dt><dd>The hash function's output range, treated as a circle so the value after <code>max</code> is <code>0</code>.</dd><dt data-g="node">Node</dt><dd>A server placed on the ring at <code>hash(node_id)</code>. Owns every key between it and its anticlockwise neighbor.</dd><dt data-g="arc">Arc</dt><dd>The stretch of ring a node owns. Removing a node merges its arc into the next node's.</dd><dt data-g="vnode">Virtual node</dt><dd>Placing each physical node at many ring positions so arcs are small and evenly sized.</dd><dt data-g="successor">Successor</dt><dd>The first node clockwise from a given point — the owner of any key landing there.</dd></dl></div></aside>
+  </div>
+  <script>
+/* ── tiny deterministic hash so the demo is stable ── */
+function h(s) {
+  let x = 2166136261;
+  for (let i = 0; i < s.length; i++) { x ^= s.charCodeAt(i); x = (x * 16777619) >>> 0; }
+  return x / 4294967296;
+}
+const COLORS = ["var(--ember)", "var(--bone)", "var(--smoke)", "var(--oxblood)"];
+const CX = 130, CY = 130, R = 100, RKEY = 78;
+const TAU = Math.PI * 2;
+
+const ring = document.getElementById("ring");
+const nSlider = document.getElementById("nSlider");
+const kSlider = document.getElementById("kSlider");
+const nVal = document.getElementById("nVal");
+const kVal = document.getElementById("kVal");
+const readout = document.getElementById("readout");
+
+let nodes = [], keys = [], lastOwner = {};
+
+function pt(r, t) { return [CX + r * Math.sin(t * TAU), CY - r * Math.cos(t * TAU)]; }
+
+function ownerOf(t) {
+  const sorted = [...nodes].sort((a, b) => a.t - b.t);
+  for (const n of sorted) if (n.t >= t) return n;
+  return sorted[0];
+}
+
+function buildNodes(n) {
+  nodes = [];
+  for (let i = 0; i < n; i++) nodes.push({ id: "n" + i, t: h("node-" + i), color: COLORS[i % COLORS.length] });
+}
+function buildKeys(k) {
+  keys = [];
+  for (let i = 0; i < k; i++) keys.push({ id: "k" + i, t: h("key-" + i) });
+}
+
+function arcPath(t0, t1) {
+  const [x0, y0] = pt(R, t0), [x1, y1] = pt(R, t1);
+  let d = t1 - t0; if (d <= 0) d += 1;
+  const large = d > 0.5 ? 1 : 0;
+  return `M ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1}`;
+}
+
+function render(moved) {
+  const sorted = [...nodes].sort((a, b) => a.t - b.t);
+  let svg = `<circle class="track" cx="${CX}" cy="${CY}" r="${R}"/>`;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const cur = sorted[i];
+    const prev = sorted[(i - 1 + sorted.length) % sorted.length];
+    svg += `<path class="arc" stroke="${cur.color}" d="${arcPath(prev.t, cur.t)}"/>`;
+  }
+  for (const k of keys) {
+    const o = ownerOf(k.t);
+    const [x, y] = pt(RKEY, k.t);
+    svg += `<circle class="key" r="3.5" cx="${x}" cy="${y}" fill="${o.color}"/>`;
+  }
+  for (const n of sorted) {
+    const [x, y] = pt(R, n.t);
+    svg += `<circle class="node" r="9" cx="${x}" cy="${y}" fill="${n.color}"/>`;
+  }
+  svg += `<text class="lbl" x="${CX}" y="18" text-anchor="middle">0</text>`;
+  ring.innerHTML = svg;
+
+  readout.innerHTML =
+    `<b>${nodes.length}</b> nodes &middot; <b>${keys.length}</b> keys &middot; ` +
+    `<span class="moved">${moved == null ? "—" : moved + " (" + Math.round(moved / keys.length * 100) + "%)"}</span> moved on last change`;
+}
+
+function diffAndRender() {
+  let moved = 0;
+  for (const k of keys) {
+    const o = ownerOf(k.t).id;
+    if (lastOwner[k.id] && lastOwner[k.id] !== o) moved++;
+    lastOwner[k.id] = o;
+  }
+  render(moved);
+}
+
+function reset() {
+  buildNodes(+nSlider.value);
+  buildKeys(+kSlider.value);
+  lastOwner = {};
+  for (const k of keys) lastOwner[k.id] = ownerOf(k.t).id;
+  nVal.textContent = nSlider.value;
+  kVal.textContent = kSlider.value;
+  render(null);
+}
+
+nSlider.oninput = () => { nVal.textContent = nSlider.value; buildNodes(+nSlider.value); diffAndRender(); };
+kSlider.oninput = () => { kVal.textContent = kSlider.value; buildKeys(+kSlider.value); lastOwner = {}; for (const k of keys) lastOwner[k.id] = ownerOf(k.t).id; render(null); };
+document.getElementById("rm").onclick = () => { if (nodes.length > 2) { nodes.splice(Math.floor(Math.random() * nodes.length), 1); diffAndRender(); } };
+document.getElementById("add").onclick = () => { if (nodes.length < 12) { const i = nodes.length; nodes.push({ id: "n" + Date.now(), t: Math.random(), color: COLORS[i % COLORS.length] }); diffAndRender(); } };
+document.getElementById("reset").onclick = reset;
+
+/* glossary highlight */
+document.querySelectorAll(".term").forEach(el => {
+  const g = el.dataset.term;
+  el.addEventListener("mouseenter", () => document.querySelector(`dt[data-g="${g}"]`)?.classList.add("hl"));
+  el.addEventListener("mouseleave", () => document.querySelector(`dt[data-g="${g}"]`)?.classList.remove("hl"));
+});
+
+/* reading progress bar */
+window.addEventListener("scroll", () => {
+  const h = document.documentElement;
+  const pct = (h.scrollTop / (h.scrollHeight - h.clientHeight)) * 100;
+  document.getElementById("progressBar").style.width = pct + "%";
+}, { passive: true });
+
+reset();
+
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
+})();
+</script>
+</body>
+</html>

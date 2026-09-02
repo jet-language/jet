@@ -4,352 +4,363 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="description" content="Domain matrix — canonical Jet proposal rendering.">
-<title>Domain matrix — Jet proposal</title>
+<title>Jet for every kind of work</title>
 <style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
 :root {
-  --bg: #071019; --surface-1: #0b1621; --surface-2: #101d29; --surface-3: #152534;
-  --border: #294050; --border-soft: #1c3140; --text: #f0f6f8; --text-2: #c1ced4;
-  --muted: #93a5ae; --amber: #f4b860; --amber-soft: #332817; --cyan: #6dd7e8;
-  --cyan-soft: #102c34; --green: #70d69a; --green-soft: #112c21; --red: #ff8585;
-  --red-soft: #381d22; --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
-  --radius: 12px; --measure: 78ch;
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
+
 * { box-sizing: border-box; }
-html { background: var(--bg); scroll-padding-top: 5.25rem; }
-body { margin: 0; background: linear-gradient(90deg,rgba(109,215,232,.025) 1px,transparent 1px),linear-gradient(rgba(109,215,232,.018) 1px,transparent 1px),var(--bg); background-size: 32px 32px; color: var(--text); font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
-a { color: var(--cyan); text-underline-offset: .2em; }
-a:hover { color: var(--text); }
-:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
-.skip-link { position: fixed; z-index: 100; top: .75rem; left: .75rem; transform: translateY(-180%); padding: .65rem .9rem; border: 1px solid var(--cyan); border-radius: 6px; background: var(--surface-1); color: var(--text); font: 700 .8rem var(--mono); }
-.skip-link:focus { transform: translateY(0); }
-.topbar { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--border-soft); background: rgba(7,16,25,.96); backdrop-filter: blur(12px); }
-.topbar-inner { display: flex; align-items: center; gap: 1rem; max-width: 1260px; margin: 0 auto; padding: .7rem 1.5rem; }
-.nav-mark { flex: none; color: var(--amber); font: 800 .74rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
-.topbar a { color: var(--text-2); font: 650 .72rem var(--mono); text-decoration: none; }
-.topbar a:hover { color: var(--text); }
-.top-links { display: flex; min-width: 0; margin-left: auto; gap: .15rem; overflow-x: auto; scrollbar-width: thin; }
-.top-links a { flex: none; padding: .38rem .55rem; border-radius: 5px; }
-.top-links a:hover { background: var(--surface-2); }
-.page { position: relative; max-width: 1260px; margin: 0 auto; padding: 3.6rem 1.5rem 5.5rem; }
-.page::before { position: absolute; top: 3.6rem; bottom: 5.5rem; left: .65rem; width: 2px; background: linear-gradient(var(--amber),rgba(244,184,96,.12)); content: ""; }
-.layout { display: grid; grid-template-columns: 205px minmax(0,1fr); gap: 2.5rem; align-items: start; }
-.toc { position: sticky; top: 4.5rem; max-height: calc(100vh - 5.5rem); overflow: auto; padding: .8rem .75rem .9rem; border: 1px solid var(--border-soft); border-radius: 9px; background: rgba(11,22,33,.88); }
-.toc-label { margin: 0 0 .55rem; color: var(--amber); font: 750 .66rem/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
-.toc a { display: block; padding: .28rem .4rem; border-left: 2px solid transparent; color: var(--text-2); font-size: .78rem; line-height: 1.35; text-decoration: none; }
-.toc a.level-3 { padding-left: .9rem; color: var(--muted); font-size: .72rem; }
-.toc a:hover { border-left-color: var(--cyan); background: var(--surface-2); color: var(--text); }
-main { min-width: 0; }
-.hero-card { margin-bottom: 3.5rem; padding: 2rem 2.1rem 1.7rem; border: 1px solid var(--border); border-top: 3px solid var(--amber); border-radius: 14px; background: linear-gradient(135deg,rgba(244,184,96,.08),var(--surface-1) 40%,var(--surface-2)); box-shadow: 0 24px 60px rgba(0,0,0,.18); }
-.eyebrow { margin: 0 0 .9rem; color: var(--amber); font: 700 .72rem/1.3 var(--mono); letter-spacing: .11em; text-transform: uppercase; }
-.eyebrow::before { content: "PROPOSAL / "; color: var(--muted); }
-h1,h2,h3,p { margin-top: 0; }
-h1 { max-width: 18ch; margin-bottom: 1rem; font-size: clamp(2.55rem,6.2vw,5.35rem); font-weight: 760; letter-spacing: -.055em; line-height: .98; }
-h2 { margin: 4.2rem 0 .7rem; font-size: clamp(1.7rem,3.6vw,2.7rem); letter-spacing: -.035em; line-height: 1.08; scroll-margin-top: 5.6rem; }
-h3 { margin: 2.25rem 0 .6rem; font-size: clamp(1.15rem,2.3vw,1.55rem); line-height: 1.25; scroll-margin-top: 5.6rem; }
-.hero-title-note { max-width: var(--measure); margin: 0 0 1.25rem; color: var(--text-2); font-size: 1rem; }
-.status-copy { margin: 0; padding: 1rem 1.1rem; border-left: 3px solid var(--amber); background: linear-gradient(90deg,var(--amber-soft),transparent 82%); color: var(--text-2); }
-.meta-row { margin-top: 1.35rem; }
-.meta-label { display: block; margin-bottom: .5rem; color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
-.pills { display: flex; flex-wrap: wrap; gap: .45rem; }
-.pill { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-3); color: var(--text-2); font: 700 .67rem/1.25 var(--mono); }
-.pill-rec { color: var(--green); }
-.score-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; margin-top: 1.15rem; }
-.score-tile { min-height: 130px; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
-.score-value { display: block; color: var(--text); font: 780 clamp(1.8rem,4vw,2.9rem)/1 var(--mono); letter-spacing: -.05em; }
-.score-name { display: block; margin-top: .55rem; color: var(--amber); font: 750 .68rem/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
-.score-detail { margin: .45rem 0 0; color: var(--muted); font-size: .74rem; line-height: 1.45; }
-.markdown { max-width: var(--measure); }
-.markdown p { margin-bottom: 1.05rem; color: var(--text-2); }
-.markdown blockquote { margin: 1.2rem 0; padding: 1rem 1.15rem; border-left: 3px solid var(--cyan); background: linear-gradient(90deg,var(--cyan-soft),transparent 90%); color: var(--text); }
-.markdown blockquote p { margin: 0; color: var(--text); }
-.markdown code,.table-wrap code { color: #f6c978; font-family: var(--mono); font-size: .88em; }
-.markdown ol,.markdown ul { color: var(--text-2); padding-left: 1.35rem; }
-.markdown li { margin-bottom: .55rem; }
-.table-wrap { width: 100%; margin: 1.15rem 0 1.45rem; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
-th { padding: .75rem .85rem; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font: 750 .65rem var(--mono); letter-spacing: .065em; text-align: left; text-transform: uppercase; white-space: nowrap; }
-td { padding: .78rem .85rem; border-bottom: 1px solid var(--border-soft); color: var(--text-2); vertical-align: top; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
 tr:last-child td { border-bottom: 0; }
-td:first-child { color: var(--text); font: 700 .77rem/1.5 var(--mono); }
-.option-table { border-collapse: separate; border-spacing: 0; }
-.option-table tbody { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .7rem; padding: .8rem; }
-.option-table tbody tr { display: block; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); overflow: hidden; }
-.option-table tbody tr.recommended-row { border-color: #3c8a5e; background: linear-gradient(150deg,var(--green-soft),var(--surface-2)); }
-.option-table tbody td { display: block; border: 0; padding: .75rem .8rem .1rem; }
-.option-table tbody td + td { padding: .12rem .8rem .75rem; }
-.option-table tbody td:first-child { color: var(--amber); font-size: .74rem; }
-.option-table tbody tr.recommended-row td:first-child::after { content: "  RECOMMENDED"; color: var(--green); font: 750 .58rem var(--mono); letter-spacing: .06em; }
-.callout { margin: 1.1rem 0; padding: 1rem 1.1rem; border-left: 3px solid var(--cyan); border-radius: 8px; background: linear-gradient(90deg,var(--cyan-soft),transparent 90%); }
-.callout p { margin: 0; color: var(--text); }
-.comparison { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .9rem; margin: 1.15rem 0 1.45rem; }
-.compare-side { min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-1); }
-.compare-side:first-child { border-top: 3px solid var(--cyan); }
-.compare-side:last-child { border-top: 3px solid var(--amber); }
-.compare-title { margin: 0 0 .55rem; color: var(--text); font: 700 .78rem/1.35 var(--mono); }
-.two-column { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .9rem; }
-.two-column .table-wrap { margin-top: 0; }
-.badge { display: inline-flex; align-items: center; margin: .08rem .15rem .08rem 0; padding: .25rem .45rem; border: 1px solid currentColor; border-radius: 5px; color: var(--red); background: var(--red-soft); font: 800 .61rem/1 var(--mono); letter-spacing: .04em; }
-.ring-diagram { width: 100%; margin: 1.3rem 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); }
-.ring-diagram svg { display: block; width: 100%; height: auto; }
-.toolbar { display: flex; align-items: center; gap: .65rem; margin: 1.1rem 0 .75rem; flex-wrap: wrap; }
-.search-wrap { flex: 1; min-width: 220px; max-width: 390px; position: relative; }
-.search-icon { position: absolute; left: .85rem; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; display: flex; }
-.search-box { width: 100%; padding: .65rem .85rem .65rem 2.35rem; border: 1px solid var(--border); border-radius: 9px; outline: none; background: var(--surface-1); color: var(--text); font: .82rem var(--sans); }
-.search-box::placeholder { color: var(--muted); }
-.search-box:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(109,215,232,.1); }
-.filter-pills { display: flex; gap: .2rem; padding: .2rem; overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); }
-.filter-btn { padding: .45rem .65rem; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font: 700 .67rem var(--mono); white-space: nowrap; }
-.filter-btn:hover { color: var(--text); background: var(--surface-2); }
-.filter-btn.active { background: var(--surface-3); color: var(--cyan); }
-.results-count { margin-left: auto; color: var(--muted); font: .7rem var(--mono); white-space: nowrap; }
-.sort-button { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; letter-spacing: inherit; text-align: left; text-transform: inherit; white-space: nowrap; }
-.sort-button:hover { color: var(--cyan); }
-.sort-arrow { margin-left: .25rem; opacity: .35; }
-.sort-button[aria-sort="ascending"] .sort-arrow,.sort-button[aria-sort="descending"] .sort-arrow { color: var(--cyan); opacity: 1; }
-.ballots-full { width: 100%; }
-#mechanism-table { min-width: 760px; }
-#mechanism-table td:nth-child(1),#mechanism-table td:nth-child(2),#mechanism-table td:nth-child(3),#mechanism-table td:nth-child(6) { white-space: nowrap; }
-#mechanism-table td:nth-child(6) { color: var(--green); font: 800 .78rem var(--mono); text-align: center; }
-#mechanism-table th:nth-child(6) { text-align: center; }
-[hidden] { display: none !important; }
-footer { margin-top: 4rem; padding-top: 1.15rem; border-top: 1px solid var(--border); color: var(--muted); font: .72rem/1.6 var(--mono); }
-@media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .toc { position: relative; top: 0; max-height: none; display: flex; flex-wrap: wrap; gap: .25rem .45rem; align-items: baseline; } .toc-label { width: 100%; } .toc a { padding: .25rem .4rem; } .toc a.level-3 { padding-left: .4rem; } .toc a.level-3::before { content: "· "; color: var(--amber); } }
-@media (max-width: 820px) { .score-grid,.option-table tbody,.comparison,.two-column { grid-template-columns: 1fr; } }
-@media (max-width: 620px) { .topbar-inner { padding-inline: .8rem; } .nav-mark { display: none; } .top-links { margin-left: 0; } .page { padding: 2.8rem .9rem 4rem 1.3rem; } .page::before { top: 2.8rem; bottom: 4rem; left: .62rem; } .hero-card { padding: 1.4rem 1.15rem 1.25rem; } h1 { max-width: 12ch; } .filter-pills { width: 100%; } .results-count { margin-left: 0; } }
-@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto !important; transition: none !important; } }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+/* page rules */
+header { padding-bottom: 34px; border-bottom: 1px solid var(--seam); }
+p { margin: 0; }
+section > p:not(.eyebrow) { max-width: 82ch; color: var(--bone-dim); }
+.journey { margin-top: 30px; padding: 24px 22px 20px; }
+.timeline { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px; }
+.timeline::before { content: ""; position: absolute; top: 7px; left: 10%; right: 10%; height: 2px; background: var(--seam); }
+.event { position: relative; min-width: 0; padding-top: 26px; }
+.node { position: absolute; top: 0; left: 50%; width: 14px; height: 14px; border: 2px solid var(--bone); border-radius: 50%; background: var(--bone); transform: translateX(-50%); }
+.event.now .node { border-color: var(--ember); background: var(--ember); }
+.event.now .node::after { content: ""; position: absolute; inset: -8px; z-index: -1; border-radius: 50%; background: var(--ember-glow); animation: lamp 2.4s ease-in-out infinite; }
+.event.proposed .node { border-color: var(--ember); background: var(--soot); }
+.event-state, .event-title { display: block; text-align: center; font-family: var(--label); }
+.event-state { color: var(--smoke); font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.event-title { margin-top: 5px; color: var(--bone); font-size: 13px; font-weight: 600; line-height: 1.3; }
+.event p { margin-top: 7px; color: var(--bone-dim); font-size: 13px; line-height: 1.45; text-align: center; }
+.findings, .decisions { margin-top: 22px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card h3 { margin: 0 0 10px; }
+.card p { color: var(--bone-dim); font-size: 14px; line-height: 1.55; }
+.aside { margin-top: 14px; padding-left: 14px; border-left: 2px solid var(--seam); color: var(--bone-dim); font-size: 13px; line-height: 1.55; }
+.aside strong { color: var(--smoke); font: 600 11px/1.5 var(--label); letter-spacing: 0.08em; text-transform: uppercase; }
+.comparison { margin: 22px 0 8px; align-items: stretch; }
+.comparison .card { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
+.comparison .before { border-left-color: var(--ember); }
+.comparison pre { white-space: pre; min-width: 0; }
+.comparison .after pre { flex: 1; }
+.receipt { display: block; padding: 10px 12px; overflow-wrap: anywhere; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); color: var(--bone); }
+.caption { margin: 10px 0 28px; color: var(--smoke); font: 11px/1.55 var(--label); letter-spacing: 0.02em; }
+.subsection { margin-top: 26px; }
+.subsection h3 { margin: 0 0 8px; }
+.subsection p { max-width: 82ch; color: var(--bone-dim); }
+.parts { display: grid; grid-template-columns: minmax(0, 1fr) 320px; align-items: center; gap: 26px; }
+.rings { display: block; width: 100%; height: auto; }
+.rings .outer { fill: none; stroke: var(--seam); stroke-width: 2; }
+.rings .inner { fill: var(--oxblood-tint); stroke: var(--ember); stroke-width: 2; }
+.rings .gate { fill: var(--soot); stroke: var(--seam); stroke-width: 1; }
+.rings text { fill: var(--bone-dim); font: 600 10px/1.25 var(--label); text-anchor: middle; }
+.rings .gate-label { fill: var(--smoke); font-size: 9px; }
+.decisions { margin-top: 22px; }
+.decisions .card { border-left-color: var(--seam); }
+.closing { margin-top: 22px; }
+footer { margin-top: 48px; }
+
+@media (max-width: 900px) {
+  .findings, .decisions { grid-template-columns: 1fr; }
+  .parts { grid-template-columns: minmax(0, 1fr) 280px; }
+}
+@media (max-width: 720px) {
+  .journey { padding: 20px; }
+  .timeline { grid-template-columns: 1fr; gap: 18px; padding-left: 24px; }
+  .timeline::before { top: 7px; bottom: 7px; left: 6px; right: auto; width: 2px; height: auto; }
+  .event { padding: 0 0 0 10px; }
+  .node { top: 2px; left: -18px; transform: none; }
+  .event-state, .event-title, .event p { text-align: left; }
+  .event-title { margin-top: 2px; }
+  .event p { margin-top: 4px; }
+  .comparison { grid-template-columns: 1fr; }
+  .parts { grid-template-columns: 1fr; }
+  .rings { max-width: 340px; margin: 0 auto; }
+}
+@media (max-width: 420px) {
+  .page { padding-left: 14px; padding-right: 14px; }
+  .panel, .card { padding-left: 14px; padding-right: 14px; }
+  pre { padding: 13px 14px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .event.now .node::after { animation: none; }
+}
 </style>
 </head>
 <body>
-<a class="skip-link" href="#content">Skip to proposal</a>
-<header class="topbar"><div class="topbar-inner"><span class="nav-mark">JET / PROPOSALS</span><nav class="top-links" aria-label="Proposal sections"><a href="#status">Status</a><a href="#owner-brief">Owner brief</a><a href="#what-the-evidence-says">Evidence</a><a href="#the-unifying-idea">Unifying idea</a><a href="#mechanism-merges">Merges</a><a href="#three-global-decisions">Global decisions</a><a href="#mechanism-ballots">Ballots</a><a href="#card-structure">Cards</a><a href="#substrate-defects">Defects</a><a href="#performance-gate">Performance</a><a href="#build-order">Build order</a><a href="#beginner-and-expert-passes">Passes</a><a href="#what-is-not-decided-here">Not decided</a><a href="#evidence-index">Index</a></nav></div></header>
-<div class="page" id="top"><div class="layout">
-<aside class="toc" aria-label="In-page table of contents"><p class="toc-label">On this spread</p>
-  <a class="level-2" href="#status">Status</a><a class="level-2" href="#owner-brief">Owner brief</a><a class="level-2" href="#what-the-evidence-says">What the evidence says</a><a class="level-2" href="#the-unifying-idea">The unifying idea</a><a class="level-2" href="#mechanism-merges">Mechanism merges</a><a class="level-2" href="#three-global-decisions">Three global decisions</a>
-  <a class="level-3" href="#d-domain-rings1">D-DOMAIN-RINGS1 (#2539)</a><a class="level-3" href="#d-domain-gauntlet1">D-DOMAIN-GAUNTLET1 (#2537)</a><a class="level-3" href="#d-domain-order1">D-DOMAIN-ORDER1 (#2538)</a>
-  <a class="level-2" href="#mechanism-ballots">Mechanism ballots</a><a class="level-2" href="#card-structure">Card structure</a><a class="level-2" href="#substrate-defects">Substrate defects</a><a class="level-2" href="#performance-gate">Performance gate</a><a class="level-2" href="#build-order">Build order</a><a class="level-2" href="#beginner-and-expert-passes">Beginner and expert passes</a><a class="level-2" href="#what-is-not-decided-here">What is not decided here</a><a class="level-2" href="#evidence-index">Evidence index</a>
-</aside>
-<main id="content">
-<header class="hero-card"><p class="eyebrow">epoch e15</p><h1>Domain matrix</h1><p class="hero-title-note">Canonical markdown rendered as a navigable dark-mode spread. Markdown remains the source of truth.</p>
-<p class="status-copy">State: Proposal. Epoch: e15. Date: 2026-09-02. Owner gates: Open: D-DOMAIN-RINGS1, D-DOMAIN-GAUNTLET1, and D-DOMAIN-ORDER1. Ratification unlocks: Ring placement, workload registration, closure rules, and the e15 build order. Card map: 219 cards: 88 mechanism, 108 domain, 9 defect, 11 gauntlet, and 3 global. Ballot map: 45 ballots: 42 mechanism ballots and 3 global ballots.</p>
-<div class="meta-row"><span class="meta-label">Ballots and recommendations</span><div class="pills"><span class="pill">D-DOMAIN-RINGS1 <span class="pill-rec">C</span></span><span class="pill">D-DOMAIN-GAUNTLET1 <span class="pill-rec">C</span></span><span class="pill">D-DOMAIN-ORDER1 <span class="pill-rec">C</span></span></div></div>
-<div class="score-grid"><article class="score-tile"><strong class="score-value">219</strong><span class="score-name">cards</span><p class="score-detail">88 mechanism, 108 domain, 9 defect, 11 gauntlet, and 3 global</p></article><article class="score-tile"><strong class="score-value">45</strong><span class="score-name">ballots</span><p class="score-detail">42 mechanism ballots and 3 global ballots</p></article><article class="score-tile"><strong class="score-value">108</strong><span class="score-name">domains</span><p class="score-detail">Registry domains</p></article><article class="score-tile"><strong class="score-value">88</strong><span class="score-name">mechanisms</span><p class="score-detail">The 88 mechanisms with two or more domains have mechanism cards.</p></article><article class="score-tile"><strong class="score-value">96/108</strong><span class="score-name">uncovered cells</span><p class="score-detail">96 of 108 domains report gauntlet coverage as <code>none</code>.</p></article><article class="score-tile"><strong class="score-value">9</strong><span class="score-name">substrate defects</span><p class="score-detail">A short list of substrate defects blocks even shipped claims.</p></article></div>
-</header>
-<article class="markdown">
-<h2 id="status">Status</h2>
-<p>This document is the owner-facing proposal for Tower epoch e15.</p>
-<div class="table-wrap"><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>State</td><td>Proposal</td></tr><tr><td>Epoch</td><td>e15</td></tr><tr><td>Date</td><td>2026-09-02</td></tr><tr><td>Owner gates</td><td>Open: D-DOMAIN-RINGS1, D-DOMAIN-GAUNTLET1, and D-DOMAIN-ORDER1</td></tr><tr><td>Ratification unlocks</td><td>Ring placement, workload registration, closure rules, and the e15 build order</td></tr><tr><td>Card map</td><td>219 cards: 88 mechanism, 108 domain, 9 defect, 11 gauntlet, and 3 global</td></tr><tr><td>Ballot map</td><td>45 ballots: 42 mechanism ballots and 3 global ballots</td></tr></tbody></table></div>
-<p>The global ballots are <code>D-DOMAIN-RINGS1</code> (#2539), <code>D-DOMAIN-GAUNTLET1</code> (#2537), and <code>D-DOMAIN-ORDER1</code> (#2538). Each is open on its card in Tower; <code>node plugins/tower/tower.mjs decision show &lt;id&gt;</code> prints the full ballot.</p>
-<p>Ratification permits implementation against one placement policy, one performance gate, and one ranked order. It does not claim that any domain is shipped.</p>
+  <div class="page">
+    <header>
+      <p class="legend rise"><span class="live">Proposal</span><span>Source · docs/proposals/domain-matrix.md · 2026-09-02</span></p>
+      <h1 class="rise">Jet for every kind of work</h1>
+      <div class="ignition"></div>
+      <p class="thesis rise">Jet's foundations are strong everywhere, but the layer that lets a person do real work in a specific field is missing and unmeasured; this plan builds that layer once, as shared parts, and proves each field with a benchmark before calling it done.</p>
+    </header>
 
-<h2 id="owner-brief">Owner brief</h2>
-<p>The owner intent in DESIGN2.md is:</p>
-<blockquote><p>"the goal is not just to beat languages on performance, we need to exceed<br>the performance of other languages WHILE providing better out of the box experiences with better, more modern dx/ux.<br>... beating everyone on performance AND providing a substantially better experience than the best experience with<br>other language's best ecosystem tools/libraries in STOCK OUT OF THE BOX jet."</p></blockquote>
-<p>Every domain a person writes software for is in scope. The owner named acoustics/MATLAB as the bar for niche depth.</p>
-<p>Every design must pass two facets. Beginner magic means a first file follows the stock open -&gt; do -&gt; see loop without setup ceremony. Expert control means explicit backends, receipts, inspection, locks, authority, and performance evidence remain available.</p>
+    <div class="panel journey">
+      <div class="timeline">
+        <div class="event shipped">
+          <span class="node"></span>
+          <span class="event-state">Shipped</span>
+          <span class="event-title">Foundations</span>
+          <p>Safe typed data, exact numbers, receipts on every result, What/Why/Fix errors, one meaning on every execution tier.</p>
+        </div>
+        <div class="event shipped">
+          <span class="node"></span>
+          <span class="event-state">Shipped</span>
+          <span class="event-title">Developer experience</span>
+          <p>Devtools, one live loop, entry resolution, the web suite, jobs.</p>
+        </div>
+        <div class="event now">
+          <span class="node"></span>
+          <span class="event-state">Now</span>
+          <span class="event-title">The survey</span>
+          <p>108 fields of work measured against the best tool in each.</p>
+        </div>
+        <div class="event proposed">
+          <span class="node"></span>
+          <span class="event-state">Proposed</span>
+          <span class="event-title">Shared parts</span>
+          <p>Build the building blocks the fields have in common, widest first.</p>
+        </div>
+        <div class="event proposed">
+          <span class="node"></span>
+          <span class="event-state">Proposed</span>
+          <span class="event-title">Proof</span>
+          <p>A field counts as done only when stock Jet beats its incumbent on a fixed workload.</p>
+        </div>
+      </div>
+    </div>
 
-<h2 id="what-the-evidence-says">What the evidence says</h2>
-<p>The corpus gives four facts.</p>
-<ol><li><p>Jet's substrate is graded strong across domains. It includes typed bounded data (<code>core.data</code>, <code>DataLimits</code>, <code>DataError</code>), exact numerics (<code>Int</code>/<code>Decimal</code>, nominal units), and typed codecs, HTTP, SQL, and HTML.</p><p>It also includes fail-closed authority and effects (E1803, <code>allow:</code> in <code>package.jet</code>), provider and placement receipts (<code>core.compute</code>), deterministic replay, tier parity (I9), and What/Why/Fix diagnostics.</p></li>
-<li><p>The domain mechanism layer is missing. The missing layer includes value models, engines, format codecs, and the incumbent-shaped day-one loop, open -&gt; do -&gt; see.</p></li>
-<li><p>The performance gate has no matched cells. 96 of 108 domains report gauntlet coverage as <code>none</code>.</p><p>The other 12 name only adjacent generic cells: <code>numerics.float-kernel</code>, <code>netserv</code>, <code>embedded.kernel</code>, and <code>regex-logscan</code>. No domain has a matched cell.</p></li>
-<li><p>A short list of substrate defects blocks even shipped claims.</p></li></ol>
-<p>The count views have different scopes, so this table labels each source.</p>
-<div class="table-wrap"><table><thead><tr><th>Measure</th><th>Count</th><th>Source</th></tr></thead><tbody><tr><td>Registry domains</td><td>108</td><td>SUMMARY.md</td></tr><tr><td>Census rows</td><td>5,698</td><td>DESIGN2.md evidence note and direct census recount</td></tr><tr><td>Raw P0 rows</td><td>2,981</td><td>DESIGN2.md evidence note and direct census recount</td></tr><tr><td>Raw owner-gated rows</td><td>4,232</td><td>DESIGN2.md evidence note and direct census recount</td></tr><tr><td>Claim-ledger rows</td><td>3,171</td><td>DESIGN2.md evidence note and direct claims recount</td></tr><tr><td>Sources</td><td>3,595</td><td>DESIGN2.md evidence note and direct manifest recount</td></tr><tr><td>Unique mechanism IDs before merges</td><td>127</td><td>SUMMARY.md</td></tr><tr><td>Merged mechanisms</td><td>120</td><td>DESIGN2.md §B</td></tr><tr><td>SUMMARY.md union P0 field total</td><td>2,957</td><td>SUMMARY.md</td></tr><tr><td>SUMMARY.md union owner-gated P0 total</td><td>2,328</td><td>SUMMARY.md</td></tr></tbody></table></div>
+    <section class="reveal">
+      <p class="eyebrow">Where we are</p>
+      <div class="section-head"><h2>The survey said the same three things everywhere</h2></div>
+      <p>We asked one question for 108 fields of work, from web servers to acoustics to double-entry accounting: what does the best tool in that field let a person do in the first five minutes, and can stock Jet do the same? A "field" here is a kind of work, not a company; the best tool is whatever practitioners actually reach for, such as MATLAB for signals or Excel for a budget. The answers came back in the same shape every time.</p>
+      <div class="grid findings">
+        <div class="card">
+          <h3>The foundations hold</h3>
+          <p>In every field, the parts Jet already has are graded strong: data that is typed and bounded, numbers that are exact, results that carry a receipt, and errors that say what happened, why, and how to fix it. Example: opening a CSV in Jet gives a typed table with a row limit and a receipt; a bad column produces a What/Why/Fix error instead of a silent guess.</p>
+        </div>
+        <div class="card">
+          <h3>The field layer is missing</h3>
+          <p>On top of the foundations, each field needs its own value types, its own engines, its file formats, and a first-five-minutes loop of open → do → see. Almost none of that exists yet. Example: an audio engineer in MATLAB has a signal type, filter design, and a spectrogram in one line each. Jet today has one FFT, implemented as a slow reference, and no way to design a filter.</p>
+        </div>
+        <div class="card">
+          <h3>Nothing is measured</h3>
+          <p>96 of the 108 fields have no benchmark against their incumbent at all. The other 12 borrow a generic one that does not measure the field's real workload. So no field can claim a win yet, in either direction.</p>
+        </div>
+      </div>
+      <p class="aside"><strong>More precisely</strong> The survey also found a short list of foundation bugs that block claims Jet already makes, for example the default evaluator rejecting lazy data paths in six fields. They are fixed first, before any field work.</p>
+    </section>
 
-<h2 id="the-unifying-idea">The unifying idea</h2>
-<p>The matrix is not 108 products. It is one substrate ledger plus ~120 shared mechanisms, projected into each domain's vocabulary.</p>
-<p>51 mechanisms span five or more domains. The 12 widest touch 26–59 domains each.</p>
-<p>Build order by mechanism breadth unblocks the most domains per unit of work. Each domain then needs its domain-only rows, example program, and gauntlet cell.</p>
-<p>The beat vector shared by all families is one typed evidence ledger: source spans, effects, authority, provider, precision, placement, and replay.</p>
-<p>Incumbent instrumentation is ambient, so it cannot offer this shared ledger. Jet wins a domain when the incumbent loop runs in stock Jet with the ledger attached and the gauntlet cell shows a win.</p>
+    <section class="reveal">
+      <p class="eyebrow">Where we could be</p>
+      <div class="section-head"><h2>Not 108 products. One foundation, about 120 shared parts</h2></div>
+      <p>The fields overlap far more than they differ. A "part" is one building block many fields need: an FFT family, a table type, a ledger, a scene graph, a units system. After merging duplicates, the 108 fields share about 120 parts; 51 of them serve five or more fields, and the widest dozen serve between 26 and 59 fields each. Build the widest parts first and each one unlocks many fields at once. Each field then needs only its own vocabulary on top, one example program, and its benchmark.</p>
 
-<h2 id="mechanism-merges">Mechanism merges</h2>
-<p>The orchestrator adjudicated these merges.</p>
-<div class="table-wrap"><table><thead><tr><th>Canonical</th><th>Absorbed</th><th>Reason</th></tr></thead><tbody><tr><td><code>M-VALIDATION-RECEIPTS</code></td><td><code>M-EVIDENCE</code></td><td>One evidence ledger; security <code>D-SEC-LEDGER1</code> argued the same.</td></tr><tr><td><code>M-WORKFLOW-DAG</code></td><td><code>M-DURABLE-WORKFLOWS</code></td><td>Durability is an execution property of the same graph; queue is #2457.</td></tr><tr><td><code>M-DATA-TABLES</code></td><td><code>M-COLUMNAR</code></td><td>Arrow, Parquet, and out-of-core work share one table boundary.</td></tr><tr><td><code>M-RASTER</code></td><td><code>M-RASTER-GRIDS</code></td><td>A georeferenced grid is a raster with CRS and nodata facets.</td></tr><tr><td><code>M-SIMULATION</code></td><td><code>M-SIM-EVENTS</code></td><td>Model, events, queues, and experiments form one simulation lifecycle.</td></tr><tr><td><code>M-MESH-STENCILS</code></td><td><code>M-MESH-FEM</code></td><td>Finite-element spaces are one facet of mesh and field discretization.</td></tr><tr><td><code>M-LINALG</code></td><td><code>M-DENSE-FACTORS</code></td><td>Factorizations are linear algebra.</td></tr></tbody></table></div>
-<p>Folds have no card of their own. <code>M-FINANCE-CODECS</code> and <code>M-CATALOG-ARCHIVES</code> move to <code>M-SCI-FORMATS</code>.</p>
-<p><code>M-PACKAGING</code> moves to the global RINGS card (D1). Everything else stays separate.</p>
-<p>After the merges, 120 mechanisms remain. The 88 mechanisms with two or more domains have mechanism cards.</p>
-<p>A mechanism with exactly one domain has no mechanism card. Its rows live in that domain's design card plan.</p>
-<p>The existing-card law is strict. When <code>_global/mechanisms.json</code> lists <code>existing_cards</code>, the new mechanism card extends that card or decision. It adds <code>blockedBy</code> and never re-decides the existing law.</p>
-<p>These ratified e14 decisions bind every mechanism:</p>
-<div class="table-wrap"><table><thead><tr><th>Decision</th><th>Binding law</th></tr></thead><tbody><tr><td><code>D-DX-DEVTOOLS-UX1 = D</code></td><td><code>Pill -&gt; Lens -&gt; Workbench</code> devtools</td></tr><tr><td><code>D-DX-LIVE1 = A</code></td><td>One live-loop law</td></tr><tr><td><code>D-DX-ENTRY1 = C</code></td><td>Bare commands resolve a package entry by override-safe facts, then shallow inference</td></tr><tr><td><code>D-DX-SUITE1 = C</code></td><td><code>core.web</code> suite on <code>core.reactive</code></td></tr><tr><td><code>D-DX-JOBS-UX1 = E</code></td><td><code>jet jobs &lt;name&gt;</code></td></tr></tbody></table></div>
-<p>Open e14 ballots stay pending. They are <code>D-DX-PLUGIN1</code>, <code>D-DX-WEBARCH1</code>, and <code>D-DX-PROD1</code>.</p>
+      <div class="grid grid-2 comparison">
+        <div class="card before">
+          <h3>Before</h3>
+          <pre>$ jet run TurbineMonitor.jet
+Error [E1001]: there is no core module `core.signal`</pre>
+          <p>The one FFT Jet has is an O(n²) reference implementation.</p>
+        </div>
+        <div class="card after">
+          <h3>After</h3>
+          <pre>use core.signal as signal
 
-<h2 id="three-global-decisions">Three global decisions</h2>
-<h3 id="d-domain-rings1">D-DOMAIN-RINGS1 (#2539)</h3>
-<p>Question: Where do domain features live, who may depend on native libraries under I6, and what does <code>use</code> look like in one file?</p>
-<div class="table-wrap"><table class="option-table"><thead><tr><th>Option letter and name</th><th>One-line description</th></tr></thead><tbody><tr><td>A. Fat Core</td><td>Put every domain API in the std-only Prelude under <code>core.&lt;x&gt;</code> and use only Jet implementations.</td></tr><tr><td>B. Bridge packs</td><td>Ship each capability as a separately versioned first-party bridge pack with a package pin beside <code>use</code>.</td></tr><tr class="recommended-row"><td>C. Two rings and a ratchet</td><td>Keep mechanism meaning in Ring 0, then place packs and backends in Ring 1 behind one index and receipt.</td></tr><tr><td>D. Per-domain choice</td><td>Let each domain choose its own package, backend, lock, and import policy.</td></tr><tr><td>E. Graduating rings</td><td>Start packs in Ring 1, then graduate them into Ring 0 after adoption and measured proof.</td></tr></tbody></table></div>
-<p>Recommendation: C.</p>
-<div class="callout"><p>Why: C keeps shared table and format meanings in Ring 0, so combined domain values use one type and operation contract. Ring 1 can accelerate those mechanisms behind one receipt. One toolchain index keeps <code>use jet.image</code> short while experts retain pins, trust policy, and offline locks.</p></div>
-<div class="ring-diagram"><svg viewBox="0 0 760 520" aria-hidden="true"><circle cx="380" cy="220" r="190" fill="#102c34" stroke="#6dd7e8" stroke-width="2"/><circle cx="380" cy="220" r="112" fill="#112c21" stroke="#70d69a" stroke-width="2"/><foreignObject x="282" y="142" width="196" height="156"><div style="color:#f0f6f8;text-align:center;font:13px/1.4 system-ui"><strong style="color:#70d69a">Ring 0</strong><br/>types, operations, CPU-oracle reference implementation, diagnostics, receipts (std-only Prelude)</div></foreignObject><foreignObject x="228" y="46" width="304" height="70"><div style="color:#f0f6f8;text-align:center;font:13px/1.4 system-ui"><strong style="color:#6dd7e8">Ring 1</strong><br/>first-party domain packs (<code>jet.&lt;domain&gt;</code>) and backends behind that meaning</div></foreignObject><foreignObject x="70" y="430" width="620" height="62"><div style="color:#c1ced4;text-align:center;font:12px/1.45 ui-monospace">Ratchet: gauntlet cell exists and is measured; native-backend card open; <code>jet inspect backends</code> shows the bridge</div></foreignObject></svg></div>
-<p>Ring 0 owns a mechanism's types, operations, CPU-oracle reference implementation, diagnostics, and receipts in the std-only Prelude. Ring 1 holds first-party domain packs and backends behind that meaning.</p>
-<p>A Ring 1 pack uses a toolchain-pinned index. A single file can resolve <code>use jet.image</code> without a manifest. Ring 1 backends can accelerate Ring 0 linalg, FFT, and compute behind the same receipt.<br>Ring 1 domain packs use the proposed <code>jet.&lt;domain&gt;</code> namespace and are distributed through jetpack.</p>
-<p>The <code>backends</code> package key in <code>package.jet</code> is PROPOSED. The <code>authority.providers</code> field is ratified trust data, not backend selection.</p>
-<p>The RINGS ratchet permits a bridge-only pack only when its gauntlet cell exists and is measured against the incumbent. Its native-backend card must be open, and proposed <code>jet inspect backends</code> must show the bridge.</p>
-<p><code>jet build --release</code> and publish refuse a bridge-only pack that fails the ratchet. They report a registered diagnostic.</p>
+fn run() {
+    recording :: signal.read_wav("Turbine48k8192.wav", channel: 0, rate: 48_000.0) ?? panic("wav")
+    first :: signal.spectrogram(recording, frame: 4096, hop: 2048, window: .Hann, provider: .Auto) ?? panic("spectrum")
+    filter :: signal.butter(recording, order: 6, cutoff: 8_000.0, phase: .Zero, mode: .Offline) ?? panic("filter")
+    filtered :: filter.apply(recording) ?? panic("apply")
+    reduced :: signal.resample(filtered, rate: 12_000.0, anti_alias: .Required, provider: .Auto) ?? panic("resample")
+    print("spectrogram_shape:{first.frames}x{first.bins}")
+    print("batch_receipt:{first.receipt.id}")
+}</pre>
+          <code class="receipt">provider=cpu-oracle ring=0 precision=F32Strict fallback=none</code>
+        </div>
+      </div>
+      <p class="caption">One shared FFT part serves signal processing, acoustics, and radio at once; the receipt names which engine produced the result and at what precision.</p>
 
-<h3 id="d-domain-gauntlet1">D-DOMAIN-GAUNTLET1 (#2537)</h3>
-<p>Question: When does Jet create each workload row, measure it, and let a domain card close?</p>
-<div class="table-wrap"><table class="option-table"><thead><tr><th>Option letter and name</th><th>One-line description</th></tr></thead><tbody><tr><td>A. Measure every cell before any domain closes</td><td>Register all 108 rows, measure them first, and block every card on one uncovered or losing row.</td></tr><tr><td>B. Measure one flagship cell per family</td><td>Register 11 family rows, add domain rows on request, and close each card after its registered rows pass.</td></tr><tr class="recommended-row"><td>C. Register every cell and measure at domain build</td><td>Register all 108 rows as <code>uncovered</code>, then measure when each domain card enters <code>building</code>.</td></tr><tr><td>D. Register every cell and measure on independent CI</td><td>Register all 108 rows, measure on a schedule, and let cards close without waiting for their rows.</td></tr></tbody></table></div>
-<p>Recommendation: C.</p>
-<div class="callout"><p>Why: C shows all 108 rows before work starts and still lets unrelated domains advance. It starts a row when its domain card enters <code>building</code>, then blocks that domain on missing or losing proof. Each row exposes its workload, output check, ratio, backend, and status.</p></div>
-<p>C accepts a temporary owner-ratified matrix deferral with an explicit <code>remove_when</code> condition. A losing row never receives that exception.</p>
+      <div class="subsection">
+        <h3>What Jet can offer that the incumbents cannot</h3>
+        <p>Every result in Jet arrives with a receipt: where the data came from, which engine computed it, at what precision, on which machine, and how to replay it. The incumbents cannot offer this because their instrumentation is bolted on afterwards; Jet's is built in. A field is won when the incumbent's five-minute loop runs in stock Jet with that receipt attached, and the benchmark shows Jet ahead.</p>
+      </div>
 
-<h3 id="d-domain-order1">D-DOMAIN-ORDER1 (#2538)</h3>
-<p>Question: Which e15 work moves first for shared mechanisms and domain packs?</p>
-<div class="table-wrap"><table class="option-table"><thead><tr><th>Option letter and name</th><th>One-line description</th></tr></thead><tbody><tr><td>A. Family by family</td><td>Build one owner-chosen family block with one flagship, shared dependencies, and its gauntlet before the next family.</td></tr><tr><td>B. Mechanism breadth first</td><td>Build Ring 0 mechanisms in descending domain reach before opening flagships or domain packs.</td></tr><tr class="recommended-row"><td>C. Controlled breadth with ranked flagships</td><td>Advance Ring 0 by reach, then open owner-swappable flagships under a bounded path gate.</td></tr><tr><td>D. Owner-ranked backlog only</td><td>Give eligible cards to <code>tower-rank</code> without a family order, Ring 0 rule, or flagship quota.</td></tr></tbody></table></div>
-<p>Recommendation: C.</p>
-<div class="callout"><p>Why: C keeps Ring 0 as one breadth-first delivery stream and gives users an early, bounded flagship result. Its seed list uses the registry practitioner-base signal, Ring 0 coverage, and cheap gauntlet registration. <code>tower-rank</code> refreshes eligible order after closure.</p></div>
-<p>The adaptive gate allows at most two flagship paths. It requires disjoint paths, a clean integration target, enough capacity, and one close owner.</p>
+      <div class="subsection parts">
+        <div>
+          <h3>Where the parts live</h3>
+          <p>Each part has one meaning, defined in Jet's standard library: its types, its operations, a reference implementation, its errors, and its receipt. Faster engines, such as FFTW for the FFT or a GPU for a matrix, plug in behind that same meaning and the receipt says which one ran. A single-file program gets the part without a manifest; an expert can pin an engine, forbid one, or work offline.</p>
+        </div>
+        <svg class="rings" viewBox="0 0 320 330">
+          <circle class="outer" cx="160" cy="112" r="100"/>
+          <circle class="inner" cx="160" cy="112" r="78"/>
+          <text x="160" y="98"><tspan x="160" dy="0">Meaning —</tspan><tspan x="160" dy="14">types, operations,</tspan><tspan x="160" dy="14">reference implementation,</tspan><tspan x="160" dy="14">errors, receipt</tspan></text>
+          <text x="160" y="230"><tspan x="160" dy="0">Engines and packs —</tspan><tspan x="160" dy="13">faster implementations</tspan><tspan x="160" dy="13">behind the same receipt</tspan></text>
+          <rect class="gate" x="12" y="272" width="296" height="46" rx="6"/>
+          <text class="gate-label" x="160" y="291"><tspan x="160" dy="0">An engine ships only after its benchmark exists</tspan><tspan x="160" dy="13">and the reference implementation is on the way</tspan></text>
+        </svg>
+      </div>
 
-<h2 id="mechanism-ballots">Mechanism ballots</h2>
-<p>The 42 D-M-* entries in BALLOTS-ADDED.json are grouped by DESIGN2.md's wave.</p>
-<p>All 42 JSON ballots include <code>reviewPasses.beginner</code> and <code>reviewPasses.adversarial</code>. The beginner pass uses rli5. Each ballot passed the Tower validator and remains open on its mapped card.</p>
-</article>
-<div class="ballots-full">
-<div class="toolbar"><div class="search-wrap"><span class="search-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><label for="ballot-search" hidden>Search mechanism ballots</label><input class="search-box" id="ballot-search" type="search" placeholder="Search ballots, cards, mechanisms, or questions"></div><div class="filter-pills" aria-label="Filter mechanism ballots"><button class="filter-btn active" type="button" data-filter="all" aria-pressed="true">All (42)</button><button class="filter-btn" id="d2-wave-1" type="button" data-filter="wave1" aria-pressed="false">Wave 1 (12)</button><button class="filter-btn" id="d3-wave-2" type="button" data-filter="wave2" aria-pressed="false">Wave 2 (30)</button><button class="filter-btn" type="button" data-filter="recC" aria-pressed="false">Rec C (41)</button><button class="filter-btn" type="button" data-filter="recD" aria-pressed="false">Rec D (1)</button></div><output class="results-count" id="ballot-count" aria-live="polite">42 of 42 shown</output></div>
-<div class="table-wrap"><table id="mechanism-table"><thead><tr><th><button class="sort-button" type="button" data-sort="ballot" aria-sort="none">Ballot <span class="sort-arrow">↕</span></button></th><th><button class="sort-button" type="button" data-sort="card" aria-sort="none">Card <span class="sort-arrow">↕</span></button></th><th>Wave</th><th>Mechanism</th><th>Question</th><th>Rec</th></tr></thead><tbody>
-<tr data-wave="1" data-rec="C"><td><code>D-M-RECEIPTS1</code></td><td>#2568</td><td>D2 wave 1</td><td><code>M-VALIDATION-RECEIPTS</code>: Cross-tier validation, reproducibility, and evidence receipts</td><td>Which domain-specific evidence fields belong on Jet's existing receipt?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-FORMATS1</code></td><td>#2625</td><td>D2 wave 1</td><td><code>M-SCI-FORMATS</code>: Standard scientific formats and interchange</td><td>Which format data does Jet own, and which approved bridges may read it?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-TABLES1</code></td><td>#2561</td><td>D2 wave 1</td><td><code>M-DATA-TABLES</code>: Typed tabular, relational, and columnar data boundary</td><td>What stock path handles typed Parquet tables beyond memory?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-WORKFLOW1</code></td><td>#2638</td><td>D2 wave 1</td><td><code>M-WORKFLOW-DAG</code>: Inspectable workflow graphs and execution plans</td><td>How does Jet record workflow parts and resume failed runs?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-LINALG1</code></td><td>#2600</td><td>D2 wave 1</td><td><code>M-LINALG</code>: Generic typed tensor and linear-algebra substrate</td><td>What public module holds shaped numbers, matrix breakdowns, and their library?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="D"><td><code>D-M-UNITS1</code></td><td>#2575</td><td>D2 wave 1</td><td><code>M-UNITS</code>: Typed physical units and dimensional analysis</td><td>Where does Jet check units and record meaning for wire data and integration?</td><td>D</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-GPU1</code></td><td>#2595</td><td>D2 wave 1</td><td><code>M-GPU-KERNELS</code>: GPU kernels, fusion, placement, and backend receipts</td><td>Should Jet hide GPU work, expose checked launches, or offer both?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-STORAGE1</code></td><td>#2630</td><td>D2 wave 1</td><td><code>M-STORAGE</code>: Durable scientific stores and caches</td><td>Should one typed path serve local files and approved database engines?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-OPTIMIZATION1</code></td><td>#2572</td><td>D2 wave 1</td><td><code>M-OPTIMIZATION</code>: Optimization model surface and LP/MILP/NLP/CP-SAT backends</td><td>How should Jet write a checked optimization model?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-DISTRIBUTED-EXEC1</code></td><td>#2610</td><td>D2 wave 1</td><td><code>M-MPI-LAUNCH</code>: Distributed execution, MPI collectives, and allocation-aware job launch</td><td>How should Jet start work on several machines and record its result?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-SIMULATION1</code></td><td>#2627</td><td>D2 wave 1</td><td><code>M-SIMULATION</code>: Reproducible domain simulation lifecycle</td><td>How should Jet advance steps, people, and equations through one reproducible run?</td><td>C</td></tr>
-<tr data-wave="1" data-rec="C"><td><code>D-M-SOLVERS1</code></td><td>#2556</td><td>D2 wave 1</td><td><code>M-SOLVER-SUBSTRATE</code>: Checked nonlinear and domain solver substrate</td><td>How should ODE, sparse, and root calls share typed results and receipts?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-SIGNAL1</code></td><td>#2558</td><td>D3 wave 2</td><td><code>M-FFT</code>: Planner-backed FFT family</td><td>What public calls and result values cover frequencies, filters, and sample-rate changes?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-HARDWARE-IO1</code></td><td>#2596</td><td>D3 wave 2</td><td><code>M-HARDWARE-IO</code>: Authority-safe hardware and instrument I/O</td><td>Should hardware use manual calls, typed bus drivers, or one shared session?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-STATS1</code></td><td>#2635</td><td>D3 wave 2</td><td><code>M-TYPED-MODEL-RESULT</code>: Typed model, fit, and result records</td><td>What checked path covers formulas, model results, and random draws?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-ML-LIFECYCLE1</code></td><td>#2590</td><td>D3 wave 2</td><td><code>M-EXPERIMENT-LEDGER</code>: Asset, lineage, run, artifact, and reproducible evidence ledger</td><td>How should Jet check and join data, model state, and run history?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-GEOMETRY-MESH1</code></td><td>#2609</td><td>D3 wave 2</td><td><code>M-MESH-STENCILS</code>: Meshes, stencils, and discretized field operators</td><td>What native or bridged path produces a typed STEP-to-field result?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-API-CONTRACT1</code></td><td>#2552</td><td>D3 wave 2</td><td><code>M-API-CONTRACT</code>: Executable API contracts, schemas, bindings, and compatibility</td><td>Where does the typed promise for <code>POST /orders</code> live?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-EMBEDDED-PLATFORM1</code></td><td>#2579</td><td>D3 wave 2</td><td><code>M-BOARD-BSP</code>: Typed board, target, BSP, and HAL facts</td><td>What owns the board lifecycle for board, flash, debug, and OTA work?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-CALENDARS1</code></td><td>#2582</td><td>D3 wave 2</td><td><code>M-CALENDARS-BUSINESS-DATES</code>: Civil calendars, exchange sessions, and business-date arithmetic</td><td>Where should calendar rules and business-date calculations live?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-SAFETY-TIMING1</code></td><td>#2636</td><td>D3 wave 2</td><td><code>M-WCET</code>: Target-bound timing, jitter, WCET, and deadline evidence</td><td>How should Jet prove a control task meets its deadline and safety duties?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-CONNECTORS1</code></td><td>#2560</td><td>D3 wave 2</td><td><code>M-CONNECTORS-WEBHOOKS</code>: Typed external connectors, webhooks, and capability injection</td><td>How should Jet type service connectors, credentials, and verified webhooks?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-PLUGIN-CAPS1</code></td><td>#2616</td><td>D3 wave 2</td><td><code>M-PLUGIN-CAPS</code>: Explicit capability imports, limits, and authority-scoped extensions</td><td>How should image data, filesystem permission, and failure limits cross a plugin boundary?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-QUERY1</code></td><td>#2554</td><td>D3 wave 2</td><td><code>M-QUERY-PLANNER</code>: Analytical SQL, typed plans, and physical execution</td><td>Should a data report use query text, typed operations, one plan, or wait?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-RULES1</code></td><td>#2621</td><td>D3 wave 2</td><td><code>M-RULES-DECISIONS</code>: Declarative rules, decisions, and policy execution</td><td>How should Jet represent and run typed rules?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-SYMBOLIC1</code></td><td>#2632</td><td>D3 wave 2</td><td><code>M-SYMBOLIC</code>: Typed symbolic AST, assumptions, equations, and rewrite calculus</td><td>Should symbolic formulas use calls, a <code>#Symbolic</code> block, or typed values?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-LOAD1</code></td><td>#2601</td><td>D3 wave 2</td><td><code>M-LOAD-RUNNER</code>: Scenario load runners with deterministic thresholds</td><td>How should Jet schedule repeated work and record its measurements?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-GRAPHICS1</code></td><td>#2594</td><td>D3 wave 2</td><td><code>M-GPU-GRAPHICS</code>: Portable graphics devices, shaders, pipelines, and frame resources</td><td>How should Jet draw a triangle, sketch in 2D, and pick a ray?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-SCENE1</code></td><td>#2624</td><td>D3 wave 2</td><td><code>M-SCENE-GRAPH</code>: Typed scene graphs, transforms, assets, and graph identity</td><td>Should scene access use component queries, parent paths, or one graph?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-NLP1</code></td><td>#2611</td><td>D3 wave 2</td><td><code>M-NLP-PIPELINE</code>: Tokenizer, document, alignment, and text annotation pipeline</td><td>How should Jet turn text into aligned tokens and annotations?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-OS-SERVICES1</code></td><td>#2569</td><td>D3 wave 2</td><td><code>M-OS-SERVICES</code>: Authority-bound operating-system services</td><td>Should one backup receipt use manager commands, a supervisor, host records, or dev supervision?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-LEDGER1</code></td><td>#2606</td><td>D3 wave 2</td><td><code>M-DOUBLE-ENTRY-LEDGER</code>: Balanced double-entry ledger and immutable posting</td><td>Where should Jet own balanced money movement rules and failure results?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-FINDINGS1</code></td><td>#2607</td><td>D3 wave 2</td><td><code>M-FINDINGS-RULES</code>: Portable security rules, dataflow findings, and SARIF publication</td><td>Should findings use YAML, Jet queries, or typed rules?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-LABELED-ARRAYS1</code></td><td>#2599</td><td>D3 wave 2</td><td><code>M-LABELED-ARRAYS</code>: Labeled N-D arrays, coordinates, and CF metadata</td><td>Where should labels live when a <code>Tensor</code> is read and aligned?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-OBJECT-PIPELINE1</code></td><td>#2613</td><td>D3 wave 2</td><td><code>M-OBJECT-PIPELINE</code>: Typed object pipelines and remote session handles</td><td>Should one process task use text pipes, records, or typed Jet values?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-RASTER1</code></td><td>#2617</td><td>D3 wave 2</td><td><code>M-RASTER</code>: First-class raster/image values and bounded pixel storage</td><td>What one value model should represent image and map pixels?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-WORKBOOK1</code></td><td>#2637</td><td>D3 wave 2</td><td><code>M-WORKBOOK-FORMULAS</code>: Workbook dependency graphs, formulas, and calculation receipts</td><td>How should Jet edit Excel files and compute changed cells?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-STREAMS1</code></td><td>#2555</td><td>D3 wave 2</td><td><code>M-REALTIME-STREAMS</code>: Bounded real-time audio and device streams</td><td>Should streams use separate types, library checks, one carrier, or a plan value?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-STRUCTURED-FILTER1</code></td><td>#2631</td><td>D3 wave 2</td><td><code>M-STRUCTURED-FILTER</code>: Structured filter programs over bounded streams</td><td>Should bounded JSONL use jq text, a filter file, or typed Jet code?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-SYNTAX-TREE1</code></td><td>#2633</td><td>D3 wave 2</td><td><code>M-SYNTAX-TREE</code>: Incremental lossless syntax trees and structural queries</td><td>What one source tree should serve editor, formatter, codemod, and query work?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-HDL1</code></td><td>#2719</td><td>D3 wave 2</td><td><code>M-HDL-SEMANTICS</code>: Typed HDL signals, clocks, elaboration, and RTL</td><td>Should circuits use library netlists, an HDL block grammar, or typed signal values?</td><td>C</td></tr>
-<tr data-wave="2" data-rec="C"><td><code>D-M-MEDIA1</code></td><td>#2608</td><td>D3 wave 2</td><td><code>M-MEDIA-PIPELINE</code>: Media codec, demux/decode/filter/encode/mux pipeline</td><td>How should Jet move media, keep time, process audio, and load plugins?</td><td>C</td></tr>
-</tbody></table></div>
-</div>
-<article class="markdown">
-<p><code>D-M-HDL1</code> uses #2719, the FPGA-HDL domain card. One-domain mechanisms have no separate mechanism card, so its title comes from <code>_global/mechanisms.json</code>.</p>
+      <div class="subsection">
+        <h3>The proof rule</h3>
+        <p>Every field gets a benchmark: a fixed workload, the incumbent it is measured against, and the numbers that count. The benchmark runs when the field's work starts. A field cannot be called done while its benchmark is missing or losing, and a loss is never averaged away by a win elsewhere.</p>
+      </div>
 
-<h2 id="card-structure">Card structure</h2>
-<p>The minted card map has this shape.</p>
-<div class="two-column"><div class="table-wrap"><table><thead><tr><th>Card kind</th><th>Count</th></tr></thead><tbody><tr><td>Mechanism</td><td>88</td></tr><tr><td>Domain design</td><td>108</td></tr><tr><td>Defect</td><td>9</td></tr><tr><td>Gauntlet</td><td>11</td></tr><tr><td>Global policy</td><td>3</td></tr><tr><td>Total</td><td>219</td></tr></tbody></table></div><div><p>Domain design cards group by family as follows.</p><div class="table-wrap"><table><thead><tr><th>Family</th><th>Domain cards</th></tr></thead><tbody><tr><td>science-numerics</td><td>12</td></tr><tr><td>engineering</td><td>14</td></tr><tr><td>life-sciences-health</td><td>7</td></tr><tr><td>earth-space</td><td>7</td></tr><tr><td>finance-business</td><td>8</td></tr><tr><td>ai-ml</td><td>12</td></tr><tr><td>media-creative</td><td>8</td></tr><tr><td>embedded-hardware</td><td>8</td></tr><tr><td>platforms-infrastructure</td><td>17</td></tr><tr><td>security</td><td>6</td></tr><tr><td>tools-productivity</td><td>9</td></tr></tbody></table></div></div></div>
-<p>Every mechanism and domain card is blocked by the RINGS policy card. A mechanism card is also blocked by each existing e14 card or decision that it extends.</p>
-<p>A domain card is blocked by its shared mechanism cards and its family gauntlet card. A gauntlet card is blocked by the GAUNTLET policy card.</p>
-<p><code>needsAcceptance</code> is true only when the incumbent loop is a GUI product. The listed GUI loop families are dashboards, desktop, creative, education, DCC, and notebooks. Other domain cards set it false.</p>
+      <div class="subsection">
+        <h3>What day one looks like</h3>
+        <p>One flagship field per family opens first, so there is something real to use early: numerical computing, signal processing, genomics, mapping, quantitative trading, machine-learning training, image processing, embedded devices, databases, cryptography, and test automation. Any flagship can be swapped before it opens.</p>
+      </div>
+    </section>
 
-<h2 id="substrate-defects">Substrate defects</h2>
-<p>The nine defect cards in <code>_cards/_defects/*.json</code> are:</p>
-<div class="table-wrap"><table><thead><tr><th>Card</th><th>Defect id</th><th>Diagnostic code</th><th>Families affected</th><th>Effect</th></tr></thead><tbody>
-<tr><td>#2639</td><td><code>autodiff-higher-order</code></td><td><span class="badge">E0112</span><span class="badge">E0102</span></td><td>ml-training</td><td>The higher-order derivative fixture stops before curvature and lacks source-spanned derivative evidence.</td></tr>
-<tr><td>#2640</td><td><code>core-sys-posix-example-drift</code></td><td><span class="badge">E0305</span><span class="badge">E0307</span><span class="badge">E0107</span><span class="badge">L0520</span></td><td>shell-sysadmin</td><td>The POSIX example uses obsolete <code>Ok</code>/<code>Err</code> patterns and fails the current <code>Int</code>, <code>Unit</code>, and <code>[Int]</code> contracts.</td></tr>
-<tr><td>#2641</td><td><code>e0109-explanation-context-drift</code></td><td><span class="badge">E0109</span></td><td>education-teaching</td><td>The live <code>Int</code>/<code>String</code> error disagrees with <code>jet explain</code>'s U8/I8 explanation.</td></tr>
-<tr><td>#2642</td><td><code>e0405-crypto-auth-examples</code></td><td><span class="badge">E0405</span></td><td>blockchain-web3, cryptography-engineering, distributed-systems, fintech-payments, identity-auth</td><td>Current crypto and auth examples use value-carrying returns in result-less functions and fail checks.</td></tr>
-<tr><td>#2643</td><td><code>e0956-evaluator-boundary</code></td><td><span class="badge">E0956</span></td><td>3d-animation-dcc, data-engineering-etl, databases-storage-engines, observability-platforms, quant-trading, spreadsheets-business-logic</td><td>The default evaluator rejects lazy, query, and <code>GameScene</code> paths.</td></tr>
-<tr><td>#2644</td><td><code>e2105-prove-hash</code></td><td><span class="badge">E2105</span></td><td>blockchain-web3, cryptography-engineering, digital-forensics, distributed-systems, identity-auth, proof-formal, reverse-engineering, security-tooling</td><td><code>jet prove</code> hashes the running compiler, so proof and replay producers stay unreachable.</td></tr>
-<tr><td>#2645</td><td><code>ice-unit-formatting-2737</code></td><td><span class="badge">ICE at <code>expressions.rs:2737:14</code></span></td><td>chemical-process, fea-structural</td><td>A successful quantity program emits ICE warnings for unit-format expressions.</td></tr>
-<tr><td>#2646</td><td><code>jit-bad-handle-geoscience</code></td><td><span class="badge">ICE <code>jit list len: bad handle</code></span></td><td>geoscience-seismology</td><td>The typed waveform table prints rows, then the JIT aborts with a bad handle.</td></tr>
-<tr><td>#2647</td><td><code>sqlite-blob-null</code></td><td><span class="badge">SQLITE-BLOB-NULL</span></td><td>databases-storage-engines</td><td>The SQLite bridge maps queried BLOB bytes to NULL instead of preserving them.</td></tr>
-</tbody></table></div>
+    <section class="reveal">
+      <p class="eyebrow">What has to be decided</p>
+      <div class="section-head"><h2>Three questions gate everything else</h2></div>
+      <div class="grid decisions">
+        <div class="card decision">
+          <h3>Where do field features live?</h3>
+          <p>In the standard library, in separate packages, or meaning in the library with engines in packages. The answer sets whether every field shares one meaning per part, what a single file can <code>use</code> without a manifest, and how fast new fields can ship.</p>
+        </div>
+        <div class="card decision">
+          <h3>When is performance measured, and can a field close without it?</h3>
+          <p>Measure everything up front, measure only flagships, or register every benchmark now and run each when its field starts. The answer trades honesty about wins against how much work can move at once.</p>
+        </div>
+        <div class="card decision">
+          <h3>What gets built first?</h3>
+          <p>Family by family, widest parts first, or widest parts first with a small number of flagships open in parallel. The answer decides whether the first usable result arrives early or after the shared parts are complete.</p>
+        </div>
+      </div>
+      <p class="closing">Behind these three sit 42 part-level design questions, one per shared part, each with the same shape: what does the person type, and which engine runs it. All of them are open on the board with a recommendation each; this page is the context, the board is where they are decided.</p>
+    </section>
 
-<h2 id="performance-gate">Performance gate</h2>
-<p>The AGENTS.md comparator is per cell and metric.</p>
-<ul><li>Jet must strictly beat every matched non-Rust peer, with Jet/peer below <code>1.00</code>.</li><li>Rust permits a Jet/Rust ratio of <code>1.05</code> or lower. This band is measurement noise, not a target or win.</li><li>No gate may average away a loss, substitute a workload or tier, omit a peer, or accept unavailable, uncovered, mismatched, or inconclusive evidence.</li></ul>
-<p>The 11 gauntlet cards use each domain's <code>performance.json</code> workload, incumbent, and metric. They register all 108 cells immediately as <code>uncovered</code>.</p>
-<p>Each cell records a locked workload, incumbent, metric, fixed input, output check, required tiers, and backend receipt. A valid same-machine run changes the status from <code>uncovered</code> to <code>win</code> or <code>loss</code>.</p>
-<p>Measurement starts when the domain card enters <code>building</code>. No domain card closes while its cell is <code>uncovered</code> or <code>loss</code>.</p>
-<p>The only exception is an owner-ratified matrix deferral with an explicit <code>remove_when</code> condition. A losing cell never receives that exception. The public scoreboard shows one status row for every domain.</p>
-
-<h2 id="build-order">Build order</h2>
-<p>D-DOMAIN-ORDER1 recommends Ring 0 breadth first, with controlled flagship breadth.</p>
-<p>The default flagship list is:</p>
-<div class="table-wrap"><table><thead><tr><th>Family</th><th>Flagship</th></tr></thead><tbody><tr><td>science-numerics</td><td>numerical-computing</td></tr><tr><td>engineering</td><td>signal-processing</td></tr><tr><td>life-sciences-health</td><td>bioinformatics-genomics</td></tr><tr><td>earth-space</td><td>gis-geospatial</td></tr><tr><td>finance-business</td><td>quant-trading</td></tr><tr><td>ai-ml</td><td>ml-training</td></tr><tr><td>media-creative</td><td>image-processing</td></tr><tr><td>embedded-hardware</td><td>embedded-iot</td></tr><tr><td>platforms-infrastructure</td><td>databases-storage-engines</td></tr><tr><td>security</td><td>cryptography-engineering</td></tr><tr><td>tools-productivity</td><td>testing-qa-automation</td></tr></tbody></table></div>
-<p>The seed criterion has three parts. Use the registry incumbent as the practitioner-base signal. Use Ring 0 coverage. Use a cheap gauntlet registration seed.</p>
-<p>The owner may swap any flagship before it opens. <code>tower-rank</code> refreshes eligible order after closure.</p>
-<p>Ring 0 remains one breadth-first delivery stream. A second flagship path needs disjoint paths, a clean integration target, enough capacity, and one close owner.</p>
-
-<h2 id="beginner-and-expert-passes">Beginner and expert passes</h2>
-<div class="comparison"><section class="compare-side"><h3 class="compare-title">Beginner</h3><p>A beginner sees a stock Jet file open a domain input, do one typed operation, and show a result, error, or receipt. The loop is open -&gt; do -&gt; see, with no backend selection or manifest setup.</p></section><section class="compare-side"><h3 class="compare-title">Expert</h3><p>An expert controls <code>backends</code>, backend pins, authority, locks, and receipts. The expert can run <code>jet inspect backends</code> and <code>jet explain --cost</code> to inspect placement and cost.</p></section></div>
-
-<h2 id="what-is-not-decided-here">What is not decided here</h2>
-<p>No I9 carve-outs are proposed.</p>
-<p>New syntax enters only through the I7 decision id named in its ballot. This proposal does not ratify syntax by itself.</p>
-<p>The open e14 ballots remain pending: <code>D-DX-PLUGIN1</code>, <code>D-DX-WEBARCH1</code>, and <code>D-DX-PROD1</code>.</p>
-<p>The pending RINGS decision blocks every Ring 1 bridge and pack.</p>
-
-<h2 id="evidence-index">Evidence index</h2>
-<p>The corpus is under <code>~/.cache/jet-luna/dx2/</code>. It is a machine-local working set, not a repository artifact; Tower and this document carry the durable record.</p>
-<div class="table-wrap"><table><thead><tr><th>Path</th><th>Contents</th></tr></thead><tbody><tr><td><code>&lt;domain&gt;/report.md</code></td><td>Domain report and evidence summary</td></tr><tr><td><code>&lt;domain&gt;/census.json</code></td><td>Domain census rows</td></tr><tr><td><code>&lt;domain&gt;/performance.json</code></td><td>Domain performance workload and incumbent</td></tr><tr><td><code>&lt;domain&gt;/claims.json</code></td><td>Domain claim ledger rows</td></tr><tr><td><code>&lt;domain&gt;/manifest.json</code></td><td>Domain source manifest</td></tr><tr><td><code>_families/&lt;family&gt;/</code></td><td>Family synthesis files</td></tr><tr><td><code>_global/</code></td><td>Global merge, registry, summary, and defect data</td></tr><tr><td><code>_cards/</code></td><td>Minted global, mechanism, domain, defect, and gauntlet payloads</td></tr><tr><td><code>ballots/</code></td><td>Full global and mechanism ballot JSON files</td></tr><tr><td><code>reviews/</code></td><td>Beginner and adversarial review files</td></tr></tbody></table></div>
-<p>The card map is <code>_cards/MINTED.json</code>. The ballot map is <code>_cards/BALLOTS-ADDED.json</code>.</p>
-</article>
-<footer>Canonical source: docs/proposals/domain-matrix.md; this page is a rendering.</footer>
-</main></div></div>
+    <footer>Canonical source: docs/proposals/domain-matrix.md; this page is a rendering.</footer>
+  </div>
 <script>
-(function () {
-  const table = document.getElementById('mechanism-table');
-  const search = document.getElementById('ballot-search');
-  const count = document.getElementById('ballot-count');
-  if (!table || !search || !count) return;
-  const tbody = table.tBodies[0];
-  const rows = Array.from(tbody ? tbody.rows : []);
-  const filters = Array.from(document.querySelectorAll('.filter-btn[data-filter]'));
-  const sorts = Array.from(table.querySelectorAll('.sort-button[data-sort]'));
-  let filter = 'all';
-  let sortKey = '';
-  let sortDirection = 1;
-
-  function matches(row) {
-    const query = search.value.trim().toLowerCase();
-    const wave = row.dataset.wave;
-    const rec = row.dataset.rec;
-    const filterMatch = filter === 'all' || filter === 'wave1' && wave === '1' || filter === 'wave2' && wave === '2' || filter === 'recC' && rec === 'C' || filter === 'recD' && rec === 'D';
-    const searchable = [row.cells[0], row.cells[1], row.cells[3], row.cells[4]].map(function (cell) { return cell.textContent; }).join(' ').toLowerCase();
-    return filterMatch && (!query || searchable.includes(query));
-  }
-
-  function render() {
-    if (!tbody) return;
-    const ordered = rows.slice();
-    if (sortKey) ordered.sort(function (a, b) {
-      const ai = sortKey === 'card' ? Number(a.cells[1].textContent.slice(1)) : a.cells[0].textContent.trim();
-      const bi = sortKey === 'card' ? Number(b.cells[1].textContent.slice(1)) : b.cells[0].textContent.trim();
-      return (ai < bi ? -1 : ai > bi ? 1 : 0) * sortDirection;
-    });
-    let shown = 0;
-    ordered.forEach(function (row) { tbody.appendChild(row); row.hidden = !matches(row); if (!row.hidden) shown += 1; });
-    count.textContent = shown + ' of 42 shown';
-  }
-
-  search.addEventListener('input', render);
-  filters.forEach(function (button) { button.addEventListener('click', function () { filter = button.dataset.filter || 'all'; filters.forEach(function (item) { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); }); render(); }); });
-  sorts.forEach(function (button) { button.addEventListener('click', function () { const key = button.dataset.sort || ''; if (sortKey === key) sortDirection *= -1; else { sortKey = key; sortDirection = 1; } sorts.forEach(function (item) { item.setAttribute('aria-sort', item === button ? (sortDirection === 1 ? 'ascending' : 'descending') : 'none'); const arrow = item.querySelector('.sort-arrow'); if (arrow) arrow.textContent = item === button ? (sortDirection === 1 ? '↑' : '↓') : '↕'; }); render(); }); });
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
 })();
 </script>
 </body>

@@ -1,0 +1,414 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+  <title>Debounced search — three approaches</title>
+  <style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+    /* page-specific layout */
+    body { padding: 0; }
+    .page { max-width: 1400px; }
+    header.page-head { max-width: 780px; margin-bottom: 32px; }
+    .prompt-section { margin-top: 28px; }
+    .prompt-box { padding: 18px 22px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); color: var(--bone-dim); }
+    .prompt-box .label { display: block; margin-bottom: 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+
+    .approaches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+    .approaches > .section-head { grid-column: 1 / -1; }
+    @media (max-width: 1100px) { .approaches { grid-template-columns: 1fr; max-width: 640px; } }
+    .approach { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+    .approach.winner { border-color: var(--ember); }
+    .approach-inner { display: flex; flex-direction: column; gap: 22px; padding: 24px 20px 20px; }
+    .winner-badge { align-self: flex-start; margin: 16px 20px 0; }
+    .approach-head h2 { margin: 0 0 6px; font: 600 18px/1.3 var(--display); letter-spacing: -0.02em; }
+    .approach-head p { padding-left: 38px; color: var(--bone-dim); font-size: 14px; }
+    .approach-head code { color: var(--bone); }
+    .num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin-right: 10px; background: var(--soot); border: 1px solid var(--seam); border-radius: 3px; color: var(--bone-dim); font: 600 11px/1 var(--label); vertical-align: middle; }
+    .winner .num { background: var(--oxblood); color: var(--bone); border-color: var(--oxblood); }
+
+    .code { position: relative; overflow-x: auto; padding: 20px 18px; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); }
+    .code::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: var(--seam); }
+    .code pre { padding: 0; background: transparent; border: 0; color: var(--bone); font-size: 12px; line-height: 1.75; white-space: pre; }
+    .code .kw { color: var(--ember); }
+    .code .str { color: var(--bone-dim); }
+    .code .cm { color: var(--smoke); }
+    .code .fn { color: var(--bone); }
+
+    .tradeoffs { overflow: hidden; border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; }
+    .tradeoffs .row { display: grid; grid-template-columns: 1fr 1fr; }
+    .tradeoffs .row + .row { border-top: 1px solid var(--seam); }
+    .tradeoffs .cell { padding: 11px 14px; color: var(--bone-dim); }
+    .tradeoffs .cell:first-child { border-right: 1px solid var(--seam); }
+    .tradeoffs .head { background: var(--soot); color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+    .tradeoffs .pro, .tradeoffs .con { position: relative; padding-left: 28px; }
+    .tradeoffs .pro::before, .tradeoffs .con::before { content: ''; position: absolute; left: 14px; top: 0.8em; width: 7px; height: 7px; border-radius: 50%; }
+    .tradeoffs .pro::before { background: var(--bone); }
+    .tradeoffs .con::before { background: var(--ember); }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { padding: 5px 10px; background: var(--soot); border: 1px solid var(--seam); border-radius: 3px; color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.06em; white-space: nowrap; }
+    .chip strong { color: var(--bone); font-weight: 600; }
+
+    .reco { max-width: 880px; padding: 24px 28px; background: var(--soot); border: 1px solid var(--seam); border-left: 3px solid var(--ember); border-radius: var(--radius); }
+    .reco h3 { margin: 0 0 14px; font: 600 20px/1.3 var(--display); }
+    .reco p { margin: 0 0 10px; color: var(--bone-dim); line-height: 1.65; }
+    .reco p:last-child { margin-bottom: 0; }
+    .reco code { padding: 2px 6px; background: var(--ash); border-radius: 3px; color: var(--bone); font-size: 0.88em; }
+    @media (max-width: 640px) { .tradeoffs .cell { padding: 10px 8px; } .reco { padding: 20px; } }
+
+</style>
+</head>
+<body>
+
+  <div class="page">
+
+    <header>
+      <p class="legend rise"><span class="live">Live</span><span>Source · Acme web client</span><span>2026-09-02</span></p>
+      <h1 class="rise">Three ways to implement debounced search</h1>
+      <div class="ignition"></div>
+      <p class="thesis rise">Compare three debounced search implementations and choose the clearest tradeoff for the task filter.</p>
+    </header>
+
+    <section class="prompt-section reveal">
+      <div class="section-head"><h2>Prompt</h2></div>
+      <div class="prompt-box">Show me three different ways to implement debounced search for the task filter input in our React codebase, with tradeoffs for each.</div>
+    </section>
+
+    <!-- ============================================================= -->
+
+    <section class="approaches reveal">
+      <div class="section-head"><h2>Approaches</h2></div>
+
+      <!-- ---------- Approach 1 ---------- -->
+      <article class="approach card">
+        <div class="approach-inner">
+          <header class="approach-head">
+            <h2><span class="num">01</span>Inline useEffect + setTimeout</h2>
+            <p>Debounce logic lives directly inside the component that owns the input.</p>
+          </header>
+
+          <div class="code"><pre><span class="kw">export function</span> <span class="fn">TaskSearch</span>() {
+  <span class="kw">const</span> [draft, setDraft] = <span class="fn">useState</span>(<span class="str">''</span>);
+  <span class="kw">const</span> [query, setQuery] = <span class="fn">useState</span>(<span class="str">''</span>);
+
+  <span class="fn">useEffect</span>(() <span class="kw">=&gt;</span> {
+    <span class="kw">const</span> id = <span class="fn">setTimeout</span>(() <span class="kw">=&gt;</span> setQuery(draft), <span class="str">300</span>);
+    <span class="kw">return</span> () <span class="kw">=&gt;</span> <span class="fn">clearTimeout</span>(id);
+  }, [draft]);
+
+  <span class="kw">const</span> { data } = <span class="fn">useTasks</span>({ search: query });
+
+  <span class="kw">return</span> (
+    &lt;<span class="fn">input</span>
+      value={draft}
+      onChange={(e) <span class="kw">=&gt;</span> setDraft(e.target.value)}
+      placeholder=<span class="str">"Filter tasks..."</span>
+    /&gt;
+  );
+}</pre></div>
+
+          <div class="tradeoffs">
+            <div class="row head">
+              <div class="cell">Pro</div>
+              <div class="cell">Con</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">Zero new abstractions to learn</div>
+              <div class="cell con">Logic duplicated everywhere search exists</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">Easy to step through in devtools</div>
+              <div class="cell con">Two pieces of state for one conceptual value</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">No dependency or bundle change</div>
+              <div class="cell con">Delay constant is buried in component body</div>
+            </div>
+          </div>
+
+          <div class="chips">
+            <span class="chip">Bundle impact: <strong>+0 kb</strong></span>
+            <span class="chip">Testability: <strong>medium</strong></span>
+            <span class="chip">Reuse: <strong>low</strong></span>
+            <span class="chip">SSR safe: <strong>yes</strong></span>
+          </div>
+        </div>
+      </article>
+
+      <!-- ---------- Approach 2 (winner) ---------- -->
+      <article class="approach winner card">
+        <div class="winner-badge status">Recommended</div>
+        <div class="approach-inner">
+          <header class="approach-head">
+            <h2><span class="num">02</span>Custom useDebounce hook</h2>
+            <p>Extract the timer into a shared hook under <code style="font-family:var(--label);font-size:12px">src/hooks/</code>.</p>
+          </header>
+
+          <div class="code"><pre><span class="cm">// src/hooks/useDebounce.ts</span>
+<span class="kw">export function</span> <span class="fn">useDebounce</span>&lt;T&gt;(value: T, ms = <span class="str">300</span>): T {
+  <span class="kw">const</span> [debounced, setDebounced] = <span class="fn">useState</span>(value);
+  <span class="fn">useEffect</span>(() <span class="kw">=&gt;</span> {
+    <span class="kw">const</span> id = <span class="fn">setTimeout</span>(() <span class="kw">=&gt;</span> setDebounced(value), ms);
+    <span class="kw">return</span> () <span class="kw">=&gt;</span> <span class="fn">clearTimeout</span>(id);
+  }, [value, ms]);
+  <span class="kw">return</span> debounced;
+}
+
+<span class="cm">// TaskSearch.tsx</span>
+<span class="kw">const</span> [draft, setDraft] = <span class="fn">useState</span>(<span class="str">''</span>);
+<span class="kw">const</span> query = <span class="fn">useDebounce</span>(draft, <span class="str">300</span>);
+<span class="kw">const</span> { data } = <span class="fn">useTasks</span>({ search: query });</pre></div>
+
+          <div class="tradeoffs">
+            <div class="row head">
+              <div class="cell">Pro</div>
+              <div class="cell">Con</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">Single import reused across filter, command bar, board search</div>
+              <div class="cell con">One more file to maintain and document</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">Trivial to unit test with fake timers</div>
+              <div class="cell con">Generic <code style="font-family:var(--label);font-size:12px">T</code> hides intent slightly</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">Delay is a visible, tunable argument</div>
+              <div class="cell con">Still re-renders on every keystroke</div>
+            </div>
+          </div>
+
+          <div class="chips">
+            <span class="chip">Bundle impact: <strong>+0.2 kb</strong></span>
+            <span class="chip">Testability: <strong>high</strong></span>
+            <span class="chip">Reuse: <strong>high</strong></span>
+            <span class="chip">SSR safe: <strong>yes</strong></span>
+          </div>
+        </div>
+      </article>
+
+      <!-- ---------- Approach 3 ---------- -->
+      <article class="approach card">
+        <div class="approach-inner">
+          <header class="approach-head">
+            <h2><span class="num">03</span>Tiny external library</h2>
+            <p>Adopt <code style="font-family:var(--label);font-size:12px">use-debounce</code> for both values and callbacks.</p>
+          </header>
+
+          <div class="code"><pre><span class="kw">import</span> { useDebouncedCallback }
+  <span class="kw">from</span> <span class="str">'use-debounce'</span>;
+
+<span class="kw">export function</span> <span class="fn">TaskSearch</span>() {
+  <span class="kw">const</span> [query, setQuery] = <span class="fn">useState</span>(<span class="str">''</span>);
+
+  <span class="kw">const</span> onChange = <span class="fn">useDebouncedCallback</span>(
+    (next: <span class="kw">string</span>) <span class="kw">=&gt;</span> setQuery(next),
+    <span class="str">300</span>,
+    { leading: <span class="kw">false</span>, maxWait: <span class="str">1000</span> },
+  );
+
+  <span class="kw">const</span> { data } = <span class="fn">useTasks</span>({ search: query });
+
+  <span class="kw">return</span> (
+    &lt;<span class="fn">input</span>
+      defaultValue=<span class="str">""</span>
+      onChange={(e) <span class="kw">=&gt;</span> onChange(e.target.value)}
+    /&gt;
+  );
+}</pre></div>
+
+          <div class="tradeoffs">
+            <div class="row head">
+              <div class="cell">Pro</div>
+              <div class="cell">Con</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">leading / trailing / maxWait handled for us</div>
+              <div class="cell con">New runtime dependency to audit and update</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">Callback form skips intermediate re-renders</div>
+              <div class="cell con">Uncontrolled input diverges from Acme form patterns</div>
+            </div>
+            <div class="row">
+              <div class="cell pro">Well-tested edge cases (unmount, flush, cancel)</div>
+              <div class="cell con">~1.4 kb gzipped for something we could own</div>
+            </div>
+          </div>
+
+          <div class="chips">
+            <span class="chip">Bundle impact: <strong>+1.4 kb</strong></span>
+            <span class="chip">Testability: <strong>high</strong></span>
+            <span class="chip">Reuse: <strong>high</strong></span>
+            <span class="chip">SSR safe: <strong>yes</strong></span>
+          </div>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- ============================================================= -->
+
+    <section class="reveal">
+      <div class="section-head"><h2>Recommendation</h2></div>
+      <aside class="reco">
+        <h3>Go with the custom useDebounce hook</h3>
+        <p>
+          Acme already has three places that hand-roll the inline pattern
+          (task filter, command palette, member picker), so extracting one
+          shared hook removes duplication without taking on a new dependency.
+        </p>
+        <p>
+          Revisit approach 03 only if we later need <code>maxWait</code> or
+          <code>flush()</code> semantics — the library earns its bundle cost
+          once the requirements outgrow a ten-line hook.
+        </p>
+      </aside>
+    </section>
+
+  </div>
+
+
+<script>
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,504 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Platform Eng — Week of Mar 10</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+/* six-slide status deck */
+body { min-height: 100vh; overflow-x: hidden; background: var(--jet); color: var(--bone); scroll-snap-type: y mandatory; }
+#progress { position: fixed; top: 0; left: 0; z-index: 100; width: 0%; height: 3px; background: var(--ember); transition: width 0.4s var(--ease); }
+#counter { position: fixed; right: 36px; bottom: 28px; z-index: 10; color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.08em; user-select: none; }
+.slide {
+  width: 100vw;
+  height: 100vh;
+  min-height: 560px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 8vh 7vw;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overflow: hidden;
+  background: var(--jet);
+  color: var(--bone);
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+}
+.slide.visible, .slide.is-visible { opacity: 1; transform: translateY(0); }
+.slide.invert { background: var(--oxblood); color: var(--bone); }
+.title-slide { flex-direction: column; gap: 32px; }
+.slide-inner { width: 100%; max-width: 800px; }
+.slide > .section-head { position: absolute; top: 6vh; left: 7vw; width: calc(100% - 14vw); margin: 0; }
+.slide > .section-head h2 { color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.slide > .section-head::before { width: 18px; height: 2px; }
+.slide::after { content: attr(data-num); position: absolute; left: 36px; bottom: 28px; color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.08em; opacity: 0.7; user-select: none; }
+.deck-header { width: 100%; max-width: 800px; margin: 0; }
+.deck-header .legend { margin-bottom: 4px; }
+.deck-header .thesis { max-width: 58ch; }
+.ornament { display: block; margin: 0 0 40px; }
+.eyebrow { margin-bottom: 32px; color: var(--ember); font: 600 11px/1.4 var(--label); letter-spacing: 0.16em; text-transform: uppercase; }
+.invert .eyebrow { color: var(--bone); }
+h1 { margin: 20px 0 0; font: 700 clamp(48px, 7.5vw, 80px)/1.02 var(--display); letter-spacing: -0.04em; }
+h2 { margin-bottom: 48px; font: 700 clamp(34px, 5vw, 52px)/1.05 var(--display); letter-spacing: -0.04em; }
+.subtitle { max-width: 480px; color: var(--bone-dim); font-size: 18px; line-height: 1.65; }
+.mono { font-family: var(--label); }
+.byline { display: flex; gap: 32px; margin-top: 72px; color: var(--smoke); font: 11px/1.4 var(--label); letter-spacing: 0.04em; }
+.ship-list, .prog-list, .next-list { display: flex; flex-direction: column; list-style: none; }
+.ship-list { gap: 0; }
+.ship-item { display: grid; grid-template-columns: 18px 1fr auto; column-gap: 24px; align-items: start; padding: 28px 0; border-bottom: 1px solid var(--seam); }
+.ship-item:first-child { padding-top: 0; }
+.ship-item:last-child { border-bottom: 0; }
+.ship-dot { width: 10px; height: 10px; margin-top: 10px; background: transparent; border: 1px solid var(--bone); border-radius: 50%; }
+.ship-title { margin-bottom: 6px; color: var(--bone); font: 600 22px/1.25 var(--display); letter-spacing: -0.01em; }
+.ship-desc, .ship-ref { color: var(--smoke); }
+.ship-desc { font-size: 14px; line-height: 1.6; }
+.ship-ref { padding-top: 6px; font: 11px/1.4 var(--label); white-space: nowrap; letter-spacing: 0.02em; }
+.prog-list { gap: 48px; }
+.prog-item .prog-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+.prog-title { color: var(--bone); font: 600 22px/1.25 var(--display); letter-spacing: -0.01em; }
+.prog-pct { color: var(--smoke); font: 12px/1.4 var(--label); letter-spacing: 0.04em; }
+.prog-track { width: 100%; height: 4px; margin-bottom: 16px; overflow: hidden; background: var(--seam); border-radius: 2px; }
+.prog-fill { height: 100%; background: var(--ember); border-radius: 2px; transition: width 1.2s var(--ease); }
+.prog-note { color: var(--bone-dim); font-size: 14px; line-height: 1.6; }
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; margin-bottom: 56px; }
+.metric-label { margin-bottom: 16px; color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.metric-value { color: var(--bone); font: 700 64px/1 var(--display); letter-spacing: -0.04em; }
+.metric-value .unit { margin-left: 2px; color: var(--bone-dim); font-size: 32px; opacity: 0.7; }
+.metric-delta { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; font: 12px/1.4 var(--label); letter-spacing: 0.02em; }
+.metric-delta.down { color: var(--bone-dim); }
+.metric-delta.down::before { content: ""; display: inline-block; width: 0; height: 0; border-right: 4px solid transparent; border-left: 4px solid transparent; border-top: 5px solid var(--bone-dim); }
+.metric-delta.up { color: var(--ember); }
+.metric-delta.up::before { content: ""; display: inline-block; width: 0; height: 0; border-right: 4px solid transparent; border-left: 4px solid transparent; border-bottom: 5px solid var(--ember); }
+.sparkline-wrap { padding-top: 32px; border-top: 1px solid var(--seam); }
+.sparkline-caption { margin-top: 12px; color: var(--smoke); font: 10px/1.4 var(--label); letter-spacing: 0.04em; }
+.decision-card { padding: 44px 48px; background: var(--oxblood-tint); border: 1px solid var(--ember); border-radius: var(--radius); }
+.decision-q { margin-bottom: 16px; color: var(--bone); font: 600 26px/1.4 var(--display); letter-spacing: -0.01em; }
+.decision-context { color: var(--bone-dim); font-size: 15px; line-height: 1.65; }
+.options { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 40px; }
+.chip { padding: 12px 22px; color: var(--bone-dim); background: var(--soot); border: 1px solid var(--seam); border-radius: 4px; font: 600 12px/1.4 var(--label); letter-spacing: 0.02em; }
+.chip:hover { border-color: var(--ember); color: var(--bone); }
+.chip.lean { color: var(--bone); background: var(--ember); border-color: var(--ember); }
+.next-list { gap: 24px; }
+.next-list li { position: relative; padding-left: 40px; color: var(--bone); font: 600 22px/1.45 var(--display); letter-spacing: -0.01em; }
+.next-list li::before { content: ""; position: absolute; left: 0; top: 0.55em; width: 22px; height: 2px; background: var(--ember); }
+.footnote { margin-top: 72px; color: var(--smoke); font: 11px/1.4 var(--label); letter-spacing: 0.02em; }
+@media (max-width: 640px) {
+  .slide { padding: 6vh 5vw; }
+  .slide > .section-head { left: 5vw; width: 90vw; }
+  .slide::after { left: 5vw; }
+  .metrics { grid-template-columns: 1fr; gap: 40px; }
+  .ship-item { grid-template-columns: 14px 1fr; }
+  .ship-ref { grid-column: 2; padding-top: 8px; }
+  .decision-card { padding: 28px 24px; }
+  h1 { font-size: clamp(36px, 10vw, 56px); }
+  h2 { font-size: clamp(28px, 7vw, 40px); }
+  .metric-value { font-size: 48px; }
+}
+</style>
+</head>
+<body>
+
+  <!-- Progress bar -->
+  <div id="progress"></div>
+
+  <!-- Slide counter -->
+  <div id="counter">1 / 6</div>
+
+  <!-- ============================================================
+       Slide 1 — Title (dark)
+       ============================================================ -->
+  <section class="slide reveal title-slide visible" id="s1" data-num="01">
+    <div class="section-head"><h2>Deck opening</h2></div>
+    <header class="slide-inner deck-header">
+      <p class="legend rise"><span class="live">Live</span><span>Platform engineering · weekly update</span><span>2026-09-02</span></p>
+      <h1 class="rise">Platform Eng<br>— Week of Mar 10</h1>
+      <div class="ignition"></div>
+      <p class="thesis rise">What shipped, what's moving, and one decision we need from the room before the Acme 2.4 cut.</p>
+    </header>
+    <div class="slide-inner">
+      <svg class="ornament" width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="32" cy="32" r="26" fill="none" stroke="var(--seam)" stroke-width="1"/>
+        <path d="M18 32 H46 M32 18 V46" stroke="var(--ember)" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="32" cy="32" r="3.5" fill="var(--bone)"/>
+      </svg>
+      <div class="byline">
+        <span>Friday demo</span>
+        <span>6 slides</span>
+        <span>~4 min</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Slide 2 — Shipped (light)
+       ============================================================ -->
+  <section class="slide reveal" id="s2" data-num="02">
+    <div class="section-head"><h2>Shipped</h2></div>
+    <div class="slide-inner">
+      <div class="eyebrow">Shipped this week</div>
+      <h2>Three things out the door</h2>
+      <ul class="ship-list">
+        <li class="ship-item">
+          <span class="ship-dot"></span>
+          <div>
+            <div class="ship-title">Bulk task import</div>
+            <div class="ship-desc">
+              CSV and JSON uploads now land straight into a board with
+              column mapping — no more paste-and-pray.
+            </div>
+          </div>
+          <span class="ship-ref">#4211</span>
+        </li>
+        <li class="ship-item">
+          <span class="ship-dot"></span>
+          <div>
+            <div class="ship-title">Webhook retries v2</div>
+            <div class="ship-desc">
+              Exponential backoff with jitter; dead-letter queue surfaces
+              in the workspace admin panel.
+            </div>
+          </div>
+          <span class="ship-ref">#4188 #4203</span>
+        </li>
+        <li class="ship-item">
+          <span class="ship-dot"></span>
+          <div>
+            <div class="ship-title">Postgres 16 migration</div>
+            <div class="ship-desc">
+              All read replicas cut over Tuesday night; zero customer-facing
+              downtime, ~9% faster aggregate queries.
+            </div>
+          </div>
+          <span class="ship-ref">#4179</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Slide 3 — In progress (dark)
+       ============================================================ -->
+  <section class="slide reveal" id="s3" data-num="03">
+    <div class="section-head"><h2>In progress</h2></div>
+    <div class="slide-inner">
+      <div class="eyebrow">In progress</div>
+      <h2>Carrying into next week</h2>
+      <ul class="prog-list">
+        <li class="prog-item">
+          <div class="prog-head">
+            <span class="prog-title">Recurring tasks engine</span>
+            <span class="prog-pct">~70%</span>
+          </div>
+          <div class="prog-track"><div class="prog-fill" style="width:70%"></div></div>
+          <p class="prog-note">
+            Scheduler and RRULE parsing are done; remaining work is the
+            timezone edge cases and the "skip holidays" toggle.
+          </p>
+        </li>
+        <li class="prog-item">
+          <div class="prog-head">
+            <span class="prog-title">Audit log export</span>
+            <span class="prog-pct">~35%</span>
+          </div>
+          <div class="prog-track"><div class="prog-fill" style="width:35%"></div></div>
+          <p class="prog-note">
+            Streaming NDJSON endpoint is up behind a flag; still wiring
+            the S3 destination picker and retention policy UI.
+          </p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Slide 4 — Metrics (dark)
+       ============================================================ -->
+  <section class="slide reveal" id="s4" data-num="04">
+    <div class="section-head"><h2>Metrics</h2></div>
+    <div class="slide-inner">
+      <div class="eyebrow">Metrics</div>
+      <h2>Numbers we watch</h2>
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">API p95 latency</div>
+          <div class="metric-value">184<span class="unit">ms</span></div>
+          <div class="metric-delta down">12% wk/wk</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Background job error rate</div>
+          <div class="metric-value">0.21<span class="unit">%</span></div>
+          <div class="metric-delta down">0.08pp</div>
+        </div>
+      </div>
+
+      <div class="sparkline-wrap">
+        <svg width="100%" height="64" viewBox="0 0 780 64" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--bone)" stop-opacity="0.15"/>
+              <stop offset="100%" stop-color="var(--bone)" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <polygon
+            points="0,22 110,30 220,18 330,34 440,26 550,40 660,24 780,12 780,63 0,63"
+            fill="url(#sparkGrad)"/>
+          <polyline
+            points="0,22 110,30 220,18 330,34 440,26 550,40 660,24 780,12"
+            fill="none"
+            stroke="var(--bone)"
+            stroke-width="2"
+            stroke-linejoin="round"
+            stroke-linecap="round"/>
+          <circle cx="780" cy="12" r="4" fill="var(--bone)"/>
+          <circle cx="780" cy="12" r="8" fill="none" stroke="var(--bone)" stroke-width="1" opacity="0.3"/>
+          <line x1="0" y1="63" x2="780" y2="63" stroke="var(--seam)" stroke-width="1"/>
+        </svg>
+        <div class="sparkline-caption">
+          p95 latency, trailing 8 days — lower is better
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Slide 5 — Decision needed (warm dark gradient)
+       ============================================================ -->
+  <section class="slide reveal invert" id="s5" data-num="05">
+    <div class="section-head"><h2>Decision needed</h2></div>
+    <div class="slide-inner">
+      <div class="eyebrow">Decision needed</div>
+      <h2>One call to make</h2>
+
+      <div class="decision-card">
+        <p class="decision-q">
+          Do we ship recurring tasks behind a workspace flag in 2.4, or
+          hold one more week for the timezone fixes?
+        </p>
+        <p class="decision-context">
+          Flagged rollout gets it to design partners Friday but means two
+          code paths for ~2 weeks. Holding keeps a single path but slips
+          the partner promise.
+        </p>
+      </div>
+
+      <div class="options">
+        <span class="chip lean">A — Flag it, ship Friday</span>
+        <span class="chip">B — Hold for 2.5</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Slide 6 — Next week (light)
+       ============================================================ -->
+  <section class="slide reveal" id="s6" data-num="06">
+    <div class="section-head"><h2>Next week</h2></div>
+    <div class="slide-inner">
+      <div class="eyebrow">Next week</div>
+      <h2>On deck</h2>
+      <ul class="next-list">
+        <li>Finish recurring tasks — timezone matrix tests, then dogfood on the internal ops board.</li>
+        <li>Audit log export to private beta — three workspaces lined up.</li>
+        <li>Start scoping rate-limit headers for the public API; RFC draft by Thursday.</li>
+      </ul>
+      <div class="footnote">
+        Questions → drop them in the platform channel or grab anyone after standup.
+      </div>
+    </div>
+  </section>
+
+<script>
+  (function () {
+    var slides = Array.from(document.querySelectorAll('.slide'));
+    var counter = document.getElementById('counter');
+    var progress = document.getElementById('progress');
+    var current = 0;
+    var total = slides.length;
+
+    function go(i) {
+      current = Math.max(0, Math.min(total - 1, i));
+      slides[current].scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function updateProgress() {
+      var pct = ((current + 1) / total) * 100;
+      progress.style.width = pct + '%';
+    }
+
+    function revealSlide(idx) {
+      slides[idx].classList.add('visible');
+    }
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); go(current + 1); }
+      if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')                     { e.preventDefault(); go(current - 1); }
+    });
+
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          var idx = slides.indexOf(en.target);
+          current = idx;
+          counter.textContent = (idx + 1) + ' / ' + total;
+          updateProgress();
+          revealSlide(idx);
+        }
+      });
+    }, { threshold: 0.6 });
+
+    slides.forEach(function (s) { obs.observe(s); });
+    updateProgress();
+  })();
+
+
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) {
+    els.forEach((e) => e.classList.add('is-visible'));
+  } else {
+    document.documentElement.classList.add('js');
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) if (en.isIntersecting) {
+        en.target.classList.add('is-visible');
+        io.unobserve(en.target);
+      }
+    }, { rootMargin: '0px 0px -8% 0px' });
+    els.forEach((e) => io.observe(e));
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>How rate limiting works in acme/api</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+/* page rules: a feature note with paths, snippets, and decisions */
+.page { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 0 52px; }
+nav { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; padding: 32px 0 32px 8px; border-right: 1px solid var(--seam); font-size: 13px; }
+nav .nav-label { margin: 0 0 14px 12px; color: var(--smoke); font: 600 10px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+nav a { display: block; padding: 6px 0 6px 12px; border-left: 2px solid transparent; color: var(--smoke); text-decoration: none; line-height: 1.4; }
+nav a:hover, nav a.active { color: var(--bone); border-left-color: var(--ember); }
+nav a.l2 { padding-left: 24px; font-size: 12px; }
+nav .files { margin: 32px 0 0 12px; padding-top: 20px; border-top: 1px solid var(--seam); }
+nav .files .nav-label { margin-left: 0; }
+nav .files code { display: block; padding: 3px 0; color: var(--smoke); font: 11px/1.5 var(--label); }
+main { min-width: 0; padding: 0 0 80px; }
+header { padding-bottom: 30px; border-bottom: 1px solid var(--seam); }
+h1 code, p code { padding: 1px 5px; background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; color: var(--ember); }
+section[id] { scroll-margin-top: 24px; }
+.tldr { border-left: 3px solid var(--ember); color: var(--bone-dim); line-height: 1.65; }
+.tldr b { color: var(--bone); }
+details.card { margin: 10px 0; padding: 0; overflow: hidden; }
+summary { display: flex; align-items: center; gap: 12px; list-style: none; padding: 16px 18px; cursor: pointer; color: var(--bone); font: 600 16px/1.3 var(--display); }
+summary::-webkit-details-marker { display: none; }
+summary .step-no { display: flex; width: 24px; height: 24px; flex: 0 0 24px; align-items: center; justify-content: center; border: 1px solid var(--seam); border-radius: 3px; background: var(--soot); color: var(--bone); font: 600 11px var(--label); }
+summary .where { margin-left: auto; padding: 3px 8px; background: var(--soot); border: 1px solid var(--seam); border-radius: 3px; color: var(--smoke); font: 11px var(--label); }
+details .body { max-height: 0; overflow: hidden; padding: 0 18px 0 54px; transition: max-height 300ms var(--ease), padding 300ms var(--ease); }
+details[open] .body { max-height: 400px; padding: 4px 18px 18px 54px; }
+details .body p { color: var(--bone-dim); font-size: 14px; }
+details .body code { padding: 1px 4px; background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; color: var(--ember); }
+.tabs { margin: 18px 0 8px; overflow: hidden; padding: 0; }
+.tabbar { display: flex; overflow-x: auto; border-bottom: 1px solid var(--seam); background: var(--soot); }
+.tabbar button { border: 0; border-radius: 0; background: transparent; color: var(--smoke); }
+.tabbar button:hover { background: var(--ash); color: var(--bone); }
+.tabbar button.on { background: var(--ash); color: var(--bone); }
+.tabbar button.on::after { content: ""; display: block; height: 2px; margin: 8px -14px -10px; background: var(--ember); }
+.tabs pre { display: none; padding: 18px 20px; overflow-x: auto; border: 0; border-radius: 0; color: var(--bone-dim); }
+.tabs pre.on { display: block; }
+.hl { color: var(--ember); }.cm { color: var(--smoke); }
+.callout { display: flex; gap: 14px; margin: 22px 0; padding: 16px 18px; border: 1px solid var(--seam); border-left: 3px solid var(--ember); border-radius: var(--radius); background: var(--oxblood-tint); color: var(--bone-dim); font-size: 14px; line-height: 1.6; }
+.callout .ico { color: var(--ember); font-weight: 700; font-size: 16px; }
+.callout code { padding: 1px 5px; background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); }
+.gotcha-list { display: flex; max-width: 680px; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.gotcha-list li { position: relative; padding: 14px 18px 14px 42px; border: 1px solid var(--seam); border-left: 2px solid var(--ember); border-radius: var(--radius); background: var(--ash); color: var(--bone-dim); font-size: 14px; line-height: 1.55; }
+.gotcha-list li::before { content: "!"; position: absolute; left: 14px; top: 14px; color: var(--ember); font: 700 11px var(--label); }
+.gotcha-list b { color: var(--bone); }
+dl.faq { max-width: 680px; margin: 8px 0 0; }
+dl.faq dt { margin-top: 22px; padding-bottom: 6px; border-bottom: 1px dashed var(--seam); color: var(--bone); font: 600 16px/1.3 var(--display); }
+dl.faq dd { max-width: 640px; margin: 8px 0 0; color: var(--bone-dim); font-size: 14px; line-height: 1.6; }
+dl.faq dd code { padding: 1px 4px; background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; color: var(--ember); }
+@media (max-width: 920px) { .page { grid-template-columns: 1fr; } nav { display: none; } main { padding: 0 0 72px; } }
+@media (max-width: 640px) { summary { align-items: flex-start; flex-wrap: wrap; } summary .where { margin-left: 36px; } }
+
+</style>
+</head>
+<body>
+  <div class="page">
+    <nav>
+      <div class="nav-label">On this page</div>
+      <a href="#tldr" data-nav="tldr">TL;DR</a><a href="#path" data-nav="path">Request path</a><a href="#path" class="l2" data-nav="path">1. Identify</a><a href="#path" class="l2" data-nav="path">2. Bucket lookup</a><a href="#path" class="l2" data-nav="path">3. Consume</a><a href="#path" class="l2" data-nav="path">4. Reject</a><a href="#config" data-nav="config">Configuring a route</a><a href="#gotchas" data-nav="gotchas">Gotchas</a><a href="#faq" data-nav="faq">FAQ</a>
+      <div class="files"><div class="nav-label">Files read</div><code>middleware/ratelimit.ts</code><code>lib/tokenBucket.ts</code><code>config/limits.yaml</code><code>routes/*.ts</code></div>
+    </nav>
+    <main>
+      <header>
+        <p class="legend rise"><span class="live">Live</span><span>Source · acme/api docs</span><span>2026-09-02</span></p>
+        <h1 class="rise">How rate limiting works in <code>acme/api</code></h1>
+        <div class="ignition"></div>
+        <p class="thesis rise">Every request resolves a bucket, consumes a token, or returns 429.</p>
+      </header>
+
+      <section class="reveal" id="tldr"><div class="section-head"><h2>TL;DR</h2></div><div class="tldr panel"><b>TL;DR</b> — Every request passes through <code>rateLimit()</code> middleware, which resolves the caller to a <em>bucket key</em>, fetches a token-bucket from Redis, and either consumes one token or returns <code>429</code>. Limits are declared per-route in <code>config/limits.yaml</code>; routes without an entry inherit the <code>default</code> tier (100 req/min per API key).</div></section>
+
+      <section class="reveal" id="path"><div class="section-head"><h2>The request path, step by step</h2></div><p>Expand each step to see what runs and where it lives. The whole path is ~40 lines and adds about 0.4&nbsp;ms p50 to every request.</p>
+        <details class="card" open><summary><span class="step-no">1</span> Identify the caller <span class="where">middleware/ratelimit.ts:21</span></summary><div class="body"><p>The middleware first reduces the request to a <code>bucketKey</code>: API key if an <code>Authorization</code> header is present, otherwise the client IP (via the <code>x-forwarded-for</code> chain, trusting only our own LB). Anonymous IP traffic gets a much lower default tier.</p></div></details>
+        <details class="card"><summary><span class="step-no">2</span> Look up the bucket <span class="where">lib/tokenBucket.ts:9</span></summary><div class="body"><p>The route name plus bucket key map to a Redis hash (<code>rl:{route}:{key}</code>) holding <code>tokens</code> and <code>updatedAt</code>. If the key is missing it's created lazily at full capacity — there's no warm-up.</p></div></details>
+        <details class="card"><summary><span class="step-no">3</span> Refill and consume <span class="where">lib/tokenBucket.ts:31</span></summary><div class="body"><p>Refill is computed from elapsed time (<code>rate × Δt</code>, capped at <code>burst</code>), then one token is subtracted. The whole read-modify-write runs as a single Lua script so concurrent requests can't double-spend.</p></div></details>
+        <details class="card"><summary><span class="step-no">4</span> Reject when empty <span class="where">middleware/ratelimit.ts:48</span></summary><div class="body"><p>If the script returns <code>tokens &lt; 0</code> the middleware short-circuits with <code>429 Too Many Requests</code> and sets <code>Retry-After</code> to the seconds until one token refills. Successful responses always carry <code>X-RateLimit-Remaining</code>.</p></div></details>
+      </section>
+
+      <section class="reveal" id="config"><div class="section-head"><h2>Configuring a limit on your route</h2></div><p>You don't touch the middleware. Add an entry to <code>config/limits.yaml</code> keyed by route name, and (optionally) tag the route so the middleware can find it.</p>
+        <div class="tabs panel" data-tabs><div class="tabbar"><button type="button" class="on" aria-pressed="true" data-t="0">limits.yaml</button><button type="button" aria-pressed="false" data-t="1">route.ts</button><button type="button" aria-pressed="false" data-t="2">client response</button></div><pre class="on"><span class="cm"># config/limits.yaml</span>
+default:
+  rate: 100/min
+  burst: 120
+
+<span class="hl">search.query</span>:
+  rate: 20/min
+  burst: 40
+  key: api_key        <span class="cm"># or: ip</span></pre><pre><span class="cm">// routes/search.ts</span>
+router.post(
+  "/search",
+  <span class="hl">rateLimit("search.query")</span>,
+  handler,
+);</pre><pre>HTTP/1.1 429 Too Many Requests
+Retry-After: 17
+X-RateLimit-Limit: 20
+X-RateLimit-Remaining: 0
+
+{ "error": "rate_limited", "retry_after": 17 }</pre></div>
+        <div class="callout"><span class="ico">★</span><div>If you only need the default tier, you don't need a YAML entry at all — just wrap the handler in <code>rateLimit()</code> with no argument. The route name is inferred from the path.</div></div>
+      </section>
+
+      <section class="reveal" id="gotchas"><div class="section-head"><h2>Gotchas worth knowing</h2></div><ul class="gotcha-list"><li><b>Limits are per-process in dev.</b> The Redis client falls back to an in-memory map when <code>REDIS_URL</code> is unset, so local testing won't reflect real cluster behaviour.</li><li><b>Burst ≠ rate.</b> <code>burst</code> is the bucket capacity; a caller idle for a minute can fire <code>burst</code> requests instantly even if <code>rate</code> is low.</li><li><b>Streaming responses count once.</b> The token is consumed at request start; a 30-second SSE stream still costs one token.</li></ul></section>
+
+      <section class="reveal" id="faq"><div class="section-head"><h2>FAQ</h2></div><dl class="faq"><dt>How do I exempt internal traffic?</dt><dd>Set <code>x-acme-internal: 1</code> from the caller; the middleware checks it against the mTLS peer name and skips the bucket entirely.</dd><dt>Where do I see who's getting limited?</dt><dd>Every <code>429</code> emits a <code>ratelimit.rejected</code> metric tagged with route and key type. There's a Grafana panel under <em>API → Health</em>.</dd><dt>Can a single user have a higher limit?</dt><dd>Yes — add their API key under <code>overrides:</code> in the YAML. Overrides are reloaded without a deploy.</dd></dl></section>
+      <footer>Source: middleware/ratelimit.ts · lib/tokenBucket.ts · config/limits.yaml · routes/*.ts</footer>
+    </main>
+  </div>
+  <script>
+/* Tab switching */
+document.querySelectorAll("[data-tabs]").forEach(box => {
+  const btns = box.querySelectorAll("button");
+  const panes = box.querySelectorAll("pre");
+  btns.forEach(b => b.addEventListener("click", () => {
+    btns.forEach(x => x.classList.remove("on"));
+    panes.forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    btns.forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    panes[+b.dataset.t].classList.add("on");
+  }));
+});
+
+/* Active nav tracking */
+const sections = document.querySelectorAll("section[id]");
+const navLinks = document.querySelectorAll("nav a[data-nav]");
+function updateNav() {
+  let current = "";
+  sections.forEach(s => {
+    if (s.getBoundingClientRect().top <= 100) current = s.id;
+  });
+  navLinks.forEach(a => {
+    a.classList.toggle("active", a.dataset.nav === current);
+  });
+}
+window.addEventListener("scroll", updateNav, { passive: true });
+updateNav();
+
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
+})();
+</script>
+</body>
+</html>

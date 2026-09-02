@@ -1,0 +1,377 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Acme — Design System Reference</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+  body { padding: 0; }
+  .nav-ribbon { position: sticky; top: 0; z-index: 10; background: var(--soot); border-bottom: 1px solid var(--seam); }
+  .nav-inner { max-width: 1200px; min-height: 56px; margin: 0 auto; padding: 0 32px; display: flex; align-items: center; gap: 28px; overflow-x: auto; scrollbar-width: none; }
+  .nav-inner::-webkit-scrollbar { display: none; }
+  .nav-brand { margin-right: auto; color: var(--bone); font: 700 18px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+  .nav-brand span { color: var(--ember); }
+  .nav-link { padding: 4px 0; border-bottom: 1px solid transparent; color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-decoration: none; text-transform: uppercase; white-space: nowrap; }
+  .nav-link:hover { color: var(--bone); border-color: var(--ember); }
+
+  .page { max-width: 1200px; }
+  .hero { padding: 64px 0 40px; }
+  .hero .thesis { max-width: 66ch; }
+  .hero-note { max-width: 66ch; margin: 20px 0 0; color: var(--bone-dim); }
+  .section { margin-top: 56px; }
+  .section > .section-head { margin-bottom: 24px; }
+  .section-number { margin-right: 10px; color: var(--smoke); font: 600 11px/1 var(--label); letter-spacing: 0.12em; vertical-align: middle; }
+  .gradient-strip { height: 72px; margin-bottom: 36px; border: 1px solid var(--seam); border-radius: var(--radius); background: linear-gradient(90deg, var(--ember), var(--bone) 38%, var(--smoke) 68%, var(--oxblood)); }
+  .palette-group { margin-bottom: 40px; }
+  .palette-label { margin: 0 0 14px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+  .palette-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .swatch-card.card { overflow: hidden; padding: 0; background: var(--soot); }
+  .swatch-paint { display: flex; align-items: flex-end; width: 100%; height: 96px; padding: 12px; border-bottom: 1px solid var(--seam); }
+  .swatch-paint .contrast-dot { width: 24px; height: 24px; border: 1px solid var(--seam); border-radius: 50%; background: var(--bone); }
+  .swatch-info { padding: 12px 14px 14px; }
+  .swatch-name { margin-bottom: 6px; color: var(--bone); font: 600 16px/1.3 var(--display); }
+  .swatch-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .swatch-hex, .swatch-token { font: 11px/1.4 var(--label); letter-spacing: 0.04em; }
+  .swatch-hex { color: var(--bone-dim); }
+  .swatch-token { padding: 3px 6px; background: var(--ash); border-radius: 3px; color: var(--ember); }
+  .token-table { margin-top: 20px; }
+  .token-table td:first-child { color: var(--bone); font-family: var(--label); }
+  .token-table td:nth-child(2) { color: var(--bone); font-family: var(--label); }
+
+  .type-table { overflow: hidden; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+  .type-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, auto); align-items: baseline; gap: 24px; padding: 24px 26px; border-bottom: 1px solid var(--seam); }
+  .type-row:last-child { border-bottom: 0; }
+  .type-row:hover { background: var(--ash); }
+  .type-specimen { min-width: 0; overflow: hidden; color: var(--bone); text-overflow: ellipsis; white-space: nowrap; }
+  .type-meta { text-align: right; white-space: nowrap; }
+  .type-meta-name { display: block; margin-bottom: 4px; color: var(--ember); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; }
+  .type-meta-props { color: var(--smoke); font: 10px/1.4 var(--label); }
+  .t-placard { font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; }
+  .t-h2 { font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+  .t-h3 { font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+  .t-body { font: 15.5px/1.6 var(--body); }
+  .t-label { color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+  .t-value { font: 700 40px/1 var(--display); letter-spacing: -0.03em; }
+
+  .spacing-grid { display: flex; align-items: flex-end; padding: 28px 20px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+  .space-col { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; gap: 14px; }
+  .space-col::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 1px; background: var(--seam); }
+  .space-col:last-child::after { display: none; }
+  .space-bar { height: 20px; background: var(--ember); }
+  .space-px { color: var(--bone); font: 700 22px/1 var(--display); }
+  .space-token { color: var(--smoke); font: 10px/1.4 var(--label); }
+
+  .radius-row, .shadow-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .radius-demo, .shadow-demo { min-height: 100px; display: flex; flex-direction: column; justify-content: flex-end; padding: 16px; background: var(--soot); border: 1px solid var(--seam); }
+  .radius-demo .lbl, .shadow-demo .lbl { color: var(--bone); font: 600 12px/1.4 var(--label); }
+  .radius-demo .val, .shadow-demo .val { color: var(--smoke); font: 10px/1.4 var(--label); }
+  .shadow-demo { box-shadow: none !important; }
+  .shadow-demo .val::after { content: ' · borders only'; color: var(--smoke); }
+
+  .comp-block { margin-bottom: 36px; }
+  .comp-label { margin-bottom: 12px; color: var(--bone-dim); font: 600 13px/1.4 var(--label); }
+  .comp-stage { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 20px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+  .btn { min-height: 36px; padding: 8px 14px; font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; }
+  .btn-primary { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+  .btn-secondary { background: var(--ash); border-color: var(--seam); color: var(--bone); }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--bone-dim); }
+  .btn-danger { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+  .input { width: 260px; height: 38px; padding: 8px 12px; }
+  .checkbox { display: inline-flex; align-items: center; gap: 10px; color: var(--bone-dim); font-size: 14px; cursor: pointer; }
+  .checkbox input { width: 18px; height: 18px; margin: 0; accent-color: var(--ember); }
+  .badge { display: inline-flex; align-items: center; min-height: 28px; padding: 5px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.08em; text-transform: uppercase; }
+  .badge-neutral { color: var(--smoke); }
+  .badge-accent { background: var(--oxblood); border-color: var(--oxblood); }
+  .badge-success { border-color: var(--seam); }
+  .badge-warning { background: var(--oxblood); border-color: var(--oxblood); }
+  @media (max-width: 768px) { .nav-inner { gap: 18px; padding: 0 18px; } .page { padding-left: 18px; padding-right: 18px; } .type-row { grid-template-columns: 1fr; gap: 10px; padding: 20px; } .type-meta { text-align: left; } .spacing-grid { padding: 20px 8px; } .space-token { font-size: 9px; } }
+  @media (max-width: 640px) { .palette-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .spacing-grid { overflow-x: auto; min-width: 520px; } .comp-stage { padding: 16px; } .input { width: min(260px, 100%); } }
+
+</style>
+</head>
+<body>
+<!-- ===== NAV RIBBON ===== -->
+<nav class="nav-ribbon">
+  <div class="nav-inner">
+    <div class="nav-brand">acme <span>studio</span></div>
+    <a href="#color" class="nav-link">Color</a>
+    <a href="#typography" class="nav-link">Type</a>
+    <a href="#spacing" class="nav-link">Space</a>
+    <a href="#shape" class="nav-link">Shape</a>
+    <a href="#components" class="nav-link">Components</a>
+  </div>
+</nav>
+
+<div class="page">
+  <header class="hero">
+    <p class="legend rise"><span class="live">Live</span><span>Source · src/styles/tokens.ts</span><span>2026-09-02</span></p>
+    <h1 class="rise">Design system reference</h1>
+    <div class="ignition"></div>
+    <p class="thesis rise">Generated from <code>src/styles/tokens.ts</code> and <code>src/components/</code> — use as a portable reference when prompting; every token and variant is documented here.</p>
+  </header>
+
+  <section class="section reveal" id="color">
+    <div class="section-head"><h2><span class="section-number">01</span>Color</h2></div>
+    <div class="gradient-strip" role="img" aria-label="Signal palette from ember through bone and smoke to oxblood"></div>
+    <div class="palette-group">
+      <div class="palette-label">Surfaces</div>
+      <div class="palette-row">
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--jet)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Jet</div><div class="swatch-meta"><span class="swatch-hex">#060606</span><span class="swatch-token">--jet</span></div></div>
+      </div>
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--soot)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Soot</div><div class="swatch-meta"><span class="swatch-hex">#111111</span><span class="swatch-token">--soot</span></div></div>
+      </div>
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--ash)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Ash</div><div class="swatch-meta"><span class="swatch-hex">#1A1A1A</span><span class="swatch-token">--ash</span></div></div>
+      </div>
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--seam)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Seam</div><div class="swatch-meta"><span class="swatch-hex">#262626</span><span class="swatch-token">--seam</span></div></div>
+      </div>
+      </div>
+    </div>
+    <div class="palette-group">
+      <div class="palette-label">Text</div>
+      <div class="palette-row">
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--bone)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Bone</div><div class="swatch-meta"><span class="swatch-hex">#EFEAE2</span><span class="swatch-token">--bone</span></div></div>
+      </div>
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--bone-dim)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Bone dim</div><div class="swatch-meta"><span class="swatch-hex">#BDB7AE</span><span class="swatch-token">--bone-dim</span></div></div>
+      </div>
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--smoke)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Smoke</div><div class="swatch-meta"><span class="swatch-hex">#8E8A83</span><span class="swatch-token">--smoke</span></div></div>
+      </div>
+      </div>
+    </div>
+    <div class="palette-group">
+      <div class="palette-label">Signal</div>
+      <div class="palette-row">
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--ember)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Ember</div><div class="swatch-meta"><span class="swatch-hex">#FF3D2E</span><span class="swatch-token">--ember</span></div></div>
+      </div>
+      <div class="swatch-card card">
+        <div class="swatch-paint" style="background:var(--oxblood)"><div class="contrast-dot" style="background:var(--bone)"></div></div>
+        <div class="swatch-info"><div class="swatch-name">Oxblood</div><div class="swatch-meta"><span class="swatch-hex">#6E1B14</span><span class="swatch-token">--oxblood</span></div></div>
+      </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="token-table">
+        <thead><tr><th>Token</th><th>Value</th><th>Role</th></tr></thead>
+        <tbody>
+        <tr><td>--jet</td><td>#060606</td><td>Page background</td></tr>
+        <tr><td>--soot</td><td>#111111</td><td>Panels</td></tr>
+        <tr><td>--ash</td><td>#1A1A1A</td><td>Raised cards, code, inputs</td></tr>
+        <tr><td>--seam</td><td>#262626</td><td>Borders and rules</td></tr>
+        <tr><td>--bone</td><td>#EFEAE2</td><td>Primary text</td></tr>
+        <tr><td>--bone-dim</td><td>#BDB7AE</td><td>Secondary text</td></tr>
+        <tr><td>--smoke</td><td>#8E8A83</td><td>Captions and muted values</td></tr>
+        <tr><td>--ember</td><td>#FF3D2E</td><td>Signal, links, critical</td></tr>
+        <tr><td>--oxblood</td><td>#6E1B14</td><td>Attention fills and selected rows</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section reveal" id="typography">
+    <div class="section-head"><h2><span class="section-number">02</span>Typography</h2></div>
+    <div class="type-table">
+      <div class="type-row"><div class="type-specimen t-placard">Plan the week ahead</div><div class="type-meta"><span class="type-meta-name">Placard</span><span class="type-meta-props">clamp(40px, 6vw, 64px) / .95 / --display 700</span></div></div>
+      <div class="type-row"><div class="type-specimen t-h2">Plan the week ahead</div><div class="type-meta"><span class="type-meta-name">Heading 2</span><span class="type-meta-props">24 / 1.2 / --display 600</span></div></div>
+      <div class="type-row"><div class="type-specimen t-h3">Plan the week ahead</div><div class="type-meta"><span class="type-meta-name">Heading 3</span><span class="type-meta-props">16 / 1.3 / --display 600</span></div></div>
+      <div class="type-row"><div class="type-specimen t-body">Review milestones, assign owners, and surface blockers before they cascade.</div><div class="type-meta"><span class="type-meta-name">Body</span><span class="type-meta-props">15.5 / 1.6 / --body</span></div></div>
+      <div class="type-row"><div class="type-specimen t-label">Updated 2 hours ago</div><div class="type-meta"><span class="type-meta-name">Label</span><span class="type-meta-props">11 / 1.6 / --label 600 uppercase</span></div></div>
+      <div class="type-row"><div class="type-specimen t-value">142</div><div class="type-meta"><span class="type-meta-name">Value</span><span class="type-meta-props">40 / 1 / --display 700</span></div></div>
+    </div>
+  </section>
+
+  <section class="section reveal" id="spacing">
+    <div class="section-head"><h2><span class="section-number">03</span>Spacing</h2></div>
+    <div class="spacing-grid">
+      <div class="space-col"><div class="space-bar" style="width:4px"></div><div class="space-px">4</div><div class="space-token">--sp-1</div></div>
+      <div class="space-col"><div class="space-bar" style="width:8px"></div><div class="space-px">8</div><div class="space-token">--sp-2</div></div>
+      <div class="space-col"><div class="space-bar" style="width:12px"></div><div class="space-px">12</div><div class="space-token">--sp-3</div></div>
+      <div class="space-col"><div class="space-bar" style="width:16px"></div><div class="space-px">16</div><div class="space-token">--sp-4</div></div>
+      <div class="space-col"><div class="space-bar" style="width:24px"></div><div class="space-px">24</div><div class="space-token">--sp-5</div></div>
+      <div class="space-col"><div class="space-bar" style="width:32px"></div><div class="space-px">32</div><div class="space-token">--sp-6</div></div>
+      <div class="space-col"><div class="space-bar" style="width:48px"></div><div class="space-px">48</div><div class="space-token">--sp-7</div></div>
+      <div class="space-col"><div class="space-bar" style="width:64px"></div><div class="space-px">64</div><div class="space-token">--sp-8</div></div>
+    </div>
+  </section>
+
+  <section class="section reveal" id="shape">
+    <div class="section-head"><h2><span class="section-number">04</span>Radius &amp; elevation</h2></div>
+    <div class="radius-row">
+      <div class="radius-demo" style="border-radius:4px"><div class="lbl">--radius-xs</div><div class="val">4px</div></div>
+      <div class="radius-demo" style="border-radius:6px"><div class="lbl">--radius</div><div class="val">6px</div></div>
+      <div class="radius-demo" style="border-radius:8px"><div class="lbl">--radius-md</div><div class="val">8px</div></div>
+      <div class="radius-demo" style="border-radius:12px"><div class="lbl">--radius-lg</div><div class="val">12px</div></div>
+    </div>
+    <div class="shadow-row">
+      <div class="shadow-demo"><div class="lbl">Quiet surface</div><div class="val">no shadow</div></div>
+      <div class="shadow-demo"><div class="lbl">Raised surface</div><div class="val">seam border</div></div>
+      <div class="shadow-demo"><div class="lbl">Attention surface</div><div class="val">oxblood tint</div></div>
+    </div>
+  </section>
+
+  <section class="section reveal" id="components">
+    <div class="section-head"><h2><span class="section-number">05</span>Core components</h2></div>
+    <div class="comp-block"><div class="comp-label">&lt;Button /&gt;</div><div class="comp-stage"><button class="btn btn-primary" type="button">Create task</button><button class="btn btn-secondary" type="button">Cancel</button><button class="btn btn-ghost" type="button">Skip</button><button class="btn btn-danger" type="button">Delete</button></div></div>
+    <div class="comp-block"><div class="comp-label">&lt;Input /&gt;</div><div class="comp-stage"><input class="input" type="text" placeholder="Search tasks…"><input class="input" type="text" value="Weekly planning"></div></div>
+    <div class="comp-block"><div class="comp-label">&lt;Checkbox /&gt;</div><div class="comp-stage"><label class="checkbox"><input type="checkbox">Notify assignees</label><label class="checkbox"><input type="checkbox" checked>Archive on complete</label></div></div>
+    <div class="comp-block"><div class="comp-label">&lt;Status /&gt;</div><div class="comp-stage"><span class="badge badge-neutral">Quiet</span><span class="badge badge-accent">In review</span><span class="badge badge-success">Done</span><span class="badge badge-warning">Overdue</span></div></div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
+})();
+</script>
+</body>
+</html>

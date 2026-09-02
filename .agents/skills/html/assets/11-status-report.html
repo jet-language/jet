@@ -1,0 +1,287 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Acme — Engineering Status — Week 11</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+/* page rules: weekly status instrument panel */
+header { padding: 0 0 34px; border-bottom: 1px solid var(--seam); }
+.summary-band { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.card.stat-card { padding: 20px; position: relative; overflow: hidden; }
+.stat-card::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: var(--seam); }
+.stat-card.attention::before { background: var(--ember); }
+.stat-card .value { margin: 4px 0 10px; }
+.stat-label { color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.stat-delta { margin-top: 8px; color: var(--bone-dim); font: 11px/1.4 var(--label); letter-spacing: 0.02em; }
+.stat-delta.attention { color: var(--ember); }
+.progress-track { height: 4px; margin-top: 18px; background: var(--seam); }
+.progress-fill { height: 100%; background: var(--ember); }
+.highlights { max-width: 760px; margin: 0; padding: 0; list-style: none; }
+.highlights li { position: relative; padding: 0 0 18px 26px; color: var(--bone-dim); line-height: 1.65; }
+.highlights li::before { content: ""; position: absolute; left: 2px; top: 0.7em; width: 8px; height: 2px; background: var(--ember); }
+.highlights li strong { color: var(--bone); font-weight: 600; }
+.table-wrap { margin: 0; }
+table.shipped { min-width: 650px; }
+table.shipped th, table.shipped td { padding: 12px 14px; }
+.inline { padding: 1px 5px; background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; }
+.pr-link { text-decoration: none; }
+.author { color: var(--bone-dim); font-size: 13px; }
+.risk { gap: 7px; }
+.risk-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bone-dim); }
+.risk.attention .risk-dot { background: var(--oxblood); }
+.risk.critical .risk-dot { background: var(--ember); }
+.chart-panel { padding: 20px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.velocity-chart { display: block; width: 100%; height: auto; }
+.velocity-chart text { font-family: var(--label); }
+.chart-grid { stroke: var(--seam); stroke-width: 1; }
+.chart-axis, .chart-caption { fill: var(--smoke); color: var(--smoke); font: 10px/1.5 var(--label); }
+.chart-bar { fill: var(--smoke); }
+.chart-bar.hot { fill: var(--ember); }
+.chart-value { fill: var(--bone-dim); font: 11px var(--label); }
+.chart-value.hot { fill: var(--bone); font-weight: 700; }
+.chart-caption { margin: 16px 0 0; font-size: 11px; letter-spacing: 0.02em; }
+.carryover { overflow: hidden; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.carry-item { display: flex; align-items: center; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--seam); }
+.carry-item:last-child { border-bottom: 0; }
+.carry-body { flex: 1; color: var(--bone-dim); font-size: 14px; }
+.carry-body .who { color: var(--smoke); font: 12px var(--label); }
+@media (max-width: 800px) { .summary-band { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .summary-band { grid-template-columns: 1fr; } .carry-item { align-items: flex-start; flex-wrap: wrap; } }
+
+</style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="legend rise"><span class="live">Live</span><span>Auto-generated · acme/app @ main</span><span>Mar 10 – Mar 16, 2025</span></p>
+      <h1 class="rise">Engineering Status — Week 11</h1>
+      <div class="ignition"></div>
+      <p class="thesis rise">This week, bulk task editing shipped to 100%, sync API p95 fell 38%, and one SEV-2 was mitigated in 47 minutes.</p>
+    </header>
+
+    <section class="reveal">
+      <div class="section-head"><h2>Summary</h2></div>
+      <div class="summary-band">
+        <div class="card stat-card">
+          <div class="value">14</div>
+          <div class="stat-label">PRs merged</div>
+          <div class="stat-delta">+3 vs wk10</div>
+          <div class="progress-track" aria-hidden="true"><div class="progress-fill" style="width: 70%"></div></div>
+        </div>
+        <div class="card stat-card">
+          <div class="value">6</div>
+          <div class="stat-label">Deploys</div>
+          <div class="stat-delta">±0</div>
+          <div class="progress-track" aria-hidden="true"><div class="progress-fill" style="width: 60%"></div></div>
+        </div>
+        <div class="card stat-card attention">
+          <div class="value attention">1</div>
+          <div class="stat-label">Incidents</div>
+          <div class="stat-delta attention">SEV-2 · 47m</div>
+          <div class="progress-track" aria-hidden="true"><div class="progress-fill" style="width: 20%"></div></div>
+        </div>
+        <div class="card stat-card">
+          <div class="value">3</div>
+          <div class="stat-label">Flaky tests fixed</div>
+          <div class="stat-delta">suite now 99.1%</div>
+          <div class="progress-track" aria-hidden="true"><div class="progress-fill" style="width: 60%"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="reveal">
+      <div class="section-head"><h2>Highlights</h2></div>
+      <ul class="highlights">
+        <li><strong>Bulk task editing shipped to 100%.</strong> The multi-select toolbar landed behind a flag on Monday and ramped to all workspaces by Thursday with no error-rate regression.</li>
+        <li><strong>Sync API p95 down 38%.</strong> Replacing per-task auth checks with a scoped batch lookup cut the hot path from 410ms to 255ms on the staging load test.</li>
+        <li><strong>One SEV-2 on Wednesday</strong> — a config rollout pushed a bad connection-pool limit to the sync workers. Mitigated in 47 minutes; full postmortem linked below.</li>
+      </ul>
+    </section>
+
+    <section class="reveal">
+      <div class="section-head"><h2>Shipped</h2></div>
+      <div class="table-wrap">
+        <table class="shipped">
+          <thead><tr><th style="width: 90px;">PR</th><th>Title</th><th style="width: 140px;">Author</th><th style="width: 100px;">Risk</th></tr></thead>
+          <tbody>
+            <tr><td><a class="pr-link" href="#">#4871</a></td><td>Bulk edit toolbar: selection model + keyboard shortcuts</td><td class="author">Mira Okafor</td><td><span class="status attention risk"><span class="risk-dot"></span>Med</span></td></tr>
+            <tr><td><a class="pr-link" href="#">#4874</a></td><td>Batch auth lookup for <code class="inline">/v2/sync</code> hot path</td><td class="author">Devon Park</td><td><span class="status attention risk"><span class="risk-dot"></span>Med</span></td></tr>
+            <tr><td><a class="pr-link" href="#">#4878</a></td><td>Fix race in attachment uploader retry loop</td><td class="author">Sam Reyes</td><td><span class="status risk"><span class="risk-dot"></span>Low</span></td></tr>
+            <tr><td><a class="pr-link" href="#">#4879</a></td><td>Migrate reminder scheduler to idempotent job keys</td><td class="author">Priya Anand</td><td><span class="status critical risk"><span class="risk-dot"></span>High</span></td></tr>
+            <tr><td><a class="pr-link" href="#">#4882</a></td><td>Board view: collapse empty swimlanes by default</td><td class="author">Mira Okafor</td><td><span class="status risk"><span class="risk-dot"></span>Low</span></td></tr>
+            <tr><td><a class="pr-link" href="#">#4885</a></td><td>Quarantine 3 flaky webhook integration tests</td><td class="author">Jules Tan</td><td><span class="status risk"><span class="risk-dot"></span>Low</span></td></tr>
+            <tr><td><a class="pr-link" href="#">#4888</a></td><td>Connection pool limits configurable per worker tier</td><td class="author">Devon Park</td><td><span class="status attention risk"><span class="risk-dot"></span>Med</span></td></tr>
+            <tr><td><a class="pr-link" href="#">#4891</a></td><td>Dark mode pass on settings &amp; billing panels</td><td class="author">Noor Halabi</td><td><span class="status risk"><span class="risk-dot"></span>Low</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="reveal">
+      <div class="section-head"><h2>Velocity</h2></div>
+      <div class="chart-panel">
+        <svg class="velocity-chart" viewBox="0 0 640 180" role="img" aria-label="PRs merged per day">
+          <line class="chart-grid" x1="48" y1="20" x2="620" y2="20"/><line class="chart-grid" x1="48" y1="60" x2="620" y2="60"/><line class="chart-grid" x1="48" y1="100" x2="620" y2="100"/><line class="chart-grid" x1="48" y1="140" x2="620" y2="140"/>
+          <text class="chart-axis" x="40" y="144" text-anchor="end">0</text><text class="chart-axis" x="40" y="104" text-anchor="end">1</text><text class="chart-axis" x="40" y="64" text-anchor="end">2</text><text class="chart-axis" x="40" y="24" text-anchor="end">3</text>
+          <rect class="chart-bar" x="64" y="60" width="56" height="80" rx="4"/><rect class="chart-bar" x="144" y="20" width="56" height="120" rx="4"/><rect class="chart-bar" x="224" y="100" width="56" height="40" rx="4"/><rect class="chart-bar hot" x="304" y="0" width="56" height="140" rx="4"/><rect class="chart-bar" x="384" y="60" width="56" height="80" rx="4"/><rect class="chart-bar" x="464" y="100" width="56" height="40" rx="4"/><rect class="chart-bar" x="544" y="100" width="56" height="40" rx="4"/>
+          <text class="chart-value" x="92" y="54" text-anchor="middle">2</text><text class="chart-value" x="172" y="14" text-anchor="middle">3</text><text class="chart-value" x="252" y="94" text-anchor="middle">1</text><text class="chart-value hot" x="332" y="14" text-anchor="middle">4</text><text class="chart-value" x="412" y="54" text-anchor="middle">2</text><text class="chart-value" x="492" y="94" text-anchor="middle">1</text><text class="chart-value" x="572" y="94" text-anchor="middle">1</text>
+          <text class="chart-axis" x="92" y="158" text-anchor="middle">Mon</text><text class="chart-axis" x="172" y="158" text-anchor="middle">Tue</text><text class="chart-axis" x="252" y="158" text-anchor="middle">Wed</text><text class="chart-axis" x="332" y="158" text-anchor="middle">Thu</text><text class="chart-axis" x="412" y="158" text-anchor="middle">Fri</text><text class="chart-axis" x="492" y="158" text-anchor="middle">Sat</text><text class="chart-axis" x="572" y="158" text-anchor="middle">Sun</text>
+        </svg>
+        <p class="chart-caption">PRs merged per day. Thursday spike is the bulk-edit feature train (4 PRs landed together).</p>
+      </div>
+    </section>
+
+    <section class="reveal">
+      <div class="section-head"><h2>Carryover</h2></div>
+      <div class="carryover">
+        <div class="carry-item"><span class="status attention">In review</span><div class="carry-body">Workspace export to CSV — waiting on pagination review. <span class="who">· Sam Reyes</span></div></div>
+        <div class="carry-item"><span class="status critical">Blocked</span><div class="carry-body">SSO group mapping — blocked on staging IdP credentials from IT. <span class="who">· Priya Anand</span></div></div>
+        <div class="carry-item"><span class="status muted">Slipped</span><div class="carry-body">Mobile push reliability dashboard — deprioritized for incident follow-up. <span class="who">· Devon Park</span></div></div>
+      </div>
+    </section>
+
+    <footer>Sources: git log main..HEAD · CI dashboard · deploy log — generated Mar 16 2025 18:02</footer>
+  </div>
+<script>
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
+})();
+</script>
+</body>
+</html>

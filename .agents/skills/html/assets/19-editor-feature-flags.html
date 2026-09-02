@@ -1,0 +1,694 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark">
+<title>Acme — flags.production.json</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+
+header { margin-bottom: 32px; }
+h1 .env-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--ember);
+  border-radius: 3px;
+  background: var(--ember);
+  color: var(--jet);
+  font: 600 11px/1.3 var(--label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 24px;
+  align-items: start;
+}
+.banner {
+  grid-column: 1 / -1;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border: 1px solid var(--oxblood);
+  border-radius: var(--radius);
+  background: var(--oxblood);
+  color: var(--bone);
+  font-size: 13px;
+  font-weight: 600;
+}
+.banner.show { display: flex; }
+.banner .glyph { color: var(--ember); font-size: 14px; line-height: 1; }
+.form-col { display: flex; flex-direction: column; gap: 14px; }
+.group {
+  overflow: hidden;
+  background: var(--soot);
+  border: 1px solid var(--seam);
+  border-radius: var(--radius);
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--seam);
+  color: var(--smoke);
+  font: 600 11px/1.4 var(--label);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.group-head .name { color: var(--bone); }
+.group-head .meta { letter-spacing: 0.06em; font-weight: 500; }
+.flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--seam);
+  border-left: 2px solid transparent;
+}
+.flag:last-child { border-bottom: 0; }
+.flag.warn { border-left-color: var(--ember); background: var(--oxblood-tint); }
+.flag-info { flex: 1; min-width: 0; }
+.flag-key {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--bone);
+  font: 600 12px/1.4 var(--label);
+}
+.dot {
+  display: none;
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ember);
+}
+.flag.changed .dot { display: inline-block; }
+.rollout {
+  padding: 2px 8px;
+  border: 1px solid var(--seam);
+  border-radius: 3px;
+  background: var(--seam);
+  color: var(--bone-dim);
+  font: 600 10px/1.3 var(--label);
+  letter-spacing: 0.06em;
+}
+.flag-desc { margin-top: 3px; color: var(--bone-dim); font-size: 12.5px; line-height: 1.5; }
+.req-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border: 1px solid var(--seam);
+  border-radius: 3px;
+  background: var(--ash);
+  color: var(--smoke);
+  font: 600 10px/1.4 var(--label);
+}
+.req-chip .warn-glyph { display: none; }
+.flag.warn .req-chip { border-color: var(--oxblood); background: var(--oxblood); color: var(--bone); }
+.flag.warn .req-chip .warn-glyph { display: inline; color: var(--ember); }
+/* seam track, ember knob on, bone outline knob off */
+.toggle { position: relative; width: 42px; height: 24px; flex: none; margin-top: 2px; }
+.toggle input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.toggle .track {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid var(--seam);
+  border-radius: 999px;
+  background: var(--seam);
+}
+.toggle .track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--bone);
+  border-radius: 50%;
+  background: var(--jet);
+}
+.toggle input:checked + .track::after { transform: translateX(18px); border-color: var(--ember); background: var(--ember); }
+.toggle input:focus-visible + .track { outline: 2px solid var(--ember); outline-offset: 2px; }
+.sidebar {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: var(--soot);
+  border: 1px solid var(--seam);
+  border-radius: var(--radius);
+}
+.side-label { color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.side-count { margin-top: 4px; color: var(--bone); font: 600 18px/1.2 var(--display); }
+.side-count .warn-n { color: var(--ember); }
+.side-count .sep { margin: 0 6px; color: var(--smoke); }
+.diff {
+  max-height: 320px;
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  background: var(--ash);
+  border: 1px solid var(--seam);
+  border-radius: var(--radius);
+  color: var(--bone-dim);
+  font-size: 11.5px;
+  line-height: 1.8;
+  white-space: pre;
+}
+.diff .minus { color: var(--ember); background: var(--oxblood-tint); }
+.diff .plus { color: var(--bone); background: var(--seam); }
+.diff .empty { color: var(--smoke); font-style: italic; }
+.btn { display: block; width: 100%; text-align: center; }
+.btn.primary { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.btn.primary:disabled { background: var(--seam); border-color: var(--seam); color: var(--smoke); cursor: not-allowed; }
+.btn.primary.copied { background: var(--bone); border-color: var(--bone); color: var(--jet); }
+.btn.ghost { background: transparent; color: var(--bone-dim); }
+.btn.ghost.copied { border-color: var(--bone); color: var(--bone); }
+.btn-stack { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 920px) { .layout { grid-template-columns: 1fr; } .sidebar { position: static; } }
+@media (max-width: 640px) { .flag { gap: 10px; padding: 14px; } }
+
+</style>
+</head>
+<body>
+<div class="page">
+
+    <header>
+    <p class="legend rise"><span class="live">Live</span><span>Source · flags.production.json / Acme</span><span>2026-09-02</span></p>
+    <h1 class="rise">flags.production.json <span class="env-badge">production</span></h1>
+    <div class="ignition"></div>
+    <p class="thesis rise">Edit production flags, resolve dependency warnings as they surface, and copy only the lines that changed.</p>
+  </header>
+
+  <section class="reveal">
+    <div class="section-head"><h2>Production flags</h2></div>
+
+  <div class="layout">
+    <div class="banner" id="banner">
+      <span class="glyph">&#9888;</span>
+      <span id="bannerText">1 flag is enabled without its prerequisite</span>
+    </div>
+
+    <div class="form-col" id="formCol"><!-- groups injected --></div>
+
+    <aside class="sidebar">
+      <div>
+        <div class="side-label">Pending changes</div>
+        <div class="side-count" id="sideCount">0 changed</div>
+      </div>
+      <pre class="diff" id="diff"><span class="empty">// no changes yet</span></pre>
+      <div class="btn-stack">
+        <button class="btn primary" id="copyDiff" disabled>Copy diff</button>
+        <button class="btn ghost" id="copyJson">Copy full JSON</button>
+        <button class="btn ghost" id="reset">Reset</button>
+      </div>
+    </aside>
+  </div>
+  </section>
+
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// data — the production flag set, as it exists right now
+// ---------------------------------------------------------------------------
+
+const GROUPS = [
+  {
+    id: "onboarding",
+    label: "Onboarding",
+    flags: [
+      { key: "onboarding.checklist_v2",
+        desc: "New three-step setup checklist replacing the modal tour.",
+        on: true },
+      { key: "onboarding.invite_nudge",
+        desc: "Nudge owners to invite teammates after creating their first project.",
+        on: true },
+      { key: "onboarding.workspace_templates",
+        desc: "Offer prebuilt workspace templates during signup.",
+        on: false, requires: "onboarding.checklist_v2" },
+      { key: "onboarding.skip_email_verify",
+        desc: "Let SSO-domain users in before email verification completes.",
+        on: false }
+    ]
+  },
+  {
+    id: "sync",
+    label: "Sync engine",
+    flags: [
+      { key: "sync.delta_compression",
+        desc: "Send field-level deltas instead of full document snapshots.",
+        on: true },
+      { key: "sync.offline_queue_v2",
+        desc: "Persist offline edits to IndexedDB and replay on reconnect.",
+        on: false, requires: "sync.delta_compression" },
+      { key: "sync.presence_cursors",
+        desc: "Show live collaborator cursors in board and doc views.",
+        on: true },
+      { key: "sync.conflict_banner",
+        desc: "Surface a merge banner instead of silently last-write-wins.",
+        on: false, requires: "sync.offline_queue_v2" },
+      { key: "sync.binary_ws_frames",
+        desc: "Switch the realtime channel to binary WebSocket frames.",
+        on: false, rollout: 10 }
+    ]
+  },
+  {
+    id: "billing",
+    label: "Billing",
+    flags: [
+      { key: "billing.usage_meter",
+        desc: "Show per-seat usage meter on the workspace billing page.",
+        on: false },
+      { key: "billing.annual_discount_banner",
+        desc: "Promote the annual-plan discount in the upgrade flow.",
+        on: true },
+      { key: "billing.proration_preview",
+        desc: "Preview the prorated charge before confirming a plan change.",
+        on: false, requires: "billing.usage_meter" },
+      { key: "billing.dunning_emails_v3",
+        desc: "Use the rewritten dunning sequence with a 14-day grace window.",
+        on: true, rollout: 25 }
+    ]
+  },
+  {
+    id: "internal",
+    label: "Internal",
+    flags: [
+      { key: "internal.shadow_traffic",
+        desc: "Mirror 1% of API traffic to the staging cluster for diffing.",
+        on: false },
+      { key: "internal.query_tracing",
+        desc: "Attach OpenTelemetry spans to every Postgres query.",
+        on: true },
+      { key: "internal.kill_switch_ui",
+        desc: "Expose the emergency kill-switch panel in the admin console.",
+        on: true, requires: "internal.query_tracing" }
+    ]
+  }
+];
+
+// flat lookup, plus a frozen copy of initial state
+const FLAGS = {};
+const INITIAL = {};
+GROUPS.forEach(g => g.flags.forEach(f => {
+  FLAGS[f.key] = f;
+  INITIAL[f.key] = f.on;
+}));
+
+// ---------------------------------------------------------------------------
+// render the form once; state lives in the checkboxes
+// ---------------------------------------------------------------------------
+
+const formCol   = document.getElementById("formCol");
+const banner    = document.getElementById("banner");
+const bannerTxt = document.getElementById("bannerText");
+const sideCount = document.getElementById("sideCount");
+const diffEl    = document.getElementById("diff");
+const copyDiffBtn = document.getElementById("copyDiff");
+const copyJsonBtn = document.getElementById("copyJson");
+const resetBtn    = document.getElementById("reset");
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function buildForm() {
+  formCol.innerHTML = "";
+  for (const g of GROUPS) {
+    const panel = document.createElement("div");
+    panel.className = "group";
+    panel.dataset.group = g.id;
+
+    const head = document.createElement("div");
+    head.className = "group-head";
+    head.innerHTML =
+      '<span class="name">' + esc(g.label) + '</span>' +
+      '<span class="meta" data-meta></span>';
+    panel.appendChild(head);
+
+    for (const f of g.flags) {
+      const row = document.createElement("div");
+      row.className = "flag";
+      row.dataset.key = f.key;
+
+      const rolloutBadge = (typeof f.rollout === "number")
+        ? '<span class="rollout">' + f.rollout + '% rollout</span>'
+        : "";
+
+      const reqChip = f.requires
+        ? '<div class="req-chip"><span class="warn-glyph">&#9888;</span>' +
+          '<span>requires ' + esc(f.requires) + '</span></div>'
+        : "";
+
+      row.innerHTML =
+        '<label class="toggle">' +
+          '<input type="checkbox" data-key="' + esc(f.key) + '"' +
+            (f.on ? " checked" : "") +
+            ' aria-label="' + esc(f.key) + '">' +
+          '<span class="track"></span>' +
+        '</label>' +
+        '<div class="flag-info">' +
+          '<div class="flag-key"><span class="dot"></span>' +
+            '<span>' + esc(f.key) + '</span>' + rolloutBadge +
+          '</div>' +
+          '<div class="flag-desc">' + esc(f.desc) + '</div>' +
+          reqChip +
+        '</div>';
+
+      panel.appendChild(row);
+    }
+    formCol.appendChild(panel);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// state helpers
+// ---------------------------------------------------------------------------
+
+function currentState() {
+  const state = {};
+  formCol.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    state[cb.dataset.key] = cb.checked;
+  });
+  return state;
+}
+
+function computeDiff(state) {
+  const lines = [];
+  for (const g of GROUPS) {
+    for (const f of g.flags) {
+      if (state[f.key] !== INITIAL[f.key]) {
+        lines.push({ key: f.key, from: INITIAL[f.key], to: state[f.key] });
+      }
+    }
+  }
+  return lines;
+}
+
+function diffText(lines) {
+  return lines.map(l =>
+    '- "' + l.key + '": ' + l.from + '\n' +
+    '+ "' + l.key + '": ' + l.to
+  ).join("\n");
+}
+
+function fullJson(state) {
+  let out = "{\n";
+  GROUPS.forEach((g, gi) => {
+    g.flags.forEach((f, fi) => {
+      const last = gi === GROUPS.length - 1 && fi === g.flags.length - 1;
+      out += '  "' + f.key + '": ' + state[f.key] + (last ? "" : ",") + "\n";
+    });
+  });
+  out += "}";
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// the live update pass
+// ---------------------------------------------------------------------------
+
+function update() {
+  const state = currentState();
+  let warnCount = 0;
+
+  // per-row decorations
+  for (const g of GROUPS) {
+    let onCount = 0;
+    for (const f of g.flags) {
+      const row = formCol.querySelector('.flag[data-key="' + CSS.escape(f.key) + '"]');
+      const on = state[f.key];
+      if (on) onCount++;
+
+      const changed = on !== INITIAL[f.key];
+      row.classList.toggle("changed", changed);
+
+      let warn = false;
+      if (f.requires && on && !state[f.requires]) warn = true;
+      row.classList.toggle("warn", warn);
+      if (warn) warnCount++;
+    }
+    const meta = formCol.querySelector(
+      '.group[data-group="' + g.id + '"] [data-meta]');
+    meta.textContent = g.flags.length + " flags, " + onCount + " on";
+  }
+
+  // diff + sidebar
+  const lines = computeDiff(state);
+  if (lines.length === 0) {
+    diffEl.innerHTML = '<span class="empty">// no changes yet</span>';
+    copyDiffBtn.disabled = true;
+  } else {
+    diffEl.innerHTML = lines.map(l =>
+      '<span class="minus">- "' + esc(l.key) + '": ' + l.from + '</span>\n' +
+      '<span class="plus">+ "' + esc(l.key) + '": ' + l.to + '</span>'
+    ).join("\n");
+    copyDiffBtn.disabled = false;
+  }
+
+  sideCount.innerHTML =
+    lines.length + " changed" +
+    '<span class="sep">&middot;</span>' +
+    '<span class="' + (warnCount ? "warn-n" : "") + '">' +
+      warnCount + " warning" + (warnCount === 1 ? "" : "s") +
+    "</span>";
+
+  // banner
+  if (warnCount > 0) {
+    bannerTxt.textContent =
+      warnCount === 1
+        ? "1 flag is enabled without its prerequisite"
+        : warnCount + " flags are enabled without their prerequisites";
+    banner.classList.add("show");
+  } else {
+    banner.classList.remove("show");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// clipboard + buttons
+// ---------------------------------------------------------------------------
+
+function flash(btn, label) {
+  const orig = btn.textContent;
+  btn.textContent = label;
+  btn.classList.add("copied");
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = orig;
+    btn.classList.remove("copied");
+    btn.disabled = false;
+    update();
+  }, 1200);
+}
+
+function writeClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch (e) { /* ignore */ }
+  document.body.removeChild(ta);
+  return Promise.resolve();
+}
+
+copyDiffBtn.addEventListener("click", () => {
+  const lines = computeDiff(currentState());
+  if (!lines.length) return;
+  writeClipboard(diffText(lines)).then(() => flash(copyDiffBtn, "Copied ✓"));
+});
+
+copyJsonBtn.addEventListener("click", () => {
+  writeClipboard(fullJson(currentState())).then(() => flash(copyJsonBtn, "Copied ✓"));
+});
+
+resetBtn.addEventListener("click", () => {
+  formCol.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    cb.checked = INITIAL[cb.dataset.key];
+  });
+  update();
+});
+
+formCol.addEventListener("change", e => {
+  if (e.target.matches("input[type=checkbox]")) update();
+});
+
+// ---------------------------------------------------------------------------
+// boot
+// ---------------------------------------------------------------------------
+
+buildForm();
+update();
+
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
+})();
+</script>
+
+</body>
+</html>

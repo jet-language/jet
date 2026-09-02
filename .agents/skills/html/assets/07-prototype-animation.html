@@ -1,0 +1,460 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark">
+<title>Acme — Task completed micro-interaction</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+/* animation prototype */
+.canvas-area { min-height: 100vh; position: relative; background: var(--jet); }
+.prototype-page { max-width: 1240px; padding: 48px 32px 120px; }
+.prototype-page > header { margin-bottom: 48px; }
+.stage-wrapper {
+  min-height: 700px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+  padding: 72px 316px 96px 32px;
+  background: var(--soot);
+  border: 1px solid var(--seam);
+  border-radius: var(--radius);
+}
+.stage {
+  width: 560px;
+  max-width: 100%;
+  position: relative;
+  padding: 48px 40px;
+  background: var(--ash);
+  border: 1px solid var(--seam);
+  border-radius: var(--radius);
+  animation: stageIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+  transform: translateY(20px) scale(0.97);
+}
+@keyframes stageIn { to { opacity: 1; transform: translateY(0) scale(1); } }
+.stage-label { position: absolute; top: -32px; left: 0; color: var(--smoke); font: 11px/1.4 var(--label); letter-spacing: 0.06em; }
+.stage-title { margin-bottom: 6px; color: var(--bone); font: 600 24px/1.2 var(--display); letter-spacing: -0.015em; }
+.stage-desc { max-width: 48ch; margin-bottom: 28px; color: var(--bone-dim); font-size: 14px; line-height: 1.55; }
+.task {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-height: 64px;
+  padding: 14px 18px;
+  position: relative;
+  background: var(--soot);
+  border: 1px solid var(--seam);
+  border-radius: var(--radius);
+  transition: max-height 280ms var(--ease) 600ms, opacity 280ms var(--ease) 600ms, padding 280ms var(--ease) 600ms, border-color 200ms var(--ease);
+  cursor: pointer;
+  user-select: none;
+}
+.task:hover { border-color: var(--ember); }
+.check {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  position: relative;
+  background: transparent;
+  border: 1px solid var(--bone-dim);
+  border-radius: 50%;
+  transition: background 180ms var(--ease), border-color 180ms var(--ease), transform 260ms var(--ease);
+}
+.check svg { position: absolute; inset: 0; width: 14px; height: 14px; margin: auto; }
+.check path { fill: none; stroke: var(--bone); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 20; stroke-dashoffset: 20; transition: stroke-dashoffset 220ms var(--ease) 80ms; }
+.label { position: relative; color: var(--bone); font-size: 15px; font-weight: 500; transition: color 200ms var(--ease) 120ms; }
+.label::after { content: ""; position: absolute; left: 0; top: 52%; width: 0; height: 1px; background: var(--smoke); transition: width 240ms var(--ease) 120ms; }
+.due { margin-left: auto; padding: 3px 8px; color: var(--smoke); background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; font: 11px/1.4 var(--label); transition: opacity 200ms var(--ease) 120ms; }
+.confetti { position: absolute; left: 22px; top: 50%; width: 6px; height: 6px; border-radius: 2px; opacity: 0; pointer-events: none; }
+.confetti.c1 { background: var(--ember); }
+.confetti.c2 { background: var(--oxblood); }
+.confetti.c3 { background: var(--bone); }
+.confetti.c4 { background: var(--ember); }
+.confetti.c5 { background: var(--smoke); }
+.confetti.c6 { background: var(--seam); }
+.task.done .check { border-color: var(--bone); transform: scale(1.12); animation: settle 380ms var(--ease) forwards; }
+@keyframes settle {
+  0% { transform: scale(0.8); background: var(--ember); border-color: var(--ember); }
+  55% { transform: scale(1.18); }
+  100% { transform: scale(1); background: transparent; border-color: var(--bone); }
+}
+.task.done .check path { stroke-dashoffset: 0; }
+.task.done .label { color: var(--smoke); }
+.task.done .label::after { width: 100%; }
+.task.done .due { opacity: 0.35; }
+.task.done { max-height: 44px; padding-top: 8px; padding-bottom: 8px; opacity: 0.6; }
+.task.done .confetti { animation: pop 520ms var(--ease) 200ms forwards; }
+.task.done .confetti.c1 { --dx: -28px; --dy: -22px; --rot: 40deg; }
+.task.done .confetti.c2 { --dx: -6px; --dy: -34px; --rot: -60deg; }
+.task.done .confetti.c3 { --dx: 18px; --dy: -26px; --rot: 90deg; }
+.task.done .confetti.c4 { --dx: 30px; --dy: -4px; --rot: -30deg; }
+.task.done .confetti.c5 { --dx: -24px; --dy: 14px; --rot: 20deg; }
+.task.done .confetti.c6 { --dx: 12px; --dy: 22px; --rot: -80deg; }
+@keyframes pop { 0% { opacity: 0; transform: translate(0, 0) rotate(0) scale(0.6); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1); } }
+.stage-hint { margin-top: 16px; color: var(--smoke); font: 11px/1.4 var(--label); text-align: center; }
+.toolbar {
+  position: absolute;
+  z-index: 15;
+  left: 50%;
+  bottom: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--ash);
+  border: 1px solid var(--seam);
+  border-radius: var(--radius);
+  animation: toolbarIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards;
+  opacity: 0;
+  transform: translateX(-50%) translateY(12px);
+}
+@keyframes toolbarIn { to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+.toolbar-group { display: flex; align-items: center; gap: 4px; }
+.ease-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  color: var(--bone-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font: 500 13px/1.3 var(--body);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ease-btn:hover { color: var(--bone); background: var(--soot); }
+.ease-btn.active { color: var(--bone); background: var(--oxblood); border-color: var(--ember); }
+.ease-btn code { color: var(--smoke); font: 10px/1.3 var(--label); }
+.ease-btn.active code { color: var(--ember); }
+.right-panel {
+  position: absolute;
+  z-index: 15;
+  right: 32px;
+  top: 50%;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transform: translateY(-50%);
+  animation: panelIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
+  opacity: 0;
+}
+@keyframes panelIn { to { opacity: 1; } }
+.panel-card { padding: 18px 20px; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); }
+.panel-card h3 { margin: 0 0 4px; color: var(--bone); font: 600 16px/1.3 var(--display); }
+.panel-card p { margin: 0 0 14px; color: var(--smoke); font-size: 12px; line-height: 1.5; }
+.timeline { position: relative; height: 2px; margin: 16px 4px 0; background: var(--seam); }
+.key { position: absolute; top: -5px; width: 12px; height: 12px; background: var(--ember); border: 1px solid var(--ash); border-radius: 50%; transform: translateX(-50%); }
+.key span { position: absolute; top: 18px; left: 50%; color: var(--smoke); font: 10px/1.3 var(--label); transform: translateX(-50%); white-space: nowrap; }
+.key em { position: absolute; bottom: 18px; left: 50%; color: var(--bone-dim); font: normal 11px/1.3 var(--body); transform: translateX(-50%); white-space: nowrap; }
+.k1 { left: 0%; }
+.k2 { left: 13%; }
+.k3 { left: 20%; }
+.k4 { left: 33%; }
+.k5 { left: 100%; background: var(--bone); }
+.code-card { overflow: hidden; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); }
+.code-header { display: flex; align-items: center; gap: 6px; padding: 10px 16px; color: var(--smoke); border-bottom: 1px solid var(--seam); font: 11px/1.4 var(--label); }
+.code-dot { width: 7px; height: 7px; border-radius: 50%; }
+.code-dot.r { background: var(--ember); }
+.code-dot.y { background: var(--oxblood); }
+.code-dot.g { background: var(--bone); }
+pre { color: var(--bone-dim); font: 11px/1.7 var(--label); }
+pre .c { color: var(--smoke); }
+pre .k { color: var(--ember); }
+pre .v { color: var(--bone); }
+@media (max-width: 1100px) { .right-panel { display: none; } .stage-wrapper { padding-right: 32px; } }
+@media (max-width: 640px) {
+  .prototype-page { padding: 40px 18px 80px; }
+  .stage { padding: 32px 24px; }
+  .stage-wrapper { min-height: 600px; padding: 56px 16px 100px; }
+  .toolbar { left: 16px; right: 16px; transform: translateY(12px); flex-wrap: wrap; justify-content: center; }
+  @keyframes toolbarIn { to { opacity: 1; transform: none; } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage, .toolbar, .right-panel { animation: none; opacity: 1; transform: none; }
+  .task, .check, .task.done .check, .task.done .confetti { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="canvas-area">
+  <div class="page prototype-page">
+    <header>
+      <p class="legend rise"><span class="live">Live</span><span>Acme.animate · interaction prototype</span><span>2026-09-02 · playground</span></p>
+      <h1 class="rise">Task completed</h1>
+      <div class="ignition"></div>
+      <p class="thesis rise">A single click should feel like a tiny win.</p>
+    </header>
+    <section class="reveal">
+      <div class="section-head"><h2>Interactive state</h2></div>
+      <!-- ===== STAGE ===== -->
+      <div class="stage-wrapper">
+    <div class="stage">
+      <div class="stage-label">Task completed / preview</div>
+      <div class="stage-title">Task completed</div>
+      <div class="stage-desc">
+        A single click should feel like a tiny win. Circle fills, check draws,
+        label strikes, a small burst, then the row quietly steps back.
+      </div>
+
+      <div class="task" id="task">
+        <div class="check">
+          <svg viewBox="0 0 16 16"><path d="M3 8.5 L6.5 12 L13 4.5"/></svg>
+        </div>
+        <span class="label">Send weekly digest</span>
+        <span class="due">Fri</span>
+        <div class="confetti c1"></div>
+        <div class="confetti c2"></div>
+        <div class="confetti c3"></div>
+        <div class="confetti c4"></div>
+        <div class="confetti c5"></div>
+        <div class="confetti c6"></div>
+      </div>
+
+      <div class="stage-hint">click the row to toggle</div>
+    </div>
+
+    <!-- ===== FLOATING TOOLBAR ===== -->
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button class="ease-btn" data-ease="linear">
+          Linear
+          <code>linear</code>
+        </button>
+        <button class="ease-btn" data-ease="cubic-bezier(0.16, 1, 0.3, 1)">
+          Ease-out
+          <code>.16, 1, .3, 1</code>
+        </button>
+        <button class="ease-btn active" data-ease="cubic-bezier(0.34, 1.56, 0.64, 1)">
+          Spring
+          <code>.34, 1.56, .64, 1</code>
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== RIGHT PANEL ===== -->
+    <div class="right-panel">
+
+      <div class="panel-card">
+        <h3>Keyframes</h3>
+        <p>Choreography timeline for the done state.</p>
+        <div class="timeline">
+          <div class="key k1"><em>fill</em><span>0ms</span></div>
+          <div class="key k2"><em>check</em><span>80ms</span></div>
+          <div class="key k3"><em>strike</em><span>120ms</span></div>
+          <div class="key k4"><em>confetti</em><span>200ms</span></div>
+          <div class="key k5"><em>collapse</em><span>600ms</span></div>
+        </div>
+      </div>
+
+      <div class="code-card">
+        <div class="code-header">
+          <div class="code-dot r"></div>
+          <div class="code-dot y"></div>
+          <div class="code-dot g"></div>
+          &nbsp; CSS
+        </div>
+<pre><span class="c">/* circle: ember flash, settle to quiet */</span>
+<span class="k">.task.done .check</span> {
+  animation: settle 380ms
+    <span class="v">cubic-bezier(.34,1.56,.64,1)</span> forwards;
+}
+<span class="k">@keyframes settle</span> {
+  0%   { transform: scale(.8);
+         background: <span class="v">var(--ember)</span>; }
+  55%  { transform: scale(1.18); }
+  100% { transform: scale(1);
+         background: <span class="v">transparent</span>; }
+}
+
+<span class="c">/* checkmark draws via stroke-dashoffset */</span>
+<span class="k">.check path</span>        { stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+  transition: stroke-dashoffset
+    220ms var(--ease) 80ms; }
+<span class="k">.task.done path</span>    { stroke-dashoffset: 0; }
+
+<span class="c">/* strikethrough grows left to right */</span>
+<span class="k">.label::after</span>      { width: 0;
+  transition: width 240ms var(--ease) 120ms; }
+<span class="k">.task.done .label::after</span> { width: 100%; }
+
+<span class="c">/* row steps back after celebration */</span>
+<span class="k">.task.done</span> { max-height: 44px;
+  opacity: .6;
+  transition-delay: 600ms; }</pre>
+      </div>
+
+    </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+  var task = document.getElementById('task');
+  task.addEventListener('click', function () {
+    task.classList.toggle('done');
+  });
+
+  var root = document.documentElement;
+  var buttons = document.querySelectorAll('.ease-btn');
+  buttons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      buttons.forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      root.style.setProperty('--ease', btn.dataset.ease);
+    });
+  });
+
+
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) {
+    els.forEach((e) => e.classList.add('is-visible'));
+  } else {
+    document.documentElement.classList.add('js');
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) if (en.isIntersecting) {
+        en.target.classList.add('is-visible');
+        io.unobserve(en.target);
+      }
+    }, { rootMargin: '0px 0px -8% 0px' });
+    els.forEach((e) => io.observe(e));
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>INC-2025-0412 — Elevated 502s on task sync</title>
+<style>
+/* html skill — canonical theme. Paste this block inline at the top of the page's single style element; never load it as an external stylesheet.
+   Palette: jet black and signal red. Voice: an instrument panel — dark and quiet when healthy, red only where attention belongs. */
+
+:root {
+  /* palette */
+  --jet:      #060606;   /* page background: the material itself, not charcoal */
+  --soot:     #111111;   /* panels */
+  --ash:      #1A1A1A;   /* raised cards, code blocks, inputs */
+  --seam:     #262626;   /* borders and rules */
+  --bone:     #EFEAE2;   /* primary text: warm off-white, never pure white */
+  --bone-dim: #BDB7AE;   /* secondary text */
+  --smoke:    #8E8A83;   /* captions, legends, muted values */
+  --ember:    #FF3D2E;   /* the one saturated color: emphasis, live, critical, links, the ignition line */
+  --oxblood:  #6E1B14;   /* deep red surfaces: selected rows, attention fills, low-emphasis series */
+  --ember-glow: rgba(255, 61, 46, 0.18);
+  --oxblood-tint: rgba(110, 27, 20, 0.35);
+
+  /* type: monospace placards for display and legends, a quiet humanist sans for reading */
+  --display: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --body:    "Avenir Next", Avenir, "Segoe UI Variable", "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --label:   var(--display);
+
+  /* geometry and motion */
+  --page: 1080px;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jet); color-scheme: dark; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--jet);
+  color: var(--bone);
+  font: 15.5px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--ember); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a:hover { color: var(--bone); }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+::selection { background: var(--oxblood); color: var(--bone); }
+code, kbd, pre { font-family: var(--label); }
+code { font-size: 0.9em; color: var(--bone); }
+pre { margin: 0; padding: 16px 18px; overflow-x: auto; background: var(--ash); border: 1px solid var(--seam); border-radius: var(--radius); font-size: 13px; line-height: 1.55; }
+
+.page { max-width: var(--page); margin: 0 auto; padding: 56px 32px 96px; }
+
+/* header: legend line, placard title, ignition line, one-sentence thesis */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.legend .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px var(--ember); vertical-align: middle; animation: lamp 2.4s ease-in-out infinite; }
+h1 { margin: 20px 0 0; font: 700 clamp(40px, 6vw, 64px)/0.95 var(--display); letter-spacing: -0.04em; color: var(--bone); }
+.ignition { height: 2px; margin: 24px 0 0; background: var(--ember); transform-origin: left center; animation: ignite 0.8s var(--ease) 0.2s both; }
+.thesis { max-width: 62ch; margin: 20px 0 0; color: var(--bone-dim); font-size: 17px; line-height: 1.5; }
+.rise { animation: rise 0.6s var(--ease) both; }
+.rise:nth-child(2) { animation-delay: 0.08s; }
+.rise:nth-child(3) { animation-delay: 0.16s; }
+.rise:nth-child(4) { animation-delay: 0.24s; }
+
+/* sections: a tick that lights when the section arrives */
+section { margin: 56px 0 0; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+.section-head::before { content: ""; flex: none; width: 18px; height: 2px; background: var(--ember); opacity: 0.35; transition: opacity 0.4s var(--ease); }
+.is-visible > .section-head::before, .section-head.is-visible::before { opacity: 1; }
+h2 { margin: 0; font: 600 24px/1.2 var(--display); letter-spacing: -0.02em; }
+h3 { margin: 24px 0 8px; font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
+.eyebrow { margin: 0 0 8px; color: var(--smoke); font: 600 11px/1.6 var(--label); letter-spacing: 0.12em; text-transform: uppercase; }
+.js .reveal { opacity: 0; transform: translateY(10px); transition: opacity 0.5s var(--ease), transform 0.5s var(--ease); }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+/* surfaces */
+.panel { padding: 20px 24px; background: var(--soot); border: 1px solid var(--seam); border-radius: var(--radius); }
+.card { padding: 16px 18px; background: var(--ash); border: 1px solid var(--seam); border-left: 2px solid transparent; border-radius: var(--radius); transition: border-color 0.2s var(--ease); }
+.card:hover { border-color: var(--oxblood); border-left-color: var(--ember); }
+.grid { display: grid; gap: 16px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* status: quiet by default; red only for attention */
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--seam); border-radius: 3px; color: var(--bone); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.status.attention { background: var(--oxblood); border-color: var(--oxblood); }
+.status.critical { background: var(--ember); border-color: var(--ember); color: var(--jet); }
+.status.muted { color: var(--smoke); }
+
+/* numbers: big values are placards */
+.value { font: 700 clamp(28px, 4vw, 40px)/1 var(--display); letter-spacing: -0.03em; color: var(--bone); }
+.value.attention { color: var(--ember); }
+
+/* tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { padding: 10px 14px; border-bottom: 1px solid var(--seam); color: var(--smoke); font: 600 11px/1.4 var(--label); letter-spacing: 0.1em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+td { padding: 11px 14px; border-bottom: 1px solid var(--seam); color: var(--bone-dim); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--ash); }
+tr.selected td { background: var(--oxblood-tint); }
+
+/* controls */
+button, .button { padding: 8px 14px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 600 12px/1.2 var(--label); letter-spacing: 0.06em; cursor: pointer; transition: border-color 0.2s var(--ease), background 0.2s var(--ease); }
+button:hover, .button:hover { border-color: var(--ember); }
+button.active, button[aria-pressed="true"] { background: var(--oxblood); border-color: var(--oxblood); }
+input, select, textarea { padding: 9px 12px; background: var(--ash); border: 1px solid var(--seam); border-radius: 4px; color: var(--bone); font: 14px/1.4 var(--body); }
+input::placeholder, textarea::placeholder { color: var(--smoke); }
+
+/* diffs: removed is oxblood, added is bone; no green */
+.diff-add { background: rgba(239, 234, 226, 0.06); }
+.diff-del { background: var(--oxblood-tint); }
+
+footer { margin-top: 72px; padding-top: 16px; border-top: 1px solid var(--seam); color: var(--smoke); font: 12px/1.6 var(--label); }
+
+@keyframes ignite { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+@media (max-width: 900px) { .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .page { padding: 40px 18px 72px; }
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: clamp(32px, 11vw, 44px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ignition, .rise, .legend .live::before { animation: none; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+/* page rules: incident evidence stays quiet until the fault appears */
+header { padding: 0 0 34px; border-bottom: 1px solid var(--seam); }
+section[id] { scroll-margin-top: 24px; }
+.tldr { margin: 0; border-left: 3px solid var(--ember); }
+.tldr p { margin: 0; color: var(--bone-dim); line-height: 1.7; }
+.tldr code, code.inline { padding: 1px 5px; background: var(--ash); border: 1px solid var(--seam); border-radius: 3px; }
+.timeline { position: relative; padding: 4px 0; }
+.timeline::before { content: ""; position: absolute; left: 15px; top: 12px; bottom: 12px; width: 2px; background: var(--seam); }
+.tl-entry { position: relative; padding: 0 0 28px 52px; }
+.tl-entry:last-child { padding-bottom: 0; }
+.tl-marker { position: absolute; left: 0; top: 4px; z-index: 1; display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 2px solid var(--bone-dim); border-radius: 50%; background: var(--soot); color: var(--bone); font: 600 11px var(--label); }
+.tl-marker.attention { border-color: var(--oxblood); background: var(--oxblood); }
+.tl-marker.critical { border-color: var(--ember); background: var(--ember); color: var(--jet); }
+.tl-time { display: inline-block; margin-bottom: 8px; padding: 3px 10px; border: 1px solid var(--seam); border-radius: 3px; background: var(--ash); color: var(--bone); font: 600 12px var(--label); letter-spacing: 0.04em; }
+.tl-body { color: var(--bone-dim); font-size: 14px; line-height: 1.65; }
+.tl-body strong { color: var(--bone); font-weight: 600; }
+.code-panel { margin: 12px 0 4px; padding: 18px 20px; overflow-x: auto; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--ash); color: var(--bone); font: 13px/1.75 var(--label); }
+.code-panel .path { display: block; margin-bottom: 12px; color: var(--smoke); font-size: 11px; letter-spacing: 0.04em; }
+.diff-line { white-space: pre; }
+.diff-line.ctx { color: var(--bone-dim); }
+.diff-line.diff-del { color: var(--bone); background: var(--oxblood-tint); }
+.diff-line.diff-add { color: var(--bone); }
+.impact-grid { display: grid; grid-template-columns: 1fr 1fr; max-width: 560px; overflow: hidden; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--seam); gap: 1px; }
+.impact-cell { padding: 16px 18px; background: var(--soot); }
+.impact-cell.dt { color: var(--smoke); font-size: 12px; }
+.impact-cell.dd { color: var(--bone); font: 500 14px var(--label); letter-spacing: 0.02em; }
+.impact-cell.dd.value { font-size: clamp(24px, 4vw, 34px); }
+.impact-cell.dd.attention { color: var(--ember); }
+.actions { overflow: hidden; border: 1px solid var(--seam); border-radius: var(--radius); background: var(--soot); }
+.ai-row { display: grid; grid-template-columns: 36px 36px 1fr 96px; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--seam); }
+.ai-row:last-child { border-bottom: 0; }
+.ai-check { position: relative; width: 20px; height: 20px; border: 2px solid var(--seam); border-radius: 3px; }
+.ai-row.done .ai-check { border-color: var(--bone); }
+.ai-row.done .ai-check::after { content: ""; position: absolute; left: 5px; top: 1px; width: 6px; height: 10px; border: solid var(--bone); border-width: 0 2px 2px 0; transform: rotate(40deg); }
+.ai-row.done .ai-desc { color: var(--smoke); text-decoration: line-through; text-decoration-color: var(--seam); }
+.ai-avatar { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--seam); border-radius: 50%; background: var(--ash); color: var(--bone-dim); font: 600 11px var(--label); letter-spacing: 0.02em; }
+.ai-desc { color: var(--bone-dim); font-size: 14px; line-height: 1.45; }
+.ai-due { color: var(--smoke); font: 12px var(--label); text-align: right; letter-spacing: 0.02em; }
+.toc { display: none; }
+@media (min-width: 1100px) { .toc { display: block; position: fixed; top: 72px; right: max(24px, calc(50vw - 420px - 200px)); width: 170px; font-size: 13px; } .toc-title { margin-bottom: 14px; color: var(--smoke); font: 600 10px/1.4 var(--label); letter-spacing: 0.12em; text-transform: uppercase; } .toc a { display: block; padding: 6px 0 6px 14px; border-left: 2px solid var(--seam); color: var(--smoke); text-decoration: none; line-height: 1.3; } .toc a:hover { color: var(--bone); border-left-color: var(--ember); } }
+@media (max-width: 640px) { .impact-grid { max-width: 100%; } .ai-row { grid-template-columns: 36px 1fr 80px; } .ai-avatar { display: none; } }
+
+</style>
+</head>
+<body>
+  <nav class="toc">
+    <div class="toc-title">On this page</div>
+    <a href="#tldr">TL;DR</a><a href="#timeline">Timeline</a><a href="#root-cause">Root cause</a><a href="#impact">Impact</a><a href="#actions">Action items</a>
+  </nav>
+  <div class="page">
+    <header>
+      <p class="legend rise"><span class="live">Live</span><span>Incident · INC-2025-0412</span><span>On-call notes + alert history</span><span>Apr 12 · 14:07</span><span class="status critical">SEV-2</span><span class="status">Resolved</span></p>
+      <h1 class="rise">Elevated 502s on task sync</h1>
+      <div class="ignition"></div>
+      <p class="thesis rise">A config rollout cut sync-worker pool capacity from 64 to 8, causing 502s for 21% of requests until rollback.</p>
+    </header>
+
+    <section class="reveal" id="tldr"><div class="section-head"><h2>TL;DR</h2></div><div class="tldr panel"><p>A config rollout lowered the database connection-pool limit on the <code>sync-worker</code> tier from 64 to 8, exhausting connections under normal afternoon load. The sync API returned 502s for roughly 21% of requests over 47 minutes. We mitigated by reverting the config and cycling the worker fleet; no data was lost.</p></div></section>
+
+    <section class="reveal" id="timeline">
+      <div class="section-head"><h2>Timeline</h2></div>
+      <div class="timeline">
+        <div class="tl-entry"><span class="tl-marker" aria-label="Step 1">1</span><span class="tl-time">14:02</span><div class="tl-body">Config change <code class="inline">cfg-9a12</code> promoted to production via the standard rollout pipeline.</div></div>
+        <div class="tl-entry"><span class="tl-marker critical" aria-label="Step 2">2</span><span class="tl-time">14:06</span><div class="tl-body"><strong>Impact starts.</strong> Sync workers begin queueing on pool checkout; p95 latency climbs past 4s and the load balancer starts returning 502s.</div></div>
+        <div class="tl-entry"><span class="tl-marker attention" aria-label="Step 3">3</span><span class="tl-time">14:07</span><div class="tl-body">Alert fires: <code class="inline">sync_5xx_rate &gt; 2%</code> for 60s. On-call (Devon) acknowledges.</div></div>
+        <div class="tl-entry"><span class="tl-marker" aria-label="Step 4">4</span><span class="tl-time">14:18</span><div class="tl-body">Initial hypothesis is a bad deploy of the API service; last two application deploys are rolled back with no effect.</div></div>
+        <div class="tl-entry"><span class="tl-marker" aria-label="Step 5">5</span><span class="tl-time">14:31</span><div class="tl-body">Mira joins and notices pool-wait saturation in the worker dashboard. Investigation pivots to infra config rather than app code.</div></div>
+        <div class="tl-entry"><span class="tl-marker" aria-label="Step 6">6</span><span class="tl-time">14:44</span><div class="tl-body"><strong>Mitigated.</strong> <code class="inline">cfg-9a12</code> reverted; worker fleet cycled. 5xx rate drops below 0.2% within three minutes.</div></div>
+        <div class="tl-entry"><span class="tl-marker" aria-label="Step 7">7</span><span class="tl-time">14:49</span><div class="tl-body">Monitors green for 5 minutes. Incident declared resolved; status page updated.</div></div>
+      </div>
+    </section>
+
+    <section class="reveal" id="root-cause"><div class="section-head"><h2>Root cause</h2></div><p>PR <code class="inline">#4888</code> made connection-pool limits configurable per worker tier. The default for the new <code class="inline">sync-worker</code> key was meant to inherit the global value (64) but was hard-coded to 8 during a local test and committed. The config linter only validates type, not magnitude, so the change passed CI.</p><p>Because config rollouts and code deploys go through separate pipelines, the on-call's first instinct — rolling back the most recent application deploys — had no effect and cost roughly 13 minutes of diagnosis time.</p><div class="code-panel"><span class="path">infra/config/workers.yaml</span><div class="diff-line ctx">   pool:</div><div class="diff-line ctx">     global_max_connections: 64</div><div class="diff-line ctx">     tiers:</div><div class="diff-line diff-del">-      sync-worker: { max_connections: 64 }</div><div class="diff-line diff-add">+      sync-worker: { max_connections: 8 }   # debug value, do not ship</div><div class="diff-line ctx">       webhook-worker: { max_connections: 32 }</div></div></section>
+
+    <section class="reveal" id="impact"><div class="section-head"><h2>Impact</h2></div><div class="impact-grid"><div class="impact-cell dt">Requests failed (502)</div><div class="impact-cell dd value attention">~41,200</div><div class="impact-cell dt">Peak error rate</div><div class="impact-cell dd value attention">21.4%</div><div class="impact-cell dt">Users affected</div><div class="impact-cell dd">~2,300 workspaces</div><div class="impact-cell dt">Data loss</div><div class="impact-cell dd">None — clients retried</div><div class="impact-cell dt">SLA breach</div><div class="impact-cell dd">No (within budget)</div></div></section>
+
+    <section class="reveal" id="actions"><div class="section-head"><h2>Action items</h2></div><div class="actions"><div class="ai-row done"><span class="ai-check" aria-hidden="true"></span><span class="ai-avatar" title="Devon Park">DP</span><span class="ai-desc">Revert cfg-9a12 and restore pool limit to 64</span><span class="ai-due">Apr 12</span></div><div class="ai-row"><span class="ai-check" aria-hidden="true"></span><span class="ai-avatar" title="Mira Okafor">MO</span><span class="ai-desc">Add config-linter range check for <code class="inline">max_connections</code> (warn &lt; 32)</span><span class="ai-due">Apr 18</span></div><div class="ai-row"><span class="ai-check" aria-hidden="true"></span><span class="ai-avatar" title="Sam Reyes">SR</span><span class="ai-desc">Surface “recent config rollouts” alongside deploys in the on-call dashboard</span><span class="ai-due">Apr 25</span></div><div class="ai-row"><span class="ai-check" aria-hidden="true"></span><span class="ai-avatar" title="Priya Anand">PA</span><span class="ai-desc">Canary config changes to one worker AZ for 10 min before fleet-wide promote</span><span class="ai-due">May 02</span></div></div></section>
+
+    <footer>Authored from on-call notes + alert history · reviewed by Devon Park, Mira Okafor</footer>
+  </div>
+<script>
+(() => {
+  const els = document.querySelectorAll('.reveal, section');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach((e) => e.classList.add('is-visible')); return; }
+  document.documentElement.classList.add('js');
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) if (en.isIntersecting) { en.target.classList.add('is-visible'); io.unobserve(en.target); }
+  }, { rootMargin: '0px 0px -8% 0px' });
+  els.forEach((e) => io.observe(e));
+})();
+</script>
+</body>
+</html>
