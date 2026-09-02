@@ -1258,6 +1258,86 @@ function recordLabel(ids) {
   if (ids.length === 1) return `Record · ${ids[0]} = ${pick[ids[0]]}`;
   return `Record ${ids.length} decisions`;
 }
+const displayedOptions = (d) => {
+  const options = d.surface?.options || d.options || [];
+  if (!d.surface) return options;
+  const rec = d.surface.recommendation?.rec ?? d.rec;
+  return [...options].sort((a, b) => a.key === rec ? -1 : b.key === rec ? 1 : 0);
+};
+function surfaceDeck(d, c, chosen) {
+  const surface = d.surface;
+  const gist = surface.gist;
+  const rec = surface.recommendation?.rec ?? d.rec ?? '';
+  const options = displayedOptions(d);
+  const trio = surface.trio || {};
+  const current = trio.current || {};
+  const wild = trio.wild || {};
+  const lineLength = (source) => String(source ?? '').split('\n')
+    .reduce((max, line) => Math.max(max, line.length), 0);
+  const trioSide = lineLength(current.code) <= 72 && lineLength(wild.code) <= 72;
+  const note = (value) => esc(value || '').replace(/\n/g, '<br>');
+  const bulletList = (items) => {
+    const values = Array.isArray(items) ? items : [];
+    return values.length
+      ? `<ul>${values.map(item => `<li>${esc(item)}</li>`).join('')}</ul>`
+      : '<div class="surface__none">none recorded</div>';
+  };
+  const optionHtml = options.map((o, idx) => {
+    const legacy = (d.options || []).find(x => x.key === o.key) || {};
+    const technical = o.technical ?? legacy.technical;
+    const proposed = o.proposed?.code ?? legacy.code ?? '';
+    return `<div class="opt${chosen === o.key ? ' sel' : ''}${o.key === rec ? ' opt--recommended' : ''}">
+        <button class="opt__h" type="button" data-opt="${esc(o.key)}"><span class="opt__num">${idx + 1}</span><span class="opt__name">${esc(o.key)} — ${esc(o.name)}</span>
+          ${o.key === rec ? '<span class="opt__rec">recommended</span>' : ''}<span class="opt__check">✓ chosen</span></button>
+        <div class="opt__gist">${esc(o.gist || '')}</div>
+        <div class="opt__columns">
+          <div class="opt__col"><div class="surface__colhead">Gains</div>${bulletList(o.gains)}</div>
+          <div class="opt__col"><div class="surface__colhead">Losses</div>${bulletList(o.losses)}</div>
+        </div>
+        <div class="opt__code"><div class="opt__code-label">Proposed · ${esc(o.key)}</div>${codeBlock(proposed)}</div>
+        ${technical ? `<details class="opt__technical"><summary>Technical details</summary><div>${esc(technical).replace(/\n/g, '<br>')}</div></details>` : ''}
+      </div>`;
+  }).join('');
+  const facets = availFacets(d);
+  const fullBallot = `<details class="fullballot">
+      <summary>Full ballot</summary>
+      ${facets.length ? `<div class="facets" id="f-facets">${facets.map(([fk, label]) => `<button class="facet${fk === focusFacet ? ' on' : ''}" data-fk="${fk}">${esc(label)}</button>`).join('')}</div><div class="facetbody" id="f-facetbody">${facetBody(d, focusFacet)}</div>` : ''}
+      ${reviewPassesBody(d)}
+    </details>`;
+  const recommendation = surface.recommendation || {};
+  const recOption = options.find(o => o.key === rec)
+    || (d.options || []).find(o => o.key === rec)
+    || {};
+  const whyNot = Array.isArray(recommendation.whyNot) ? recommendation.whyNot : [];
+  return `<h2 class="fdeck__gist">${esc(gist)}</h2>
+    <p class="fdeck__lesson">${note(surface.lesson)}</p>
+    <div class="trio${trioSide ? ' trio--side' : ''}">
+      <section class="trio__pane">
+        <div class="trio__head"><b>Current</b></div>
+        <div class="trio__note">${note(current.note)}</div>
+        ${codeBlock(current.code || '')}
+      </section>
+      <section class="trio__pane">
+        <div class="trio__head"><b>In the wild</b><span class="chip">${esc(wild.lang || '')}</span></div>
+        <div class="trio__note">${note(wild.note)}</div>
+        ${codeBlock(wild.code || '')}
+      </section>
+    </div>
+    <div class="optslabel">Choose one
+      ${(options.length >= 2) ? `<button class="btn btn--ghost btn--sm" id="f-compare" style="margin-left:10px;text-transform:none;letter-spacing:0">${focusCompare ? '☰ Stack' : '⇆ Compare'}</button>` : ''}</div>
+    <div class="opts ${focusCompare ? 'opts--compare' : ''}" id="f-opts">${optionHtml}</div>
+    <div class="recline">
+      <b>Recommendation:</b> ${esc(rec)} · ${esc(recOption.name || '')}
+      <p class="recline__why"><b>Why:</b> ${esc(recommendation.why || '')}</p>
+      <div class="recline__columns">
+        <div class="recline__col"><div class="surface__colhead">Gains</div>${bulletList(recommendation.gains)}</div>
+        <div class="recline__col"><div class="surface__colhead">Losses</div>${bulletList(recommendation.losses)}</div>
+      </div>
+      ${whyNot.map(x => `<p class="recline__why-not"><b>Why not ${esc(x.key)}:</b> ${esc(x.reason || '')}</p>`).join('')}
+      <p class="recline__tradeoff"><b>Tradeoff:</b> ${esc(recommendation.tradeoff || '')}</p>
+    </div>
+    ${fullBallot}`;
+}
 function renderFocus() {
   const f = $('#focus');
   focusIds = (focusIds || []).filter(id => S.decisions.some(d => d.id === id && d.status !== 'ratified'));
@@ -1271,6 +1351,7 @@ function renderFocus() {
   const facets = availFacets(d);
   if (!focusFacet || !facets.some(([fk]) => fk === focusFacet)) focusFacet = facets.length ? facets[0][0] : null;
   const qs = c ? (c.questions || []).filter(q => q.decisionId === d.id) : [];
+  const surfaceHtml = d.surface ? surfaceDeck(d, c, chosen) : '';
 
   f.innerHTML = `
     <div class="focustop">
@@ -1286,11 +1367,13 @@ function renderFocus() {
         <button class="btn btn--sm" id="f-close">Esc</button>
       </div>
     </div>
-    <div class="focusscroll"><div class="fdeck">
+    <div class="focusscroll"><div class="fdeck${d.surface ? ' fdeck--surface' : ''}">
       <div class="fdeck__head"><span class="fdeck__id">${esc(d.id)}</span>
         <span class="fdeck__for">card ${c ? ticket(c) : '—'}${c ? ' · ' + esc(c.title) : ''}</span>
+        ${d.surface && d.status ? `<span class="chip">${esc(d.status)}</span>` : ''}
         ${qState(d) ? `<span class="qchip qchip--${qState(d)}">${qState(d) === 'open' ? '✎ awaiting answer' : '✓ question answered'}</span>` : ''}
         ${d.rec ? `<span class="fdeck__rec">rec ${esc(d.rec)}</span>` : ''}</div>
+      ${d.surface ? surfaceHtml : `
       <div class="fdeck__gist">${esc(d.gist || d.title)}</div>
       ${d.gist ? `<div class="fdeck__title">${esc(d.title)}</div>` : ''}
       ${facets.length ? `<div class="facets" id="f-facets">${facets.map(([fk, l]) => `<button class="facet${fk === focusFacet ? ' on' : ''}" data-fk="${fk}">${esc(l)}</button>`).join('')}</div><div class="facetbody" id="f-facetbody">${facetBody(d, focusFacet)}</div>` : ''}
@@ -1302,6 +1385,7 @@ function renderFocus() {
         ${d.recommendation?.why ? `<p><b>Why this wins:</b> ${esc(d.recommendation.why)}</p>` : ''}
         ${(d.recommendation?.whyNot || []).map(x => `<p class="recline__why-not"><b>Why not ${esc(x.key)}:</b> ${esc(x.reason || '')}</p>`).join('')}
         ${d.recommendation?.tradeoff ? `<p><b>Accepted tradeoff:</b> ${esc(d.recommendation.tradeoff)}</p>` : ''}</div>` : ''}
+      `}
       <textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
       <div class="deck-actions">
         ${chosen ? `<button class="btn btn--ghost btn--sm" id="f-clear">✕ Clear choice</button>` : ''}
@@ -1319,16 +1403,24 @@ function renderFocus() {
     </div></div>`;
 
   const opts = $('#f-opts', f);
-  (d.options || []).forEach((o, idx) => {
-    const node = el(`<div class="opt${chosen === o.key ? ' sel' : ''}">
-        <button class="opt__h"><span class="opt__num">${idx + 1}</span><span class="opt__name">${esc(o.key)} — ${esc(o.name)}</span>
-          ${o.key === d.rec ? '<span class="opt__rec">recommended</span>' : ''}<span class="opt__check">✓ chosen</span></button>
-        ${o.detail ? `<div class="opt__detail">${esc(o.detail)}</div>` : ''}
-        ${o.technical ? `<details class="opt__technical"><summary>Technical details</summary><div>${esc(o.technical).replace(/\n/g, '<br>')}</div></details>` : ''}
-        ${o.code ? `<div class="opt__code">${codeBlock(o.code)}</div>` : ''}</div>`);
+  const bindOption = (o, node) => {
     $('.opt__h', node).addEventListener('click', () => { if (pick[d.id] === o.key) delete pick[d.id]; else pick[d.id] = o.key; updateChoice(); });
-    opts.appendChild(node);
-  });
+  };
+  if (d.surface) {
+    const display = displayedOptions(d);
+    opts.querySelectorAll('.opt').forEach((node, idx) => { if (display[idx]) bindOption(display[idx], node); });
+  } else {
+    (d.options || []).forEach((o, idx) => {
+      const node = el(`<div class="opt${chosen === o.key ? ' sel' : ''}">
+          <button class="opt__h"><span class="opt__num">${idx + 1}</span><span class="opt__name">${esc(o.key)} — ${esc(o.name)}</span>
+            ${o.key === d.rec ? '<span class="opt__rec">recommended</span>' : ''}<span class="opt__check">✓ chosen</span></button>
+          ${o.detail ? `<div class="opt__detail">${esc(o.detail)}</div>` : ''}
+          ${o.technical ? `<details class="opt__technical"><summary>Technical details</summary><div>${esc(o.technical).replace(/\n/g, '<br>')}</div></details>` : ''}
+          ${o.code ? `<div class="opt__code">${codeBlock(o.code)}</div>` : ''}</div>`);
+      bindOption(o, node);
+      opts.appendChild(node);
+    });
+  }
 
   $('#f-dots', f).querySelectorAll('.dot').forEach(dot => dot.addEventListener('click', () => { focusIdx = +dot.dataset.i; focusFacet = null; askOpen = false; renderFocus(); }));
   $('#f-facets', f)?.querySelectorAll('.facet').forEach(b => b.addEventListener('click', () => {
@@ -1353,7 +1445,8 @@ function updateChoice() {
   const f = $('#focus'); const d = S.decisions.find(x => x.id === focusIds[focusIdx]); if (!d) return;
   const chosen = pick[d.id] ?? null;
   const pickedIds = focusIds.filter(id => pick[id]);
-  $('#f-opts', f).querySelectorAll('.opt').forEach((node, i) => node.classList.toggle('sel', (d.options[i] || {}).key === chosen));
+  const options = displayedOptions(d);
+  $('#f-opts', f).querySelectorAll('.opt').forEach((node, i) => node.classList.toggle('sel', (options[i] || {}).key === chosen));
   $('#f-dots', f).querySelectorAll('.dot').forEach((dot, i) => dot.classList.toggle('picked', !!pick[focusIds[i]]));
   const rec = $('#f-record', f);
   if (rec) { rec.disabled = !pickedIds.length; rec.textContent = recordLabel(pickedIds); }
@@ -1892,7 +1985,8 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') return focusGo(1);
     if (e.key === 'Enter') { if (focusIds.some(id => pick[id])) recordBatch(); else focusGo(1); return; }
     const n = parseInt(e.key, 10);
-    if (n >= 1 && n <= 9 && d && d.options && d.options[n - 1]) { pick[d.id] = d.options[n - 1].key; updateChoice(); }
+    const options = d ? displayedOptions(d) : [];
+    if (n >= 1 && n <= 9 && options[n - 1]) { pick[d.id] = options[n - 1].key; updateChoice(); }
     return;
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); return openPalette(); }

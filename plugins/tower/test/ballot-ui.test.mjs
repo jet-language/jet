@@ -55,3 +55,30 @@ test('Board search and Recent flatten like a milestone filter', () => {
   assert.match(css, /\.card__dates \{/);
   assert.match(css, /\.docs__dates \{/);
 });
+
+test('Focus Mode renders a reading surface before the options', () => {
+  const gist = js.indexOf('surface.gist');
+  const trio = js.indexOf('const trio = surface.trio');
+  const opts = js.indexOf('id="f-opts">${optionHtml}');
+  assert.ok(gist >= 0 && gist < trio && trio < opts, 'surface gist, trio, and options must stay in order');
+});
+
+test('Focus Mode puts the recommended surface option first without mutating the record', () => {
+  assert.match(js, /return \[\.\.\.options\]\.sort\(\(a, b\) => a\.key === rec \? -1 : b\.key === rec \? 1 : 0\)/);
+});
+
+test('Focus Mode keeps long ballot details behind one Full ballot fold', () => {
+  assert.match(js, /const fullBallot = `<details class="fullballot">/);
+  for (const id of ['f-facets', 'f-facetbody']) assert.match(js, new RegExp(`id="${id}"`));
+  assert.match(js, /const fullBallot[\s\S]*reviewPassesBody\(d\)/);
+});
+
+test('Focus Mode wraps deck code and only enables a wide trio at 960px', () => {
+  assert.match(css, /\.fdeck--surface \.code \{[^}]*font-size: 13\.5px;[^}]*line-height: 1\.6;[^}]*white-space: pre-wrap;[^}]*overflow-wrap: anywhere;[^}]*max-width: none;/s);
+  assert.match(css, /@media \(min-width: 960px\) \{\s+\.trio\.trio--side \{/);
+});
+
+test('Focus Mode keeps the legacy deck path behind the surface guard', () => {
+  assert.match(js, /const surfaceHtml = d\.surface \? surfaceDeck\(d, c, chosen\) : ''/);
+  assert.match(js, /\$\{d\.surface \? surfaceHtml : `/);
+});
