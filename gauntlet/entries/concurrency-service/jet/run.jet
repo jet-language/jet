@@ -1,10 +1,12 @@
 use core.[net, time]
 
-
-#CLI struct Args { port: String{"18080"} }
+#CLI
+struct Args {
+    port: String
+}
 
 fn worker(receiver: Receiver<Int>, sender: Sender<Int>) {
-    loop value in receiver -> {
+    loop value in receiver {
         time.sleep(1ms)
         sender.send(value * value)
     }
@@ -22,7 +24,9 @@ fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) String -
     if command == "shutdown" -> return "bye"
     if command.starts_with("batch ") {
         count :: Int.parse(command.after("batch ")) ?? 0
-        if count > 0 && count <= 32 -> return "batch {count} total {run_batch(count, jobs, results)}"
+        if count > 0 && count <= 32 {
+            return "batch {count} total {run_batch(count, jobs, results)}"
+        }
     }
     return "error"
 }

@@ -1,19 +1,25 @@
 use core.files as files
 use core.regex as re
 
-#CLI struct Args { path: String }
-
-fn run(args: Args){
-d::args.path
-e::files.list_dir(d)??panic("cannot list directory")
-q::Regex{"^IMG_(\d+)\.jpeg$"}
-p:=[String]{...e.filter(x->!x.is_dir).filter_map(x->re.match(q,x.name).map(m->"{("{Int.parse(m.group(1)??"0")??0}").pad_start(20,"0")}|{x.name}")).to_list()}
-p.sort_by((x:String)->x)
-loop (i,x) in p{
-f::x.split_once("|")??panic("bad photo")
-n::"{i+1}".pad_start(4,"0")
-files.rename(Path.from(d).join(f.after),Path.from(d).join("photo-{n}.jpg"))??panic("cannot rename photo")
-print("renamed {f.after} -> photo-{n}.jpg")
+#CLI
+struct Args {
+    path: String
 }
-print("renamed {p.len()} skipped {e.count_where(x->!x.is_dir)-p.len()}")
+
+fn run(args: Args) {
+    d :: args.path
+    e :: files.list_dir(d) ?? panic("cannot list directory")
+    q :: Regex{"^IMG_(\d+)\.jpeg$"}
+    p := e.filter((x: DirEntry) -> !x.is_dir && (~q).is_match(x.name)).map((x: DirEntry) -> {
+        m :: re.match(~q, x.name) ?? panic("bad photo")
+        "{("{Int.parse(m.group(1) ?? "0") ?? 0}").pad_start(20, "0")}|{x.name}"
+    })
+    p.sort_by((x: String) -> x)
+    loop (i, x) in p {
+        f :: x.split_once("|") ?? panic("bad photo")
+        n :: "{i + 1}".pad_start(4, "0")
+        files.rename(Path.from(d).join(f.after), Path.from(d).join("photo-{n}.jpg")) ?? panic("cannot rename photo")
+        print("renamed {f.after} -> photo-{n}.jpg")
+    }
+    print("renamed {p.len()} skipped {e.count_where(x -> !x.is_dir) - p.len()}")
 }

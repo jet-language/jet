@@ -1,36 +1,41 @@
 use core.[http.server, net]
 
-struct ServerState { stopped: Bool }
-#CLI struct Args { port: String{"18080"} }
+struct ServerState {
+    stopped: Bool
+}
 
+#CLI
+struct Args {
+    port: String
+}
 
 fn reply(status: Int, body: String) HTTPResponse !HTTPError -> Ok(server.response(status, body).header("content-type", "application/json"))
 
-fn kv(req: HTTPRequest, values: Shared<[String:String]>, put: Bool) {
-  key :: req.param("key") ?? ""
-  if put {
-    value :: req.body().text(8388608) ?? ""
-    values.guard_edit().value.add(key, value)
-    return reply(200, "{{\"stored\":\"{key}\"}}")
-  }
-  stored :: values.guard_read().value.get(key) ?? return reply(404, "{{\"error\":\"not found\"}}")
-  return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
+fn kv(req: HTTPRequest, values: Shared<[String:String]>, put: Bool) HTTPResponse !HTTPError -> {
+    key :: req.param("key") ?? ""
+    if put {
+        value :: req.body().text(8388608) ?? ""
+        values.guard_edit().value[key] = value
+        return reply(200, "{{\"stored\":\"{key}\"}}")
+    }
+    stored :: values.guard_read().value.get(key) ?? return reply(404, "{{\"error\":\"not found\"}}")
+    return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
 }
 
-fn run(args: Args) !(HTTPError | NetError | IOError) {
-  listener :: net.tcp_listen("127.0.0.1:{args.port}")
-  values :: shared [String:String]{}
-  state :: shared ServerState{stopped: false}
-  mux :: server.mux()
-  mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
-  mux.put("/kv/:key", req -> kv(req, values, true))
-  mux.get("/kv/:key", req -> kv(req, values, false))
-  mux.get("/shutdown", () -> {
-    state.stopped = true
-    reply(200, "{{\"bye\":true}}")
-  })
-  loop {
-    if state.stopped -> break
-    server.serve_once_listener(listener, mux) ?? panic("serve failed")
-  }
+fn run(args: Args) !(HTTPError | IOError | NetError) {
+    listener :: net.tcp_listen("127.0.0.1:{args.port}")
+    values :: shared [String:String]{}
+    state :: shared ServerState{stopped: false}
+    mux :: server.mux()
+    mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
+    mux.put("/kv/:key", req -> kv(req, values, true))
+    mux.get("/kv/:key", req -> kv(req, values, false))
+    mux.get("/shutdown", () -> {
+        state.stopped = true
+        reply(200, "{{\"bye\":true}}")
+    })
+    loop {
+        if state.stopped -> break
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+    }
 }

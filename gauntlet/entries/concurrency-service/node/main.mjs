@@ -38,7 +38,7 @@ function closeWorkers() {
   for (let index = 0; index < workers.length; index += 1) enqueue(null);
 }
 
-const server = net.createServer((socket) => {
+const server = net.createServer({ allowHalfOpen: true }, (socket) => {
   socket.setEncoding("utf8");
   let input = "";
   let handled = false;
