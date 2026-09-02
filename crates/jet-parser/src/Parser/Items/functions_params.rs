@@ -74,6 +74,7 @@ impl<'a> Parser<'a> {
         inline_span: Option<Span>,
         is_replayable: bool,
         replayable_span: Option<Span>,
+        allow_guest_import_symbol: bool,
     ) -> Result<Func, Diagnostic> {
         let declaration_start = self.toks[self.pos.saturating_sub(1)].span.start;
         let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
@@ -187,7 +188,7 @@ impl<'a> Parser<'a> {
             {
                 Some(span)
             }
-            _ => self.parse_optional_function_body_marker(),
+            _ => self.parse_optional_function_body_marker(allow_guest_import_symbol),
         };
         if body_marker_span.is_some() {
             let value_body = !matches!(self.peek().kind, TokKind::LBrace)
@@ -335,11 +336,47 @@ impl<'a> Parser<'a> {
             body,
         })
     }
+    /// Parse a per-callable `#Import(c)` declaration with its canonical
+    /// symbol-string body marker. The marker is retired for ordinary Jet
+    /// functions, but it is the ratified import spelling at this site.
+    pub(in crate::Parser) fn guest_import_func(&mut self) -> Result<Func, Diagnostic> {
+        while matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        let (is_pub, is_package_pub) = self.parse_item_visibility();
+        self.expect_kw(TokKind::KwFn, "to start a function definition")?;
+        self.func_after_fn(
+            is_pub,
+            is_package_pub,
+            false,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            false,
+            None,
+            true,
+        )
+    }
+
 
     pub(in crate::Parser) fn foreign_function(&mut self) -> Result<Func, Diagnostic> {
         self.func_after_fn(
             false, false, false, None, None, false, false, None, None, None, false, None, false,
             None, None, None, false, false, None, false, None,
+            false,
         )
     }
 
@@ -383,6 +420,7 @@ impl<'a> Parser<'a> {
             None,
             false,
             None,
+            false,
         )
     }
 
@@ -510,9 +548,18 @@ impl<'a> Parser<'a> {
             || matches!(self.peek().kind, TokKind::MinusMinus)
     }
 
-    fn parse_optional_function_body_marker(&mut self) -> Option<Span> {
+    fn parse_optional_function_body_marker(
+        &mut self,
+        allow_guest_import_symbol: bool,
+    ) -> Option<Span> {
         match self.peek().kind {
-            TokKind::UnifiedArrow => Some(self.bump().span),
+            TokKind::UnifiedArrow => {
+                let span = self.bump().span;
+                if allow_guest_import_symbol {
+                    self.diags.push(Self::guest_import_body_marker(span));
+                }
+                Some(span)
+            }
             TokKind::Arrow | TokKind::LambdaArrow => {
                 let span = self.bump().span;
                 self.diags.push(Self::retired_unified_arrow(span));
@@ -525,12 +572,25 @@ impl<'a> Parser<'a> {
             }
             TokKind::Eq => {
                 let span = self.bump().span;
-                self.diags.push(Self::retired_function_body(span, "="));
+                if !allow_guest_import_symbol {
+                    self.diags.push(Self::retired_function_body(span, "="));
+                }
                 Some(span)
             }
             _ => None,
         }
     }
+    fn guest_import_body_marker(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E3261",
+            "`#Import(c)` function uses a non-canonical body marker".to_string(),
+            "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol"
+                .to_string(),
+            "write `#Import(c) fn name(args) Return = \"symbol\"`".to_string(),
+            Some(span),
+        )
+    }
+
 
     /// D-EFF1 / D-SHAPE8 / D-ARROW-RESPELL1: parse an optional
     /// `-[Net, DB]>` effect bound.

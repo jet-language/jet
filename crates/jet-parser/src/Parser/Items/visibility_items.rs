@@ -407,6 +407,7 @@ impl<'a> Parser<'a> {
             inline_span,
             is_replayable,
             replayable_span,
+            false,
         )
     }
 }

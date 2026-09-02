@@ -133,6 +133,7 @@ impl<'a> Parser<'a> {
             None,
             false,
             None,
+            false,
         )?;
         self.reject_root_method_params(&function.params);
         self.apply_method_markers(function, markers)

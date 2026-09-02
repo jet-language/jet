@@ -674,6 +674,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E3207 | parse | `#Bindgen` outside generated `.jet/bindings/c/` file |
 | E3208 | jet   | `jet inspect bind` / header translation failed |
 | E3260 | loader/jet | `com.*` or COM binding requested away from a Windows host |
+| E3261 | parse | `#Import(c)` function uses a non-canonical body marker |
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
 | E3211 | sema  | string literal with a known interior NUL byte passed to a C-boundary function |
@@ -1989,6 +1990,7 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | E3207 | `#Bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Import module`. | Edit your overlay file with `#Import module`, or regenerate the cache with `jet inspect bind`. |
 | E3208 | Could not generate bindings from `{header}`. | `{reason}` | Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Import module c.{lib}`. |
 | E3260 | `com.*` needs a Windows host. | COM type libraries, apartments, the registry, and IDispatch are Windows facilities. | Generate, build, and run the COM module on a Windows host; use a non-COM boundary for other targets. |
+| E3261 | `#Import(c)` function uses a non-canonical body marker. | `#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol. | Write `#Import(c) fn name(args) Return = "symbol"`. |
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
 | E3211 | This string literal has an embedded NUL byte, so it can't cross into a C function. | C strings are NUL-terminated, not length-prefixed — an embedded `\0` would truncate the string on the C side, silently losing everything after it. | Remove the embedded NUL, or split the call so the C function only sees the part before it. |

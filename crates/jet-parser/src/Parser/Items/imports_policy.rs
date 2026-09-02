@@ -1289,6 +1289,7 @@ impl<'a> Parser<'a> {
                                     None,
                                     false,
                                     None,
+                                    false,
                                 )
                                 .map(Item::Func),
                         }

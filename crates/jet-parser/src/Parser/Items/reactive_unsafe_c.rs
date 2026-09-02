@@ -9,7 +9,7 @@ impl<'a> Parser<'a> {
         &mut self,
         mut markers: Vec<crate::AST::Marker>,
     ) -> Result<Func, Diagnostic> {
-        let function = self.func()?;
+        let function = self.guest_import_func()?;
         let symbol = match function.body.as_slice() {
             [crate::AST::Stmt::Expr(crate::AST::Expr::Str(parts, span))]
                 if parts.len() == 1 => match &parts[0] {
