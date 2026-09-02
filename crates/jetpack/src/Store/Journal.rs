@@ -1129,7 +1129,7 @@ mod integrity_tests {
             "nix",
             drv,
             SHA256::sha256_hex(drv.as_bytes()),
-            crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+            crate::ProviderPlanFacts::from_facts(BTreeMap::from([
                 ("nix.drv_path".into(), drv.into()),
                 ("nix.reference".into(), reference.into()),
                 (format!("nix.output.{output_name}"), output_path.clone()),

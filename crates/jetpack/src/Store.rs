@@ -1539,7 +1539,7 @@ pub(crate) fn record_locked_nix(
             "nix.cache.platform".into(),
             lock_envelope.platform.clone(),
         );
-        let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(facts.clone())
+        let plan = crate::ProviderPlanFacts::from_facts(facts.clone())
             .map_err(std::io::Error::other)?;
         let nix_toolchain_facts = format!(
             "nix-derivation:{}",

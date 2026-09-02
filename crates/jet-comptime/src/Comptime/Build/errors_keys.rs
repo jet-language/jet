@@ -289,23 +289,6 @@ pub(super) fn canonical_action_key(
         w.str(snapshot.digest.as_str());
         w.bytes.extend_from_slice(&snapshot.byte_len.to_be_bytes());
     }
-    w.str("dependency-artifact-snapshots");
-    for input in action.inputs.iter().filter(|path| {
-        path.as_str()
-            .starts_with(".jet/build-cache/package-artifacts/")
-    }) {
-        w.str(input.as_str());
-        if let Some(snapshot) = inputs
-            .iter()
-            .find(|snapshot| snapshot.path.as_str() == input.as_str())
-        {
-            w.bool(true);
-            w.str(snapshot.digest.as_str());
-            w.bytes.extend_from_slice(&snapshot.byte_len.to_be_bytes());
-        } else {
-            w.bool(false);
-        }
-    }
     w.str("outputs");
     w.vec_str(action.outputs.iter().map(BuildPath::as_str));
     w.str("dep-outputs");

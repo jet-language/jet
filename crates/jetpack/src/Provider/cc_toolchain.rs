@@ -298,7 +298,7 @@ impl BundleManifest {
             PRODUCER,
             self.source.clone(),
             self.bundle_sha256.clone(),
-            crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+            crate::ProviderPlanFacts::from_facts(BTreeMap::from([
                 ("action.kind".into(), "cc-toolchain-provision".into()),
                 ("action.recipe".into(), RECIPE_ID.into()),
             ]))
@@ -746,7 +746,7 @@ fn nix_descriptor(
         &references,
         &admitted.closure_receipt_sha256,
     );
-    let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(facts.clone())
+    let plan = crate::ProviderPlanFacts::from_facts(facts.clone())
         .map_err(ProviderError::BadOutput)?;
     let producer = ProducerRecord::new(
         NIX_PRODUCER,

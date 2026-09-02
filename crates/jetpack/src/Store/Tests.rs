@@ -1139,7 +1139,7 @@ mod tests {
             "nix",
             drv,
             crate::SHA256::sha256_hex(drv.as_bytes()),
-            crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+            crate::ProviderPlanFacts::from_facts(BTreeMap::from([
                 ("nix.drv_path".into(), drv.into()),
                 ("nix.output.out".into(), "/nix/store/projection-out".into()),
                 ("nix.output.dev".into(), "/nix/store/projection-dev".into()),

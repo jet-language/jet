@@ -199,17 +199,7 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
             print_build_explanation(&explanation, mode.json);
             return;
         }
-        if let Some(mut explanation) = plan.explain_action_named(subject) {
-            let source_parent = std::path::Path::new(file)
-                .parent()
-                .unwrap_or(std::path::Path::new("."));
-            let project_root = jet::Loader::find_manifest_root(source_parent)
-                .unwrap_or_else(|| source_parent.to_path_buf());
-            if let Ok(Some(rebuild)) = plan.last_rebuild_explanation(&project_root, subject) {
-                explanation
-                    .provenance
-                    .push(format!("rebuild={}", rebuild.reason));
-            }
+        if let Some(explanation) = plan.explain_action_named(subject) {
             print_build_explanation(&explanation, mode.json);
             return;
         }
@@ -227,7 +217,6 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
                 "inspect.build",
                 &format!(",\"build\":{payload}")
             )
-
         );
     } else {
         for target in graph.targets {
@@ -8300,15 +8289,6 @@ pub(crate) fn build(
         })
         .unwrap_or_default();
     let record_program = build_record_program(file, runtime_bundle);
-    let record_key = cache_key.clone().unwrap_or_else(|| {
-        let mut bytes = b"jet.build-record-key.v1\0".to_vec();
-        for node in &compiler_nodes {
-            append_cache_field(&mut bytes, node.kind.as_str());
-            append_cache_field(&mut bytes, &node.subject);
-            append_cache_field(&mut bytes, &node.key);
-        }
-        jet::SHA256::sha256_hex(&bytes)
-    });
     let previous_record = native_store.as_ref().and_then(|store| {
         store.latest_build_record(&record_program).ok().flatten()
     });
@@ -8432,7 +8412,6 @@ pub(crate) fn build(
             step("cache hit -> reused cached binary".to_string());
             persist_build_record(
                 native_store.as_ref(),
-                &record_key,
                 &record_program,
                 &compiler_nodes,
                 previous_record.as_ref(),
@@ -8724,7 +8703,6 @@ pub(crate) fn build(
     }
     persist_build_record(
         native_store.as_ref(),
-        &record_key,
         &record_program,
         &compiler_nodes,
         previous_record.as_ref(),
@@ -8762,7 +8740,6 @@ fn build_record_program(
 
 fn persist_build_record(
     store: Option<&Store>,
-    key: &str,
     program: &str,
     nodes: &[jet::Comptime::Build::BuildPlanNode],
     previous: Option<&jet_store::BuildRecord>,
@@ -8804,9 +8781,8 @@ fn persist_build_record(
         return;
     };
     let record = jet_store::BuildRecord::new(program.to_string(), nodes);
-    if store.build_record(key).ok().flatten().is_none() {
-        let _ = store.publish_build_record(key, &record);
-    }
+    let record_key = jet::SHA256::sha256_hex(record.to_json().as_bytes());
+    let _ = store.publish_build_record(&record_key, &record);
 }
 
 /// D-DBG3 step 2 (dap-debugger): build + launch the native lldb-backed `jet

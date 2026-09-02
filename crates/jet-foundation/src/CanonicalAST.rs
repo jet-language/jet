@@ -103,14 +103,14 @@ pub fn canonical_fragment<T: std::fmt::Debug>(value: &T) -> Vec<u8> {
     strip_spans(&format!("{value:?}")).into_bytes()
 }
 
-/// The build-cache key for a parsed program:
+/// The artifact-store key for a parsed program:
 /// `SHA256(canonical_bytes + 0 + target_dossier + 0 + profile_tag + 0 + jet_version)`,
 /// as 64 lowercase hex chars. The dossier is length-framed and covers the
 /// target triple, selected runtime layer, provider identity, and Prelude
 /// source-closure identity.
 ///
 /// SHA-256 throughout, matching `Lock::LockEnvelope::output_hash`
-/// (D-JPK-CACHE1=A / D-CASTORE1=A) so the local build cache and the hangar/lock
+/// (D-JPK-CACHE1=A / D-CASTORE1=A) so the local artifact store and the hangar/lock
 /// `output-hash` field are the same mechanism computed the same way — the
 /// Epoch-6 substitution protocol can feed this value straight in by prefixing
 /// `sha256-` (the lock's spelling); the raw-hex form here is the cache-directory

@@ -3,7 +3,7 @@ use super::cache_cas::{
     atomic_restore_file, ensure_real_directory, hex_decode, hex_encode, remote_execution_identity,
     remote_policy_digest, secure_read_file, ActionCacheProvenance, ActionCacheStatus,
     ActionInputSnapshot, ActionKey, ActionOutcome, ActionOutputRecord, ActionResultRecord,
-    CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion, LocalCas,
+    BuildArtifactStore, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
     RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
     RemoteDeniedReason, RemoteExecutionRequest,
 };
@@ -364,11 +364,13 @@ fn run_native_sandboxed_with_timeout_and_mounts(
 pub fn execute_build_plan(
     plan: &BuildPlan,
     project_root: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     grants: &BTreeSet<BuildCapability>,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
     execute_build_plan_with_front_end_and_remote(
         plan,
         project_root,
+        artifact_store,
         grants,
         FrontEndCompletion::all_complete(),
         None,
@@ -380,10 +382,18 @@ pub fn execute_build_plan(
 pub fn execute_build_plan_with_front_end(
     plan: &BuildPlan,
     project_root: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     grants: &BTreeSet<BuildCapability>,
     front_end: FrontEndCompletion,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
-    execute_build_plan_with_front_end_and_remote(plan, project_root, grants, front_end, None)
+    execute_build_plan_with_front_end_and_remote(
+        plan,
+        project_root,
+        artifact_store,
+        grants,
+        front_end,
+        None,
+    )
 }
 
 /// Execute with an explicitly selected host-owned builder binding. No
@@ -392,6 +402,7 @@ pub fn execute_build_plan_with_front_end(
 pub fn execute_build_plan_with_front_end_and_remote(
     plan: &BuildPlan,
     project_root: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     grants: &BTreeSet<BuildCapability>,
     front_end: FrontEndCompletion,
     remote_binding: Option<&RemoteBuildBinding>,
@@ -399,6 +410,7 @@ pub fn execute_build_plan_with_front_end_and_remote(
     execute_build_plan_with_front_end_and_remote_and_compiler(
         plan,
         project_root,
+        artifact_store,
         grants,
         front_end,
         remote_binding,
@@ -411,6 +423,7 @@ pub fn execute_build_plan_with_front_end_and_remote(
 pub fn execute_build_plan_with_front_end_and_compiler(
     plan: &BuildPlan,
     project_root: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     grants: &BTreeSet<BuildCapability>,
     front_end: FrontEndCompletion,
     runner: &CompilerActionRunner<'_>,
@@ -418,6 +431,7 @@ pub fn execute_build_plan_with_front_end_and_compiler(
     execute_build_plan_with_front_end_and_remote_and_compiler(
         plan,
         project_root,
+        artifact_store,
         grants,
         front_end,
         None,
@@ -425,9 +439,11 @@ pub fn execute_build_plan_with_front_end_and_compiler(
     )
 }
 
+
 pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
     plan: &BuildPlan,
     project_root: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     grants: &BTreeSet<BuildCapability>,
     front_end: FrontEndCompletion,
     remote_binding: Option<&RemoteBuildBinding>,
@@ -464,8 +480,6 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
     let model = plan
         .execution_model()
         .map_err(BuildExecutionError::InvalidGraph)?;
-    let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
-    let records = project_root.join(".jet/build-cache/actions");
     let remote_scheduler = remote_binding
         .filter(|binding| binding.is_enabled())
         .map(remote_scheduler_for_binding)
@@ -474,10 +488,6 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
             action: "remote scheduler".to_string(),
             detail: error,
         })?;
-    ensure_real_directory(&records).map_err(|e| BuildExecutionError::IO {
-        action: "cache".to_string(),
-        detail: e.to_string(),
-    })?;
     let mut outcomes = Vec::new();
     for stage in model.stages {
         for batch in execution_batches(plan, &stage.actions) {
@@ -493,8 +503,7 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
                 }
             }
             let mut completed = std::thread::scope(|scope| {
-                let cas = &cas;
-                let records = &records;
+                let artifact_store = artifact_store;
                 let probe_facts = &probes;
                 let remote_scheduler = remote_scheduler.as_ref();
                 let jobs = batch
@@ -513,8 +522,7 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
                                     action,
                                     handle,
                                     project_root,
-                                    cas,
-                                    records,
+                                    artifact_store,
                                     grants,
                                     probe_facts,
                                     front_end,
@@ -587,8 +595,7 @@ fn execute_one_action(
     action: &BuildAction,
     handle: ActionHandle,
     project_root: &Path,
-    cas: &LocalCas,
-    records: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     grants: &BTreeSet<BuildCapability>,
     probe_facts: &[BuildProbeFact],
     front_end: FrontEndCompletion,
@@ -597,9 +604,9 @@ fn execute_one_action(
     compiler: Option<&CompilerActionRunner<'_>>,
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let cache_lookup_allowed = front_end.authorize_cache_lookup().is_ok();
-    let snapshots = cas
-        .snapshot_declared_inputs(project_root, action)
-        .map_err(|e| io_action(action, e))?;
+    let snapshots =
+        super::cache_cas::snapshot_declared_inputs(artifact_store, project_root, action)
+            .map_err(|e| io_action(action, e))?;
     let remote_requested = remote_binding.is_some_and(RemoteBuildBinding::is_enabled);
     let (executable, executable_digest) = if action.is_compiler_owned() {
         (
@@ -647,33 +654,27 @@ fn execute_one_action(
             &effective_probe_facts,
         )
         .map_err(BuildExecutionError::InvalidGraph)?;
-    let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
     let remote = if action.is_compiler_owned() {
         None
     } else {
         remote_for_action(plan, action, &key, grants, remote_binding, remote_scheduler)?
     };
-    let previous_key = read_last_rebuild_record(project_root, action.id, &action.name)
-        .map_err(|error| io_action(action, error))?
-        .map(|record| record.key);
     let mut restore_failure = None;
     if action.cache == ActionCache::Cached {
         // E4-JP2: no cache lookup may bypass parser/sema/policy/diagnostics.
         if cache_lookup_allowed {
-            match read_action_record(records, &record_path, key.clone()) {
+            match read_action_record(artifact_store, key.clone()) {
                 Ok(Some(record)) => {
                     if let Some(report) = record.failure_report {
                         return Err(BuildExecutionError::Reported { report });
                     }
-                    match cas.restore_action_outputs(project_root, action, &record) {
+                    match super::cache_cas::restore_action_outputs(
+                        artifact_store,
+                        project_root,
+                        action,
+                        &record,
+                    ) {
                         Ok(()) => {
-                            write_last_rebuild_record(
-                                project_root,
-                                action,
-                                &key,
-                                ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-                                None,
-                            )?;
                             return Ok(ActionOutcome::RestoredFromCache);
                         }
                         Err(error) => {
@@ -714,13 +715,6 @@ fn execute_one_action(
                         super::cache_cas::RemoteActionRequest::CacheRead,
                     ) {
                         Ok(restored) => {
-                            write_last_rebuild_record(
-                                project_root,
-                                action,
-                                &key,
-                                ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-                                None,
-                            )?;
                             restored.commit();
                             return Ok(ActionOutcome::RestoredFromCache);
                         }
@@ -742,8 +736,6 @@ fn execute_one_action(
         ActionCacheStatus::Miss(CacheMissReason::UncachedAction)
     } else if let Some(reason) = restore_failure {
         ActionCacheStatus::Miss(reason)
-    } else if previous_key.as_ref().is_some_and(|old| old != &key) {
-        ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged)
     } else {
         ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord)
     };
@@ -791,18 +783,18 @@ fn execute_one_action(
         }
         let outcome = ActionOutcome::Succeeded { exit_code: 0 };
         if action.cache == ActionCache::Cached {
-            let record = cas
-                .capture_declared_outputs(
-                    project_root,
-                    action,
-                    key.clone(),
-                    outcome,
-                    ActionCacheProvenance::miss(rebuild_status_reason(rebuild_status)),
-                )
+            let record = super::cache_cas::capture_declared_outputs(
+                artifact_store,
+                project_root,
+                action,
+                key.clone(),
+                outcome,
+                ActionCacheProvenance::miss(rebuild_status_reason(rebuild_status)),
+            )
+            .map_err(|e| io_action(action, e))?;
+            write_action_record(artifact_store, &key, &record)
                 .map_err(|e| io_action(action, e))?;
-            write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
         }
-        write_last_rebuild_record(project_root, action, &key, rebuild_status, None)?;
         return Ok(outcome);
     }
 
@@ -814,11 +806,9 @@ fn execute_one_action(
             plan,
             action,
             project_root,
-            cas,
-            &record_path,
+            artifact_store,
             &snapshots,
             &key,
-            rebuild_status,
             timeout_ms,
             remote_scheduler.expect("enabled remote execution requires its scheduler"),
             remote_binding.expect("enabled remote execution requires its host binding"),
@@ -929,7 +919,6 @@ fn execute_one_action(
     if !output.status.success() {
         let _ = fs::remove_dir_all(&sandbox);
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        write_last_rebuild_record(project_root, action, &key, rebuild_status, Some(code))?;
         let report = action_failure_report(&action.name, code, &stderr);
         if action.cache == ActionCache::Cached {
             let record = ActionResultRecord {
@@ -948,7 +937,8 @@ fn execute_one_action(
                         .map_err(|detail| remote_action(action, detail))?;
                 }
             }
-            write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
+            write_action_record(artifact_store, &key, &record)
+                .map_err(|e| io_action(action, e))?;
         }
         return Err(BuildExecutionError::Reported { report });
     }
@@ -964,15 +954,15 @@ fn execute_one_action(
     }
     let outcome = ActionOutcome::Succeeded { exit_code: code };
     if action.cache == ActionCache::Cached {
-        let record = cas
-            .capture_declared_outputs(
-                project_root,
-                action,
-                key.clone(),
-                outcome,
-                ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
-            )
-            .map_err(|e| io_action(action, e))?;
+        let record = super::cache_cas::capture_declared_outputs(
+            artifact_store,
+            project_root,
+            action,
+            key.clone(),
+            outcome,
+            ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+        )
+        .map_err(|e| io_action(action, e))?;
         if let Some((transport, policy, _execute)) = &remote {
             if policy
                 .check(super::cache_cas::RemoteActionRequest::CacheWrite)
@@ -982,9 +972,9 @@ fn execute_one_action(
                     .map_err(|detail| remote_action(action, detail))?;
             }
         }
-        write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
+        write_action_record(artifact_store, &key, &record)
+            .map_err(|e| io_action(action, e))?;
     }
-    write_last_rebuild_record(project_root, action, &key, rebuild_status, None)?;
     fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
     Ok(outcome)
 }
@@ -993,11 +983,9 @@ fn execute_remote_action(
     plan: &BuildPlan,
     action: &BuildAction,
     project_root: &Path,
-    cas: &LocalCas,
-    record_path: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     snapshots: &[ActionInputSnapshot],
     key: &ActionKey,
-    rebuild_status: ActionCacheStatus,
     timeout_ms: u64,
     scheduler: &RemoteScheduler,
     binding: &RemoteBuildBinding,
@@ -1013,13 +1001,11 @@ fn execute_remote_action(
             plan,
             action,
             project_root,
-            cas,
-            record_path,
+            artifact_store,
             snapshots,
             key,
             &transport,
             &policy,
-            rebuild_status,
             timeout_ms,
             &builder.binding,
         ) {
@@ -1046,13 +1032,11 @@ fn execute_remote_candidate(
     plan: &BuildPlan,
     action: &BuildAction,
     project_root: &Path,
-    cas: &LocalCas,
-    record_path: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     snapshots: &[ActionInputSnapshot],
     key: &ActionKey,
     transport: &RemoteCacheTransport,
     policy: &RemoteCachePolicy,
-    rebuild_status: ActionCacheStatus,
     timeout_ms: u64,
     binding: &RemoteBuildBinding,
 ) -> Result<ActionOutcome, RemoteAttemptFailure> {
@@ -1063,13 +1047,11 @@ fn execute_remote_candidate(
             plan,
             action,
             project_root,
-            cas,
-            record_path,
+            artifact_store,
             snapshots,
             key,
             transport,
             &policy,
-            rebuild_status,
             timeout_ms,
         ) {
             Ok(outcome) => return Ok(outcome),
@@ -1087,13 +1069,11 @@ fn execute_remote_attempt(
     plan: &BuildPlan,
     action: &BuildAction,
     project_root: &Path,
-    cas: &LocalCas,
-    record_path: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     snapshots: &[ActionInputSnapshot],
     key: &ActionKey,
     transport: &RemoteCacheTransport,
     policy: &RemoteCachePolicy,
-    rebuild_status: ActionCacheStatus,
     timeout_ms: u64,
 ) -> Result<ActionOutcome, RemoteAttemptFailure> {
     let proof = policy
@@ -1156,15 +1136,15 @@ fn execute_remote_attempt(
             )
             .map_err(|detail| remote_action(action, detail))?;
             if action.cache == ActionCache::Cached {
-                let record = cas
-                    .capture_declared_outputs(
-                        project_root,
-                        action,
-                        key.clone(),
-                        ActionOutcome::Succeeded { exit_code },
-                        ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
-                    )
-                    .map_err(|e| io_action(action, e))?;
+                let record = super::cache_cas::capture_declared_outputs(
+                    artifact_store,
+                    project_root,
+                    action,
+                    key.clone(),
+                    ActionOutcome::Succeeded { exit_code },
+                    ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
+                )
+                .map_err(|e| io_action(action, e))?;
                 if record.outputs != result.outputs {
                     return Err(RemoteAttemptFailure::terminal(remote_action(
                         action,
@@ -1178,16 +1158,13 @@ fn execute_remote_attempt(
                     publish_remote_outputs(transport, policy, project_root, &record)
                         .map_err(|detail| remote_action(action, detail))?;
                 }
-                write_action_record(record_path, &record).map_err(|e| io_action(action, e))?;
+                write_action_record(artifact_store, key, &record)
+                    .map_err(|e| io_action(action, e))?;
             }
-            write_last_rebuild_record(project_root, action, key, rebuild_status, None)
-                .map_err(RemoteAttemptFailure::terminal)?;
             restored.commit();
             Ok(ActionOutcome::Succeeded { exit_code })
         }
         ActionOutcome::Failed { exit_code } => {
-            write_last_rebuild_record(project_root, action, key, rebuild_status, Some(exit_code))
-                .map_err(RemoteAttemptFailure::terminal)?;
             let stderr = transport
                 .download_execution_blob(&result.stderr_digest, policy)
                 .map_err(|error| {
@@ -1211,7 +1188,7 @@ fn execute_remote_attempt(
                         |detail| RemoteAttemptFailure::terminal(remote_action(action, detail)),
                     )?;
                 }
-                write_action_record(record_path, &record)
+                write_action_record(artifact_store, key, &record)
                     .map_err(|error| RemoteAttemptFailure::terminal(io_action(action, error)))?;
             }
             Err(RemoteAttemptFailure::terminal(
@@ -1590,33 +1567,6 @@ fn remote_action(action: &BuildAction, detail: String) -> BuildExecutionError {
     }
 }
 
-pub(super) struct LastRebuildRecord {
-    pub(super) key: ActionKey,
-    pub(super) status: ActionCacheStatus,
-    pub(super) failed_exit_code: Option<i32>,
-}
-
-fn rebuild_record_path(project_root: &Path, action: ActionId) -> PathBuf {
-    project_root
-        .join(".jet/build-cache/explanations")
-        .join(action.0.to_string())
-}
-
-fn rebuild_status_code(status: ActionCacheStatus) -> &'static str {
-    match status {
-        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched) => "hit-local",
-        ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored) => "hit-output",
-        ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord) => "miss-new",
-        ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged) => "miss-key",
-        ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing) => "miss-output",
-        ActionCacheStatus::Miss(CacheMissReason::CacheRecordInvalid) => "miss-invalid",
-        ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed) => "miss-restore",
-        ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => "miss-remote",
-        ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => "miss-uncached",
-        ActionCacheStatus::Miss(CacheMissReason::FrontEndIncomplete) => "miss-frontend",
-    }
-}
-
 fn rebuild_status_reason(status: ActionCacheStatus) -> CacheMissReason {
     match status {
         ActionCacheStatus::Miss(reason) => reason,
@@ -1624,84 +1574,6 @@ fn rebuild_status_reason(status: ActionCacheStatus) -> CacheMissReason {
     }
 }
 
-fn parse_rebuild_status(code: &str) -> Option<ActionCacheStatus> {
-    Some(match code {
-        "hit-local" => ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-        "hit-output" => ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored),
-        "miss-new" => ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord),
-        "miss-key" => ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged),
-        "miss-output" => ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing),
-        "miss-invalid" => ActionCacheStatus::Miss(CacheMissReason::CacheRecordInvalid),
-        "miss-restore" => ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed),
-        "miss-remote" => ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
-        "miss-uncached" => ActionCacheStatus::Miss(CacheMissReason::UncachedAction),
-        "miss-frontend" => ActionCacheStatus::Miss(CacheMissReason::FrontEndIncomplete),
-        _ => return None,
-    })
-}
-
-pub(super) fn read_last_rebuild_record(
-    project_root: &Path,
-    action: ActionId,
-    action_name: &str,
-) -> io::Result<Option<LastRebuildRecord>> {
-    let path = rebuild_record_path(project_root, action);
-    let bytes = match secure_read_file(project_root, &path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let text = String::from_utf8(bytes).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "rebuild explanation is not UTF-8",
-        )
-    })?;
-    let mut lines = text.lines();
-    let Some(key) = lines.next() else {
-        return Ok(None);
-    };
-    let action_digest = ContentDigest::from_bytes(action_name.as_bytes());
-    if lines.next() != Some(action_digest.as_str()) {
-        return Ok(None);
-    }
-    let Some(status) = lines.next().and_then(parse_rebuild_status) else {
-        return Ok(None);
-    };
-    Ok(Some(LastRebuildRecord {
-        key: ActionKey(key.to_string()),
-        status,
-        failed_exit_code: lines
-            .next()
-            .and_then(|line| line.strip_prefix("failed:"))
-            .and_then(|code| code.parse().ok()),
-    }))
-}
-
-fn write_last_rebuild_record(
-    project_root: &Path,
-    action: &BuildAction,
-    key: &ActionKey,
-    status: ActionCacheStatus,
-    failed_exit_code: Option<i32>,
-) -> Result<(), BuildExecutionError> {
-    let path = rebuild_record_path(project_root, action.id);
-    let text = format!(
-        "{}\n{}\n{}\n{}",
-        key.as_str(),
-        ContentDigest::from_bytes(action.name.as_bytes()).as_str(),
-        rebuild_status_code(status),
-        failed_exit_code
-            .map(|code| format!("failed:{code}\n"))
-            .unwrap_or_default()
-    );
-    atomic_restore_file(project_root, &path, text.as_bytes()).map_err(|error| {
-        BuildExecutionError::IO {
-            action: format!("rebuild explanation {}", action.name),
-            detail: error.to_string(),
-        }
-    })
-}
 
 pub(super) fn prepare_output_destination(root: &Path, output: &Path) -> io::Result<()> {
     let parent = output.parent().unwrap_or(root);
@@ -2142,7 +2014,11 @@ fn remote_provenance_digest(plan: &BuildPlan, action: &BuildAction) -> ContentDi
     ContentDigest::from_bytes(statement.as_bytes())
 }
 
-fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<()> {
+fn write_action_record(
+    artifact_store: &dyn BuildArtifactStore,
+    key: &ActionKey,
+    record: &ActionResultRecord,
+) -> io::Result<()> {
     let mut text = format!(
         "{}\noutcome={}\n",
         record.key.as_str(),
@@ -2161,13 +2037,7 @@ fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<(
             output.byte_len
         ));
     }
-    let root = path.parent().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "action record has no cache directory",
-        )
-    })?;
-    atomic_restore_file(root, path, text.as_bytes())
+    artifact_store.put_record(key.as_str(), text.as_bytes())
 }
 
 fn encode_local_outcome(outcome: ActionOutcome) -> String {
@@ -2213,14 +2083,11 @@ fn cache_restore_miss_reason(error: &io::Error) -> CacheMissReason {
 }
 
 pub(super) fn read_action_record(
-    root: &Path,
-    path: &Path,
+    artifact_store: &dyn BuildArtifactStore,
     key: ActionKey,
 ) -> io::Result<Option<ActionResultRecord>> {
-    let bytes = match secure_read_file(root, path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
+    let Some(bytes) = artifact_store.get_record(key.as_str())? else {
+        return Ok(None);
     };
     let text = String::from_utf8(bytes)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "action record is not UTF-8"))?;
@@ -2333,6 +2200,49 @@ fn native_sandbox_error(action: &BuildAction, error: NativeSandboxError) -> Buil
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct TestArtifactStore {
+        blobs: std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+        records: std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+    }
+
+    impl BuildArtifactStore for TestArtifactStore {
+        fn put_blob(&self, bytes: &[u8]) -> std::io::Result<ContentDigest> {
+            let digest = ContentDigest::from_bytes(bytes);
+            self.blobs
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(digest.as_str().to_string(), bytes.to_vec());
+            Ok(digest)
+        }
+
+        fn get_blob(&self, digest: &ContentDigest) -> std::io::Result<Option<Vec<u8>>> {
+            Ok(self
+                .blobs
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(digest.as_str())
+                .cloned())
+        }
+
+        fn put_record(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+            self.records
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(key.to_string(), bytes.to_vec());
+            Ok(())
+        }
+
+        fn get_record(&self, key: &str) -> std::io::Result<Option<Vec<u8>>> {
+            Ok(self
+                .records
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(key)
+                .cloned())
+        }
+    }
 
     #[test]
     fn shared_hostile_corpus_is_consumable_by_hermetic_execution() {
@@ -2699,7 +2609,8 @@ mod tests {
                 .unwrap();
             let plan = context.plan_with_default(target).unwrap();
             let grants = [BuildCapability::Exec].into_iter().collect();
-            let result = execute_build_plan(&plan, &root, &grants);
+            let artifact_store = TestArtifactStore::default();
+            let result = execute_build_plan(&plan, &root, &artifact_store, &grants);
 
             if capability.available {
                 result.unwrap_or_else(|error| {

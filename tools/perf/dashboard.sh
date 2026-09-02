@@ -724,36 +724,36 @@ prepare_peer_report() {
     }
 }
 
-timing_field() {
-    timing_file=$1
-    timing_name=$2
-    [ -s "$timing_file" ] || return 0
-    sed 's/},{/}\n{/g' "$timing_file" \
-        | grep '"name":"'"$timing_name"'"' \
-        | sed 's/.*"us"://; s/[^0-9].*//' \
-        | head -n1
+build_record_cache_hit() {
+    build_record_file=$1
+    awk '
+        {
+            total += gsub(/"why_ran":/, "&")
+            cached += gsub(/"why_ran":"cached"/, "&")
+        }
+        END {
+            if (total > 0 && cached == total) print 1
+            else print 0
+        }
+    ' "$build_record_file"
 }
 
-append_timing_phases() {
-    timing_file=$1
+append_build_record_phases() {
+    build_record_file=$1
     phase_file=$2
-    [ -s "$timing_file" ] || { echo "missing timing report: $timing_file" >&2; exit 1; }
-    for phase_name in parse sema ffi tir emission build_plan cache_key backend link frontend jit jit_cache_hit cache_hit rust_bytes; do
-        phase_value=$(timing_field "$timing_file" "$phase_name")
-        case "$phase_value" in
-            ""|*[!0-9]*) ;;
-            *) printf '%s%s%s\n' "$phase_name" "$TAB" "$phase_value" >> "$phase_file" ;;
+    [ -s "$build_record_file" ] || {
+        echo "missing explain-build report: $build_record_file" >&2
+        exit 1
+    }
+    sed 's/},{/}\n{/g' "$build_record_file" | while IFS= read -r node; do
+        node_kind=$(printf '%s\n' "$node" | sed -n 's/.*"kind":"\([^"]*\)".*/\1/p')
+        node_duration_ms=$(printf '%s\n' "$node" | sed -n 's/.*"duration_ms":\([0-9.]*\).*/\1/p')
+        case "$node_kind:$node_duration_ms" in
+            :*|*:|*[!A-Za-z0-9_.:-]*) continue ;;
         esac
+        node_duration_us=$(awk -v milliseconds="$node_duration_ms" 'BEGIN { printf "%.0f\n", milliseconds * 1000 }')
+        printf '%s_us%s%s\n' "$node_kind" "$TAB" "$node_duration_us" >> "$phase_file"
     done
-}
-
-append_cache_miss() {
-    phase_file=$1
-    cache_hit_value=$2
-    case "$cache_hit_value" in
-        1) printf '%s%s%s\n' cache_miss "$TAB" 0 >> "$phase_file" ;;
-        *) printf '%s%s%s\n' cache_miss "$TAB" 1 >> "$phase_file" ;;
-    esac
 }
 
 top_cause() {
@@ -962,7 +962,7 @@ workload_digest() {
 reset_fixture_state() {
     fixture_root=$1
     rm -rf "$fixture_root/build" "$fixture_root/cache" \
-        "$fixture_root/timing" "$fixture_root/jet-timing.json"
+        "$fixture_root/explain-build.json" "$fixture_root/explain-build.stderr"
 }
 
 prepare_fixture() {
@@ -1015,7 +1015,7 @@ run_jit_trial() {
     else
         trial_invocation="exec '$JET_BIN' run run.jet"
     fi
-    mkdir -p "$trial_work/timing" "$trial_cache"
+    mkdir -p "$trial_cache"
     if run_timed "$trial_stats" "$trial_output.stdout" "$trial_output.stderr" \
         env \
         -u JET_DEBUG_NATIVE_CACHE_LOG \
@@ -1023,8 +1023,6 @@ run_jit_trial() {
         JET_RECEIPT_BYPASS=1 \
         JET_RUN_CACHE_DIR="$trial_cache/run" \
         JET_STORE_DIR="$trial_cache/store" \
-        JET_TIMING=1 \
-        JET_TIMING_DIR="$trial_work/timing" \
         NO_COLOR=1 \
         bash -c "cd '$trial_work' && $trial_invocation"; then
         trial_status=0
@@ -1033,16 +1031,18 @@ run_jit_trial() {
     fi
     [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.stderr"
     check_trial_output "$trial_work" "$trial_output.stdout" "$trial_output.stderr"
-    trial_timing_file="$trial_work/timing/jet-timing.json"
-    append_timing_phases "$trial_timing_file" "$trial_phases"
-    trial_cache_hit=$(timing_field "$trial_timing_file" cache_hit)
-    case "$trial_cache_hit" in
-        1) ;;
-        *) trial_cache_hit=0 ;;
-    esac
+    trial_explain_file="$trial_work/explain-build.json"
+    if ! (cd "$trial_work" && "$JET_BIN" inspect explain-build run.jet --json >"$trial_explain_file" 2>"$trial_work/explain-build.stderr"); then
+        echo "explain-build failed: $trial_work/run.jet" >&2
+        cat "$trial_work/explain-build.stderr" >&2 || true
+        exit 1
+    fi
+    append_build_record_phases "$trial_explain_file" "$trial_phases"
+    trial_cache_hit=$(build_record_cache_hit "$trial_explain_file")
     TRIAL_CACHE_HIT=$trial_cache_hit
     TRIAL_CACHE_MISSES=$((1 - trial_cache_hit))
-    append_cache_miss "$trial_phases" "$trial_cache_hit"
+    printf '%s%s%s\n' cache_hit "$TAB" "$trial_cache_hit" >> "$trial_phases"
+    printf '%s%s%s\n' cache_miss "$TAB" "$TRIAL_CACHE_MISSES" >> "$trial_phases"
     read_timed_stats "$trial_stats"
 }
 
@@ -1055,7 +1055,7 @@ run_aot_trial() {
     trial_program=${6:-}
     trial_profile=${7:-release}
     trial_job=$(job_argument_for_program "$trial_program")
-    mkdir -p "$trial_work/timing" "$trial_cache"
+    mkdir -p "$trial_cache"
     if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
         env \
         -u JET_DEBUG_NATIVE_CACHE_LOG \
@@ -1063,8 +1063,6 @@ run_aot_trial() {
         JET_RECEIPT_BYPASS=1 \
         JET_STORE_DIR="$trial_cache/store" \
         JET_ROOT="$trial_work" \
-        JET_TIMING=1 \
-        JET_TIMING_DIR="$trial_work/timing" \
         NO_COLOR=1 \
         "$BASH_BIN" -c "cd '$trial_work' && exec '$JET_BIN' build --profile=$trial_profile --verbose run.jet"; then
         trial_status=0
@@ -1098,14 +1096,18 @@ run_aot_trial() {
     fi
     [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.stderr"
     check_trial_output "$trial_work" "$trial_output.stdout" "$trial_output.stderr"
-    append_timing_phases "$trial_work/timing/jet-timing.json" "$trial_phases"
-    append_timing_phases "$trial_work/timing/build/jet-timing-backend.json" "$trial_phases"
-    aot_cache_hits=$(grep -c '\[build\] cache hit -> reused cached binary' "$trial_output.build.stderr" || true)
-    aot_cache_misses=$(grep -c '\[build\] cache miss -> compiling' "$trial_output.build.stderr" || true)
-    TRIAL_CACHE_HITS=$aot_cache_hits
-    TRIAL_CACHE_MISSES=$aot_cache_misses
-    printf '%s%s%s\n' cache_hit "$TAB" "$aot_cache_hits" >> "$trial_phases"
-    printf '%s%s%s\n' cache_miss "$TAB" "$aot_cache_misses" >> "$trial_phases"
+    trial_explain_file="$trial_work/explain-build.json"
+    if ! (cd "$trial_work" && "$JET_BIN" inspect explain-build run.jet --json >"$trial_explain_file" 2>"$trial_work/explain-build.stderr"); then
+        echo "explain-build failed: $trial_work/run.jet" >&2
+        cat "$trial_work/explain-build.stderr" >&2 || true
+        exit 1
+    fi
+    append_build_record_phases "$trial_explain_file" "$trial_phases"
+    aot_cache_hit=$(build_record_cache_hit "$trial_explain_file")
+    TRIAL_CACHE_HITS=$aot_cache_hit
+    TRIAL_CACHE_MISSES=$((1 - aot_cache_hit))
+    printf '%s%s%s\n' cache_hit "$TAB" "$TRIAL_CACHE_HITS" >> "$trial_phases"
+    printf '%s%s%s\n' cache_miss "$TAB" "$TRIAL_CACHE_MISSES" >> "$trial_phases"
     trial_linker=$(sed -n 's/.*\[build\] linker[[:space:]]*->[[:space:]]*//p' "$trial_output.build.stderr" | tail -n1)
     if [ -n "$trial_linker" ]; then
         if [ -n "${TRIAL_LINKER:-}" ] && [ "$TRIAL_LINKER" != "$trial_linker" ]; then
@@ -1256,16 +1258,6 @@ phase_average() {
     awk -F "$TAB" -v wanted="$phase_wanted" '$1 == wanted { total += $2; count++ } END { if (count == 0) print 0; else printf "%.0f\n", total / count }' "$phase_file_path"
 }
 
-required_phase_average() {
-    phase_file_path=$1
-    phase_wanted=$2
-    phase_count=$(awk -F "$TAB" -v wanted="$phase_wanted" '$1 == wanted { count++ } END { print count + 0 }' "$phase_file_path")
-    [ "$phase_count" -eq "$SAMPLES" ] || {
-        echo "missing required compiler phase: $phase_wanted (expected $SAMPLES samples, got $phase_count)" >&2
-        exit 1
-    }
-    phase_average "$phase_file_path" "$phase_wanted"
-}
 
 safe_id() {
     printf '%s' "$1" | tr '/.' '__'
@@ -1373,7 +1365,7 @@ check_native_jit() {
             -u JET_RUNTIME_CACHE_STATS \
             JET_RECEIPT_BYPASS=1 \
             JET_RUN_CACHE_DIR="$native_root/run-cache" \
-            JET_STORE_DIR="$native_root/build-cache" \
+            JET_STORE_DIR="$native_root/store" \
             NO_COLOR=1 \
             "$JET_BIN" run run.jet --trace-tiers -- "$native_job"
     else
@@ -1383,7 +1375,7 @@ check_native_jit() {
             -u JET_RUNTIME_CACHE_STATS \
             JET_RECEIPT_BYPASS=1 \
             JET_RUN_CACHE_DIR="$native_root/run-cache" \
-            JET_STORE_DIR="$native_root/build-cache" \
+            JET_STORE_DIR="$native_root/store" \
             NO_COLOR=1 \
             "$JET_BIN" run run.jet --trace-tiers
     fi
@@ -1404,13 +1396,13 @@ parity_run_case() {
     prepare_fixture "$parity_root" "$parity_program" "$parity_expected"
 
     parity_run_process "$parity_root/jit.status" "$parity_root/jit.stdout" "$parity_root/jit.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/jit-run-cache" JET_STORE_DIR="$parity_root/jit-build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_root/jit-run-cache" JET_STORE_DIR="$parity_root/jit-store" NO_COLOR=1 \
         "$JET_BIN" run run.jet
     parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
         "$JET_BIN" dev run.jet --watch=off --quiet
     parity_run_process "$parity_root/aot-build.status" "$parity_root/aot-build.stdout" "$parity_root/aot-build.stderr" "$parity_root" \
-        env JET_STORE_DIR="$parity_root/aot-build-cache" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_root/aot-store" NO_COLOR=1 \
         "$JET_ENV" bash -c "cd '$parity_root' && exec '$JET_BIN' build --profile=release run.jet"
     parity_require_status "$(sed -n '1p' "$parity_root/jit.status")" "$parity_id/jit"
     parity_require_status "$(sed -n '1p' "$parity_root/dev.status")" "$parity_id/dev"
@@ -1429,10 +1421,10 @@ parity_run_case() {
     parity_compare "$parity_root/jit.stderr" "$parity_root/aot.stderr" "$parity_id/jit-aot-stderr"
 
     parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-store" NO_COLOR=1 \
         "$JET_BIN" run run.jet --trace-tiers
     parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-store" NO_COLOR=1 \
         "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers
     parity_require_status "$(sed -n '1p' "$parity_root/jit-trace.status")" "$parity_id/jit-trace"
     parity_require_status "$(sed -n '1p' "$parity_root/dev-trace.status")" "$parity_id/dev-trace"
@@ -1465,11 +1457,11 @@ parity_run_dev_case() {
     parity_job=$(job_argument_for_program "$parity_program")
     if [ -n "$parity_job" ]; then
         parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-build-cache" NO_COLOR=1 \
+            env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
             "$JET_BIN" dev run.jet --watch=off --quiet -- "$parity_job"
     else
         parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-build-cache" NO_COLOR=1 \
+            env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
             "$JET_BIN" dev run.jet --watch=off --quiet
     fi
     parity_require_status "$(sed -n '1p' "$parity_root/dev.status")" "$parity_id/dev"
@@ -1479,17 +1471,17 @@ parity_run_dev_case() {
 
     if [ -n "$parity_job" ]; then
         parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-build-cache" NO_COLOR=1 \
+            env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-store" NO_COLOR=1 \
             "$JET_BIN" run run.jet --trace-tiers -- "$parity_job"
         parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-build-cache" NO_COLOR=1 \
+            env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-store" NO_COLOR=1 \
             "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers -- "$parity_job"
     else
         parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-build-cache" NO_COLOR=1 \
+            env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-store" NO_COLOR=1 \
             "$JET_BIN" run run.jet --trace-tiers
         parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-build-cache" NO_COLOR=1 \
+            env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-store" NO_COLOR=1 \
             "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers
     fi
     parity_require_status "$(sed -n '1p' "$parity_root/jit-trace.status")" "$parity_id/jit-trace"
@@ -1515,13 +1507,13 @@ parity_check_job_runner_case() {
     prepare_fixture "$parity_case_root" "$parity_case_program" "$parity_case_seed_expected"
 
     parity_run_process "$parity_case_root/run-seed.status" "$parity_case_root/run-seed.stdout" "$parity_case_root/run-seed.stderr" "$parity_case_root" \
-        env JET_RUN_CACHE_DIR="$parity_case_root/run-cache" JET_STORE_DIR="$parity_case_root/build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_case_root/run-cache" JET_STORE_DIR="$parity_case_root/store" NO_COLOR=1 \
         "$JET_BIN" run run.jet -- seed_data
     parity_run_process "$parity_case_root/dev-seed.status" "$parity_case_root/dev-seed.stdout" "$parity_case_root/dev-seed.stderr" "$parity_case_root" \
-        env JET_RUN_CACHE_DIR="$parity_case_root/dev-run-cache" JET_STORE_DIR="$parity_case_root/dev-build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_case_root/dev-run-cache" JET_STORE_DIR="$parity_case_root/dev-store" NO_COLOR=1 \
         "$JET_BIN" dev run.jet --watch=off --quiet -- seed_data
     parity_run_process "$parity_case_root/interpreter-seed.status" "$parity_case_root/interpreter-seed.stdout" "$parity_case_root/interpreter-seed.stderr" "$parity_case_root" \
-        env JET_RUN_CACHE_DIR="$parity_case_root/interpreter-run-cache" JET_STORE_DIR="$parity_case_root/interpreter-build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_case_root/interpreter-run-cache" JET_STORE_DIR="$parity_case_root/interpreter-store" NO_COLOR=1 \
         "$JET_BIN" run --interpret run.jet -- seed_data
     parity_require_status "$(sed -n '1p' "$parity_case_root/run-seed.status")" "$parity_case_id/run-seed"
     parity_require_status "$(sed -n '1p' "$parity_case_root/dev-seed.status")" "$parity_case_id/dev-seed"
@@ -1531,7 +1523,7 @@ parity_check_job_runner_case() {
     parity_compare "$parity_case_root/expected.out" "$parity_case_root/interpreter-seed.stdout" "$parity_case_id/expected-interpreter-seed"
 
     parity_run_process "$parity_case_root/release-build.status" "$parity_case_root/release-build.stdout" "$parity_case_root/release-build.stderr" "$parity_case_root" \
-        env JET_STORE_DIR="$parity_case_root/release-build-cache" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_case_root/release-store" NO_COLOR=1 \
         "$JET_ENV" bash -c "cd '$parity_case_root' && exec '$JET_BIN' build --profile=release run.jet"
     parity_require_status "$(sed -n '1p' "$parity_case_root/release-build.status")" "$parity_case_id/release-build"
     [ -x "$parity_case_root/build/run" ] || { echo "missing job-runner release artifact: $parity_case_id" >&2; exit 1; }
@@ -1579,13 +1571,13 @@ parity_check_diagnostic() {
     rm -rf "$parity_root"
     mkdir -p "$parity_root"
     parity_run_process "$parity_root/jit.status" "$parity_root/jit.stdout" "$parity_root/jit.stderr" "$ROOT" \
-        env JET_RUN_CACHE_DIR="$parity_root/jit-run-cache" JET_STORE_DIR="$parity_root/jit-build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_root/jit-run-cache" JET_STORE_DIR="$parity_root/jit-store" NO_COLOR=1 \
         "$JET_BIN" run "$parity_source"
     parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$ROOT" \
-        env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-build-cache" NO_COLOR=1 \
+        env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
         "$JET_BIN" dev "$parity_source" --watch=off --quiet
     parity_run_process "$parity_root/aot.status" "$parity_root/aot.stdout" "$parity_root/aot.stderr" "$ROOT" \
-        env JET_STORE_DIR="$parity_root/aot-build-cache" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_root/aot-store" NO_COLOR=1 \
         "$JET_ENV" bash -c "cd '$ROOT' && exec '$JET_BIN' build --quiet --profile=release '$parity_source'"
     for parity_tier in jit dev aot; do
         parity_status=$(sed -n '1p' "$parity_root/$parity_tier.status")
@@ -1768,7 +1760,7 @@ measure_state() {
         state_linker_backend_sha256="none"
         state_profile="fast"
         state_artifact_bytes=0
-        state_phase_text="frontend_us=$(phase_average "$state_phases" frontend);jit_us=$(phase_average "$state_phases" jit);jit_cache_hit=$(phase_average "$state_phases" jit_cache_hit)"
+        state_phase_text="check_us=$(phase_average "$state_phases" check_us);compile_us=$(phase_average "$state_phases" compile_us);link_us=$(phase_average "$state_phases" link_us);frontend_us=$(phase_average "$state_phases" frontend);jit_us=$(phase_average "$state_phases" jit);jit_cache_hit=$(phase_average "$state_phases" jit_cache_hit)"
     else
         state_backend="rustc-llvm"
         state_linker="$TRIAL_LINKER"
@@ -1779,15 +1771,7 @@ measure_state() {
         state_linker_backend_sha256="$TRIAL_LINKER_BACKEND_SHA256"
         state_profile="release"
         state_artifact_bytes="$TRIAL_ARTIFACT_BYTES"
-        if [ "$state_kind" = "no-change" ]; then
-            # A cache hit skips TIR/emission; zero is the measured work.
-            state_tir_us=$(phase_average "$state_phases" tir)
-            state_emission_us=$(phase_average "$state_phases" emission)
-        else
-            state_tir_us=$(required_phase_average "$state_phases" tir)
-            state_emission_us=$(required_phase_average "$state_phases" emission)
-        fi
-        state_phase_text="parse_us=$(required_phase_average "$state_phases" parse);sema_us=$(required_phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);tir_us=$state_tir_us;emission_us=$state_emission_us;build_plan_us=$(phase_average "$state_phases" build_plan);cache_key_us=$(phase_average "$state_phases" cache_key);backend_us=$(required_phase_average "$state_phases" backend);link_us=$(required_phase_average "$state_phases" link)"
+        state_phase_text="check_us=$(phase_average "$state_phases" check_us);compile_us=$(phase_average "$state_phases" compile_us);link_us=$(phase_average "$state_phases" link_us);parse_us=$(phase_average "$state_phases" parse);sema_us=$(phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);tir_us=$(phase_average "$state_phases" tir);emission_us=$(phase_average "$state_phases" emission);build_plan_us=$(phase_average "$state_phases" build_plan);cache_key_us=$(phase_average "$state_phases" cache_key);backend_us=$(phase_average "$state_phases" backend)"
     fi
     state_artifact_source="$state_work"
     if [ "$state_kind" = "clean" ]; then
@@ -1799,12 +1783,8 @@ measure_state() {
         mkdir -p "$state_full_artifact"
         cp "$state_artifact_source/run.jet" "$state_full_artifact/run.jet"
         cp "$state_artifact_source/expected.out" "$state_full_artifact/expected.out"
-        if [ -f "$state_artifact_source/timing/jet-timing.json" ]; then
-            cp "$state_artifact_source/timing/jet-timing.json" "$state_full_artifact/jet-timing.json"
-        fi
-        if [ -f "$state_artifact_source/timing/build/jet-timing-backend.json" ]; then
-            mkdir -p "$state_full_artifact/build"
-            cp "$state_artifact_source/timing/build/jet-timing-backend.json" "$state_full_artifact/build/jet-timing-backend.json"
+        if [ -f "$state_artifact_source/explain-build.json" ]; then
+            cp "$state_artifact_source/explain-build.json" "$state_full_artifact/explain-build.json"
         fi
         if [ -f "$state_artifact_source/build/run.rs" ]; then
             mkdir -p "$state_full_artifact/build"

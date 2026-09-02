@@ -923,7 +923,7 @@ mod production_path {
             Command::new(jet())
                 .args(["run", "--release", "src/main.jet"])
                 .current_dir(&scratch.path)
-                .env("JET_STORE_DIR", scratch.join("build-cache"))
+                .env("JET_STORE_DIR", scratch.join("store"))
                 .env("JET_RECEIPT_BYPASS", "1")
                 .env("NO_COLOR", "1")
                 .output()

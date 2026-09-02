@@ -1,5 +1,5 @@
 use super::{CacheExpectation, CacheIdentity, Closure, Roots, StoreEntry};
-use crate::Comptime::Build::BuildPlanReplay;
+use crate::ProviderPlanFacts;
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,7 +15,7 @@ pub(crate) fn canonical_producer(
     facts.insert("action.recipe".into(), identity.recipe_fingerprint.clone());
     facts.insert("closure.authority".into(), "hangar-cas".into());
     facts.insert("cache.reproducibility".into(), "attested-v1".into());
-    let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(facts.clone())
+    let plan = ProviderPlanFacts::from_facts(facts.clone())
         .map_err(std::io::Error::other)?;
     ProducerRecord::new(
         provider,
@@ -71,7 +71,7 @@ pub(crate) fn refresh_lock_digest(
     replay_facts.insert("nix.lock.digest".to_string(), lock_digest.to_string());
     replay_facts.remove("provider-facts");
     replay_facts.remove("provider-facts-digest");
-    producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(replay_facts)
+    producer.plan = ProviderPlanFacts::from_facts(replay_facts)
         .map_err(std::io::Error::other)?;
     producer.bind_cache_provenance(
         &entry.reference,
@@ -114,7 +114,7 @@ pub struct ProducerRecord {
     pub provider: String,
     pub immutable_source: String,
     pub source_digest: String,
-    pub plan: BuildPlanReplay,
+    pub plan: ProviderPlanFacts,
     pub toolchain_facts: String,
     pub policy_facts: String,
     pub facts: BTreeMap<String, String>,
@@ -125,7 +125,7 @@ impl ProducerRecord {
         provider: impl Into<String>,
         immutable_source: impl Into<String>,
         source_digest: impl Into<String>,
-        plan: BuildPlanReplay,
+        plan: ProviderPlanFacts,
         toolchain_facts: impl Into<String>,
         policy_facts: impl Into<String>,
         facts: BTreeMap<String, String>,
@@ -250,7 +250,7 @@ impl ProducerRecord {
         let provider = take("provider")?;
         let immutable_source = take("immutable_source")?;
         let source_digest = take("source_digest")?;
-        let plan = BuildPlanReplay::decode(&take("plan")?)?;
+        let plan = ProviderPlanFacts::decode(&take("plan")?)?;
         let toolchain_facts = take("toolchain_facts")?;
         let policy_facts = take("policy_facts")?;
         let mut facts = BTreeMap::new();
@@ -665,7 +665,7 @@ mod tests {
             "nix",
             "/nix/store/exact.drv",
             "sha256-source",
-            BuildPlanReplay::from_facts(BTreeMap::from([(
+            ProviderPlanFacts::from_facts(BTreeMap::from([(
                 "nix.output.out".into(),
                 "/nix/store/exact-out".into(),
             )]))

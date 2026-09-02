@@ -25,8 +25,6 @@ pub use plugins_modules::*;
 mod plan_graph;
 pub use plan_graph::*;
 mod plan_impl;
-mod replay;
-pub use replay::*;
 mod context;
 mod execution_helpers;
 pub use context::*;

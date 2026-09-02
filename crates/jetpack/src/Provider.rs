@@ -266,7 +266,7 @@ pub(super) fn producer_record(
     identity: &super::Store::CacheIdentity,
     facts: BTreeMap<String, String>,
 ) -> Result<super::Store::ProducerRecord, ProviderError> {
-    let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(plan_facts)
+    let plan = crate::ProviderPlanFacts::from_facts(plan_facts)
         .map_err(ProviderError::CoreBuild)?;
     super::Store::ProducerRecord::new(
         provider,
@@ -303,7 +303,7 @@ pub(crate) fn refresh_provider_facts(
     let mut native_plan_facts = native.plan.facts().clone();
     native_plan_facts.remove(SHARED_PROVIDER_FACTS);
     native_plan_facts.remove(SHARED_PROVIDER_FACTS_DIGEST);
-    native.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(native_plan_facts)
+    native.plan = crate::ProviderPlanFacts::from_facts(native_plan_facts)
         .map_err(ProviderError::BadOutput)?;
 
     let mut shared = ProviderFacts::for_reference(&producer.provider, reference);
@@ -1674,7 +1674,7 @@ fn finalize_nix_realization(
     facts.extend(prepared_facts.clone());
     let mut plan_facts = previous.plan.facts().clone();
     plan_facts.extend(prepared_facts);
-    let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(plan_facts)
+    let plan = crate::ProviderPlanFacts::from_facts(plan_facts)
         .map_err(ProviderError::BadOutput)?;
     realized.producer = super::Store::ProducerRecord::new(
         previous.provider,
@@ -3197,7 +3197,7 @@ mod tests {
             Some("deterministic")
         );
         let producer_facts = nix_build_facts_record();
-        let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::new()).unwrap();
+        let plan = crate::ProviderPlanFacts::from_facts(BTreeMap::new()).unwrap();
         let producer = super::super::Store::ProducerRecord::new(
             "nix",
             "/nix/store/fake.drv",
@@ -3230,7 +3230,7 @@ mod tests {
 
     #[test]
     fn shared_carrier_rejects_unpinned_external_reference() {
-        let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([(
+        let plan = crate::ProviderPlanFacts::from_facts(BTreeMap::from([(
             "action.kind".to_string(),
             "test".to_string(),
         )]))

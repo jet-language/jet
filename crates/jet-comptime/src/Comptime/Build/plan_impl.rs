@@ -1,4 +1,6 @@
-use super::actions_policy::{ActionCache, BuildAction, BuildCapability, BuildResourcePoolSpec};
+use super::actions_policy::{
+    ActionCache, BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec,
+};
 use super::cache_cas::{
     ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ContentDigest,
 };
@@ -10,7 +12,7 @@ use super::execution_helpers::{
     action_pools, cache_status_reason, collect_target_actions, default_resource_pools,
     execution_metrics, execution_stages,
 };
-use super::execution_runtime::{read_last_rebuild_record, BuildProbeFact};
+use super::execution_runtime::BuildProbeFact;
 use super::handles::{
     ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, TargetId, TargetRef,
     ToolchainHandle, ToolchainId,
@@ -25,7 +27,6 @@ use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
 use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
 use super::targets::{BuildPath, BuildTarget, TargetKind};
 use std::collections::{BTreeMap, BTreeSet};
-use std::io;
 use std::path::Path;
 
 impl BuildPlan {
@@ -274,7 +275,7 @@ impl BuildPlan {
                 )));
             }
             let output = BuildPath::new(format!(
-                ".jet/build-cache/package-artifacts/{}.sealed",
+                ".jet/package-artifacts/{}.sealed",
                 compiler_package_path_name(&package.name)
             ))?;
             if let Some(previous) = package_by_output.insert(output.clone(), package.name.clone()) {
@@ -726,41 +727,6 @@ impl BuildPlan {
         })
     }
 
-    /// Explain the most recent real execution of a named action. Inspection
-    /// reads execution provenance only; it never runs an action or probes the
-    /// ambient machine.
-    pub fn last_rebuild_explanation(
-        &self,
-        project_root: &Path,
-        action_name: &str,
-    ) -> io::Result<Option<RebuildExplanation>> {
-        let Some(action) = self
-            .actions
-            .iter()
-            .find(|action| action.name == action_name)
-        else {
-            return Ok(None);
-        };
-        let Some(record) = read_last_rebuild_record(project_root, action.id, action_name)? else {
-            return Ok(None);
-        };
-        let mut explanation = self
-            .why_rebuilt(
-                ActionHandle {
-                    id: action.id,
-                    context: self.context,
-                },
-                record.status,
-            )
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))?;
-        if let Some(code) = record.failed_exit_code {
-            explanation.reason = format!(
-                "action failed with exit code {code} after {}",
-                explanation.reason
-            );
-        }
-        Ok(Some(explanation))
-    }
 
     pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
         let selected = self.selected_action_ids()?;
@@ -1012,6 +978,213 @@ impl BuildPlan {
                 )
             })
             .collect())
+    }
+    /// Return the deterministic provider facts attached to this build plan.
+    /// The provider owns serialization; comptime only exposes the facts.
+    pub fn provider_plan_facts(&self) -> Result<BTreeMap<String, String>, String> {
+        let mut facts = BTreeMap::new();
+        facts.insert(
+            "plan.recipe_fingerprint".to_string(),
+            self.complete_recipe_fingerprint()
+                .map_err(|error| format!("cannot fingerprint build plan: {error:?}"))?,
+        );
+        facts.insert(
+            "plan.default".to_string(),
+            self.default_target()
+                .map(|target| target.id().0.to_string())
+                .unwrap_or_default(),
+        );
+        facts.insert("plan.targets".to_string(), self.targets().len().to_string());
+        facts.insert("plan.actions".to_string(), self.actions().len().to_string());
+        for (index, contribution) in self.fact_contributions().iter().enumerate() {
+            let prefix = format!("fact_contribution.{index}");
+            facts.insert(format!("{prefix}.key"), contribution.key.clone());
+            facts.insert(
+                format!("{prefix}.value"),
+                format!("{:?}", contribution.value),
+            );
+            facts.insert(
+                format!("{prefix}.scope"),
+                contribution.scope.name().to_string(),
+            );
+            facts.insert(
+                format!("{prefix}.layer"),
+                contribution.layer.name().to_string(),
+            );
+            facts.insert(format!("{prefix}.source"), contribution.source.clone());
+            facts.insert(
+                format!("{prefix}.reason"),
+                contribution.reason.clone().unwrap_or_default(),
+            );
+        }
+        for (index, target) in self.targets().iter().enumerate() {
+            let prefix = format!("target.{index}");
+            facts.insert(format!("{prefix}.name"), target.name.clone());
+            facts.insert(format!("{prefix}.kind"), format!("{:?}", target.kind));
+            facts.insert(
+                format!("{prefix}.sources"),
+                target
+                    .sources
+                    .iter()
+                    .map(|path| path.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\0"),
+            );
+            facts.insert(
+                format!("{prefix}.inputs"),
+                target
+                    .inputs
+                    .iter()
+                    .map(|path| path.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\0"),
+            );
+            facts.insert(
+                format!("{prefix}.outputs"),
+                target
+                    .outputs
+                    .iter()
+                    .map(|path| path.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\0"),
+            );
+            facts.insert(
+                format!("{prefix}.deps"),
+                target
+                    .deps
+                    .iter()
+                    .map(|dep| dep.id().0.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            facts.insert(
+                format!("{prefix}.actions"),
+                target
+                    .actions
+                    .iter()
+                    .map(|action| action.id().0.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            facts.insert(
+                format!("{prefix}.toolchain"),
+                target.toolchain.id().0.to_string(),
+            );
+            facts.insert(format!("{prefix}.metadata"), map_debug(&target.metadata));
+        }
+        for (index, action) in self.actions().iter().enumerate() {
+            let prefix = format!("action.{index}");
+            facts.insert(format!("{prefix}.name"), action.name.clone());
+            facts.insert(format!("{prefix}.kind"), action.kind.as_str().to_string());
+            facts.insert(format!("{prefix}.cache"), format!("{:?}", action.cache));
+            facts.insert(format!("{prefix}.argv"), action.argv.join("\0"));
+            facts.insert(
+                format!("{prefix}.inputs"),
+                action
+                    .inputs
+                    .iter()
+                    .map(|path| path.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\0"),
+            );
+            facts.insert(
+                format!("{prefix}.outputs"),
+                action
+                    .outputs
+                    .iter()
+                    .map(|path| path.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\0"),
+            );
+            facts.insert(format!("{prefix}.env"), map_debug(&action.env));
+            facts.insert(
+                format!("{prefix}.env_allowlist"),
+                action
+                    .env_allowlist
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\0"),
+            );
+            facts.insert(
+                format!("{prefix}.caps"),
+                action
+                    .caps
+                    .iter()
+                    .map(|cap| cap.name().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\0"),
+            );
+            facts.insert(
+                format!("{prefix}.toolchain"),
+                action.toolchain.id().0.to_string(),
+            );
+            facts.insert(format!("{prefix}.labels"), map_debug(&action.labels));
+            facts.insert(
+                format!("{prefix}.helpers"),
+                map_debug(&action.helper_versions),
+            );
+            facts.insert(
+                format!("{prefix}.pools"),
+                action
+                    .resource_pools
+                    .iter()
+                    .map(pool_name)
+                    .collect::<Vec<_>>()
+                    .join("\0"),
+            );
+            facts.insert(
+                format!("{prefix}.variant"),
+                action.variant_identity.clone().unwrap_or_default(),
+            );
+            facts.insert(
+                format!("{prefix}.legacy"),
+                action
+                    .legacy_wrapper
+                    .map(|wrapper| wrapper.as_str().to_string())
+                    .unwrap_or_default(),
+            );
+            facts.insert(
+                format!("{prefix}.action_key"),
+                self.action_key(super::ActionHandle {
+                    id: action.id,
+                    context: self.context,
+                })
+                .map_err(|error| format!("cannot key provider plan action: {error:?}"))?
+                .as_str()
+                .to_string(),
+            );
+        }
+        for (index, toolchain) in self.toolchains().iter().enumerate() {
+            facts.insert(format!("toolchain.{index}"), format!("{toolchain:?}"));
+        }
+        for (index, identity) in self.signing_identities().iter().enumerate() {
+            facts.insert(format!("signing.{index}"), format!("{identity:?}"));
+        }
+        for (index, probe) in self.probes().iter().enumerate() {
+            facts.insert(format!("probe.{index}"), format!("{probe:?}"));
+        }
+        for (index, plugin) in self.plugins().iter().enumerate() {
+            facts.insert(format!("plugin.{index}"), format!("{plugin:?}"));
+        }
+        for (index, module) in self.generated_modules().iter().enumerate() {
+            facts.insert(format!("generated.{index}"), format!("{module:?}"));
+        }
+        Ok(facts)
+    }
+}
+
+fn map_debug(map: &BTreeMap<String, String>) -> String {
+    map.iter()
+        .map(|(key, value)| format!("{}:{}:{}:{}", key.len(), key, value.len(), value))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn pool_name(pool: &BuildResourcePool) -> String {
+    match pool {
+        BuildResourcePool::Custom(name) => format!("custom:{name}"),
+        _ => pool.as_str().to_string(),
     }
 }
 

@@ -8,6 +8,76 @@ use jet_pkg_model::Authority::AuthorityResolver;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+/// Driver-owned adapter for the machine-wide immutable artifact store.
+/// Comptime receives only the object-safe seam and never depends on
+/// `jet-store` directly.
+pub struct BuildArtifactStoreHandle {
+    store: jet_store::Store,
+}
+
+impl BuildArtifactStoreHandle {
+    pub fn open() -> Result<Self, String> {
+        jet_store::Store::from_env()
+            .map(|store| Self { store })
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn at(root: impl Into<std::path::PathBuf>) -> Result<Self, String> {
+        jet_store::Store::new(root.into())
+            .map(|store| Self { store })
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl crate::Comptime::Build::BuildArtifactStore for BuildArtifactStoreHandle {
+    fn put_blob(
+        &self,
+        bytes: &[u8],
+    ) -> std::io::Result<crate::Comptime::Build::ContentDigest> {
+        let object = self
+            .store
+            .publish_blob(bytes)
+            .map_err(store_io_error)?;
+        crate::Comptime::Build::ContentDigest::parse(&format!(
+            "sha256:{}",
+            object.digest().to_hex()
+        ))
+        .map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+        })
+    }
+
+    fn get_blob(
+        &self,
+        digest: &crate::Comptime::Build::ContentDigest,
+    ) -> std::io::Result<Option<Vec<u8>>> {
+        let hex = digest.as_str().strip_prefix("sha256:").ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "artifact digest has no sha256 prefix",
+            )
+        })?;
+        let digest = jet_store::Digest::from_hex(hex).map_err(store_io_error)?;
+        self.store.blob_by_digest(&digest).map_err(store_io_error)
+    }
+
+    fn put_record(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let action = self.store.action(key);
+        self.store
+            .publish_action(action, bytes)
+            .map_err(store_io_error)
+    }
+
+    fn get_record(&self, key: &str) -> std::io::Result<Option<Vec<u8>>> {
+        let action = self.store.action(key);
+        self.store.get_action(&action).map_err(store_io_error)
+    }
+}
+
+fn store_io_error(error: jet_store::StoreError) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, error.to_string())
+}
+
 /// One of the four user-facing truth states printed by `jet inspect
 /// guarantees` (D-MEM-GUARANTEE1). The labels are deliberately stable: they
 /// are a report vocabulary, not engine-specific implementation detail.
@@ -3722,9 +3792,19 @@ fn compile_build_from_front_end(
         };
         let executed = if options.execute {
             let execution_grants = effective_grants(&options);
+            let artifact_store = BuildArtifactStoreHandle::open().map_err(|detail| {
+                vec![Diagnostic::error(
+                    "E3505",
+                    "build artifact store is unavailable".to_string(),
+                    detail,
+                    "Jet needs a writable artifact store before it can execute build actions".to_string(),
+                    None,
+                )]
+            })?;
             crate::Comptime::Build::execute_build_plan_with_front_end_and_remote_and_compiler(
                 &evaluated.plan,
                 &bundle.project_root,
+                &artifact_store,
                 &execution_grants,
                 front_end_completion,
                 options.remote.as_ref(),

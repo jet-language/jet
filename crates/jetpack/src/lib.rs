@@ -39,6 +39,8 @@ pub use jet_pkg_model::MCP;
 pub mod Bridge;
 pub mod BrowserLock;
 pub mod BuildDebug;
+pub mod provider_plan_facts;
+pub use provider_plan_facts::ProviderPlanFacts;
 pub mod CLI;
 pub mod Components;
 pub mod Discovery;

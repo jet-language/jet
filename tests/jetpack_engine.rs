@@ -3,7 +3,7 @@
 //! Core package/env mechanics driven through the compiled `jetpack`/`jet`
 //! binaries against offline provider fixtures: doctor, build/hangar list/hangar clean/run,
 //! env add/remove, channel update/outdated, typed sources (copy/prebuilt/
-//! core/bad-adapter), no-nix reporting, bridge-flake, and monorepo/build-cache
+//! core/bad-adapter), no-nix reporting, bridge-flake, and monorepo/artifact-store
 //! behavior. Split out of the former `tests/jetpack.rs`; see
 //! `tests/jetpack_dispatch.rs` / `tests/jetpack_jetos.rs` /
 //! `tests/jetpack_studio.rs` for the other slices and
@@ -9953,6 +9953,7 @@ fn remote_ineligible_builder_honors_local_fallback() {
         execute_build_plan_with_front_end_and_remote, ActionSpec, BuildCapability, BuildContext,
         BuildExecutionEvent, BuildResourcePool, FrontEndCompletion, RemoteBuildBinding,
     };
+    use jet_driver::Driver::BuildArtifactStoreHandle;
 
     let project = Scratch::new("remote-ineligible-fallback");
     let mut context = BuildContext::new();
@@ -9986,10 +9987,14 @@ fn remote_ineligible_builder_honors_local_fallback() {
         .with_trust_domain("trusted")
         .with_execute(true)
         .with_local_fallback(true);
+    let artifact_store =
+        BuildArtifactStoreHandle::at(project.path.join(".jet-store"))
+            .expect("open test artifact store");
 
     let execution = execute_build_plan_with_front_end_and_remote(
         &plan,
         &project.path,
+        &artifact_store,
         &grants,
         FrontEndCompletion::all_complete(),
         Some(&binding),

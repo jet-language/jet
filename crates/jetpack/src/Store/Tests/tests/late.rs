@@ -281,14 +281,14 @@ fn closure_action_key_excludes_realized_outputs_but_keeps_action_facts() {
 
     let mut replay = producer.plan.facts().clone();
     replay.insert("output.out".to_string(), "sha256-different".to_string());
-    producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(replay).unwrap();
+    producer.plan = crate::ProviderPlanFacts::from_facts(replay).unwrap();
     entry.producer_record = producer.encode();
     assert_eq!(entry_action_key(&entry), original);
 
     let mut producer = ProducerRecord::decode(&entry.producer_record).unwrap();
     let mut replay = producer.plan.facts().clone();
     replay.insert("action.recipe".to_string(), "different-recipe".to_string());
-    producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(replay).unwrap();
+    producer.plan = crate::ProviderPlanFacts::from_facts(replay).unwrap();
     entry.producer_record = producer.encode();
     assert_ne!(entry_action_key(&entry), original);
 
@@ -307,7 +307,7 @@ fn nix_action_key_is_input_derivation_only() {
             "nix",
             drv,
             crate::SHA256::sha256_hex(drv.as_bytes()),
-            crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+            crate::ProviderPlanFacts::from_facts(BTreeMap::from([
                 ("nix.drv_path".into(), drv.into()),
                 ("nix.reference".into(), reference.into()),
                 ("nix.output.out".into(), output.into()),
@@ -368,7 +368,7 @@ fn nix_multi_projection_registers_recovers_queries_and_rolls_back_conflict() {
             "nix",
             drv,
             crate::SHA256::sha256_hex(drv.as_bytes()),
-            crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+            crate::ProviderPlanFacts::from_facts(BTreeMap::from([
                 ("nix.drv_path".into(), drv.into()),
                 ("nix.reference".into(), entry.reference.clone()),
                 (format!("nix.output.{output_name}"), path.clone()),

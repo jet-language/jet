@@ -131,32 +131,32 @@ pub(crate) fn realize_adapter(
     let sandbox_class = run_report.sandbox_class.clone();
     let sandbox_policy = run_report.sandbox_policy.clone();
     let private_untrusted = matches!(&plan.recipe, AdapterRecipe::Build(_));
-    let replay = Recipe::lower_to_plan(&recipe, &plan.name, &build_ctx.tools)
+    let provider_facts = Recipe::lower_to_plan(&recipe, &plan.name, &build_ctx.tools)
         .map_err(|d| ProviderError::Adapter(d.what))?
-        .replay_record()
+        .provider_plan_facts()
         .map_err(ProviderError::Adapter)?;
-    let mut replay_facts = replay.facts().clone();
-    replay_facts.insert(
+    let mut provider_facts_map = provider_facts;
+    provider_facts_map.insert(
         "adapter.build.dependencies".to_string(),
         declared_dependencies.clone(),
     );
-    replay_facts.insert("adapter.build.identity".to_string(), build_identity.clone());
-    replay_facts.insert(
+    provider_facts_map.insert("adapter.build.identity".to_string(), build_identity.clone());
+    provider_facts_map.insert(
         "adapter.build.authority".to_string(),
         declared_authority.clone(),
     );
-    replay_facts.insert("adapter.build.sandbox".to_string(), sandbox_class.clone());
-    replay_facts.insert(
+    provider_facts_map.insert("adapter.build.sandbox".to_string(), sandbox_class.clone());
+    provider_facts_map.insert(
         "adapter.build.sandbox_policy".to_string(),
         sandbox_policy.clone(),
     );
     if private_untrusted {
-        replay_facts.insert(
+        provider_facts_map.insert(
             "adapter.build.trust".to_string(),
             "private-untrusted".to_string(),
         );
     }
-    let replay = crate::Comptime::Build::BuildPlanReplay::from_facts(replay_facts)
+    let provider_plan_facts = crate::ProviderPlanFacts::from_facts(provider_facts_map)
         .map_err(ProviderError::Adapter)?;
     let mut producer_facts = BTreeMap::from([
         ("adapter.source".into(), plan.source.clone()),
@@ -173,7 +173,7 @@ pub(crate) fn realize_adapter(
         "adapter",
         format!("cas:{source_fingerprint}"),
         &source_fingerprint,
-        replay,
+        provider_plan_facts,
         format!(
             "declared-tools={}\nbuild-identity={build_identity}\ncapabilities={}\ndependencies={}\nauthority={}\nsandbox={}\nsandbox-policy={}",
             declared_dependencies,

@@ -57,7 +57,7 @@ pub fn canonical_program(prog: &Program) -> Vec<u8> {
 /// carry the same fields and differ only in the construction head. The fmt
 /// identity projection intentionally omits that redundant head. Keep this
 /// projection out of public `canonical_program`, whose semantic identity keeps
-/// constructor types distinct; build-cache identity also retains the head.
+/// constructor types distinct; artifact-store identity also retains the head.
 ///
 /// A singleton `return value` in a callable body is the block spelling of the
 /// same tail value emitted by `--simplify` as `-> value`. Normalize that

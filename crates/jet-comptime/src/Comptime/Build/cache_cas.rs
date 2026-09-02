@@ -928,11 +928,68 @@ fn parse_host_bool(fields: &BTreeMap<String, String>, field: &str) -> Result<boo
 fn bool_host_value(value: bool) -> u8 {
     u8::from(value)
 }
+#[derive(Clone, PartialEq, Eq)]
+struct RemoteBlobStore {
+    root: PathBuf,
+}
+
+impl RemoteBlobStore {
+    fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn put_blob(&self, bytes: &[u8]) -> io::Result<ContentDigest> {
+        let digest = ContentDigest::from_bytes(bytes);
+        let path = self.blob_path(&digest)?;
+        ensure_real_directory(&self.root)?;
+        match secure_read_file(&self.root, &path) {
+            Ok(existing) => {
+                if ContentDigest::from_bytes(&existing) != digest {
+                    atomic_restore_file(&self.root, &path, bytes)?;
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                atomic_restore_file(&self.root, &path, bytes)?;
+            }
+            Err(error) => return Err(error),
+        }
+        Ok(digest)
+    }
+
+    fn read_blob(&self, digest: &ContentDigest) -> io::Result<Vec<u8>> {
+        let bytes = secure_read_file(&self.root, &self.blob_path(digest)?)?;
+        let actual = ContentDigest::from_bytes(&bytes);
+        if &actual != digest {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("CAS blob digest mismatch: expected {}", digest.as_str()),
+            ));
+        }
+        Ok(bytes)
+    }
+
+    fn blob_path(&self, digest: &ContentDigest) -> io::Result<PathBuf> {
+        let digest = ContentDigest::parse(digest.as_str())?;
+        let hex = digest.0.strip_prefix("sha256:").expect("validated prefix");
+        let (prefix, rest) = hex.split_at(2);
+        Ok(self
+            .root
+            .join("blobs")
+            .join("sha256")
+            .join(prefix)
+            .join(rest))
+    }
+}
+
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct RemoteCacheTransport {
     root: PathBuf,
-    cas: LocalCas,
+    cas: RemoteBlobStore,
     credential: Option<RemoteCredential>,
     worker_identity: Option<RemoteWorkerIdentity>,
 }
@@ -960,7 +1017,7 @@ impl RemoteCacheTransport {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
         RemoteCacheTransport {
-            cas: LocalCas::new(root.join("cas")),
+            cas: RemoteBlobStore::new(root.join("cas")),
             root,
             credential: None,
             worker_identity: None,
@@ -977,7 +1034,7 @@ impl RemoteCacheTransport {
     ) -> Result<Self, String> {
         let root = root.into();
         Ok(Self {
-            cas: LocalCas::new(root.join("cas")),
+            cas: RemoteBlobStore::new(root.join("cas")),
             root,
             credential: Some(RemoteCredential::new(credential)?),
             worker_identity: None,
@@ -3115,148 +3172,109 @@ pub struct ActionResultRecord {
     pub failure_report: Option<jet_foundation::Outcome::JetErrorReport>,
     pub provenance: ActionCacheProvenance,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalCas {
-    root: PathBuf,
+/// The compiler-side storage seam. The driver owns the concrete machine-wide
+/// store and passes this object into build execution; comptime never names a
+/// filesystem cache or depends on `jet-store`.
+pub trait BuildArtifactStore: Send + Sync {
+    fn put_blob(&self, bytes: &[u8]) -> io::Result<ContentDigest>;
+    fn get_blob(&self, digest: &ContentDigest) -> io::Result<Option<Vec<u8>>>;
+    fn put_record(&self, key: &str, bytes: &[u8]) -> io::Result<()>;
+    fn get_record(&self, key: &str) -> io::Result<Option<Vec<u8>>>;
 }
 
-impl LocalCas {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        LocalCas { root: root.into() }
+pub fn snapshot_declared_inputs(
+    store: &dyn BuildArtifactStore,
+    base: &Path,
+    action: &BuildAction,
+) -> io::Result<Vec<ActionInputSnapshot>> {
+    let mut inputs = Vec::new();
+    for input in &action.inputs {
+        let path = resolve_under(base, input.as_str())?;
+        let bytes = secure_read_file(base, &path)?;
+        let digest = store.put_blob(&bytes)?;
+        inputs.push(ActionInputSnapshot {
+            path: input.clone(),
+            digest,
+            byte_len: bytes.len() as u64,
+        });
     }
-
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    pub fn put_blob(&self, bytes: &[u8]) -> io::Result<ContentDigest> {
-        let digest = ContentDigest::from_bytes(bytes);
-        let path = self.blob_path(&digest)?;
-        ensure_real_directory(&self.root)?;
-        match secure_read_file(&self.root, &path) {
-            Ok(existing) => {
-                if ContentDigest::from_bytes(&existing) != digest {
-                    atomic_restore_file(&self.root, &path, bytes)?;
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                atomic_restore_file(&self.root, &path, bytes)?;
-            }
-            Err(error) => return Err(error),
-        }
-        Ok(digest)
-    }
-
-    pub fn read_blob(&self, digest: &ContentDigest) -> io::Result<Vec<u8>> {
-        let bytes = secure_read_file(&self.root, &self.blob_path(digest)?)?;
-        let actual = ContentDigest::from_bytes(&bytes);
-        if &actual != digest {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("CAS blob digest mismatch: expected {}", digest.as_str()),
-            ));
-        }
-        Ok(bytes)
-    }
-
-    pub fn snapshot_declared_inputs(
-        &self,
-        base: &Path,
-        action: &BuildAction,
-    ) -> io::Result<Vec<ActionInputSnapshot>> {
-        let mut inputs = Vec::new();
-        for input in &action.inputs {
-            let path = resolve_under(base, input.as_str())?;
-            let bytes = secure_read_file(base, &path)?;
-            let digest = self.put_blob(&bytes)?;
-            inputs.push(ActionInputSnapshot {
-                path: input.clone(),
-                digest,
-                byte_len: bytes.len() as u64,
-            });
-        }
-        Ok(inputs)
-    }
-
-    pub fn capture_declared_outputs(
-        &self,
-        base: &Path,
-        action: &BuildAction,
-        key: ActionKey,
-        outcome: ActionOutcome,
-        provenance: ActionCacheProvenance,
-    ) -> io::Result<ActionResultRecord> {
-        let mut outputs = Vec::new();
-        for output in &action.outputs {
-            let path = resolve_under(base, output.as_str())?;
-            let bytes = secure_read_file(base, &path)?;
-            let digest = self.put_blob(&bytes)?;
-            outputs.push(ActionOutputRecord {
-                path: output.clone(),
-                digest,
-                byte_len: bytes.len() as u64,
-            });
-        }
-        Ok(ActionResultRecord {
-            key,
-            outcome,
-            outputs,
-            failure_report: None,
-            provenance,
-        })
-    }
-
-    pub fn restore_declared_outputs(
-        &self,
-        base: &Path,
-        record: &ActionResultRecord,
-    ) -> io::Result<()> {
-        self.restore_outputs(base, record)
-    }
-
-    pub fn restore_action_outputs(
-        &self,
-        base: &Path,
-        action: &BuildAction,
-        record: &ActionResultRecord,
-    ) -> io::Result<()> {
-        if record.outputs.len() != action.outputs.len()
-            || record
-                .outputs
-                .iter()
-                .zip(&action.outputs)
-                .any(|(recorded, declared)| recorded.path != *declared)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "cached output record does not exactly match action declarations",
-            ));
-        }
-        self.restore_outputs(base, record)
-    }
-
-    fn restore_outputs(&self, base: &Path, record: &ActionResultRecord) -> io::Result<()> {
-        for output in &record.outputs {
-            let path = resolve_under(base, output.path.as_str())?;
-            let bytes = self.read_blob(&output.digest)?;
-            atomic_restore_file(base, &path, &bytes)?;
-        }
-        Ok(())
-    }
-
-    fn blob_path(&self, digest: &ContentDigest) -> io::Result<PathBuf> {
-        let digest = ContentDigest::parse(digest.as_str())?;
-        let hex = digest.0.strip_prefix("sha256:").expect("validated prefix");
-        let (prefix, rest) = hex.split_at(2);
-        Ok(self
-            .root
-            .join("blobs")
-            .join("sha256")
-            .join(prefix)
-            .join(rest))
-    }
+    Ok(inputs)
 }
+
+pub fn capture_declared_outputs(
+    store: &dyn BuildArtifactStore,
+    base: &Path,
+    action: &BuildAction,
+    key: ActionKey,
+    outcome: ActionOutcome,
+    provenance: ActionCacheProvenance,
+) -> io::Result<ActionResultRecord> {
+    let mut outputs = Vec::new();
+    for output in &action.outputs {
+        let path = resolve_under(base, output.as_str())?;
+        let bytes = secure_read_file(base, &path)?;
+        let digest = store.put_blob(&bytes)?;
+        outputs.push(ActionOutputRecord {
+            path: output.clone(),
+            digest,
+            byte_len: bytes.len() as u64,
+        });
+    }
+    Ok(ActionResultRecord {
+        key,
+        outcome,
+        outputs,
+        failure_report: None,
+        provenance,
+    })
+}
+
+pub fn restore_declared_outputs(
+    store: &dyn BuildArtifactStore,
+    base: &Path,
+    record: &ActionResultRecord,
+) -> io::Result<()> {
+    restore_outputs(store, base, record)
+}
+
+pub fn restore_action_outputs(
+    store: &dyn BuildArtifactStore,
+    base: &Path,
+    action: &BuildAction,
+    record: &ActionResultRecord,
+) -> io::Result<()> {
+    if record.outputs.len() != action.outputs.len()
+        || record
+            .outputs
+            .iter()
+            .zip(&action.outputs)
+            .any(|(recorded, declared)| recorded.path != *declared)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "cached output record does not exactly match action declarations",
+        ));
+    }
+    restore_outputs(store, base, record)
+}
+
+fn restore_outputs(
+    store: &dyn BuildArtifactStore,
+    base: &Path,
+    record: &ActionResultRecord,
+) -> io::Result<()> {
+    for output in &record.outputs {
+        let path = resolve_under(base, output.path.as_str())?;
+        let bytes = store
+            .get_blob(&output.digest)?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "CAS blob is missing"))?;
+        atomic_restore_file(base, &path, &bytes)?;
+    }
+    Ok(())
+}
+
+
+
 
 
 #[cfg(unix)]
@@ -3477,7 +3495,6 @@ pub(super) fn secure_read_file_bounded(
 
 #[cfg(all(test, unix))]
 mod hostile_tests {
-    use super::super::execution_runtime::read_action_record;
     use super::*;
     use std::os::unix::fs::symlink;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -3498,7 +3515,7 @@ mod hostile_tests {
         let outside = temp("outside");
         let root_parent = temp("root-link");
         symlink(&outside, root_parent.join("cache")).unwrap();
-        assert!(LocalCas::new(root_parent.join("cache"))
+        assert!(RemoteBlobStore::new(root_parent.join("cache"))
             .put_blob(b"secret")
             .is_err());
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
@@ -3507,14 +3524,14 @@ mod hostile_tests {
         let cas = root.join("cache");
         fs::create_dir_all(&cas).unwrap();
         symlink(&outside, cas.join("blobs")).unwrap();
-        assert!(LocalCas::new(&cas).put_blob(b"secret").is_err());
+        assert!(RemoteBlobStore::new(&cas).put_blob(b"secret").is_err());
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
     }
 
     #[test]
-    fn known_digest_blob_and_action_record_symlinks_are_never_read() {
+    fn known_digest_blob_is_never_read() {
         let root = temp("read-link");
-        let cas = LocalCas::new(root.join("cas"));
+        let cas = RemoteBlobStore::new(root.join("cas"));
         let digest = cas.put_blob(b"host-bytes").unwrap();
         let blob = cas.blob_path(&digest).unwrap();
         fs::remove_file(&blob).unwrap();
@@ -3522,15 +3539,6 @@ mod hostile_tests {
         fs::write(&host, b"host-bytes").unwrap();
         symlink(&host, &blob).unwrap();
         assert!(cas.read_blob(&digest).is_err());
-
-        let records = root.join("records");
-        fs::create_dir_all(&records).unwrap();
-        let key = ActionKey("act-sha256:known".to_string());
-        let host_record = root.join("host-record");
-        fs::write(&host_record, format!("{}\n", key.as_str())).unwrap();
-        let record = records.join("known");
-        symlink(host_record, &record).unwrap();
-        assert!(read_action_record(&records, &record, key).is_err());
     }
 
     #[test]

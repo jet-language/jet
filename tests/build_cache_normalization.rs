@@ -1,4 +1,4 @@
-//! D-BUILDNORM1=A (Tower #85): the content-addressed build-cache key is
+//! D-BUILDNORM1=A (Tower #85): the content-addressed artifact-store key is
 //! `SHA256(canonical_bytes(pre-sema AST) + profile + toolchain-salt)`. These
 //! tests pin the six normalization properties of that key — the contract a
 //! description alone can't enforce (I4/I5).

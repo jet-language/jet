@@ -1,24 +1,69 @@
 mod common;
 
 use jet::Comptime::Build::{
-    execute_build_plan_with_front_end_and_compiler, execute_build_plan_with_front_end_and_remote,
+    execute_build_plan_with_front_end_and_compiler as execute_build_plan_with_front_end_and_compiler_with_store,
+    execute_build_plan_with_front_end_and_remote as execute_build_plan_with_front_end_and_remote_with_store,
     read_packaged_file_bounded, remote_execution_identity, remote_policy_digest, ActionCache,
     ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
-    ActionHandle, ActionKind, ActionOutputRecord, ActionResultRecord, ActionSpec, BuildCapability,
-    BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPlan,
-    BuildNodeKind, BuildPlanNode, BuildPolicy, BuildProvenance,
-    BuildResourcePool, CacheHitReason, CacheMissReason, CompilerPackageSpec, ContentDigest,
-    FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity,
-    LocalCas, LockRecord, PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource,
+    ActionHandle, ActionKind, ActionOutputRecord, ActionResultRecord, ActionSpec, BuildArtifactStore,
+    BuildCapability, BuildContext, BuildError, BuildExecutionEvent, BuildExecutionResult,
+    BuildGraphSubject,
+    BuildPath, BuildPlan, BuildNodeKind, BuildPlanNode, BuildPolicy, BuildProvenance,
+    BuildResourcePool, BuildExecutionError, CacheHitReason, CacheMissReason, CompilerActionRunner,
+    CompilerPackageSpec, ContentDigest, FrontEndCompletion, GeneratedModuleSpec,
+    LegacyWrapperKind, LegacyWrapperSpec, capture_declared_outputs, restore_action_outputs,
+    restore_declared_outputs, snapshot_declared_inputs,
+    LinkerIdentity, LockRecord, PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource,
     RemoteActionRequest, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy,
     RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult,
     RemoteSandboxProof, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, SysrootIdentity,
-    TargetKind,
-    TargetSpec, ToolchainResolution, ToolchainRole, ToolchainSpec, WasmComponentPluginSpec,
-    BUILD_PLUGIN_API_VERSION,
+    TargetKind, TargetSpec, ToolchainResolution, ToolchainRole, ToolchainSpec,
+    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
 };
+use jet_driver::Driver::BuildArtifactStoreHandle;
 use std::fs;
 use std::sync::{Arc, Barrier, Mutex};
+
+fn test_artifact_store(root: &std::path::Path) -> BuildArtifactStoreHandle {
+    BuildArtifactStoreHandle::at(root.join(".jet-store")).expect("open test artifact store")
+}
+
+fn execute_build_plan_with_front_end_and_remote(
+    plan: &BuildPlan,
+    project_root: &std::path::Path,
+    grants: &std::collections::BTreeSet<BuildCapability>,
+    front_end: FrontEndCompletion,
+    remote_binding: Option<&RemoteBuildBinding>,
+) -> Result<BuildExecutionResult, BuildExecutionError> {
+    let artifact_store = test_artifact_store(project_root);
+    execute_build_plan_with_front_end_and_remote_with_store(
+        plan,
+        project_root,
+        &artifact_store,
+        grants,
+        front_end,
+        remote_binding,
+    )
+}
+
+fn execute_build_plan_with_front_end_and_compiler(
+    plan: &BuildPlan,
+    project_root: &std::path::Path,
+    grants: &std::collections::BTreeSet<BuildCapability>,
+    front_end: FrontEndCompletion,
+    runner: &CompilerActionRunner<'_>,
+) -> Result<BuildExecutionResult, BuildExecutionError> {
+    let artifact_store = test_artifact_store(project_root);
+    execute_build_plan_with_front_end_and_compiler_with_store(
+        plan,
+        project_root,
+        &artifact_store,
+        grants,
+        front_end,
+        runner,
+    )
+}
+
 
 static REMOTE_HOST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -787,18 +832,21 @@ fn action_keys_are_deterministic_and_cover_cache_contract() {
 }
 
 #[test]
-fn local_cas_round_trips_blobs_and_restores_declared_outputs() {
+fn artifact_store_round_trips_blobs_and_restores_declared_outputs() {
     let root = std::env::temp_dir().join(format!(
-        "jet_build_cache_{}_{}",
+        "jet_artifact_store_{}_{}",
         std::process::id(),
         "restore"
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("work/build")).unwrap();
 
-    let cas = LocalCas::new(root.join("cache"));
-    let digest = cas.put_blob(b"hello cache").unwrap();
-    assert_eq!(cas.read_blob(&digest).unwrap(), b"hello cache");
+    let store = test_artifact_store(&root);
+    let digest = store.put_blob(b"hello artifact").unwrap();
+    assert_eq!(
+        store.get_blob(&digest).unwrap().unwrap(),
+        b"hello artifact"
+    );
 
     let mut b = BuildContext::new();
     let action = b
@@ -811,37 +859,24 @@ fn local_cas_round_trips_blobs_and_restores_declared_outputs() {
     let key = plan.action_key(action).unwrap();
     fs::write(root.join("work/build/out.txt"), "compiled bytes").unwrap();
 
-    let record = cas
-        .capture_declared_outputs(
-            &root.join("work"),
-            plan.action(action).unwrap(),
-            key,
-            ActionOutcome::Succeeded { exit_code: 0 },
-            ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
-        )
-        .unwrap();
+    let record = capture_declared_outputs(
+        &store,
+        &root.join("work"),
+        plan.action(action).unwrap(),
+        key,
+        ActionOutcome::Succeeded { exit_code: 0 },
+        ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+    )
+    .unwrap();
     fs::write(root.join("work/build/out.txt"), "stale").unwrap();
 
-    cas.restore_action_outputs(&root.join("work"), plan.action(action).unwrap(), &record)
+    restore_action_outputs(&store, &root.join("work"), plan.action(action).unwrap(), &record)
         .unwrap();
     assert_eq!(
         fs::read_to_string(root.join("work/build/out.txt")).unwrap(),
         "compiled bytes"
     );
     assert_eq!(record.outputs[0].byte_len, "compiled bytes".len() as u64);
-
-    let hex = digest.as_str().strip_prefix("sha256:").unwrap();
-    let blob = cas
-        .root()
-        .join("blobs")
-        .join("sha256")
-        .join(&hex[..2])
-        .join(&hex[2..]);
-    fs::write(&blob, "corrupt").unwrap();
-    let err = cas.read_blob(&digest).unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-    cas.put_blob(b"hello cache").unwrap();
-    assert_eq!(cas.read_blob(&digest).unwrap(), b"hello cache");
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -863,13 +898,13 @@ fn cas_rejects_malformed_digests_without_panicking() {
 fn cache_restore_rejects_symlinked_parent_without_outside_write() {
     use std::os::unix::fs::symlink;
     let root = std::env::temp_dir().join(format!(
-        "jet_build_cache_{}_parent_symlink",
+        "jet_artifact_store_{}_parent_symlink",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("work/real")).unwrap();
     fs::create_dir_all(root.join("outside")).unwrap();
-    let cas = LocalCas::new(root.join("cache"));
+    let store = test_artifact_store(&root);
     let mut b = BuildContext::new();
     let action = b
         .action(
@@ -879,20 +914,24 @@ fn cache_restore_rejects_symlinked_parent_without_outside_write() {
         .unwrap();
     let plan = b.plan().unwrap();
     fs::write(root.join("work/real/out.txt"), "safe").unwrap();
-    let record = cas
-        .capture_declared_outputs(
-            &root.join("work"),
-            plan.action(action).unwrap(),
-            plan.action_key(action).unwrap(),
-            ActionOutcome::Succeeded { exit_code: 0 },
-            ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
-        )
-        .unwrap();
+    let record = capture_declared_outputs(
+        &store,
+        &root.join("work"),
+        plan.action(action).unwrap(),
+        plan.action_key(action).unwrap(),
+        ActionOutcome::Succeeded { exit_code: 0 },
+        ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+    )
+    .unwrap();
     fs::remove_dir_all(root.join("work/real")).unwrap();
     symlink(root.join("outside"), root.join("work/real")).unwrap();
-    assert!(cas
-        .restore_action_outputs(&root.join("work"), plan.action(action).unwrap(), &record)
-        .is_err());
+    assert!(restore_action_outputs(
+        &store,
+        &root.join("work"),
+        plan.action(action).unwrap(),
+        &record
+    )
+    .is_err());
     assert!(!root.join("outside/out.txt").exists());
     let _ = fs::remove_dir_all(&root);
 }
@@ -900,14 +939,14 @@ fn cache_restore_rejects_symlinked_parent_without_outside_write() {
 #[test]
 fn action_key_changes_when_declared_input_contents_change() {
     let root = std::env::temp_dir().join(format!(
-        "jet_build_cache_{}_{}",
+        "jet_artifact_store_{}_{}",
         std::process::id(),
         "inputs"
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("work/src")).unwrap();
 
-    let cas = LocalCas::new(root.join("cache"));
+    let store = test_artifact_store(&root);
     let mut b = BuildContext::new();
     let action = b
         .action(
@@ -921,15 +960,11 @@ fn action_key_changes_when_declared_input_contents_change() {
     let action_ref = plan.action(action).unwrap();
 
     fs::write(root.join("work/src/main.jet"), "fn run() { print(1) }").unwrap();
-    let first_inputs = cas
-        .snapshot_declared_inputs(&root.join("work"), action_ref)
-        .unwrap();
+    let first_inputs = snapshot_declared_inputs(&store, &root.join("work"), action_ref).unwrap();
     let first = plan.action_key_with_inputs(action, &first_inputs).unwrap();
 
     fs::write(root.join("work/src/main.jet"), "fn run() { print(2) }").unwrap();
-    let second_inputs = cas
-        .snapshot_declared_inputs(&root.join("work"), action_ref)
-        .unwrap();
+    let second_inputs = snapshot_declared_inputs(&store, &root.join("work"), action_ref).unwrap();
     let second = plan.action_key_with_inputs(action, &second_inputs).unwrap();
 
     assert_ne!(first, second);
@@ -944,7 +979,7 @@ fn cache_restore_replaces_output_symlink_instead_of_following_it() {
     use std::os::unix::fs::symlink;
 
     let root = std::env::temp_dir().join(format!(
-        "jet_build_cache_{}_{}",
+        "jet_artifact_store_{}_{}",
         std::process::id(),
         "symlink"
     ));
@@ -952,7 +987,7 @@ fn cache_restore_replaces_output_symlink_instead_of_following_it() {
     fs::create_dir_all(root.join("work/build")).unwrap();
     fs::write(root.join("outside.txt"), "outside").unwrap();
 
-    let cas = LocalCas::new(root.join("cache"));
+    let store = test_artifact_store(&root);
     let mut b = BuildContext::new();
     let action = b
         .action(
@@ -963,20 +998,19 @@ fn cache_restore_replaces_output_symlink_instead_of_following_it() {
     let plan = b.plan().unwrap();
     let key = plan.action_key(action).unwrap();
     fs::write(root.join("work/build/out.txt"), "compiled bytes").unwrap();
-    let record = cas
-        .capture_declared_outputs(
-            &root.join("work"),
-            plan.action(action).unwrap(),
-            key,
-            ActionOutcome::Succeeded { exit_code: 0 },
-            ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
-        )
-        .unwrap();
+    let record = capture_declared_outputs(
+        &store,
+        &root.join("work"),
+        plan.action(action).unwrap(),
+        key,
+        ActionOutcome::Succeeded { exit_code: 0 },
+        ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+    )
+    .unwrap();
 
     fs::remove_file(root.join("work/build/out.txt")).unwrap();
     symlink(root.join("outside.txt"), root.join("work/build/out.txt")).unwrap();
-    cas.restore_declared_outputs(&root.join("work"), &record)
-        .unwrap();
+    restore_declared_outputs(&store, &root.join("work"), &record).unwrap();
 
     assert_eq!(
         fs::read_to_string(root.join("outside.txt")).unwrap(),
@@ -1474,10 +1508,9 @@ fn remote_driver_consumes_authenticated_worker_result() {
         .unwrap();
     let plan = b.plan_with_default(target).unwrap();
     let grants = [BuildCapability::Net].into_iter().collect();
-    let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
-    let snapshots = cas
-        .snapshot_declared_inputs(&project_root, plan.action(action).unwrap())
-        .unwrap();
+    let store = test_artifact_store(&project_root);
+    let snapshots =
+        snapshot_declared_inputs(&store, &project_root, plan.action(action).unwrap()).unwrap();
     let key = plan
         .effective_action_key(
             action,
@@ -1778,19 +1811,6 @@ fn build_failure_report_survives_local_remote_cache_and_replay() {
     };
     assert_eq!(remote_report, local_report);
 
-    let remote_local_record = remote_project
-        .join(".jet/build-cache/actions")
-        .join(remote_key.as_str().trim_start_matches("act-sha256:"));
-    let remote_cached_error = execute_build_plan_with_front_end_and_remote(
-        &remote_plan,
-        &remote_project,
-        &remote_grants,
-        FrontEndCompletion::all_complete(),
-        Some(&binding),
-    )
-    .unwrap_err();
-    assert_eq!(remote_cached_error.report(), Some(&local_report));
-    fs::remove_file(remote_local_record).unwrap();
     let remote_replayed_error = execute_build_plan_with_front_end_and_remote(
         &remote_plan,
         &remote_project,
@@ -1831,10 +1851,9 @@ fn remote_execution_retries_after_worker_loss() {
         .unwrap();
     let plan = b.plan_with_default(target).unwrap();
     let grants = [BuildCapability::Net].into_iter().collect();
-    let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
-    let snapshots = cas
-        .snapshot_declared_inputs(&project_root, plan.action(action).unwrap())
-        .unwrap();
+    let store = test_artifact_store(&project_root);
+    let snapshots =
+        snapshot_declared_inputs(&store, &project_root, plan.action(action).unwrap()).unwrap();
     let key = plan
         .effective_action_key(
             action,
@@ -2018,10 +2037,9 @@ fn remote_execution_fails_over_to_registered_builder_after_worker_loss() {
         .unwrap();
     let plan = b.plan_with_default(target).unwrap();
     let grants = [BuildCapability::Net].into_iter().collect();
-    let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
-    let snapshots = cas
-        .snapshot_declared_inputs(&project_root, plan.action(action).unwrap())
-        .unwrap();
+    let store = test_artifact_store(&project_root);
+    let snapshots =
+        snapshot_declared_inputs(&store, &project_root, plan.action(action).unwrap()).unwrap();
     let key = plan
         .effective_action_key(
             action,

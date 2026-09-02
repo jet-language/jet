@@ -13,6 +13,7 @@ use crate::Output::Theme;
 use crate::Provider::{self, ProviderError, SourceState};
 use crate::{RefSpec, Store};
 use jet_foundation::ExitCodes;
+use jet_driver::Driver::BuildArtifactStoreHandle;
 use jet_foundation::Terminal::ColorChoice;
 use crate::RefSpec::SourceTable;
 use std::collections::{BTreeSet, HashSet};
@@ -231,7 +232,18 @@ pub(super) fn main(verb: &str, args: &[String]) -> i32 {
     let grants = [BuildCapability::Exec]
         .into_iter()
         .collect::<BTreeSet<_>>();
-    match execute_build_plan(&plan, &project_root, &grants) {
+    let artifact_store = match BuildArtifactStoreHandle::open() {
+        Ok(store) => store,
+        Err(error) => {
+            report_operational_error(
+                "C/C++ invocation could not open the artifact store",
+                &error,
+                "check JET_STORE_DIR and retry",
+            );
+            return ExitCodes::USER_ERROR;
+        }
+    };
+    match execute_build_plan(&plan, &project_root, &artifact_store, &grants) {
         Ok(_) => {
             if !options.compile_only {
                 if let Err(reason) = mark_link_outputs_executable(&project_root, &invocation.outputs)

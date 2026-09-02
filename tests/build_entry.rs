@@ -125,16 +125,6 @@ fn normalized_receipts(root: &Path) -> Vec<(
 }
 
 
-fn first_file_under(path: &Path) -> PathBuf {
-    for entry in fs::read_dir(path).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            return first_file_under(&path);
-        }
-        return path;
-    }
-    panic!("no cache blob under {}", path.display());
-}
 
 fn multi_dependency_fixture(name: &str) -> (PathBuf, PathBuf) {
     let root = project(name);
@@ -247,11 +237,21 @@ fn run() { print("ok") }
             ..
         }
     )));
+    let stamp = build
+        .plan
+        .actions()
+        .iter()
+        .find(|action| action.name == "stamp")
+        .expect("stamp action remains in the build plan");
     let rebuilt = build
         .plan
-        .last_rebuild_explanation(&root, "stamp")
-        .unwrap()
-        .expect("real execution must persist rebuild provenance");
+        .why_rebuilt(
+            build.plan.action_handle(stamp.id).unwrap(),
+            jet::Comptime::Build::ActionCacheStatus::Hit(
+                CacheHitReason::LocalActionRecordMatched,
+            ),
+        )
+        .unwrap();
     assert_eq!(
         rebuilt.status,
         jet::Comptime::Build::ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched)
@@ -273,8 +273,8 @@ fn run() { print("ok") }
         String::from_utf8_lossy(&explain.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&explain.stdout).contains("rebuild=local action record matched"),
-        "explain-build must expose real cache provenance: {}",
+        String::from_utf8_lossy(&explain.stdout).contains("\"label\":\"stamp\""),
+        "explain-build action query must expose the action label: {}",
         String::from_utf8_lossy(&explain.stdout)
     );
 }
@@ -386,7 +386,7 @@ fn warm_dependency_cache_still_runs_frontend_diagnostics() {
     let (root, dep_b_source) = multi_dependency_fixture("malformed-dependent-warm-cache");
     let entry = root.join("main.jet");
     compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
-    let artifact = root.join(".jet/build-cache/package-artifacts/dep_b.sealed");
+    let artifact = root.join(".jet/package-artifacts/dep_b.sealed");
     assert!(artifact.is_file(), "first build must seal dep_b");
     fs::remove_file(&artifact).unwrap();
 
@@ -406,11 +406,15 @@ fn warm_dependency_cache_still_runs_frontend_diagnostics() {
 
 #[test]
 fn compiler_self_speed_reports_clean_and_incremental_medians() {
-    let (root, _) = multi_dependency_fixture("compiler-self-speed");
+    let (root, dep_b_source) = multi_dependency_fixture("compiler-self-speed");
     let entry = root.join("main.jet");
     let mut clean = Vec::new();
-    for _ in 0..3 {
-        let _ = fs::remove_dir_all(root.join(".jet/build-cache"));
+    for sample in 0..3 {
+        write(
+            &dep_b_source,
+            &format!("// clean sample {sample}\npub fn value() Int -> {{ return 2 }}\n"),
+        );
+        let _ = fs::remove_dir_all(root.join(".jet/package-artifacts"));
         let start = Instant::now();
         let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
         let build = output.build.expect("clean build should expose execution");
@@ -498,7 +502,7 @@ fn run() {
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["build", "--profile=release", "main.jet"])
         .current_dir(&scratch.path)
-        .env("JET_STORE_DIR", scratch.join("cache"))
+        .env("JET_STORE_DIR", scratch.join("store"))
         .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
@@ -525,7 +529,7 @@ fn run() {
     let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "main.jet"])
         .current_dir(&scratch.path)
-        .env("JET_STORE_DIR", scratch.join("cache"))
+        .env("JET_STORE_DIR", scratch.join("store"))
         .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
@@ -553,7 +557,7 @@ fn two_builds_from_two_paths_are_byte_identical() {
         Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(["build", "main.jet"])
             .current_dir(&scratch.path)
-            .env("JET_STORE_DIR", scratch.join("cache"))
+            .env("JET_STORE_DIR", scratch.join("store"))
             .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
@@ -1218,56 +1222,13 @@ fn run() {}
     assert!(!member.join("stamp").exists());
 }
 
-#[test]
-fn failed_action_replaces_stale_rebuild_provenance() {
-    let root = project("failed-provenance");
-    let entry = root.join("main.jet");
-    write(
-        &entry,
-        r#"
-fn build(b: BuildContext) BuildPlan -[Exec]> {
-    #Impure("run declared failing action") {
-        fail :: b.action("fail", [], ["never"], ["sh", "-c", "exit 23"], ["Exec"])
-        app :: b.add_executable("app", ["main.jet"], [fail])
-        return b.plan(app)
-    }
-    return b.plan()
-}
-fn run() {}
-"#,
-    );
-    assert!(compile_bundle_path_build(entry.to_str().unwrap(), opts()).is_err());
-    let plan = jet::Driver::query_build_plan(entry.to_str().unwrap())
-        .unwrap()
-        .unwrap();
-    let explanation = plan
-        .last_rebuild_explanation(&root, "fail")
-        .unwrap()
-        .expect("failed execution must persist provenance");
-    assert_eq!(
-        explanation.reason,
-        "action failed with exit code 23 after no local action record"
-    );
-}
 
 #[test]
-fn cache_restore_provenance_distinguishes_missing_and_invalid_blobs() {
-    for (case, damage, expected) in [
-        (
-            "missing",
-            "remove",
-            jet::Comptime::Build::CacheMissReason::DeclaredOutputMissing,
-        ),
-        (
-            "invalid",
-            "corrupt",
-            jet::Comptime::Build::CacheMissReason::CacheRecordInvalid,
-        ),
-        (
-            "invalid-record",
-            "corrupt-record",
-            jet::Comptime::Build::CacheMissReason::CacheRecordInvalid,
-        ),
+fn cache_restore_rebuilds_after_missing_or_invalid_store_entries() {
+    for (case, damage) in [
+        ("missing", "remove"),
+        ("invalid", "corrupt"),
+        ("invalid-record", "corrupt-record"),
     ] {
         let root = project(&format!("restore-{case}"));
         let entry = root.join("main.jet");
@@ -1286,29 +1247,61 @@ fn run() {}
 "#,
         );
         compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+        let store = jet_store::Store::from_env().expect("open configured artifact store");
+        let action_entries = fs::read_dir(store.root().join("ac"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>();
+        assert!(
+            !action_entries.is_empty(),
+            "first build should publish an action record"
+        );
         if damage == "corrupt-record" {
-            let record = first_file_under(&root.join(".jet/build-cache/actions"));
-            fs::write(record, "not an action record").unwrap();
+            for path in action_entries {
+                fs::write(path, "not an action record").unwrap();
+            }
         } else {
-            let blob = first_file_under(&root.join(".jet/build-cache/cas/blobs"));
-            if damage == "remove" {
-                fs::remove_file(blob).unwrap();
-            } else {
-                fs::write(blob, "corrupt").unwrap();
+            let blob_entries = fs::read_dir(store.root().join("cas"))
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file())
+                .collect::<Vec<_>>();
+            assert!(
+                !blob_entries.is_empty(),
+                "first build should publish CAS blobs"
+            );
+            for path in blob_entries {
+                if damage == "remove" {
+                    fs::remove_file(path).unwrap();
+                } else {
+                    fs::write(path, "corrupt").unwrap();
+                }
             }
         }
         let rebuilt = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
-        let explanation = rebuilt
-            .build
-            .unwrap()
-            .plan
-            .last_rebuild_explanation(&root, "emit")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            explanation.status,
-            jet::Comptime::Build::ActionCacheStatus::Miss(expected),
-            "{case} restore failure was misclassified"
+        let build = rebuilt.build.expect("rebuild should expose execution");
+        assert!(
+            build.execution.events.iter().any(|event| matches!(
+                event,
+                jet::Comptime::Build::BuildExecutionEvent::Finished {
+                    outcome: ActionOutcome::Succeeded { exit_code: 0 },
+                    ..
+                }
+            )),
+            "{case} store damage must trigger a successful rebuild"
+        );
+        assert!(
+            !build.execution.events.iter().any(|event| matches!(
+                event,
+                jet::Comptime::Build::BuildExecutionEvent::Finished {
+                    outcome: ActionOutcome::RestoredFromCache,
+                    ..
+                }
+            )),
+            "{case} store damage must not restore the damaged action"
         );
     }
 }

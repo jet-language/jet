@@ -16,6 +16,8 @@ use jet::Comptime::Build::{
     execute_build_plan, ActionSpec, BuildCapability, BuildContext as HermeticBuildContext,
     TargetSpec,
 };
+#[cfg(target_os = "windows")]
+use jet_driver::Driver::BuildArtifactStoreHandle;
 
 const HOSTILE_CORPUS: &str = include_str!("fixtures/build_sandbox/hostile-corpus.tsv");
 
@@ -464,9 +466,9 @@ fn native_windows_appcontainer_hermetic_build_allows_declared_output() {
     let plan = context
         .plan_with_default(target)
         .expect("hermetic Windows plan should validate");
-    let grants = [BuildCapability::Exec].into_iter().collect();
-
-    let result = execute_build_plan(&plan, &base, &grants)
+    let artifact_store =
+        BuildArtifactStoreHandle::at(base.join(".jet-store")).expect("open test artifact store");
+    let result = execute_build_plan(&plan, &base, &artifact_store, &grants)
         .expect("AppContainer hermetic build should complete");
     assert_eq!(result.report.metrics.actions_total, 1);
     assert_eq!(result.report.metrics.failed_actions, 0);
@@ -511,8 +513,10 @@ fn native_windows_appcontainer_hermetic_build_rejects_host_write() {
         .plan_with_default(target)
         .expect("hermetic Windows plan should validate");
     let grants = [BuildCapability::Exec].into_iter().collect();
+    let artifact_store =
+        BuildArtifactStoreHandle::at(base.join(".jet-store")).expect("open test artifact store");
 
-    let result = execute_build_plan(&plan, &base, &grants);
+    let result = execute_build_plan(&plan, &base, &artifact_store, &grants);
     assert!(result.is_err(), "host write must fail the hermetic action");
     assert!(!marker.exists(), "hermetic build wrote outside its output");
     std::fs::remove_dir_all(&base).ok();

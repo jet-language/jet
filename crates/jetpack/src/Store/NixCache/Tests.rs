@@ -1186,7 +1186,7 @@ fn native_nix_cache_registration_reports_the_failed_cas_condition() {
         "nix",
         "/nix/store/test.drv",
         "sha256-source",
-        crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::new()).unwrap(),
+        crate::ProviderPlanFacts::from_facts(BTreeMap::new()).unwrap(),
         "nix-test",
         "policy=test\nplatform=test",
         BTreeMap::new(),
