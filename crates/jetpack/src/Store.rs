@@ -1119,10 +1119,10 @@ pub fn entry_id(name: &str, version: &str, reference: &str, out: &str) -> String
     }
 }
 
-/// Build the directory identity for a Nix realization from its immutable
-/// output digest. Nix outputs are projected into a root-local Hangar path, so
-/// hashing that path would make the same locked closure look different on
-/// every checkout or machine.
+/// Build the directory identity for a realization from its immutable output
+/// digest. Provider outputs are projected into a root-local Hangar path, so
+/// hashing that path would make the same locked result look different on every
+/// checkout or machine.
 pub(crate) fn content_addressed_entry_id(
     name: &str,
     version: &str,
@@ -1140,13 +1140,13 @@ pub(crate) fn content_addressed_entry_id(
     }
 }
 
-/// Return the identity expected for a persisted entry. Nix records use their
-/// immutable output digest; legacy/native records retain the existing local
-/// output-path identity until they are rewritten.
+/// Return the identity expected for a persisted entry. Provider records whose
+/// output is content-addressed use the immutable output digest; legacy records
+/// retain the existing local output-path identity until they are rewritten.
 pub(crate) fn expected_entry_id(entry: &StoreEntry) -> String {
-    let nix = ProducerRecord::decode(&entry.producer_record)
-        .is_ok_and(|producer| producer.provider == "nix");
-    if nix && !entry.envelope.output_hash.is_empty() {
+    let content_addressed = ProducerRecord::decode(&entry.producer_record)
+        .is_ok_and(|producer| matches!(producer.provider.as_str(), "nix" | "jetpackage"));
+    if content_addressed && !entry.envelope.output_hash.is_empty() {
         content_addressed_entry_id(
             &entry.name,
             &entry.version,
@@ -1341,7 +1341,11 @@ fn record_realized_mode_unlocked(
         )?
     };
     named_outputs.insert("out".into(), realized.envelope.output_hash.clone());
-    let id = if realized.producer.provider == "nix" {
+    let content_addressed = matches!(
+        realized.producer.provider.as_str(),
+        "nix" | "jetpackage"
+    );
+    let id = if content_addressed {
         content_addressed_entry_id(
             &realized.name,
             &realized.version,

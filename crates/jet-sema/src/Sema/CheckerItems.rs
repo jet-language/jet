@@ -2323,19 +2323,23 @@ impl<'a> Checker<'a> {
         field: &str,
         expected: &Type,
         actual: &Type,
-        value: &Expr,
+        value: &mut Expr,
         span: Span,
     ) {
-        let reported = self.check_type_assignable(expected, actual, span);
-        if !reported && expected != actual {
+        let mut actual = actual.clone();
+        if expected != &actual && self.implicitly_convert_unit(value, expected, &actual) {
+            actual = expected.clone();
+        }
+        let reported = self.check_type_assignable(expected, &actual, span);
+        if !reported {
             let fix = if *expected == Type::Int
                 && matches!(value, Expr::Binary(BinOp::Div, _, _, _))
-                && matches!(actual, Type::Named(name) if name == Syntax::TYPE_FRACTION)
+                && matches!(&actual, Type::Named(name) if name == Syntax::TYPE_FRACTION)
             {
                 "use `/%` to divide and round down (`/%=` in place), or make the field a Float"
                     .to_string()
             } else {
-                type_fix_hint(expected, actual)
+                type_fix_hint(expected, &actual)
             };
             self.diags.push(Diagnostic::error(
                 "E0108",
@@ -2692,12 +2696,13 @@ impl<'a> Checker<'a> {
             self.expected_type = saved_expected;
             if let (Some((_, _, fty)), Some(et)) = (field_def, et) {
                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
+                let filled_span = filled.span();
                 self.check_struct_field_assignable(
                     &name,
                     &inst,
                     &et,
-                    &filled,
-                    filled.span(),
+                    &mut filled,
+                    filled_span,
                 );
             }
             fields.push((name, name_span, filled));

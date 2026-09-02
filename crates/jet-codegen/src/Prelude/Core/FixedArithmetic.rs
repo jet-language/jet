@@ -38,7 +38,7 @@ impl JetFixedArithmeticError {
                 "This multiplication overflows the value's type (the result is outside its range)"
                     .to_string()
             }
-            Self::DivideZero => "Divided by zero".to_string(),
+            Self::DivideZero => "divided by zero".to_string(),
             Self::DivisionOverflow => {
                 "This division overflows the value's type (the result is outside its range)"
                     .to_string()

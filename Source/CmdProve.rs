@@ -58,6 +58,7 @@ struct ContractDeclaration {
     line: usize,
     column: usize,
     marker: &'static str,
+    message: Option<String>,
 }
 
 struct TestItem {
@@ -1588,12 +1589,20 @@ fn collect_func_semantics(
             let (line, column) = span_line_col(source, span.start);
             let span_text = span_text(source, span);
             let claim = normalized_claim(source, span);
+            let message = match &clause.message_expr {
+                Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                    jet::AST::StrPart::Lit(value) => Some(value.clone()),
+                    _ => None,
+                },
+                _ => None,
+            };
             declarations.push(ContractDeclaration {
                 id: evidence_id(target, "contract", path, &span_text, &claim),
                 path: path.to_string(),
                 line,
                 column,
                 marker,
+                message,
             });
         }
     }
@@ -2650,7 +2659,10 @@ fn normalized(path: &Path) -> String {
 fn budget_projection(target: &Target) -> jet::BudgetView::BudgetProjection {
     let target_path = Path::new(&target.root);
     let search = if target_path.is_file() {
-        target_path.parent().unwrap_or(Path::new("."))
+        target_path
+            .parent()
+            .and_then(Path::parent)
+            .unwrap_or(Path::new("."))
     } else {
         target_path
     };
@@ -2729,13 +2741,8 @@ fn render_report(
 
     let mut used_contract_records = BTreeSet::new();
     for declaration in declarations {
-        let matching = tests.iter().enumerate().find(|(index, item)| {
-            item.kind == 1
-                && !used_contract_records.contains(index)
-                && item.name == declaration.marker
-                && item.line as usize == declaration.line
-                && source_paths_match(&item.path, &declaration.path)
-        });
+        let matching =
+            matching_contract_record(declaration, tests, &used_contract_records);
         let (id, attachment, state, outcome, reason, observation, diagnostic_indexes) =
             if let Some((index, item)) = matching {
                 used_contract_records.insert(index);
@@ -3030,13 +3037,8 @@ fn contract_summary(
     let mut not_observed = 0;
     let mut skipped = 0;
     for declaration in declarations {
-        let matching = tests.iter().enumerate().find(|(index, item)| {
-            item.kind == 1
-                && !used.contains(index)
-                && item.name == declaration.marker
-                && item.line as usize == declaration.line
-                && source_paths_match(&item.path, &declaration.path)
-        });
+        let matching =
+            matching_contract_record(declaration, tests, &used);
         let Some((index, item)) = matching else {
             not_observed += 1;
             continue;
@@ -3066,6 +3068,34 @@ fn source_paths_match(left: &str, right: &str) -> bool {
     let left = normalize(left);
     let right = normalize(right);
     left == right || left.ends_with(&format!("/{right}")) || right.ends_with(&format!("/{left}"))
+}
+fn contract_record_matches(declaration: &ContractDeclaration, item: &TestItem) -> bool {
+    item.kind == 1
+        && item.name == declaration.marker
+        && source_paths_match(&item.path, &declaration.path)
+        && declaration
+            .message
+            .as_ref()
+            .map_or(true, |message| message == &item.message)
+}
+
+fn matching_contract_record<'a>(
+    declaration: &ContractDeclaration,
+    tests: &'a [TestItem],
+    used: &BTreeSet<usize>,
+) -> Option<(usize, &'a TestItem)> {
+    if let Some(matching) = tests.iter().enumerate().find(|(index, item)| {
+        !used.contains(index)
+            && contract_record_matches(declaration, item)
+            && item.line as usize == declaration.line
+    }) {
+        return Some(matching);
+    }
+    let mut candidates = tests.iter().enumerate().filter(|(index, item)| {
+        !used.contains(index) && contract_record_matches(declaration, item)
+    });
+    let first = candidates.next()?;
+    candidates.next().is_none().then_some(first)
 }
 
 fn runtime_contract_diagnostic(path: &str, item: &TestItem) -> String {

@@ -6,8 +6,8 @@ use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_lambda_block;
 use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::fork_panic;
-use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::lambda_body_ty_expecting;
+use crate::Codegen::TIR::spawn_body_result_ty;
 use crate::Codegen::TIR::lower::lambda_block_tail;
 use crate::Codegen::TIR::lower::{
     lower_value_block, prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
@@ -809,8 +809,27 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
 
     let ret = shared_body
         .as_ref()
-        .map(|body| lowered_block_return_ty(body))
-        .unwrap_or_else(|| lambda_body_ty(lam, cx, env));
+        .map(|body| {
+            let body_ty = lowered_block_return_ty(body);
+            if let Some(Type::Result { err, .. }) = lam.meta.fallible_carrier.as_ref() {
+                Type::Result {
+                    ok: Box::new(body_ty),
+                    err: err.clone(),
+                }
+            } else if lam.meta.fallible_propagation {
+                match env.ret_ty.as_ref() {
+                    Some(Type::Result { err, .. }) => Type::Result {
+                        ok: Box::new(body_ty),
+                        err: err.clone(),
+                    },
+                    Some(Type::Option(_)) => Type::Option(Box::new(body_ty)),
+                    _ => body_ty,
+                }
+            } else {
+                body_ty
+            }
+        })
+        .unwrap_or_else(|| spawn_body_result_ty(lam, cx, env));
     if shared_body.is_none() {
         match &lam.body {
             LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),

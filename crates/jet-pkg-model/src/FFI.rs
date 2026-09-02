@@ -3482,7 +3482,7 @@ pub fn host_target() -> String {
 
 fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>, has_native: bool) -> String {
     let mut s = format!(
-        "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{}\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n",
+        "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{}\n[workspace]\n\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n",
         if has_native { "build = \"build.rs\"\n" } else { "" }
     );
     if !deps.is_empty() {
@@ -4526,6 +4526,49 @@ mod tests {
         );
         let stamp = foreign_descriptor_stamp(ForeignLanguage::Rust);
         assert!(source.contains(&format!("// jet-ffi-descriptor={stamp}")));
+    }
+    #[test]
+    fn generated_cargo_manifest_builds_when_nested_in_workspace() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".tmp")
+            .join("jet-test-scratch")
+            .join(format!(
+                "ffi-manifest-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock is after the Unix epoch")
+                    .as_nanos()
+            ));
+        let target = root
+            .parent()
+            .expect("manifest scratch root has a parent")
+            .join(format!("ffi-manifest-target-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&target);
+        std::fs::create_dir_all(root.join("src")).expect("create nested manifest source");
+        std::fs::write(
+            root.join("Cargo.toml"),
+            emit_cargo_toml("nested_ffi_probe", &BTreeMap::new(), false),
+        )
+        .expect("write generated nested manifest");
+        std::fs::write(root.join("src/lib.rs"), "pub fn probe() -> i64 { 7 }\n")
+            .expect("write generated nested source");
+
+        let output = Command::new("cargo")
+            .args(["build", "--offline", "--manifest-path"])
+            .arg(root.join("Cargo.toml"))
+            .arg("--target-dir")
+            .arg(&target)
+            .output()
+            .expect("run cargo for generated nested manifest");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&target);
+        assert!(
+            output.status.success(),
+            "generated nested manifest must build: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

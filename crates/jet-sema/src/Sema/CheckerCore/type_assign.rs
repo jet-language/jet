@@ -859,7 +859,7 @@ impl<'a> Checker<'a> {
                 ));
                 return true;
             }
-            return false;
+            return true;
         }
         if self.checked_text_string_target(want, got) {
             self.diags.push(Diagnostic::error(
@@ -1012,7 +1012,7 @@ impl<'a> Checker<'a> {
                 self.report_option_mismatch(want, got, span);
                 return true;
             }
-            return false;
+            return true;
         }
         if want.unwrap_option().is_some() && got.unwrap_option().is_none() {
             self.diags.push(Diagnostic::error(
@@ -1033,11 +1033,11 @@ impl<'a> Checker<'a> {
             (Type::List(want_elem), Type::FixedList { elem: got_elem, .. })
                 if want_elem == got_elem =>
             {
-                return false;
+                return true;
             }
             // D-UNIONTYPE1=A: a member value widens into its union.
             (Type::Union(members), got) if members.iter().any(|m| m == got) => {
-                return false;
+                return true;
             }
             (Type::TraitObject(trait_names), got) => {
                 for trait_name in trait_names {
@@ -1048,7 +1048,7 @@ impl<'a> Checker<'a> {
                         return true;
                     }
                 }
-                return false;
+                return true;
             }
             _ => {}
         }

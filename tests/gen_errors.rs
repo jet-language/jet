@@ -125,7 +125,10 @@ fn render_page(
     row: &jet_foundation::Registry::DiagnosticRow,
     has_fixed: bool,
 ) -> String {
-    let title = format!("{code}: {}", row.what);
+    let what = jet_foundation::Outcome::jet_sentence_case_line(row.what);
+    let why = jet_foundation::Outcome::jet_sentence_case_line(row.why);
+    let fix = jet_foundation::Outcome::jet_sentence_case_line(row.fix);
+    let title = format!("{code}: {what}");
     let fixed = if has_fixed {
         let fixed_rel = jet_rel.replace(".jet", ".fixed.jet");
         format!("\n## Fixed program\n\nSee [`{fixed_rel}`](../../../{fixed_rel}).\n")
@@ -148,9 +151,9 @@ fn render_page(
          [Back to diagnostics registry](../../spec/diagnostics.md)\n",
         title = title,
         code = code,
-        what = row.what,
-        why = row.why,
-        fix = row.fix,
+        what = what,
+        why = why,
+        fix = fix,
         jet_rel = jet_rel,
         fixed = fixed,
     )

@@ -247,9 +247,9 @@ impl Diagnostic {
             moment: row.moment,
             severity: row.severity,
             code,
-            what: rendered.what,
-            why: rendered.why,
-            fix: rendered.fix,
+            what: crate::Outcome::jet_sentence_case_line(&rendered.what),
+            why: crate::Outcome::jet_sentence_case_line(&rendered.why),
+            fix: crate::Outcome::jet_sentence_case_line(&rendered.fix),
             span,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
@@ -684,13 +684,12 @@ impl Diagnostic {
 
     fn render_inner(&self, file: &str, src: &str, color: bool, hyperlinks: bool) -> String {
         let theme = Theme::new(color);
-        // Diagnostic fields remain raw for JSON/LSP consumers. Only the
-        // terminal projection escapes them, so an URL, revision, provider
-        // stderr, or source line cannot emit terminal controls or forge rows.
+        // Diagnostic fields are sentence-cased at construction. The terminal
+        // projection only escapes them, so JSON/LSP and terminal text agree.
         let file = escape_terminal_text(file);
-        let what = escape_terminal_text(&crate::Outcome::jet_sentence_case_line(&self.what));
-        let why = escape_terminal_text(&crate::Outcome::jet_sentence_case_line(&self.why));
-        let fix = escape_terminal_text(&crate::Outcome::jet_sentence_case_line(&self.fix));
+        let what = escape_terminal_text(&self.what);
+        let why = escape_terminal_text(&self.why);
+        let fix = escape_terminal_text(&self.fix);
         let mut out = String::new();
         let label = match self.severity {
             Severity::Error => theme.error("Error"),
@@ -807,9 +806,9 @@ impl Diagnostic {
             self.moment.as_str(),
             sev,
             self.code.clone(),
-            crate::Outcome::jet_sentence_case_line(&self.what),
-            crate::Outcome::jet_sentence_case_line(&self.why),
-            crate::Outcome::jet_sentence_case_line(&self.fix),
+            self.what.clone(),
+            self.why.clone(),
+            self.fix.clone(),
         );
         report.applicability = self.applicability;
         report.detail = self.detail.clone();
@@ -1480,26 +1479,26 @@ mod renderer_tests {
         assert_eq!(
             error().render_colored("main.jet", source, true),
             concat!(
-                "\x1b[31mError\x1b[0m [E0001]: error what\n",
+                "\x1b[31mError\x1b[0m [E0001]: Error what\n",
                 "  \x1b[2;37m--> main.jet:1:2\x1b[0m\n",
                 "    |\n",
                 "  1 | abc\n",
                 "    |  \x1b[31m^^\x1b[0m\n",
-                " \x1b[1mWhy:\x1b[0m error why\n",
-                " \x1b[1mFix:\x1b[0m error fix\n",
+                " \x1b[1mWhy:\x1b[0m Error why\n",
+                " \x1b[1mFix:\x1b[0m Error fix\n",
                 "More: jet-lang.dev/e/E0001\n",
             )
         );
         assert_eq!(
             warning().render_colored("main.jet", source, true),
             concat!(
-                "\x1b[33mWarning\x1b[0m [L2001] (deprecated_item): warning what\n",
+                "\x1b[33mWarning\x1b[0m [L2001] (deprecated_item): Warning what\n",
                 "  \x1b[2;37m--> main.jet:1:2\x1b[0m\n",
                 "    |\n",
                 "  1 | abc\n",
                 "    |  \x1b[33m^^\x1b[0m\n",
-                " \x1b[1mWhy:\x1b[0m warning why\n",
-                " \x1b[1mFix:\x1b[0m warning fix\n",
+                " \x1b[1mWhy:\x1b[0m Warning why\n",
+                " \x1b[1mFix:\x1b[0m Warning fix\n",
                 "More: jet-lang.dev/e/L2001\n",
             )
         );
@@ -1511,26 +1510,26 @@ mod renderer_tests {
         assert_eq!(
             error().render_colored("main.jet", source, false),
             concat!(
-                "Error [E0001]: error what\n",
+                "Error [E0001]: Error what\n",
                 "  --> main.jet:1:2\n",
                 "    |\n",
                 "  1 | abc\n",
                 "    |  ^^\n",
-                " Why: error why\n",
-                " Fix: error fix\n",
+                " Why: Error why\n",
+                " Fix: Error fix\n",
                 "More: jet-lang.dev/e/E0001\n",
             )
         );
         assert_eq!(
             warning().render("main.jet", source),
             concat!(
-                "Warning [L2001] (deprecated_item): warning what\n",
+                "Warning [L2001] (deprecated_item): Warning what\n",
                 "  --> main.jet:1:2\n",
                 "    |\n",
                 "  1 | abc\n",
                 "    |  ^^\n",
-                " Why: warning why\n",
-                " Fix: warning fix\n",
+                " Why: Warning why\n",
+                " Fix: Warning fix\n",
                 "More: jet-lang.dev/e/L2001\n",
             )
         );
@@ -1561,11 +1560,11 @@ mod renderer_tests {
     #[test]
     fn runtime_text_obeys_case_law_and_more_line() {
         assert_eq!(
-            crate::Outcome::jet_sentence_case_line("The compiler saw `TypeName`"),
-            "the compiler saw `TypeName`"
+            crate::Outcome::jet_sentence_case_line("the compiler saw `TypeName`"),
+            "The compiler saw `TypeName`"
         );
         assert_eq!(
-            crate::Outcome::jet_sentence_case_line("`--offline` Forbids network access"),
+            crate::Outcome::jet_sentence_case_line("`--offline` forbids network access"),
             "`--offline` forbids network access"
         );
         assert_eq!(
@@ -1588,7 +1587,7 @@ mod renderer_tests {
             None,
         );
         let rendered = diagnostic.render("", "");
-        assert!(rendered.contains("Error [E0001]: the dynamic what"));
+        assert!(rendered.contains("Error [E0001]: The dynamic what"));
         assert!(rendered.ends_with("More: jet-lang.dev/e/E0001\n"));
 
         let lint = Diagnostic::lint(
@@ -1598,9 +1597,9 @@ mod renderer_tests {
             "The dynamic fix".into(),
             None,
         );
-        assert_eq!(lint.what, "the dynamic warning");
-        assert_eq!(lint.why, "the dynamic why");
-        assert_eq!(lint.fix, "the dynamic fix");
+        assert_eq!(lint.what, "The dynamic warning");
+        assert_eq!(lint.why, "The dynamic why");
+        assert_eq!(lint.fix, "The dynamic fix");
     }
 
     #[test]
@@ -1615,13 +1614,13 @@ mod renderer_tests {
             )
             .render("wide.jet", "a界b\n"),
             concat!(
-                "Error [E0001]: error what\n",
+                "Error [E0001]: Error what\n",
                 "  --> wide.jet:1:2\n",
                 "    |\n",
                 "  1 | a界b\n",
                 "    |  ^^\n",
-                " Why: error why\n",
-                " Fix: error fix\n",
+                " Why: Error why\n",
+                " Fix: Error fix\n",
                 "More: jet-lang.dev/e/E0001\n",
             )
         );

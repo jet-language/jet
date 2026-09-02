@@ -523,7 +523,6 @@ fn check_bundle_opts_for_output_inner(
     diags.extend(inject_units_prelude(bundle));
     super::super::Prelude::inject(bundle);
     diags.extend(super::super::Casing::validate_bundle(bundle));
-    diags.extend(resolve_unit_dimensions(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `@if @build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
@@ -761,6 +760,9 @@ fn check_bundle_opts_for_output_inner(
     // tooling projections read. The final population pass remains below for
     // aliases and references discovered during registration.
     populate_name_ledger(bundle, &states, &mut name_ledger);
+    bundle.name_ledger = std::mem::take(&mut name_ledger);
+    diags.extend(resolve_unit_dimensions(bundle));
+    name_ledger = std::mem::take(&mut bundle.name_ledger);
 
     // D-METADERIVE1=A orphan law needs a bundle-wide provider view: a derive
     // may be supplied by the entry module for an imported type, or imported

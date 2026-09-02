@@ -583,6 +583,7 @@ mod jet_devserver_impl {
         "index.html",
     ];
 
+    // JET_VETTED_UNSAFE_BEGIN: jet_devserver_unix_output
     #[cfg(unix)]
     mod jet_devserver_unix_output {
         use super::*;
@@ -1027,6 +1028,7 @@ mod jet_devserver_impl {
             Ok(None)
         }
     }
+    // JET_VETTED_UNSAFE_END: jet_devserver_unix_output
 
     fn jet_devserver_read_inside(root: &Path, relative: &str) -> std::io::Result<Vec<u8>> {
         let relative = Path::new(relative);

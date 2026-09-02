@@ -32,15 +32,24 @@ pub struct Explanation {
 pub fn index() -> BTreeMap<String, Explanation> {
     let mut out: BTreeMap<String, Explanation> = BTreeMap::new();
     for row in jet_foundation::Registry::diagnostic_rows() {
+        let what = row
+            .detail
+            .then(|| jet_foundation::Outcome::jet_sentence_case_line(row.what));
+        let why = row
+            .detail
+            .then(|| jet_foundation::Outcome::jet_sentence_case_line(row.why));
+        let fix = row
+            .detail
+            .then(|| jet_foundation::Outcome::jet_sentence_case_line(row.fix));
         out.insert(
             row.code.to_string(),
             Explanation {
                 code: row.code.to_string(),
                 stage: row.stage.to_string(),
                 meaning: row.meaning.to_string(),
-                what: row.detail.then(|| row.what.to_string()),
-                why: row.detail.then(|| row.why.to_string()),
-                fix: row.detail.then(|| row.fix.to_string()),
+                what,
+                why,
+                fix,
                 example: detailed_example(row.code),
                 retired: row.status == jet_foundation::Registry::DiagnosticStatus::Retired,
             },
@@ -71,6 +80,9 @@ pub fn diagnostics_reference_markdown() -> String {
             jet_foundation::Diagnostics::Severity::Error => "error",
             jet_foundation::Diagnostics::Severity::Lint => "lint",
         };
+        let what = jet_foundation::Outcome::jet_sentence_case_line(row.what);
+        let why = jet_foundation::Outcome::jet_sentence_case_line(row.why);
+        let fix = jet_foundation::Outcome::jet_sentence_case_line(row.fix);
         let cells = [
             row.code,
             row.stage,
@@ -78,9 +90,9 @@ pub fn diagnostics_reference_markdown() -> String {
             row.moment.as_str(),
             row.status.name(),
             row.meaning,
-            row.what,
-            row.why,
-            row.fix,
+            what.as_str(),
+            why.as_str(),
+            fix.as_str(),
         ];
         out.push('|');
         for cell in cells {

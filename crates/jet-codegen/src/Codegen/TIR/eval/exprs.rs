@@ -6014,6 +6014,17 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         }
     }
 
+    /// D-NEVER1=C: the parser's exhaustive-dispatch marker is not a user
+    /// diagnostic. If a malformed TIR reaches it, route through the shared
+    /// registered runtime stop instead of leaking evaluator E0956.
+    fn eval_proven_unreachable(&mut self, line: u32) -> Result<CtValue, Diagnostic> {
+        Err(self.runtime_stop(
+            "E3001",
+            line,
+            "proven-unreachable exhaustive-dispatch arm",
+        ))
+    }
+
     fn eval_expr_inner(
         &mut self,
         expr: &'a TExpr,
@@ -10372,12 +10383,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     ))
                 }
             }
-            // Card #1440: sema proved this arm dead (E0307) — reaching it in
-            // the interpreter is a compiler bug, reported as an internal error.
-            TExprKind::Unreachable { line } => Err(unsupported(
-                &format!("proven-unreachable exhaustive-dispatch arm (line {line})"),
-                self.span(),
-            )),
+            // D-NEVER1=C: this marker is an unreachable control-flow edge,
+            // not an unsupported evaluator construct. Keep the runtime
+            // report on the shared E3001 boundary for every execution tier.
+            TExprKind::Unreachable { line } => self.eval_proven_unreachable(*line as u32),
             TExprKind::DistinctRaw(inner) => self.eval_expr_child(inner, scope),
             TExprKind::OptField {
                 base,

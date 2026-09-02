@@ -1,6 +1,6 @@
-//! D-INTDIV1=A — `/` answers the true quotient, so two whole numbers give a
-//! Float. `/%` is the whole-number path. Operands arrive through `score` so
-//! nothing folds away before the built program runs.
+//! D-INTDIV1=A / D-TYPE2-DEFAULT1=A — `/` answers an exact quotient: whole
+//! numbers produce a `Fraction`, finite results print as decimals, and repeating
+//! results print as fractions. `/%` is the whole-number path.
 
 mod common;
 
@@ -9,7 +9,7 @@ mod tir_support;
 
 use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run};
 
-const SEED: &str = "fn score(n: Int) Int {\n    return n\n}\n";
+const SEED: &str = "fn score(n: Int) Int -> {\n    return n\n}\n";
 
 /// D-INTDIV1=A: `7 / 2` is 3.5, and the fraction survives an average.
 #[test]
@@ -32,10 +32,10 @@ fn run() {{
     assert_eq!(out, "3.5\n3.0\n-3.5\n0.25\n", "{out}");
 }
 
-/// D-INTDIV1=A: the result really is a Float, proved by the slot it fits.
-/// `want_float` takes only a Float, so this compiling at all is the evidence.
+/// D-TYPE2-DEFAULT1=A: exact division prints its exact result, while a Float
+/// parameter requires the explicit destination-owned conversion.
 #[test]
-fn int_division_result_is_a_float() {
+fn int_division_lands_exact() {
     if !have_rustc() {
         return;
     }
@@ -46,14 +46,16 @@ fn want_float(x: Float) {{
 }}
 
 fn run() {{
-    want_float(score(7) / score(2))
-    want_float(score(9) / score(3))
+    exact :: score(7) / score(2)
+    print(exact)
+    print(7 / 3)
+    want_float(Float.from_fraction(exact))
 }}
 "
     );
-    let (code, out) = build_and_run("intdiv_is_float", &src);
+    let (code, out) = build_and_run("intdiv_exact", &src);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(out, "3.5\n3.0\n", "{out}");
+    assert_eq!(out, "3.5\n1/3\n3.5\n", "{out}");
 }
 
 /// D-INTDIV1=A: storing that exact quotient back into a whole number is a
@@ -177,7 +179,7 @@ fn run() {
         (
             "u8_call_div_zero",
             r#"
-fn score(n: U8) U8 {
+fn score(n: U8) U8 -> {
     return n
 }
 fn run() {
@@ -192,9 +194,7 @@ fn run() {
             "{name}: fixed-width / by zero must exit 70, got {code}; out={out} err={err}"
         );
         assert!(
-            err.contains("this division can't be done")
-                || err.contains("dividing by zero")
-                || err.contains("divided by zero"),
+            err.contains("E3010") && err.contains("divided by zero"),
             "{name}: expected Prelude division wording, got: {err}"
         );
         assert!(
@@ -208,10 +208,7 @@ fn run() {
             "{name}: jet run must exit 70 (I9), got {jit_code}: {jit_out}{jit_err}"
         );
         assert!(
-            jit_err.contains("Stop [E3010]")
-                && (jit_err.contains("this division can't be done")
-                    || jit_err.contains("dividing by zero")
-                    || jit_err.contains("divided by zero")),
+            jit_err.contains("Stop [E3010]: `divided by zero`"),
             "{name}: jet run expected the E3010 Prelude stop, got: {jit_err}"
         );
         assert!(

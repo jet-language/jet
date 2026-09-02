@@ -4676,11 +4676,12 @@ pub(crate) fn build_cx_items(
                             .params
                             .iter()
                             .map(|p| {
-                                if p.variadic {
+                                let ty = if p.variadic {
                                     Type::List(Box::new(p.ty.clone()))
                                 } else {
                                     p.ty.clone()
-                                }
+                                };
+                                ty.with_effective_fn_returns()
                             })
                             .collect(),
                         ret: Some(Box::new(f.effective_return_type())),
@@ -5122,7 +5123,7 @@ pub(crate) fn build_cx_items(
                                         } else {
                                             p.ty.clone()
                                         };
-                                        (p.convention, ty)
+                                        (p.convention, ty.with_effective_fn_returns())
                                     })
                                     .collect(),
                             );
@@ -5133,14 +5134,15 @@ pub(crate) fn build_cx_items(
                                         .params
                                         .iter()
                                         .map(|p| {
-                                            if p.variadic {
+                                            let ty = if p.variadic {
                                                 Type::List(Box::new(p.ty.clone()))
                                             } else {
                                                 p.ty.clone()
-                                            }
+                                            };
+                                            ty.with_effective_fn_returns()
                                         })
                                         .collect(),
-                                    ret: f.return_type.clone().map(Box::new),
+                                    ret: Some(Box::new(f.effective_return_type())),
                                     effect_bound: None,
                                     return_view_provenance: f.return_view_provenance.clone(),
                                     param_contract: (!f.params.is_empty()).then(|| {

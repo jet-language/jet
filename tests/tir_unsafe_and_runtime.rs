@@ -163,8 +163,8 @@ cell :: 1337
     // `#Unsafe fn` → `pub unsafe fn …`.
     assert!(
         out.rust
-            .contains("pub unsafe fn __jet_read_reg(__jet_addr: i64) -> i64 {"),
-        "unsafe fn signature not byte-exact:\n{}",
+            .contains("pub unsafe fn __jet_read_reg(__jet_addr: i64) -> JetOutcome<i64, JetErr> {"),
+        "unsafe fn signature not byte-exact (D-FAIL-CARRIER1=A):\n{}",
         out.rust
     );
     // `mem.Ptr<Int>.from_addr(addr)` and `mem.volatile_read(p)` in the fn body (sema
@@ -176,9 +176,10 @@ cell :: 1337
         out.rust
     );
     assert!(
-        out.rust
-            .contains("return jet_mem::jet_sentry_volatile_read((__jet_p), \"valid_ptr\");"),
-        "volatile_read sentry wrapper missing:\n{}",
+        out.rust.contains(
+            "return Ok(jet_mem::jet_sentry_volatile_read((__jet_p), \"valid_ptr\"));"
+        ),
+        "volatile_read sentry wrapper missing (D-FAIL-CARRIER1=A):\n{}",
         out.rust
     );
     // `mem.address_of(cell)` → the sentry-backed address identity (no `unsafe`).
@@ -217,12 +218,8 @@ cell :: 1337
     // (`unsafe {` or `unsafe fn`).
     let user = tir_support::strip_vetted_prelude_modules(&out.rust);
     for line in user.lines() {
-        // Skip comment lines (the source-map path comment can contain the word).
-        if line.trim_start().starts_with("//") {
-            continue;
-        }
-        if let Some(col) = line.find("unsafe") {
-            let after = line[col..].trim_start_matches("unsafe").trim_start();
+        for col in common::unsafe_keyword_columns(line) {
+            let after = line[col + "unsafe".len()..].trim_start();
             assert!(
                 after.starts_with('{') || after.starts_with("fn "),
                 "I1: ungated `unsafe` in generated code: {}",
@@ -1154,7 +1151,8 @@ fn run() {
     assert_eq!(code, 70, "{stderr}");
     assert_eq!(stdout, "", "{stderr}");
     assert!(
-        stderr.contains("Error [E3003]: deadline exceeded while waiting in task join"),
+        stderr.contains("Error [E3003]: Deadline exceeded while waiting in task join")
+            && stderr.contains("More: jet-lang.dev/e/E3003"),
         "{stderr}"
     );
 
@@ -1275,7 +1273,8 @@ fn run() {
     assert_eq!(code, 70, "{stderr}");
     assert_eq!(stdout, "", "{stderr}");
     assert!(
-        stderr.contains("Error [E3003]: deadline exceeded while waiting in task selection"),
+        stderr.contains("Error [E3003]: Deadline exceeded while waiting in task selection")
+            && stderr.contains("More: jet-lang.dev/e/E3003"),
         "{stderr}"
     );
 

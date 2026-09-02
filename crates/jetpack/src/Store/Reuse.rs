@@ -516,28 +516,13 @@ impl CacheLease {
         )
         .any(|root| {
             let roots = path_variants(root);
-            let matched = roots.iter().any(|root| {
+            roots.iter().any(|root| {
                 resolved_paths
                     .iter()
                     .any(|resolved| resolved.starts_with(root))
-            });
-            if matched {
-                eprintln!(
-                    "DEBUG lease root matched requested={requested} root={}",
-                    root.display()
-                );
-            }
-            matched
+            })
         });
         if path_is_lease_owned {
-            eprintln!(
-                "DEBUG lease path rejected requested={requested} out={} lease_root={} bin_output={:?} projected_bin={:?} wrapper={:?}",
-                self.out.display(),
-                self.lease_root.display(),
-                self.bin_output_root,
-                self.projected_bin_root,
-                self.wrapper_root
-            );
             return Err(std::io::Error::other(
                 "caller requested a path inside an executable lease that is not a recorded member",
             ));
@@ -1020,7 +1005,12 @@ fn path_variants(path: &Path) -> Vec<PathBuf> {
     let lexical = lexical_normalize(path);
     let mut variants = vec![lexical];
     if let Ok(canonical) = fs::canonicalize(path) {
-        if !variants.iter().any(|variant| variant == &canonical) {
+        // A detached `/proc/self/fd/<n>` directory can resolve to `/` after
+        // its private mount keeper exits. Treating that broad fallback as an
+        // owned lease would reject every absolute caller path.
+        if canonical != Path::new("/")
+            && !variants.iter().any(|variant| variant == &canonical)
+        {
             variants.push(canonical);
         }
     }

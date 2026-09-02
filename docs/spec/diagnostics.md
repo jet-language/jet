@@ -119,13 +119,13 @@ keyword, or quoted code fragment keeps its own case; sentence capitalization
 starts at the first ordinary prose word.
 
 ```
-Error [E0102]: nothing named `pirnt` exists here
+Error [E0102]: Nothing named `pirnt` exists here
   --> tests/ui/unknown_function.jet:2:5
     |
   2 |     pirnt("hi")
     |     ^^^^^
- Why: only functions that have been defined (or built in, like `print`) can be called
- Fix: did you mean `print`?
+ Why: Only functions that have been defined (or built in, like `print`) can be called
+ Fix: Did you mean `print`?
 More: jet-lang.dev/e/E0102
 ```
 

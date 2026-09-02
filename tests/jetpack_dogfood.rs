@@ -457,8 +457,15 @@ fn run_phase(
     fs::write(scratch.phase_pid_path(mode), std::process::id().to_string())
         .expect("save phase process identity");
     let mut probe_command = enter_command(repo, jetpack, scratch, offline);
+    // The namespace child keeps its dynamic loader open on fd 9, while the
+    // command's clean environment intentionally removes LD_LIBRARY_PATH.
+    // Invoke this test binary through that loader and pass the staged library
+    // path explicitly so the proof exercises the projected environment rather
+    // than failing before the probe starts.
+    probe_command.arg("--").arg("/proc/self/fd/9");
+    probe_command.args(["--library-path"]);
+    probe_command.arg(env::var_os("LD_LIBRARY_PATH").expect("namespace library path"));
     probe_command
-        .arg("--")
         .arg(test_binary)
         .args(["--exact", "jetpack_dogfood_probe_child", "--nocapture"])
         .stdout(Stdio::piped())
@@ -1058,9 +1065,13 @@ impl DogfoodScratch {
             {
                 continue;
             }
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(entry.path(), destination.join(name))
-                .expect("link source checkout entry");
+            if name == "env.jet" {
+                fs::copy(entry.path(), destination.join(name)).expect("copy project authority");
+            } else {
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(entry.path(), destination.join(name))
+                    .expect("link source checkout entry");
+            }
         }
 
         let source_jet = source.join(".jet");
@@ -1072,11 +1083,13 @@ impl DogfoodScratch {
             destination_jet.join("lock"),
         )
         .expect("copy portable lock");
-        for entry in fs::read_dir(source_jet.join("nix-cas")).expect("read portable lock bundles") {
-            let entry = entry.expect("read portable lock bundle");
-            if entry.file_type().expect("read portable lock bundle type").is_file() {
-                fs::copy(entry.path(), destination_bundle.join(entry.file_name()))
-                    .expect("copy portable lock bundle");
+        if let Ok(entries) = fs::read_dir(source_jet.join("nix-cas")) {
+            for entry in entries {
+                let entry = entry.expect("read portable lock bundle");
+                if entry.file_type().expect("read portable lock bundle type").is_file() {
+                    fs::copy(entry.path(), destination_bundle.join(entry.file_name()))
+                        .expect("copy portable lock bundle");
+                }
             }
         }
         destination
@@ -1126,9 +1139,7 @@ fn install_native_catalog(catalog: &Path, artifact_root: &Path, packages: &[Stri
                     "#!/bin/sh\n\
                      case \"${{1-}}\" in\n\
                        --version) printf '%s\\n' '{}';;\n\
-                       build) mkdir -p \"${{CARGO_TARGET_DIR:?}}/debug\"; \
-                              printf '#!/bin/sh\\nexit 0\\n' > \"${{CARGO_TARGET_DIR}}/debug/jet\"; \
-                              chmod +x \"${{CARGO_TARGET_DIR}}/debug/jet\";;\n\
+                       build) printf '#!/bin/sh\\nexit 0\\n' > \"${{CARGO_TARGET_DIR:?}}/debug/jet\";;\n\
                        test) :;;\n\
                        *) :;;\n\
                      esac\n",

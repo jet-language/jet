@@ -932,7 +932,7 @@ pub(crate) fn validate_nix_build_facts(
 pub(crate) fn nix_runtime_environment(
     producer: &super::Store::ProducerRecord,
 ) -> BTreeMap<String, String> {
-    if validate_nix_build_facts(producer).is_err() {
+    if producer.provider != "nix" || validate_nix_build_facts(producer).is_err() {
         return BTreeMap::new();
     }
     nix_build_environment_facts()

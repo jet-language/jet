@@ -106,6 +106,11 @@ impl<'a> Checker<'a> {
         }) else {
             return None;
         };
+        // D-CALLBACK-ABI: function values expose the effective executable
+        // carrier at the call boundary. Local bindings retain source spelling
+        // for diagnostics, so normalize exactly once before binding arguments
+        // and projecting the result.
+        let callee_ty = callee_ty.with_effective_fn_returns();
         let Type::Fn {
             params,
             ret,

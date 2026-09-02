@@ -644,6 +644,13 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     // D-HTTPLIB1=A: server binding uses the shared interpreter network carrier.
     ("core.http.server", "bind"),
     ("core.data", "query"),
+    // D-NETUDP1=A: packet projections marshal opaque network handles through
+    // the shared ambient Prelude adapter instead of the structural pure route.
+    ("core.net", "udp_packet_data"),
+    ("core.net", "udp_packet_addr"),
+    ("core.net", "udp_packet_bytes"),
+    ("core.net", "udp_packet_original_len"),
+    ("core.net", "udp_packet_truncated"),
 ];
 
 pub fn core_call_ambient_routes() -> &'static [(&'static str, &'static str)] {
@@ -3738,7 +3745,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true],
     )
-    .with_pure_route(CoreCallPureRoute::Net),
+        .with_pure_route(CoreCallPureRoute::Net)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "udp_packet_addr",
@@ -3746,7 +3754,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true],
     )
-    .with_pure_route(CoreCallPureRoute::Net),
+        .with_pure_route(CoreCallPureRoute::Net)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "udp_packet_bytes",
@@ -3754,7 +3763,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true],
     )
-    .with_pure_route(CoreCallPureRoute::Net),
+        .with_pure_route(CoreCallPureRoute::Net)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "udp_packet_original_len",
@@ -3762,7 +3772,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true],
     )
-    .with_pure_route(CoreCallPureRoute::Net),
+        .with_pure_route(CoreCallPureRoute::Net)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "udp_packet_truncated",
@@ -3770,7 +3781,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true],
     )
-    .with_pure_route(CoreCallPureRoute::Net),
+        .with_pure_route(CoreCallPureRoute::Net)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "unix_listen",

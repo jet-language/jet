@@ -2815,6 +2815,12 @@ pub(super) fn collect_diverging_functions(
     }
 }
 /// Publish the fixed-point result on bundle functions for downstream lowering.
+///
+/// A function is projected as diverging only when its body has no reachable
+/// normal, returning, or loop-control path; an E0307 `NoElse` marker is an
+/// absent fallthrough, not a diverging result, and every arm/fallback/loop
+/// path must independently diverge.
+///
 /// This is the sole semantic writer of `Func::diverges`; parser and synthetic
 /// constructors only initialize the compiler-metadata bit to `false`.
 pub(super) fn project_divergence_facts(
@@ -2848,168 +2854,432 @@ pub(super) fn project_divergence_facts(
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct DivergenceFlow {
+    normal: bool,
+    returned: bool,
+    diverged: bool,
+    broke: bool,
+    continued: bool,
+}
+
+impl DivergenceFlow {
+    fn normal() -> Self {
+        Self {
+            normal: true,
+            ..Self::default()
+        }
+    }
+
+    fn none() -> Self {
+        Self::default()
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            normal: self.normal || other.normal,
+            returned: self.returned || other.returned,
+            diverged: self.diverged || other.diverged,
+            broke: self.broke || other.broke,
+            continued: self.continued || other.continued,
+        }
+    }
+
+    /// Sequence `next` after every path in `self` that still reaches a
+    /// statement. Terminal paths remain terminal and never reach `next`.
+    fn then(self, next: Self) -> Self {
+        if !self.normal {
+            return self;
+        }
+        Self {
+            normal: false,
+            returned: self.returned,
+            diverged: self.diverged,
+            broke: self.broke,
+            continued: self.continued,
+        }
+        .union(next)
+    }
+
+    fn return_to_caller(self) -> Self {
+        Self {
+            normal: false,
+            returned: self.returned || self.normal,
+            diverged: self.diverged,
+            broke: self.broke,
+            continued: self.continued,
+        }
+    }
+
+    fn break_to_loop(self) -> Self {
+        Self {
+            normal: false,
+            returned: self.returned,
+            diverged: self.diverged,
+            broke: self.broke || self.normal,
+            continued: self.continued,
+        }
+    }
+
+    fn definitely_diverges(self) -> bool {
+        self.diverged
+            && !self.normal
+            && !self.returned
+            && !self.broke
+            && !self.continued
+    }
+}
+
+fn body_flow(
+    body: &[Stmt],
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    let mut flow = DivergenceFlow::normal();
+    for stmt in body {
+        flow = flow.then(stmt_flow(stmt, diverging, state));
+    }
+    flow
+}
 
 fn body_definitely_diverges(
     body: &[Stmt],
     diverging: &std::collections::HashSet<String>,
     state: &ModuleState,
 ) -> bool {
-    body.iter()
-        .any(|stmt| stmt_definitely_diverges(stmt, diverging, state))
+    body_flow(body, diverging, state).definitely_diverges()
 }
 
-fn stmt_definitely_diverges(
-    stmt: &Stmt,
+fn expr_list_flow<'a, I>(
+    expressions: I,
     diverging: &std::collections::HashSet<String>,
     state: &ModuleState,
-) -> bool {
-    match stmt {
-        Stmt::Expr(expr) => expr_definitely_diverges(expr, diverging, state),
-        Stmt::Switch {
-            arms, else_body, ..
-        }
-        | Stmt::ComptimeSwitch {
-            arms, else_body, ..
-        } => else_body.as_ref().is_some_and(|body| {
-            arms.iter()
-                .all(|arm| body_definitely_diverges(&arm.body, diverging, state))
-                && body_definitely_diverges(body, diverging, state)
-        }),
-        Stmt::Loop { body, .. } => !loop_body_has_break(body),
-        Stmt::While { cond, body, .. } => {
-            matches!(cond.without_parens(), Expr::Bool(true, _))
-                && !loop_body_has_break(body)
-        }
-        Stmt::Unsafe { body, .. }
-        | Stmt::Impure { body, .. }
-        | Stmt::Reactive { body, .. }
-        | Stmt::Shield { body, .. }
-        | Stmt::Switched { body, .. }
-        | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
-        | Stmt::TaskGroup { body, .. }
-        | Stmt::Layout { body, .. }
-        | Stmt::AuthorityScope { body, .. }
-        | Stmt::ComptimeIf {
-            then_body: body, ..
-        }
-        | Stmt::ContextBlock { body, .. }
-        | Stmt::Live { body, .. }
-        | Stmt::AssumeDet { body, .. }
-        | Stmt::Transact { body, .. } => body_definitely_diverges(body, diverging, state),
-        _ => false,
+) -> DivergenceFlow
+where
+    I: IntoIterator<Item = &'a Expr>,
+{
+    let mut flow = DivergenceFlow::normal();
+    for expression in expressions {
+        flow = flow.then(expr_flow(expression, diverging, state));
+    }
+    flow
+}
+
+fn call_args_flow(
+    args: &[crate::AST::CallArg],
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    expr_list_flow(args.iter().map(|arg| &arg.expr), diverging, state)
+}
+
+fn lvalue_flow(
+    target: &LValue,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    match target {
+        LValue::Local { .. } => DivergenceFlow::normal(),
+        LValue::Index { base, index, .. } => expr_flow(base, diverging, state)
+            .then(expr_flow(index, diverging, state)),
+        LValue::Field { base, .. } => expr_flow(base, diverging, state),
     }
 }
 
-fn loop_body_has_break(body: &[Stmt]) -> bool {
-    body.iter().any(|stmt| match stmt {
-        Stmt::Break(_)
-        | Stmt::BreakValue(_, _)
-        | Stmt::BreakLabel(_, _)
-        | Stmt::BreakLabelValue(_, _, _, _) => true,
-        Stmt::Loop { .. }
-        | Stmt::For { .. }
-        | Stmt::CountedLoop { .. }
-        | Stmt::While { .. } => false,
-        Stmt::Unsafe { body, .. }
-        | Stmt::Impure { body, .. }
-        | Stmt::Reactive { body, .. }
+fn for_kind_flow(
+    kind: &ForKind,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    match kind {
+        ForKind::Range {
+            start, end, step, ..
+        } => expr_flow(start, diverging, state)
+            .then(expr_flow(end, diverging, state))
+            .then(
+                step.as_ref()
+                    .map(|step| expr_flow(step, diverging, state))
+                    .unwrap_or_else(DivergenceFlow::normal),
+            ),
+        ForKind::In { collection, step } => expr_flow(collection, diverging, state).then(
+            step.as_ref()
+                .map(|step| expr_flow(step, diverging, state))
+                .unwrap_or_else(DivergenceFlow::normal),
+        ),
+    }
+}
+
+fn finite_loop_flow(body: DivergenceFlow) -> DivergenceFlow {
+    // A finite or conditionally entered loop can always exhaust without an
+    // iteration. Return and divergence paths from an iteration still matter.
+    DivergenceFlow {
+        normal: true,
+        returned: body.returned,
+        diverged: body.diverged,
+        broke: false,
+        continued: false,
+    }
+}
+
+fn infinite_loop_flow(body: DivergenceFlow) -> DivergenceFlow {
+    // Normal/continue paths start another iteration. A break is the loop's
+    // normal exit; return/divergence escape the enclosing function.
+    DivergenceFlow {
+        normal: body.broke,
+        returned: body.returned,
+        diverged: body.diverged || body.normal || body.continued,
+        broke: false,
+        continued: false,
+    }
+}
+
+fn branch_flow(
+    body: &[Stmt],
+    value: &Expr,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    body_flow(body, diverging, state).then(expr_flow(value, diverging, state))
+}
+
+fn switch_flow(
+    subject: &Expr,
+    arms: &[SwitchArm],
+    else_body: Option<&[Stmt]>,
+    span: Span,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    if arms.is_empty() {
+        return expr_flow(subject, diverging, state).then(
+            else_body
+                .map(|body| body_flow(body, diverging, state))
+                .unwrap_or_else(DivergenceFlow::normal),
+        );
+    }
+    let mut branches = DivergenceFlow::none();
+    for arm in arms {
+        branches = branches.union(
+            expr_flow(&arm.cond, diverging, state)
+                .then(body_flow(&arm.body, diverging, state)),
+        );
+    }
+    let fallback = match else_body {
+        Some(body) => body_flow(body, diverging, state),
+        None if crate::AST::is_subjectless_guard(subject, span) => DivergenceFlow::normal(),
+        // A checked exhaustive dispatch has no runtime miss path. Its
+        // synthesized Expr::NoElse is represented by `none`, not Diverged.
+        None => DivergenceFlow::none(),
+    };
+    expr_flow(subject, diverging, state).then(branches.union(fallback))
+}
+
+fn stmt_flow(
+    stmt: &Stmt,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    match stmt {
+        Stmt::Expr(expr) => expr_flow(expr, diverging, state),
+        Stmt::Val(binding) => expr_flow(&binding.init, diverging, state),
+        Stmt::Assign { target, value, .. } => {
+            lvalue_flow(target, diverging, state).then(expr_flow(value, diverging, state))
+        }
+        Stmt::Return(value, ..) => value
+            .as_ref()
+            .map(|value| expr_flow(value, diverging, state))
+            .unwrap_or_else(DivergenceFlow::normal)
+            .return_to_caller(),
+        Stmt::Break(_) | Stmt::BreakLabel(_, _) => DivergenceFlow {
+            broke: true,
+            ..DivergenceFlow::none()
+        },
+        Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
+            expr_flow(value, diverging, state).break_to_loop()
+        }
+        Stmt::Continue(_) | Stmt::ContinueLabel(_, _) => DivergenceFlow {
+            continued: true,
+            ..DivergenceFlow::none()
+        },
+        Stmt::Loop { body, .. } => infinite_loop_flow(body_flow(body, diverging, state)),
+        Stmt::While { cond, body, .. } => {
+            let loop_body = body_flow(body, diverging, state);
+            let loop_flow = if matches!(cond.without_parens(), Expr::Bool(true, _)) {
+                infinite_loop_flow(loop_body)
+            } else {
+                finite_loop_flow(loop_body)
+            };
+            expr_flow(cond, diverging, state).then(loop_flow)
+        }
+        Stmt::For {
+            kind, body, ..
+        } => for_kind_flow(kind, diverging, state)
+            .then(finite_loop_flow(body_flow(body, diverging, state))),
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            let iteration = body_flow(body, diverging, state).then(
+                step.as_deref()
+                    .map(|step| stmt_flow(step, diverging, state))
+                    .unwrap_or_else(DivergenceFlow::normal),
+            );
+            let loop_flow = if matches!(cond.without_parens(), Expr::Bool(true, _)) {
+                infinite_loop_flow(iteration)
+            } else {
+                finite_loop_flow(iteration)
+            };
+            expr_flow(&init.init, diverging, state)
+                .then(expr_flow(cond, diverging, state))
+                .then(loop_flow)
+        }
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            span,
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            span,
+        } => switch_flow(
+            subject,
+            arms,
+            else_body.as_deref(),
+            *span,
+            diverging,
+            state,
+        ),
+        Stmt::Unsafe {
+            audit_expr, body, ..
+        }
+        | Stmt::Impure {
+            reason_expr: audit_expr,
+            body,
+            ..
+        } => audit_expr
+            .as_ref()
+            .map(|expr| expr_flow(expr, diverging, state))
+            .unwrap_or_else(DivergenceFlow::normal)
+            .then(body_flow(body, diverging, state)),
+        Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
         | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
-        | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::AuthorityScope { body, .. }
-        | Stmt::ComptimeIf {
-            then_body: body, ..
-        }
-        | Stmt::ContextBlock { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
         | Stmt::Live { body, .. }
-        | Stmt::AssumeDet { body, .. }
-        | Stmt::Transact { body, .. } => loop_body_has_break(body),
-        Stmt::Switch {
-            arms, else_body, ..
+        | Stmt::Transact { body, .. } => body_flow(body, diverging, state),
+        Stmt::TaskGroup { limit, body, .. } => limit
+            .as_ref()
+            .map(|expr| expr_flow(expr, diverging, state))
+            .unwrap_or_else(DivergenceFlow::normal)
+            .then(body_flow(body, diverging, state)),
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            selected_then,
+            ..
+        } => match selected_then {
+            Some(true) => body_flow(then_body, diverging, state),
+            Some(false) => else_body
+                .as_deref()
+                .map(|body| body_flow(body, diverging, state))
+                .unwrap_or_else(DivergenceFlow::normal),
+            None => body_flow(then_body, diverging, state).union(
+                else_body
+                    .as_deref()
+                    .map(|body| body_flow(body, diverging, state))
+                    .unwrap_or_else(DivergenceFlow::normal),
+            ),
+        },
+        Stmt::ContextBlock { fields, body, .. } => {
+            let fields = expr_list_flow(fields.iter().map(|(_, value, _)| value), diverging, state);
+            fields.then(body_flow(body, diverging, state))
         }
-        | Stmt::ComptimeSwitch {
-            arms, else_body, ..
-        } => {
-            arms.iter().any(|arm| loop_body_has_break(&arm.body))
-                || else_body.as_ref().is_some_and(|body| loop_body_has_break(body))
+        Stmt::AssumeDet {
+            reason_expr, body, ..
+        } => expr_flow(reason_expr, diverging, state).then(body_flow(body, diverging, state)),
+        Stmt::Yield(value, _) => expr_flow(value, diverging, state),
+        Stmt::ScopeMember { args, body, .. } => {
+            expr_list_flow(args.iter(), diverging, state).then(body_flow(body, diverging, state))
         }
-        _ => false,
-    })
+        Stmt::DeferClose { close, .. } => expr_flow(close, diverging, state),
+    }
 }
 
-fn expr_definitely_diverges(
+fn typed_lit_flow(
+    body: &crate::AST::TypedLitBody,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    match body {
+        crate::AST::TypedLitBody::Fields(fields) => {
+            expr_list_flow(fields.iter().map(|(_, _, value)| value), diverging, state)
+        }
+        crate::AST::TypedLitBody::Elements(elements) => {
+            expr_list_flow(elements.iter(), diverging, state)
+        }
+        crate::AST::TypedLitBody::Entries(entries) => expr_list_flow(
+            entries.iter().flat_map(|(key, value)| [key, value]),
+            diverging,
+            state,
+        ),
+        crate::AST::TypedLitBody::Value(value) => expr_flow(value, diverging, state),
+        crate::AST::TypedLitBody::ByteText(_) | crate::AST::TypedLitBody::Empty => {
+            DivergenceFlow::normal()
+        }
+    }
+}
+
+fn expr_flow(
     expr: &Expr,
     diverging: &std::collections::HashSet<String>,
     state: &ModuleState,
-) -> bool {
+) -> DivergenceFlow {
     match expr.without_parens() {
-        Expr::Todo { .. } | Expr::NoElse(_) => true,
-        Expr::Call(call) => {
-            call.name == Syntax::BUILTIN_PANIC
-                || diverging.contains(&call.name)
-                || call.args
-                    .iter()
-                    .any(|arg| expr_definitely_diverges(&arg.expr, diverging, state))
+        Expr::Str(parts, _) => {
+            let mut flow = DivergenceFlow::normal();
+            for part in parts {
+                if let StrPart::Interp(value, _) = part {
+                    flow = flow.then(expr_flow(value, diverging, state));
+                }
+            }
+            flow
         }
-        Expr::MethodCall {
-            receiver,
-            method,
-            args,
+        Expr::StrMatchLit(_, _)
+        | Expr::BinMatchLit(_, _)
+        | Expr::Int(_, _, _, _)
+        | Expr::Float(_, _, _, _)
+        | Expr::Bool(_, _)
+        | Expr::Unit(_)
+        | Expr::Char(_, _)
+        | Expr::Ident(_, _)
+        | Expr::Absent(_)
+        | Expr::ReduceMarker(_, _)
+        | Expr::ComptimeName { .. }
+        | Expr::Lambda(_) => DivergenceFlow::normal(),
+        Expr::ListLit(items, _) => expr_list_flow(items.iter(), diverging, state),
+        Expr::MemberSpread { base, .. } | Expr::Spread(base, _) => {
+            expr_flow(base, diverging, state)
+        }
+        Expr::MapLit(items, _) => expr_list_flow(
+            items.iter().flat_map(|(key, value)| [key, value]),
+            diverging,
+            state,
+        ),
+        Expr::Index { base, index, .. } | Expr::Range {
+            start: base,
+            end: index,
             ..
-        } => {
-            core_call_diverges(state, receiver, method)
-                || expr_definitely_diverges(receiver, diverging, state)
-                || args
-                    .iter()
-                    .any(|arg| expr_definitely_diverges(&arg.expr, diverging, state))
-        }
-        Expr::If {
-            then_body,
-            then_value,
-            else_body,
-            else_value,
-            ..
-        } => {
-            (body_definitely_diverges(then_body, diverging, state)
-                || expr_definitely_diverges(then_value, diverging, state))
-                && (body_definitely_diverges(else_body, diverging, state)
-                    || expr_definitely_diverges(else_value, diverging, state))
-        }
-        Expr::Try(inner, ..)
-        | Expr::Paren(inner, _)
-        | Expr::Tainted(inner, ..)
-        | Expr::Present(inner, _)
-        | Expr::Ok(inner, _)
-        | Expr::Err(inner, _)
-        | Expr::Copy(inner, _)
-        | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _)
-        | Expr::Place(inner, _, _) => expr_definitely_diverges(inner, diverging, state),
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
-            expr_definitely_diverges(inner, diverging, state)
-        }
-        Expr::Binary(_, left, right, _) => {
-            expr_definitely_diverges(left, diverging, state)
-                || expr_definitely_diverges(right, diverging, state)
-        }
-        Expr::Field(base, ..) | Expr::OptField { base, .. } => {
-            expr_definitely_diverges(base, diverging, state)
-        }
-        Expr::ListLit(items, _) => items
-            .iter()
-            .any(|item| expr_definitely_diverges(item, diverging, state)),
-        Expr::MapLit(items, _) => items.iter().any(|(key, value)| {
-            expr_definitely_diverges(key, diverging, state)
-                || expr_definitely_diverges(value, diverging, state)
-        }),
-        Expr::Index { base, index, .. } | Expr::Range { start: base, end: index, .. } => {
-            expr_definitely_diverges(base, diverging, state)
-                || expr_definitely_diverges(index, diverging, state)
-        }
+        } => expr_flow(base, diverging, state).then(expr_flow(index, diverging, state)),
         Expr::Slice {
             base,
             start,
@@ -3017,32 +3287,194 @@ fn expr_definitely_diverges(
             range,
             ..
         } => {
-            expr_definitely_diverges(base, diverging, state)
-                || expr_definitely_diverges(start, diverging, state)
-                || expr_definitely_diverges(end, diverging, state)
-                || range
-                    .as_deref()
-                    .is_some_and(|expr| expr_definitely_diverges(expr, diverging, state))
+            let mut flow = expr_flow(base, diverging, state)
+                .then(expr_flow(start, diverging, state))
+                .then(expr_flow(end, diverging, state));
+            if let Some(range) = range {
+                flow = flow.then(expr_flow(range, diverging, state));
+            }
+            flow
         }
-        Expr::CompareChain { operands, .. } => operands
-            .iter()
-            .any(|operand| expr_definitely_diverges(operand, diverging, state)),
-        Expr::StructLit { fields, .. } => fields.iter().any(|(_, _, value)| {
-            expr_definitely_diverges(value, diverging, state)
-        }),
-        Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
-            EnumLitArg::Positional(expr) => expr_definitely_diverges(expr, diverging, state),
-            EnumLitArg::Named { expr, .. } => expr_definitely_diverges(expr, diverging, state),
-        }),
-        Expr::OrFallback { value, .. } => expr_definitely_diverges(value, diverging, state),
-        Expr::CallValue { callee, args, .. } => {
-            expr_definitely_diverges(callee, diverging, state)
-                || args
-                    .iter()
-                    .any(|arg| expr_definitely_diverges(&arg.expr, diverging, state))
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            let flow = expr_flow(receiver, diverging, state)
+                .then(call_args_flow(args, diverging, state));
+            if flow.normal && core_call_diverges(state, receiver, method) {
+                DivergenceFlow {
+                    normal: false,
+                    diverged: true,
+                    ..flow
+                }
+            } else {
+                flow
+            }
         }
-        Expr::PtrFromAddr { addr, .. } => expr_definitely_diverges(addr, diverging, state),
-        _ => false,
+        Expr::UnitLit { .. } => DivergenceFlow::normal(),
+        Expr::Call(call) => {
+            let args = call_args_flow(&call.args, diverging, state);
+            let call_diverges =
+                call.name == Syntax::BUILTIN_PANIC || diverging.contains(&call.name);
+            if !call_diverges {
+                args
+            } else if args.normal {
+                DivergenceFlow {
+                    normal: false,
+                    returned: args.returned,
+                    diverged: true,
+                    broke: args.broke,
+                    continued: args.continued,
+                }
+            } else {
+                args
+            }
+        }
+        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. } => {
+            expr_flow(inner, diverging, state)
+        }
+        Expr::Binary(op, left, right, _) => {
+            let left = expr_flow(left, diverging, state);
+            let right = expr_flow(right, diverging, state);
+            if matches!(op, crate::AST::BinOp::And | crate::AST::BinOp::Or) {
+                if !left.normal {
+                    left
+                } else {
+                    DivergenceFlow {
+                        normal: true,
+                        returned: left.returned || right.returned,
+                        diverged: left.diverged || right.diverged,
+                        broke: left.broke || right.broke,
+                        continued: left.continued || right.continued,
+                    }
+                }
+            } else {
+                left.then(right)
+            }
+        }
+        Expr::CompareChain { operands, .. } => {
+            let mut flow = DivergenceFlow::normal();
+            for (index, operand) in operands.iter().enumerate() {
+                let prior = flow;
+                flow = flow.then(expr_flow(operand, diverging, state));
+                // A comparison can stop the chain before a later operand.
+                if index > 0 && prior.normal {
+                    flow.normal = true;
+                }
+            }
+            flow
+        }
+        Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Field(inner, _, _)
+        | Expr::OptField { base: inner, .. }
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Paren(inner, _) => expr_flow(inner, diverging, state),
+        Expr::StructLit { fields, .. } => {
+            expr_list_flow(fields.iter().map(|(_, _, value)| value), diverging, state)
+        }
+        Expr::TypedLit { body, .. } => typed_lit_flow(body, diverging, state),
+        Expr::EnumLit { args, .. } => expr_list_flow(
+            args.iter().filter_map(|arg| match arg {
+                EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
+                    Some(value)
+                }
+            }),
+            diverging,
+            state,
+        ),
+        Expr::Tainted(inner, ..) => expr_flow(inner, diverging, state),
+        Expr::Todo { .. } => DivergenceFlow {
+            diverged: true,
+            ..DivergenceFlow::none()
+        },
+        // This is the parser's omitted exhaustive fallthrough. It has no
+        // runtime outcome; treating it as Diverged makes every value dispatch
+        // appear to be a Never-producing call.
+        Expr::NoElse(_) => DivergenceFlow::none(),
+        Expr::PatternTest { subject, .. } => expr_flow(subject, diverging, state),
+        Expr::Try(inner, _, _, note) => {
+            let mut flow = expr_flow(inner, diverging, state);
+            if let Some(note) = note {
+                flow = flow.union(expr_flow(note, diverging, state));
+            }
+            flow
+        }
+        Expr::OrFallback { value, fallback, .. } => {
+            let value_flow = expr_flow(value, diverging, state);
+            if value_flow.normal {
+                value_flow.union(or_fallback_flow(fallback, diverging, state))
+            } else {
+                value_flow
+            }
+        }
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            let branches = branch_flow(then_body, then_value, diverging, state)
+                .union(branch_flow(else_body, else_value, diverging, state));
+            expr_flow(cond, diverging, state).then(branches)
+        }
+        Expr::TupleLit(fields, _, _) => {
+            expr_list_flow(fields.iter().map(|(_, value)| value), diverging, state)
+        }
+        Expr::CallValue { callee, args, .. } => expr_flow(callee, diverging, state)
+            .then(call_args_flow(args, diverging, state)),
+        Expr::PtrFromAddr { addr, .. } => expr_flow(addr, diverging, state),
+    }
+}
+
+fn or_fallback_flow(
+    fallback: &OrFallback,
+    diverging: &std::collections::HashSet<String>,
+    state: &ModuleState,
+) -> DivergenceFlow {
+    match fallback {
+        OrFallback::Value(value) => expr_flow(value, diverging, state),
+        OrFallback::Block { body, value, .. } => body_flow(body, diverging, state).then(
+            value
+                .as_deref()
+                .map(|value| expr_flow(value, diverging, state))
+                .unwrap_or_else(DivergenceFlow::normal),
+        ),
+        OrFallback::Return(value, _) => value
+            .as_deref()
+            .map(|value| expr_flow(value, diverging, state))
+            .unwrap_or_else(DivergenceFlow::normal)
+            .return_to_caller(),
+        OrFallback::Panic { args, .. } => {
+            let args = call_args_flow(args, diverging, state);
+            if args.normal {
+                DivergenceFlow {
+                    normal: false,
+                    returned: args.returned,
+                    diverged: true,
+                    broke: args.broke,
+                    continued: args.continued,
+                }
+            } else {
+                args
+            }
+        }
+        OrFallback::Break(_) | OrFallback::BreakLabel(_, _) => DivergenceFlow {
+            broke: true,
+            ..DivergenceFlow::none()
+        },
+        OrFallback::Continue(_) | OrFallback::ContinueLabel(_, _) => DivergenceFlow {
+            continued: true,
+            ..DivergenceFlow::none()
+        },
     }
 }
 

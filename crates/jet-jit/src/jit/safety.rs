@@ -2461,7 +2461,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     || (args.len() == 3 && matches!(&args[2].ty, Type::Option(_)));
                 return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
-            if module == "core.http.server" && method == "serve_once" {
+            if module == "core.http.server"
+                && matches!(method.as_str(), "serve_once" | "serve_once_listener")
+            {
                 return args.len() == 2
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }

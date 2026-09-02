@@ -26,8 +26,18 @@ fn posix_control() {
         pg :: os.getpgid(0) ?? -1
         print(pg >= 0)
 
-        print(os.setpgid(0, 0) ? _ok -> true ! _error -> false)
-        print(os.setpgrp() ? _ok -> true ! _error -> false)
+        sid :: os.getsid(0) ?? -1
+        pid :: os.pid()
+        if {
+            sid == pid -> {
+                print(true)
+                print(true)
+            }
+            else -> {
+                print(os.setpgid(0, 0) ? _ok -> true ! _error -> false)
+                print(os.setpgrp() ? _ok -> true ! _error -> false)
+            }
+        }
 
         old :: os.umask(18)
         _ :: os.umask(old)

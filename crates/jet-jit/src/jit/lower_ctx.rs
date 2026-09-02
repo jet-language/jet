@@ -571,9 +571,19 @@ impl LowerCtx<'_, '_> {
             self.lower_clone(&captured)
         } else {
             let key = TIR::local_place(outer);
+            // Resource bindings carry a generated Rust place in the capture
+            // tuple (`TStmt::Let` lowers the resource slot under that place),
+            // while ordinary locals use `local_place(outer)`. Resolve both
+            // spellings from the TIR fact; never infer resource naming here.
+            let capture_place = lambda
+                .captures
+                .iter()
+                .find(|(name, _, _)| name == outer)
+                .map(|(_, place, _)| place);
             let var = self
                 .vars
                 .get(&key)
+                .or_else(|| capture_place.and_then(|place| self.vars.get(place)))
                 .or_else(|| self.vars.get(outer))
                 .copied()
                 .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
@@ -926,11 +936,20 @@ impl LowerCtx<'_, '_> {
             self.b.ins().trap(TrapCode::UnreachableCodeReached);
             self.dead = true;
         }
-        Ok(Some(value.unwrap_or_else(|| {
+        let raw = value.unwrap_or_else(|| {
             clif_ty(ret_ty)
                 .map(|_| self.b.inst_results(call)[0])
                 .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0))
-        })))
+        });
+        // Resident hosts use a packed i64 ABI even when the Core row returns
+        // Bool. Narrow the host word at the one registry-driven boundary so a
+        // caller's declared i8 slot sees the same value as AOT/TIR.
+        let narrowed = if matches!(ret_ty, Type::Bool) && self.b.func.dfg.value_type(raw) != types::I8 {
+            self.b.ins().ireduce(types::I8, raw)
+        } else {
+            raw
+        };
+        Ok(Some(narrowed))
     }
 
     fn is_range_ty(ty: &Type) -> bool {
@@ -1013,6 +1032,10 @@ impl LowerCtx<'_, '_> {
                     }
                 } if self.meta.result_option_target(name)
             ),
+            TExprKind::HandleMethod {
+                op: THandleOp::DBQueryOne,
+                ..
+            } => true,
             // ONE fact, read by every seam: `??`, `match`, `if none`, `.map`,
             // `==`/`<`, interpolation, `print`, and the binding that records
             // `result_option_vars`. A builtin's carrier is decided in its host
@@ -16213,6 +16236,10 @@ impl LowerCtx<'_, '_> {
                                 ),
                                 "serve_once" if args.len() == 2 => (
                                     self.host.net_http.http_serve_once,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "serve_once_listener" if args.len() == 2 => (
+                                    self.host.net_http.http_serve_once_listener,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
                                 "request_id" if args.len() == 1 => (

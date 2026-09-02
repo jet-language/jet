@@ -8458,7 +8458,9 @@ fn ambient_http_server_call(
                     .map(|_| CtValue::Present(Box::new(CtValue::Unit)))
             }))
         }
-        "bind" if args.len() == 2 => {
+        "bind" if args.len() == 2
+            || (args.len() == 3
+                && matches!(args.get(2), Some(CtValue::Failed(CtReport::Clean(_))))) => {
             let address = match args.first() {
                 Some(CtValue::Str(address)) => address.clone(),
                 _ => return Err(unsupported("core.http.server bind address", span)),

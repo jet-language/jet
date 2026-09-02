@@ -86,7 +86,7 @@ pub(crate) const JET_ARITHMETIC_SUB_OVERFLOW: &str =
     "This subtraction overflows the value's type (the result is outside its range)";
 pub(crate) const JET_ARITHMETIC_MUL_OVERFLOW: &str =
     "This multiplication overflows the value's type (the result is outside its range)";
-pub(crate) const JET_ARITHMETIC_DIVIDE_ZERO: &str = "Divided by zero";
+pub(crate) const JET_ARITHMETIC_DIVIDE_ZERO: &str = "divided by zero";
 pub(crate) const JET_ARITHMETIC_DIVISION_ERROR: &str =
     "This division can't be done (dividing by zero, or overflow)";
 pub(crate) const JET_ARITHMETIC_DIVIDE_OVERFLOW: &str =

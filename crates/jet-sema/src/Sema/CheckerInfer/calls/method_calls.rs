@@ -5481,6 +5481,7 @@ impl<'a> Checker<'a> {
                 self.record_edge(crate::Sema::effect_key(Some(&trait_name), method), span);
                 *recv_type_out = Some(trait_name.clone());
                 let ret = self.check_trait_method_args(method, &msig, receiver, args, span);
+                *resolved_ret_out = ret.clone();
                 return ret;
             }
             // Keep the original single-trait wording byte-for-byte (it's snapshot-
