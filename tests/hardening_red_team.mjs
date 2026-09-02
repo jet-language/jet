@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -220,7 +220,103 @@ test("pre-produced lane adapter binds packet identities and emits canonical JSON
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, "");
     assert.equal(result.stdout, `${canonicalJson(receipt)}\n`);
+    assert.throws(
+      () => runReceiptRunner(JSON.stringify(packet), { receipt_dir: directory }),
+      (error) => error.code === "E_RECEIPT_CONSUMED" && /already been consumed/.test(error.message),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("receipt claims are atomic and a second claimant gets a stable consumed error", async () => {
+  const value = manifest();
+  const packet = makeContextPackets(value)[0];
+  const receipt = makeLaneReceipt(value, {
+    lane_id: packet.lane_id,
+    packet_digest: packet.context_digest,
+    context_id: "atomic-claim-context",
+    agent_id: "atomic-claim-agent",
+  });
+  const directory = receiptScratch();
+  writeFileSync(join(directory, `${packet.lane_id}.json`), JSON.stringify(receipt));
+  const run = () => new Promise((resolvePromise, reject) => {
+    const env = { ...process.env, [RECEIPT_DIR_ENV]: directory };
+    const child = spawn(process.execPath, [RECEIPT_RUNNER], {
+      cwd: ROOT,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (status) => resolvePromise({ status, stdout, stderr }));
+    child.stdin.end(JSON.stringify(packet));
+  });
+  try {
+    const results = await Promise.all([run(), run()]);
+    assert.deepEqual(results.map((item) => item.status).sort(), [0, 1]);
+    const failed = results.find((item) => item.status !== 0);
+    assert.match(failed.stderr, /already been consumed/);
+    assert.equal(failed.stdout, "");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("receipt open rejects a symlink swap after selection", () => {
+  const value = manifest();
+  const packet = makeContextPackets(value)[0];
+  const receipt = makeLaneReceipt(value, {
+    lane_id: packet.lane_id,
+    packet_digest: packet.context_digest,
+    context_id: "toctou-context",
+    agent_id: "toctou-agent",
+  });
+  const directory = receiptScratch();
+  const target = receiptScratch();
+  writeFileSync(join(directory, `${packet.lane_id}.json`), JSON.stringify(receipt));
+  writeFileSync(join(target, `${packet.lane_id}.json`), JSON.stringify(receipt));
+  try {
+    assert.throws(
+      () => runReceiptRunner(JSON.stringify(packet), {
+        receipt_dir: directory,
+        before_open: () => {
+          rmSync(join(directory, `${packet.lane_id}.json`));
+          symlinkSync(join(target, `${packet.lane_id}.json`), join(directory, `${packet.lane_id}.json`));
+        },
+      }),
+      (error) => error.code === "E_PATH" && /symlink|changed after selection/.test(error.message),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test("replay after consume fails closed even when the receipt is replaced", () => {
+  const value = manifest();
+  const packet = makeContextPackets(value)[0];
+  const receipt = makeLaneReceipt(value, {
+    lane_id: packet.lane_id,
+    packet_digest: packet.context_digest,
+    context_id: "replay-context",
+    agent_id: "replay-agent",
+  });
+  const directory = receiptScratch();
+  const path = join(directory, `${packet.lane_id}.json`);
+  writeFileSync(path, JSON.stringify(receipt));
+  try {
     assert.deepEqual(runReceiptRunner(JSON.stringify(packet), { receipt_dir: directory }), receipt);
+    writeFileSync(path, JSON.stringify(receipt));
+    assert.throws(
+      () => runReceiptRunner(JSON.stringify(packet), { receipt_dir: directory }),
+      (error) => error.code === "E_RECEIPT_CONSUMED" && /already been consumed/.test(error.message),
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

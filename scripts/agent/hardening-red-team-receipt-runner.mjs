@@ -13,7 +13,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, parse, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bundleIdentity, makeResultBundle } from "./hardening-oracle-layer.mjs";
 
@@ -702,67 +702,161 @@ function assertNoSymlinkComponents(path) {
   }
 }
 
+function directoryAuthority(fd) {
+  return `/proc/self/fd/${fd}`;
+}
+
 function receiptDirectory(configured, cwd) {
   if (typeof configured !== "string" || !configured.trim()) {
     fail(`${RECEIPT_DIR_ENV} must name an explicit receipt directory`, "E_CONFIG");
   }
   const requested = resolve(cwd, configured);
   assertNoSymlinkComponents(requested);
-  let stat;
+  let canonical;
   try {
-    stat = lstatSync(requested);
-  } catch (error) {
+    canonical = realpathSync(requested);
+  } catch {
     fail(`receipt directory is unavailable: ${requested}`, "E_PATH");
   }
-  if (stat.isSymbolicLink() || !stat.isDirectory()) fail(`receipt directory is not a regular directory: ${requested}`, "E_PATH");
-  const canonical = realpathSync(requested);
   assertNoSymlinkComponents(canonical);
-  return canonical;
+  let stat;
+  try {
+    stat = lstatSync(canonical);
+  } catch {
+    fail(`receipt directory is unavailable: ${requested}`, "E_PATH");
+  }
+  if (!stat.isDirectory()) fail(`receipt directory is not a regular directory: ${requested}`, "E_PATH");
+
+  let fd;
+  try {
+    fd = openSync(
+      canonical,
+      constants.O_RDONLY | (constants.O_DIRECTORY || 0) | (constants.O_NOFOLLOW || 0),
+    );
+    if (realpathSync(directoryAuthority(fd)) !== canonical) {
+      fail("receipt directory changed while opening", "E_PATH");
+    }
+    return { path: canonical, fd, authority: directoryAuthority(fd) };
+  } catch (error) {
+    if (fd !== undefined) closeSync(fd);
+    if (error instanceof ReceiptRunnerError) throw error;
+    fail(`receipt directory is unavailable: ${requested}`, "E_PATH");
+  }
 }
 
 function selectReceiptFile(directory, laneId) {
   const expectedName = `${laneId}.json`;
-  const entries = readdirSync(directory, { withFileTypes: true });
+  const consumedName = `.consumed-${laneId}.json`;
+  const entries = readdirSync(directory.authority, { withFileTypes: true });
   const names = new Set();
+  let selected;
+  let consumed = false;
   for (const entry of entries) {
-    const candidate = join(directory, entry.name);
-    const stat = lstatSync(candidate);
-    if (stat.isSymbolicLink()) fail(`receipt directory contains symlink: ${entry.name}`, "E_PATH");
-    if (!stat.isFile()) fail(`receipt directory contains non-file data: ${entry.name}`, "E_PATH");
-    if (!LANE_FILE_PATTERN.test(entry.name)) fail(`receipt directory contains unexpected receipt file: ${entry.name}`, "E_PATH");
-    if (names.has(entry.name)) fail(`receipt directory contains duplicate receipt file: ${entry.name}`, "E_PATH");
-    names.add(entry.name);
+    const name = entry.name;
+    if (!LANE_FILE_PATTERN.test(name) && !CONSUMED_MARKER_PATTERN.test(name)) {
+      fail(`receipt directory contains unexpected receipt file: ${name}`, "E_PATH");
+    }
+    const candidate = join(directory.authority, name);
+    let stat;
+    try {
+      stat = lstatSync(candidate);
+    } catch (error) {
+      fail(`receipt directory entry changed while selecting: ${name}`, "E_PATH");
+    }
+    if (stat.isSymbolicLink()) fail(`receipt directory contains symlink: ${name}`, "E_PATH");
+    if (!stat.isFile()) fail(`receipt directory contains non-file data: ${name}`, "E_PATH");
+    if (names.has(name)) fail(`receipt directory contains duplicate receipt file: ${name}`, "E_PATH");
+    names.add(name);
+    if (name === expectedName) selected = { name, dev: stat.dev, ino: stat.ino };
+    if (name === consumedName) consumed = true;
   }
-  if (!names.has(expectedName)) fail(`missing pre-produced lane receipt: ${expectedName}`, "E_RECEIPT");
-  const candidate = resolve(directory, expectedName);
-  const rel = relative(directory, candidate);
-  if (!rel || rel.startsWith(`..${sep}`) || rel === ".." || isAbsolute(rel)) fail("lane receipt path escapes receipt directory", "E_PATH");
-  assertNoSymlinkComponents(candidate);
-  return candidate;
+  if (consumed) fail(`lane receipt ${expectedName} has already been consumed`, "E_RECEIPT_CONSUMED");
+  if (selected === undefined) fail(`missing pre-produced lane receipt: ${expectedName}`, "E_RECEIPT");
+  return selected;
 }
 
-function readReceiptFile(path) {
+function claimReceipt(directory, packet) {
+  const markerName = `.consumed-${packet.lane_id}.json`;
+  const markerPath = join(directory.authority, markerName);
   const noFollow = constants.O_NOFOLLOW || 0;
   let fd;
   try {
-    fd = openSync(path, constants.O_RDONLY | noFollow);
+    fd = openSync(
+      markerPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow,
+      0o600,
+    );
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      fail(`lane receipt ${packet.lane_id}.json has already been consumed`, "E_RECEIPT_CONSUMED");
+    }
+    if (error.code === "ELOOP") {
+      fail(`consumed marker is a symlink: ${markerName}`, "E_PATH");
+    }
+    fail(`cannot claim lane receipt ${packet.lane_id}.json: ${error.message}`, "E_RECEIPT");
+  }
+  try {
+    const marker = {
+      schema: CONSUMED_MARKER_SCHEMA,
+      schema_version: RED_TEAM_SCHEMA_VERSION,
+      session_id: packet.session_id,
+      packet_digest: packet.context_digest,
+      lane_id: packet.lane_id,
+    };
+    writeFileSync(fd, `${canonicalJson(marker)}\n`, "utf8");
+    fsyncSync(fd);
+    fsyncSync(directory.fd);
+  } catch (error) {
+    if (error instanceof ReceiptRunnerError) throw error;
+    fail(`cannot persist lane receipt claim ${packet.lane_id}.json: ${error.message}`, "E_RECEIPT");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readReceiptFile(directory, selected) {
+  const path = join(directory.authority, selected.name);
+  const displayPath = join(directory.path, selected.name);
+  const noFollow = constants.O_NOFOLLOW || 0;
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK || 0) | noFollow);
     const stat = fstatSync(fd);
-    if (!stat.isFile()) fail(`lane receipt is not a regular file: ${path}`, "E_PATH");
+    if (!stat.isFile()) fail(`lane receipt is not a regular file: ${displayPath}`, "E_PATH");
+    if (stat.dev !== selected.dev || stat.ino !== selected.ino) {
+      fail(`lane receipt changed after selection: ${selected.name}`, "E_PATH");
+    }
     return readFileSync(fd, "utf8");
   } catch (error) {
     if (error instanceof ReceiptRunnerError) throw error;
-    fail(`cannot read lane receipt ${path}: ${error.message}`, "E_RECEIPT");
+    if (error.code === "ELOOP") {
+      fail(`lane receipt changed to a symlink after selection: ${selected.name}`, "E_PATH");
+    }
+    fail(`cannot read lane receipt ${displayPath}: ${error.message}`, "E_RECEIPT");
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
 }
 
-export function loadLaneReceipt(packet, { receipt_dir = undefined, cwd = process.cwd() } = {}) {
+export function loadLaneReceipt(
+  packet,
+  { receipt_dir = undefined, cwd = process.cwd(), before_open = undefined } = {},
+) {
   validatePacket(packet);
   const directory = receiptDirectory(receipt_dir ?? process.env[RECEIPT_DIR_ENV], cwd);
-  const path = selectReceiptFile(directory, packet.lane_id);
-  const receipt = parseJson(readReceiptFile(path), `lane receipt ${path}`);
-  return validateLaneReceipt(receipt, packet);
+  try {
+    const selected = selectReceiptFile(directory, packet.lane_id);
+    if (before_open !== undefined) {
+      if (typeof before_open !== "function") fail("before_open must be a function", "E_CONFIG");
+      before_open({ lane_id: packet.lane_id, receipt_name: selected.name });
+    }
+    claimReceipt(directory, packet);
+    const receiptPath = join(directory.path, selected.name);
+    const receipt = parseJson(readReceiptFile(directory, selected), `lane receipt ${receiptPath}`);
+    return validateLaneReceipt(receipt, packet);
+  } finally {
+    closeSync(directory.fd);
+  }
 }
 
 export function runReceiptRunner(packetText, options = {}) {
