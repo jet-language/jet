@@ -133,3 +133,39 @@ test("partial scope can never publish as complete", () => {
   assert.equal(status.publication.status, "incomplete");
   assert.match(status.publication.blockers.join("\n"), /run scope is partial/);
 });
+
+test("projects live reload comparison rows and axis publication", () => {
+  const report = fixture("axis_live_reload");
+  report.axes = {
+    live_reload: {
+      status: "complete",
+      schema: "gauntlet-axis-live-reload-v1",
+      metric: "reload_latency_ms",
+      metrics: {
+        "jet-dev": { cold_reload_latency_ms: 100, warm_reload_latency_ms: 110 },
+        vite: { cold_reload_latency_ms: 90, warm_reload_latency_ms: 105 },
+      },
+      comparisons: {
+        vite: {
+          verdict: "parity",
+          cold: { status: "measured", jet: 100, peer: 90, ratio: 1.111, verdict: "loss" },
+          warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "parity" },
+        },
+      },
+      verdicts: { vite: "parity" },
+      publication: { status: "ready", blockers: [] },
+    },
+  };
+  const status = projectStatus(report);
+  assert.equal(status.publication.complete, true);
+  assert.deepEqual(status.axes.live_reload.metrics.vite, {
+    cold_reload_latency_ms: 90,
+    warm_reload_latency_ms: 105,
+  });
+  assert.deepEqual(status.axes.live_reload.comparisons.vite, {
+    verdict: "parity",
+    cold: { status: "measured", jet: 100, peer: 90, ratio: 1.111, verdict: "loss" },
+    warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "parity" },
+  });
+  assert.deepEqual(status.axes.live_reload.verdicts, { vite: "parity" });
+});

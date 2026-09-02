@@ -172,14 +172,42 @@ function projectSummary(report, cells) {
   return Object.fromEntries(SUMMARY_KEYS.map((key) => [key, countValue(source[key], fallback[key])]));
 }
 
+function projectAxisComparison(value) {
+  const record = asObject(value);
+  return {
+    verdict: record.verdict ?? null,
+    cold: projectTier(record.cold),
+    warm: projectTier(record.warm),
+  };
+}
+
+function projectAxisMetrics(value) {
+  return Object.fromEntries(Object.entries(asObject(value)).map(([id, metric]) => {
+    const record = asObject(metric);
+    return [id, {
+      cold_reload_latency_ms: finiteNumber(record.cold_reload_latency_ms),
+      warm_reload_latency_ms: finiteNumber(record.warm_reload_latency_ms),
+    }];
+  }));
+}
+
 function projectAxes(report) {
   return Object.fromEntries(Object.entries(asObject(report?.axes)).map(([id, value]) => {
     const axis = asObject(value);
     const publication = asObject(axis.publication);
+    const comparisons = Object.fromEntries(Object.entries(asObject(axis.comparisons))
+      .map(([peer, comparison]) => [peer, projectAxisComparison(comparison)]));
+    const declaredVerdicts = asObject(axis.verdicts);
+    const verdicts = Object.keys(declaredVerdicts).length
+      ? Object.fromEntries(Object.entries(declaredVerdicts).map(([peer, verdict]) => [peer, typeof verdict === "string" ? verdict : null]))
+      : Object.fromEntries(Object.entries(comparisons).map(([peer, comparison]) => [peer, comparison.verdict]));
     return [id, {
       status: axis.status ?? "unmeasured",
       schema: axis.schema ?? axis.contract?.schema ?? null,
       metric: axis.metric ?? axis.contract?.metric ?? null,
+      metrics: projectAxisMetrics(axis.metrics),
+      comparisons,
+      verdicts,
       publication: {
         status: publication.status ?? "blocked",
         blockers: asArray(publication.blockers),
@@ -192,11 +220,12 @@ function projectPublication(report, scope) {
   const source = asObject(report?.publication);
   const blockers = [...asArray(source.blockers)];
   const fullScope = scope === "full_matrix";
-  if (!fullScope && !blockers.includes("run scope is partial; full matrix publication requires no --entry")) {
+  const axisScope = typeof scope === "string" && scope.startsWith("axis_");
+  if (!fullScope && !axisScope && !blockers.includes("run scope is partial; full matrix publication requires no --entry")) {
     blockers.push("run scope is partial; full matrix publication requires no --entry");
   }
   if (!Object.keys(source).length) blockers.push("publication is missing");
-  const complete = fullScope && source.status === "complete" && source.complete === true && blockers.length === 0;
+  const complete = (fullScope || axisScope) && source.status === "complete" && source.complete === true && blockers.length === 0;
   return {
     scope: source.scope ?? scope,
     status: complete ? "complete" : "incomplete",

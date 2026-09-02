@@ -2,11 +2,15 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 let version = 1;
+let watcherReady = false;
 
 export default {
   plugins: [{
     name: "jet-gauntlet-readiness",
     configureServer(server) {
+      server.watcher.on("ready", () => {
+        watcherReady = true;
+      });
       server.watcher.on("change", (file) => {
         if (path.basename(file) === "client.mjs") version += 1;
       });
@@ -25,6 +29,12 @@ export default {
         }
         if (pathname !== "/__axis_ready") {
           next();
+          return;
+        }
+        if (!watcherReady) {
+          response.statusCode = 503;
+          response.setHeader("content-type", "text/plain; charset=utf-8");
+          response.end("watcher starting");
           return;
         }
         response.statusCode = 200;

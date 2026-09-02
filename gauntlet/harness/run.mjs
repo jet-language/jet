@@ -141,26 +141,30 @@ function shellQuote(value) {
 }
 
 function parseArgs(argv) {
-  const options = { runs: null, entry: null, jetBin: null, entriesDir: null };
+  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--entry" || arg === "--jet-bin" || arg === "--runs" || arg === "--entries-dir") {
+    if (arg === "--entry" || arg === "--jet-bin" || arg === "--runs" || arg === "--entries-dir" || arg === "--axis") {
       if (i + 1 >= argv.length) throw new Error(`${arg} needs a value`);
       const value = argv[++i];
       if (arg === "--entry") options.entry = value;
       if (arg === "--jet-bin") options.jetBin = value;
       if (arg === "--entries-dir") options.entriesDir = value;
       if (arg === "--runs") options.runs = Number.parseInt(value, 10);
+      if (arg === "--axis") options.axis = value;
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node gauntlet/harness/run.mjs [--entry name] [--jet-bin path] [--runs n] [--entries-dir path]");
+      console.log("usage: node gauntlet/harness/run.mjs [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload]");
       process.exit(0);
     }
     throw new Error(`unknown argument: ${arg}`);
   }
   if (options.runs !== null && (!Number.isInteger(options.runs) || options.runs < 1)) {
     throw new Error("--runs must be a positive integer");
+  }
+  if (options.axis !== null && !["live_reload", "memory_safety_fuzz"].includes(options.axis)) {
+    throw new Error("--axis must be live_reload or memory_safety_fuzz");
   }
   return options;
 }
@@ -3237,11 +3241,12 @@ function unmeasuredAxis(id, axis, reason) {
   };
 }
 
-async function runAxes(manifest, runDir, jetBin, fullScope, runId) {
+async function runAxes(manifest, runDir, jetBin, fullScope, runId, selectedAxis = null) {
   const contracts = manifest?.axes ?? {};
   const axes = {};
   for (const [id, axis] of Object.entries(contracts)) {
-    if (!fullScope) {
+    if (selectedAxis !== null && id !== selectedAxis) continue;
+    if (!fullScope && selectedAxis === null) {
       axes[id] = unmeasuredAxis(id, axis, "axis measurements require the full corpus scope");
       continue;
     }
@@ -3276,14 +3281,34 @@ async function runAxes(manifest, runDir, jetBin, fullScope, runId) {
   }
   return axes;
 }
-
-function publicationState({ fullScope, loaded, skipped, matrix, manifest, sourceMeasurements, results, scoreboard, axes, validationIssues }) {
+function publicationState({ fullScope, loaded, skipped, matrix, manifest, sourceMeasurements, results, scoreboard, axes, validationIssues, axisId = null }) {
   const loadedEntries = Array.isArray(loaded) ? loaded : [];
   const skippedEntries = Array.isArray(skipped) ? skipped : [];
   const measuredResults = Array.isArray(results) ? results : [];
   const matrixCells = Array.isArray(matrix?.cells) ? matrix.cells : [];
   const scoreboardCells = Array.isArray(scoreboard?.cells) ? scoreboard.cells : [];
   const summary = scoreboard?.summary && typeof scoreboard.summary === "object" ? scoreboard.summary : {};
+  if (axisId !== null) {
+    const axis = axes?.[axisId];
+    const axisBlockers = Array.isArray(validationIssues) ? [...validationIssues] : [];
+    if (!axis) {
+      axisBlockers.push(`${axisId} axis is missing`);
+    } else {
+      if (axis.status !== "complete") axisBlockers.push(`${axisId} axis is ${axis.status ?? "unreported"}`);
+      if (axis.publication?.status !== "ready") {
+        axisBlockers.push(`${axisId} axis publication is ${axis.publication?.status ?? "unreported"}`);
+      }
+      axisBlockers.push(...(axis.publication?.blockers ?? []));
+    }
+    const uniqueAxisBlockers = [...new Set(axisBlockers.filter((blocker) => typeof blocker === "string" && blocker.length > 0))];
+    return {
+      scope: `axis_${axisId}`,
+      status: uniqueAxisBlockers.length ? "incomplete" : "complete",
+      complete: uniqueAxisBlockers.length === 0,
+      blockers: uniqueAxisBlockers,
+      allowed_uncovered_cells: [],
+    };
+  }
   const blockers = Array.isArray(validationIssues) ? [...validationIssues] : [];
   blockers.push(...measuredResults.flatMap((result) => validateResultShape(result, matrix)));
   blockers.push(...(Array.isArray(scoreboard?.validation_issues) ? scoreboard.validation_issues : []));
@@ -3418,12 +3443,13 @@ async function main() {
   const matrix = JSON.parse(matrixText);
   const entriesDir = path.resolve(process.cwd(), options.entriesDir ?? path.join(repoDir, "gauntlet/entries"));
   const defaultEntriesDir = path.resolve(path.join(repoDir, "gauntlet/entries"));
-  const fullScope = entriesDir === defaultEntriesDir && options.entry === null;
+  const axisOnly = options.axis !== null;
+  const fullScope = !axisOnly && entriesDir === defaultEntriesDir && options.entry === null;
   const manifestPath = path.join(repoDir, "gauntlet/measurement-manifest.json");
   const sourceManifest = entriesDir === defaultEntriesDir
     ? JSON.parse(await fs.readFile(manifestPath, "utf8"))
     : null;
-  const sourceMeasurements = sourceManifest ? await measureSourceManifest(entriesDir, sourceManifest, matrix) : null;
+  const sourceMeasurements = !axisOnly && sourceManifest ? await measureSourceManifest(entriesDir, sourceManifest, matrix) : null;
   const runId = `${dateStamp().replaceAll("-", "")}-${process.pid}-${Date.now().toString(36)}`;
   const runDir = path.join(process.env.HOME ?? ".", ".cache/jet-gauntlet/work", runId);
   await fs.mkdir(runDir, { recursive: true });
@@ -3431,8 +3457,12 @@ async function main() {
   const toolchains = await toolchainFingerprint(runDir, jetBin);
   const dev = await devAvailable(jetBin, runDir);
   if (!dev) console.warn("WARN jet dev unavailable; skipping Jet dev tier");
-  const { loaded, skipped } = await loadEntries(entriesDir, options.entry);
-  const validationIssues = await validateCorpus(entriesDir, loaded, skipped, matrix, sourceManifest, fullScope);
+  const { loaded, skipped } = axisOnly
+    ? { loaded: [], skipped: [] }
+    : await loadEntries(entriesDir, options.entry);
+  const validationIssues = axisOnly
+    ? []
+    : await validateCorpus(entriesDir, loaded, skipped, matrix, sourceManifest, fullScope);
   for (const issue of validationIssues) console.warn(`WARN corpus: ${issue}`);
   const results = [];
   for (const item of loaded) {
@@ -3457,26 +3487,28 @@ async function main() {
     }
     console.error(`gauntlet: entry ${item.entry.name} done`);
   }
-  const covered = new Set(results.flatMap((result) => result.entry.cells ?? []));
-  const uncovered = (matrix.cells ?? []).map((cell) => cell.id).filter((id) => !covered.has(id));
-  const tower = await readLiveTowerCards();
-  const scoreboard = buildScoreboard(matrix, results, sourceManifest, tower);
-  const axes = await runAxes(sourceManifest, runDir, jetBin, fullScope, runId);
-  const publication = publicationState({ fullScope, loaded, skipped, matrix, manifest: sourceManifest, sourceMeasurements, results, scoreboard, axes, validationIssues });
+  const covered = axisOnly ? new Set() : new Set(results.flatMap((result) => result.entry.cells ?? []));
+  const uncovered = axisOnly ? [] : (matrix.cells ?? []).map((cell) => cell.id).filter((id) => !covered.has(id));
+  const tower = axisOnly ? null : await readLiveTowerCards();
+  const scoreboard = axisOnly
+    ? { primary_metric_by_mode: MODE_PRIMARY_METRIC, verdict_policy: RATIO_VERDICTS, summary: {}, cells: [] }
+    : buildScoreboard(matrix, results, sourceManifest, tower);
+  const axes = await runAxes(sourceManifest, runDir, jetBin, fullScope || axisOnly, runId, options.axis);
+  const publication = publicationState({ fullScope, loaded, skipped, matrix, manifest: sourceManifest, sourceMeasurements, results, scoreboard, axes, validationIssues, axisId: options.axis });
   const expectedEntryNames = sourceManifest?.corpus?.entry_names ?? [];
-  const allowedUncovered = new Set(sourceManifest?.corpus?.allowed_uncovered_cells ?? MATRIX_UNCOVERED_DEFAULTS);
+  const allowedUncovered = axisOnly ? new Set() : new Set(sourceManifest?.corpus?.allowed_uncovered_cells ?? MATRIX_UNCOVERED_DEFAULTS);
   const unexpectedUncovered = uncovered.filter((cell) => !allowedUncovered.has(cell));
   const denominator = {
-    entry_names_pass: fullScope && skipped.length === 0 && loaded.length === expectedEntryNames.length && equalStringArrays(loaded.map((item) => item.directoryName ?? path.basename(item.dir)), expectedEntryNames),
-    matrix_coverage_pass: unexpectedUncovered.length === 0,
-    source_pairs_pass: sourceMeasurements?.coverage?.denominator_pass ?? false,
+    entry_names_pass: axisOnly || (fullScope && skipped.length === 0 && loaded.length === expectedEntryNames.length && equalStringArrays(loaded.map((item) => item.directoryName ?? path.basename(item.dir)), expectedEntryNames)),
+    matrix_coverage_pass: axisOnly || unexpectedUncovered.length === 0,
+    source_pairs_pass: axisOnly || (sourceMeasurements?.coverage?.denominator_pass ?? false),
   };
   denominator.pass = denominator.entry_names_pass && denominator.matrix_coverage_pass && denominator.source_pairs_pass;
   const report = {
     contract: "gauntlet-report-v1",
     generated: new Date().toISOString(),
     run_id: runId,
-    options: { entry: options.entry, jet_bin: jetBin, runs: options.runs, scope: fullScope ? "full_matrix" : "partial_entry" },
+    options: { entry: options.entry, axis: options.axis, jet_bin: jetBin, runs: options.runs, scope: axisOnly ? `axis_${options.axis}` : (fullScope ? "full_matrix" : "partial_entry") },
     matrix_version: matrix.version,
     matrix_rails: matrix.rails,
     entries_dir: entriesDir,
@@ -3523,7 +3555,7 @@ async function main() {
   const resultPath = path.join(resultDir, `${dateStamp()}.json`);
   await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`);
   const statusPath = path.join(repoDir, "gauntlet/status.json");
-  if (fullScope) {
+  if (fullScope || axisOnly) {
     const status = projectStatus(report, resultPath);
     await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
     console.log(`status\t${statusPath}`);
@@ -3561,6 +3593,12 @@ async function main() {
   for (const [id, axis] of Object.entries(axes)) {
     console.log(`axis\t${id}\t${axis.status}`);
     for (const blocker of axis.publication?.blockers ?? []) console.log(`axis-blocker\t${id}\t${blocker}`);
+    if (id === options.axis) {
+      console.log("axis-rival\tcold_reload_ms\twarm_reload_ms\tverdict");
+      for (const [rival, comparison] of Object.entries(axis.comparisons ?? {})) {
+        console.log(`${rival}\t${comparison.cold?.jet ?? "-"}:${comparison.cold?.peer ?? "-"}\t${comparison.warm?.jet ?? "-"}:${comparison.warm?.peer ?? "-"}\t${comparison.verdict ?? "-"}`);
+      }
+    }
   }
   if (!publication.complete) process.exitCode = 1;
 }

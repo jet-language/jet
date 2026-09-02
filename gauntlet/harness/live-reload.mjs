@@ -11,6 +11,7 @@ const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepoDir = path.resolve(harnessDir, "../..");
 const AXIS_OUTPUT_LIMIT = 4_000;
 const AXIS_HTTP_BODY_LIMIT = 4 * 1024 * 1024;
+const AXIS_READY_SETTLE_MS = 150;
 const PROCESS_TERM_TIMEOUT_MS = 5_000;
 const PROCESS_KILL_TIMEOUT_MS = 1_000;
 
@@ -63,7 +64,8 @@ function axisCommand(command, replacements) {
       (value, [needle, replacement]) => value.replaceAll(`{${needle}}`, String(replacement)),
       part,
     );
-    return expanded === "jet" && replacements.jet_bin ? replacements.jet_bin : expanded;
+    if (expanded === "jet" && replacements.jet_bin) return path.resolve(replacements.jet_bin);
+    return expanded;
   });
 }
 
@@ -398,6 +400,51 @@ async function waitForAxisState({ child, port, readiness, output, expectedMarker
   const acknowledged = await waitForAxisOutput(child, port, output, expectedMarker, staleMarker, remaining, pollIntervalMs);
   return { ready, output: acknowledged, observed_at_ms: acknowledged.observed_at_ms };
 }
+async function waitForAxisReadyStable(child, port, readiness, timeoutMs, pollIntervalMs, settleMs = AXIS_READY_SETTLE_MS) {
+  if (!readiness || typeof readiness.path !== "string" || readiness.path.length === 0) {
+    throw new Error("axis runner readiness must declare a path");
+  }
+  const started = monotonicNow();
+  const expectedStatus = readiness.status ?? 200;
+  let stableValue = null;
+  let stableSince = null;
+  let lastReason = "readiness endpoint did not return a stable numeric counter";
+  while (monotonicNow() - started < timeoutMs) {
+    const failure = childFailure(child);
+    if (failure) throw new Error(failure);
+    const remaining = Math.max(1, timeoutMs - (monotonicNow() - started));
+    const result = await httpProbe(port, { path: readiness.path }, Math.min(1_000, remaining));
+    if (result.ok && result.status === expectedStatus) {
+      const body = result.body.trim();
+      const value = Number(body);
+      if (body.length > 0 && Number.isSafeInteger(value) && value >= 0) {
+        const observedAt = monotonicNow();
+        if (stableValue !== value) {
+          stableValue = value;
+          stableSince = observedAt;
+        } else if (observedAt - stableSince >= settleMs) {
+          return { value, body: result.body, status: result.status, waited_ms: observedAt - started, observed_at_ms: observedAt };
+        }
+        lastReason = `readiness counter ${JSON.stringify(result.body)} is still settling`;
+      } else {
+        stableValue = null;
+        stableSince = null;
+        lastReason = `readiness body was not a non-negative integer: ${JSON.stringify(result.body)}`;
+      }
+    } else if (!result.ok) {
+      if (result.fatal) throw new Error(result.error);
+      stableValue = null;
+      stableSince = null;
+      lastReason = result.error;
+    } else {
+      stableValue = null;
+      stableSince = null;
+      lastReason = `readiness status ${result.status}, expected ${expectedStatus}`;
+    }
+    await sleep(Math.min(pollIntervalMs, Math.max(1, timeoutMs - (monotonicNow() - started))));
+  }
+  throw new Error(`${readiness.path} did not become stable within ${timeoutMs}ms: ${lastReason}`);
+}
 
 async function normalizeAxisMarker(file, from, to) {
   const text = await fs.readFile(file, "utf8");
@@ -568,6 +615,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
       timeoutMs: budget.startup_timeout_ms,
       pollIntervalMs: budget.poll_interval_ms,
     });
+    await waitForAxisReadyStable(child, port, runner.readiness, budget.startup_timeout_ms, budget.poll_interval_ms);
     sample.readiness = {
       path: runner.readiness.path,
       initial: initial.ready.value,
@@ -591,6 +639,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
         previousValue: previous,
       });
       warmup.push({ edit: warmedAfterEdit, readiness: warmedAfter.ready.value, output: warmedAfter.output.marker });
+      await waitForAxisReadyStable(child, port, runner.readiness, budget.reload_timeout_ms, budget.poll_interval_ms);
       previous = warmedAfter.ready.value;
       const warmedBeforeEdit = await applyAxisEdit(editPath, budget.edit_to, budget.edit_from);
       const warmedBefore = await waitForAxisState({
@@ -605,6 +654,7 @@ export async function runLiveReloadSample({ runner, stageDir, editPath, phase, i
         previousValue: previous,
       });
       warmup.push({ edit: warmedBeforeEdit, readiness: warmedBefore.ready.value, output: warmedBefore.output.marker });
+      await waitForAxisReadyStable(child, port, runner.readiness, budget.reload_timeout_ms, budget.poll_interval_ms);
       previous = warmedBefore.ready.value;
       sample.warmup = { edits: warmup, measured: false };
     }
@@ -681,6 +731,47 @@ function median(values) {
   const middle = Math.floor(numbers.length / 2);
   return numbers.length % 2 === 1 ? numbers[middle] : (numbers[middle - 1] + numbers[middle]) / 2;
 }
+function liveReloadPhaseComparison(jet, peer) {
+  const measured = Number.isFinite(jet) && Number.isFinite(peer) && peer > 0;
+  const ratio = measured ? jet / peer : null;
+  return {
+    status: measured ? "measured" : "unmeasured",
+    jet,
+    peer,
+    ratio,
+    verdict: measured ? (ratio < 1 ? "win" : "loss") : "unmeasured",
+  };
+}
+
+function liveReloadAggregateVerdict(phases) {
+  const verdicts = Object.values(phases).map((phase) => phase.verdict);
+  if (verdicts.some((verdict) => verdict === "loss")) return "loss";
+  if (verdicts.length > 0 && verdicts.every((verdict) => verdict === "win")) return "win";
+  if (verdicts.length > 0 && verdicts.every((verdict) => verdict === "parity")) return "parity";
+  return "unmeasured";
+}
+
+function liveReloadComparisons(runners) {
+  const jet = runners.find((runner) => runner.id === "jet-dev");
+  const jetSummary = jet?.summary ?? {};
+  return Object.fromEntries(runners
+    .filter((runner) => runner.id !== "jet-dev")
+    .map((runner) => {
+      const peerSummary = runner.summary ?? {};
+      const phases = {
+        cold: liveReloadPhaseComparison(
+          jetSummary.cold?.median_reload_latency_ms ?? null,
+          peerSummary.cold?.median_reload_latency_ms ?? null,
+        ),
+        warm: liveReloadPhaseComparison(
+          jetSummary.warm?.median_reload_latency_ms ?? null,
+          peerSummary.warm?.median_reload_latency_ms ?? null,
+        ),
+      };
+      return [runner.id, { verdict: liveReloadAggregateVerdict(phases), ...phases }];
+    }));
+}
+
 
 export async function runLiveReloadRunner(axis, runner, axisDir, jetBin, { repoDir = defaultRepoDir, envRunner = null, envRunnerArgs = [] } = {}) {
   const runnerDir = path.join(axisDir, runner.id.replaceAll(/[^A-Za-z0-9_.-]/g, "_"));
@@ -754,6 +845,8 @@ export async function runLiveReloadAxis(axis, runDir, jetBin, options = {}) {
     cold_reload_latency_ms: runner.summary?.cold?.median_reload_latency_ms ?? null,
     warm_reload_latency_ms: runner.summary?.warm?.median_reload_latency_ms ?? null,
   }]));
+  const comparisons = liveReloadComparisons(runners);
+  const verdicts = Object.fromEntries(Object.entries(comparisons).map(([id, comparison]) => [id, comparison.verdict]));
   return {
     id: "live_reload",
     required: axis.status === "required",
@@ -768,6 +861,8 @@ export async function runLiveReloadAxis(axis, runDir, jetBin, options = {}) {
     phases: axis.phases,
     fairness: axis.fairness,
     metrics,
+    comparisons,
+    verdicts,
     runners,
     publication: {
       status: blockers.length === 0 ? "ready" : "blocked",
@@ -789,4 +884,6 @@ export const liveReloadInternals = {
   validateSampleTimestamps,
   waitForAxisOutput,
   waitForAxisReady,
+  waitForAxisReadyStable,
+  liveReloadComparisons,
 };
