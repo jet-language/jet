@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jet explain-build · shop</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090d11;
+      --panel: #111820;
+      --panel-raised: #151f28;
+      --panel-soft: #0d141a;
+      --line: #263640;
+      --line-soft: #1c2931;
+      --text: #d9e5e2;
+      --muted: #829295;
+      --dim: #5f7175;
+      --compiled: #79e2af;
+      --compiled-bright: #b6f3d5;
+      --reused: #82a9d1;
+      --restored: #e6b968;
+      --failed: #ee737b;
+      --critical: #fff2b6;
+      --check: #7398bd;
+      --emit: #ab8bd3;
+      --compile: #72dca9;
+      --link: #efb16f;
+      --action: #df91c2;
+      --fetch: #d6b565;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 84% -8%, rgba(121, 226, 175, .075), transparent 31rem),
+        radial-gradient(circle at 5% 18%, rgba(115, 152, 189, .045), transparent 26rem),
+        var(--bg);
+      font: 14px/1.45 var(--sans);
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    :focus-visible { outline: 2px solid var(--compiled); outline-offset: 3px; }
+    .page { width: min(1440px, calc(100% - 36px)); margin: 0 auto; padding: 34px 0 52px; }
+    .eyebrow, .section-kicker {
+      margin: 0;
+      color: var(--compiled);
+      font: 11px/1.2 var(--mono);
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    .report-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 22px; }
+    h1 { margin: 7px 0 0; color: #eef7f4; font-size: clamp(26px, 4vw, 42px); line-height: 1.05; letter-spacing: -.045em; font-weight: 650; }
+    .heading-note { max-width: 440px; margin: 0; color: var(--muted); text-align: right; }
+    .header-strip, .section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 24, 32, .88);
+      box-shadow: 0 18px 52px rgba(0, 0, 0, .16), 0 1px 0 rgba(255,255,255,.02) inset;
+    }
+    .header-strip { padding: 19px 20px 20px; margin-bottom: 20px; }
+    .header-command { display: flex; align-items: center; gap: 10px; margin-bottom: 17px; color: var(--muted); font: 12px var(--mono); }
+    .prompt { color: var(--compiled); }
+    .head-stats { display: grid; grid-template-columns: 1.1fr 1fr 1.1fr 1fr 1fr 1.15fr; gap: 1px; background: var(--line-soft); border: 1px solid var(--line-soft); }
+    .stat { min-height: 73px; padding: 12px 13px; background: var(--panel-soft); }
+    .stat-label { display: block; margin-bottom: 7px; color: var(--dim); font: 10px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .stat-value { display: block; color: #e5efec; font-size: 15px; font-weight: 620; }
+    .stat-value.mono { font: 14px/1.25 var(--mono); }
+    .stat-value.accent { color: var(--compiled-bright); }
+    .stat-value small { color: var(--muted); font-size: 11px; font-weight: 450; }
+    .section { padding: 19px 20px 21px; margin-top: 20px; }
+    .section-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 16px; }
+    .section-title { margin: 4px 0 0; font-size: 19px; letter-spacing: -.025em; font-weight: 630; }
+    .section-help { max-width: 490px; margin: 0; color: var(--muted); font-size: 12px; text-align: right; }
+    .timeline-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+    .legend { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 13px; color: var(--muted); font: 11px var(--mono); }
+    .legend-item { display: inline-flex; align-items: center; gap: 5px; }
+    .legend-swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--legend-color); }
+    .legend-swatch.reused { border: 1px solid var(--reused); background: transparent; border-radius: 50%; }
+    .legend-swatch.critical { width: 10px; height: 10px; border: 2px solid var(--critical); background: transparent; }
+    .zoom-readout { color: var(--dim); font: 11px var(--mono); }
+    .timeline-viewport { overflow-x: auto; border: 1px solid var(--line-soft); background: #0c1319; scrollbar-color: #344a51 #0c1319; }
+    .timeline-board { --label-width: 116px; width: 1040px; min-width: 1040px; }
+    .ruler-row, .lane-row { display: grid; grid-template-columns: var(--label-width) 1fr; }
+    .ruler-row { min-height: 42px; border-bottom: 1px solid var(--line); }
+    .ruler-name { display: flex; align-items: center; padding-left: 13px; color: var(--dim); font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .ruler { position: relative; min-width: 0; margin: 9px 12px 7px 0; border-top: 1px solid #40525b; cursor: ew-resize; user-select: none; background: repeating-linear-gradient(to right, transparent 0, transparent calc(12.195% - 1px), rgba(94, 118, 126, .22) calc(12.195% - 1px), rgba(94, 118, 126, .22) 12.195%); }
+    .ruler::before { position: absolute; inset: -3px 0 auto; height: 5px; content: ""; border-left: 1px solid #556b71; border-right: 1px solid #556b71; }
+    .ruler-tick { position: absolute; top: -4px; width: 1px; height: 8px; background: #577079; }
+    .ruler-tick span { position: absolute; top: 10px; left: 0; transform: translateX(-50%); color: var(--dim); font: 10px var(--mono); white-space: nowrap; }
+    .ruler-tick:first-child span { transform: none; }
+    .ruler-tick:last-child span { transform: translateX(-100%); }
+    .lane-row { min-height: 29px; border-bottom: 1px solid var(--line-soft); }
+    .lane-row:last-child { border-bottom: 0; }
+    .lane-label { display: flex; align-items: center; padding-left: 13px; color: #829396; font: 11px var(--mono); }
+    .lane-label.link-label { color: var(--link); }
+    .track { position: relative; min-width: 0; margin-right: 12px; background: repeating-linear-gradient(to right, transparent 0, transparent calc(12.195% - 1px), rgba(52, 74, 82, .2) calc(12.195% - 1px), rgba(52, 74, 82, .2) 12.195%); }
+    .timeline-bar { position: absolute; top: 7px; height: 15px; min-width: 2px; border: 1px solid color-mix(in srgb, var(--bar-color) 82%, white); border-radius: 2px; background: var(--bar-color); box-shadow: 0 2px 6px rgba(0, 0, 0, .2); cursor: pointer; transition: filter .15s ease, transform .15s ease; }
+    .timeline-bar:hover, .timeline-bar:focus-visible { z-index: 4; filter: brightness(1.27); transform: translateY(-1px); }
+    .timeline-bar.reused { top: 6px; min-width: 0; width: 0 !important; height: 17px; opacity: .82; border: 0; border-left: 2px solid #b2c9e3; border-radius: 0; background: transparent; box-shadow: 0 0 0 2px rgba(130,169,209,.1); }
+    .timeline-bar.restored { background: var(--restored); }
+    .timeline-bar.failed { background: var(--failed); }
+    .timeline-bar.critical { border: 2px solid var(--critical); box-shadow: 0 0 0 1px rgba(255,242,182,.24), 0 0 12px rgba(255,242,182,.14); }
+    .timeline-bar.reused.critical { border: 0; border-left: 2px solid var(--critical); }
+    .kind-check { --bar-color: var(--check); }
+    .kind-emit { --bar-color: var(--emit); }
+    .kind-compile { --bar-color: var(--compile); }
+    .kind-link { --bar-color: var(--link); }
+    .kind-action { --bar-color: var(--action); }
+    .kind-fetch { --bar-color: var(--fetch); }
+    .tooltip { position: fixed; z-index: 20; width: min(325px, calc(100vw - 24px)); padding: 11px 12px; border: 1px solid #496068; border-radius: 5px; background: #0b1116; color: var(--text); box-shadow: 0 12px 32px rgba(0,0,0,.42); font-size: 12px; pointer-events: none; }
+    .tooltip[hidden] { display: none; }
+    .tooltip strong { display: block; margin-bottom: 5px; color: var(--compiled-bright); font: 12px var(--mono); }
+    .tooltip dl { display: grid; grid-template-columns: 78px 1fr; gap: 3px 8px; margin: 0; }
+    .tooltip dt { color: var(--dim); }
+    .tooltip dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+    .tooltip .input-diff { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line-soft); color: var(--muted); }
+    .tooltip code { color: #c9dcd5; font: 11px var(--mono); }
+    .timeline-note { margin: 9px 0 0; color: var(--dim); font: 11px var(--mono); }
+    .graph-wrap { overflow: auto; border: 1px solid var(--line-soft); background: #0c1319; scrollbar-color: #344a51 #0c1319; }
+    .graph-canvas { position: relative; min-width: 920px; min-height: 286px; padding: 15px 14px 21px; }
+    .graph-edges { position: absolute; inset: 0; z-index: 0; overflow: visible; pointer-events: none; }
+    .graph-edge { fill: none; stroke-width: 1.2; opacity: .72; }
+    .graph-columns { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 17px; }
+    .package-column { min-width: 0; border: 1px solid var(--line); border-top: 2px solid var(--package-color); border-radius: 5px; background: rgba(17, 24, 32, .94); }
+    .package-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 11px 12px 10px; border-bottom: 1px solid var(--line-soft); }
+    .package-name { color: #e6f1ee; font: 15px var(--mono); }
+    .package-dep { color: var(--dim); font: 10px var(--mono); }
+    .unit-list { padding: 6px; }
+    .unit-row { display: flex; align-items: center; gap: 7px; min-height: 27px; padding: 4px 6px; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
+    .unit-row:hover { border-color: #30434d; background: rgba(121,226,175,.045); }
+    .unit-row[aria-pressed="true"] { border-color: rgba(121,226,175,.5); background: rgba(121,226,175,.08); }
+    .unit-row .unit-toggle { display: grid; place-items: center; flex: 0 0 17px; width: 17px; height: 17px; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: 15px/1 var(--mono); }
+    .state-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--state-color); }
+    .state-dot.reused { background: var(--reused); }
+    .state-dot.restored { background: var(--restored); }
+    .state-dot.compiled { background: var(--compiled); box-shadow: 0 0 0 2px rgba(121,226,175,.13); }
+    .unit-name { min-width: 0; overflow: hidden; color: #b9cac6; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--mono); }
+    .unit-state { margin-left: auto; color: var(--muted); font: 10px var(--mono); }
+    .unit-state.compiled { color: var(--compiled); }
+    .unit-state.restored { color: var(--restored); }
+    .unit-modules { margin: 0 8px 7px 35px; padding: 7px 8px; border-left: 1px solid #3a5156; background: #0d151b; color: var(--dim); font: 10px/1.7 var(--mono); }
+    .unit-modules[hidden] { display: none; }
+    .unit-modules code { display: block; overflow-wrap: anywhere; }
+    .graph-caption { margin: 9px 0 0; color: var(--dim); font: 11px var(--mono); }
+    .why-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 13px; }
+    .search-wrap { position: relative; flex: 1 1 280px; }
+    .search-wrap::before { position: absolute; top: 50%; left: 11px; color: var(--dim); content: "/"; transform: translateY(-50%); font: 12px var(--mono); }
+    #whySearch { width: 100%; padding: 9px 11px 9px 27px; border: 1px solid var(--line); border-radius: 4px; outline: 0; background: #0c1319; color: var(--text); font: 12px var(--mono); }
+    #whySearch:focus { border-color: var(--compiled); box-shadow: 0 0 0 2px rgba(121,226,175,.12); }
+    .filter-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font: 11px var(--mono); }
+    .filter-chip strong { color: var(--compiled); font-weight: 500; }
+    .filter-clear { padding: 0; border: 0; background: transparent; color: var(--dim); cursor: pointer; font: 14px var(--mono); }
+    .table-count { margin-left: auto; color: var(--dim); font: 11px var(--mono); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line-soft); }
+    table { width: 100%; min-width: 1100px; border-collapse: collapse; background: #0d141a; }
+    th { padding: 0; border-bottom: 1px solid var(--line); background: #111a21; text-align: left; }
+    th button { display: flex; align-items: center; gap: 5px; width: 100%; padding: 10px 9px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    th button:hover, th button[aria-sort="ascending"], th button[aria-sort="descending"] { color: var(--compiled-bright); }
+    .sort-mark { color: var(--dim); }
+    td { padding: 9px; border-bottom: 1px solid var(--line-soft); color: #afbfbc; font-size: 12px; vertical-align: top; }
+    tr.why-row { cursor: pointer; }
+    tr.why-row:hover td, tr.why-row[aria-selected="true"] td { background: rgba(121,226,175,.055); }
+    tr.why-row:focus-visible td { background: rgba(121,226,175,.08); }
+    td.node-cell, td.input-cell, td.tier-cell { color: #cbd9d5; font-family: var(--mono); font-size: 11px; }
+    td.node-cell { color: #c4e6d5; }
+    td.reason-cell { max-width: 265px; color: var(--muted); }
+    td.duration-cell { color: #bccbc8; font-family: var(--mono); white-space: nowrap; }
+    .badge { display: inline-flex; align-items: center; min-height: 20px; padding: 2px 7px; border-radius: 99px; background: rgba(130,169,209,.12); color: var(--reused); font: 10px var(--mono); }
+    .badge.compiled { background: rgba(121,226,175,.12); color: var(--compiled); }
+    .badge.restored { background: rgba(230,185,104,.13); color: var(--restored); }
+    .badge.failed { background: rgba(238,115,123,.14); color: var(--failed); }
+    .detail-row td { padding: 0; background: #111b22; }
+    .detail-content { display: grid; gap: 7px; padding: 12px 13px 13px 34px; border-left: 2px solid var(--compiled); }
+    .detail-title { color: var(--compiled-bright); font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .input-line { display: grid; grid-template-columns: minmax(120px, 1.1fr) minmax(220px, 1fr); gap: 10px; color: var(--muted); font-size: 11px; }
+    .input-line code { overflow-wrap: anywhere; color: #c8d9d4; font: 11px var(--mono); }
+    .digest { color: #a7cbb9; }
+    .empty-input { color: var(--dim); font: 11px var(--mono); }
+    .store-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+    .tier-card { padding: 13px; border: 1px solid var(--line); border-radius: 5px; background: #0d141a; }
+    .tier-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 11px; }
+    .tier-name { color: #e2ece9; font: 13px var(--mono); }
+    .tier-state { color: var(--dim); font: 10px var(--mono); }
+    .tier-state.used { color: var(--compiled); }
+    .hit-miss { display: flex; height: 7px; overflow: hidden; border-radius: 2px; background: #1d2930; }
+    .hit-miss .hit { background: var(--compiled); }
+    .hit-miss .miss { background: var(--failed); opacity: .8; }
+    .tier-count { margin: 9px 0 0; color: var(--muted); font: 11px var(--mono); }
+    .tier-count strong { color: var(--text); font-weight: 500; }
+    .tier-bytes { margin: 4px 0 0; color: var(--dim); font: 10px var(--mono); }
+    .store-lower { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+    .store-subpanel { padding: 13px; border: 1px solid var(--line); border-radius: 5px; background: #0d141a; }
+    .subpanel-title { margin: 0 0 10px; color: var(--dim); font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .footprint-meta { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font: 11px var(--mono); }
+    .footprint-meta strong { color: var(--compiled-bright); font-weight: 500; }
+    .footprint-track { height: 8px; margin-top: 9px; overflow: hidden; border-radius: 2px; background: #1b2830; }
+    .footprint-fill { width: 21%; height: 100%; background: linear-gradient(90deg, var(--compiled), #afd987); }
+    .quarantine-empty { display: flex; align-items: center; min-height: 27px; padding: 7px 9px; border: 1px dashed #33464b; border-radius: 3px; color: var(--dim); font: 11px var(--mono); }
+    footer { margin-top: 25px; color: var(--dim); text-align: center; font: 11px var(--mono); }
+    @media (max-width: 980px) {
+      .report-heading { display: block; }
+      .heading-note { max-width: 600px; margin-top: 10px; text-align: left; }
+      .head-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 650px) {
+      .page { width: min(100% - 20px, 1440px); padding-top: 24px; }
+      .section, .header-strip { padding: 15px 13px 16px; }
+      .head-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .section-head { display: block; }
+      .section-help { margin-top: 7px; text-align: left; }
+      .store-grid, .store-lower { grid-template-columns: 1fr; }
+      .table-count { margin-left: 0; width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="report-heading">
+      <div>
+        <p class="eyebrow">Build intelligence / explainable artifact reuse</p>
+        <h1>Build report</h1>
+      </div>
+      <p class="heading-note">Every skipped unit has a reason. The schedule and store ledger keep the fast path visible without hiding the work.</p>
+    </div>
+
+    <header class="header-strip" aria-label="Build summary">
+      <div class="header-command"><span class="prompt">$</span><span>jet explain-build --html shop</span></div>
+      <div id="headStats" class="head-stats" role="list"></div>
+    </header>
+
+    <section class="section" aria-labelledby="timelineTitle">
+      <div class="section-head">
+        <div><p class="section-kicker">01 / schedule</p><h2 class="section-title" id="timelineTitle">Critical path timeline</h2></div>
+        <p class="section-help">One row per scheduler lane. Reused work is a tick; the bright outline is the longest remaining chain.</p>
+      </div>
+      <div class="timeline-toolbar">
+        <div class="legend" aria-label="Timeline legend">
+          <span class="legend-item"><i class="legend-swatch" style="--legend-color:var(--check)"></i>check</span>
+          <span class="legend-item"><i class="legend-swatch" style="--legend-color:var(--emit)"></i>emit</span>
+          <span class="legend-item"><i class="legend-swatch" style="--legend-color:var(--compile)"></i>compile</span>
+          <span class="legend-item"><i class="legend-swatch" style="--legend-color:var(--link)"></i>link</span>
+          <span class="legend-item"><i class="legend-swatch reused"></i>reused</span>
+          <span class="legend-item"><i class="legend-swatch critical"></i>critical</span>
+        </div>
+        <span class="zoom-readout" id="zoomReadout">zoom 1.0× · drag ruler to zoom</span>
+      </div>
+      <div class="timeline-viewport" id="timelineViewport">
+        <div class="timeline-board" id="timelineBoard"></div>
+      </div>
+      <p class="timeline-note">critical path: check → emit → rustc shop/net → link · about 3.9s · double-click the ruler to reset</p>
+    </section>
+
+    <section class="section" aria-labelledby="graphTitle">
+      <div class="section-head">
+        <div><p class="section-kicker">02 / dependency shape</p><h2 class="section-title" id="graphTitle">Packages and units</h2></div>
+        <p class="section-help">Columns follow dependency order. Expand a unit for its modules; select one to focus the Why table.</p>
+      </div>
+      <div class="graph-wrap" id="graphWrap">
+        <div class="graph-canvas" id="graphCanvas">
+          <svg class="graph-edges" id="graphEdges" aria-hidden="true"></svg>
+          <div class="graph-columns" id="graphColumns"></div>
+        </div>
+      </div>
+      <p class="graph-caption" id="graphCaption">Click a unit to filter the explanation ledger.</p>
+    </section>
+
+    <section class="section" aria-labelledby="whyTitle">
+      <div class="section-head">
+        <div><p class="section-kicker">03 / provenance</p><h2 class="section-title" id="whyTitle">Why these nodes ran</h2></div>
+        <p class="section-help">Search any field. Sort a header. Focus a row, then press Enter to inspect the exact input diff.</p>
+      </div>
+      <div class="why-toolbar">
+        <label class="search-wrap"><span class="sr-only">Search why table</span><input id="whySearch" type="search" autocomplete="off" placeholder="Search node, reason, path, tier…" aria-label="Search why table"></label>
+        <span class="filter-chip" id="filterChip" hidden></span>
+        <span class="table-count" id="tableCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <caption class="sr-only">Build node explanations</caption>
+          <thead><tr>
+            <th scope="col"><button type="button" data-sort="node" aria-sort="ascending">node <span class="sort-mark">↑</span></button></th>
+            <th scope="col"><button type="button" data-sort="kind" aria-sort="none">kind <span class="sort-mark">↕</span></button></th>
+            <th scope="col"><button type="button" data-sort="state" aria-sort="none">state <span class="sort-mark">↕</span></button></th>
+            <th scope="col"><button type="button" data-sort="reason" aria-sort="none">reason <span class="sort-mark">↕</span></button></th>
+            <th scope="col"><button type="button" data-sort="changed_input" aria-sort="none">changed input <span class="sort-mark">↕</span></button></th>
+            <th scope="col"><button type="button" data-sort="duration_ms" aria-sort="none">duration <span class="sort-mark">↕</span></button></th>
+            <th scope="col"><button type="button" data-sort="store_tier" aria-sort="none">store tier <span class="sort-mark">↕</span></button></th>
+            <th scope="col"><button type="button" data-sort="reproducibility" aria-sort="none">reproducibility <span class="sort-mark">↕</span></button></th>
+          </tr></thead>
+          <tbody id="whyBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="storeTitle">
+      <div class="section-head">
+        <div><p class="section-kicker">04 / artifact store</p><h2 class="section-title" id="storeTitle">Where the work came from</h2></div>
+        <p class="section-help">The tier ledger separates local hits from team recovery and keeps capacity visible.</p>
+      </div>
+      <div class="store-grid" id="storeGrid"></div>
+      <div class="store-lower">
+        <div class="store-subpanel">
+          <p class="subpanel-title">LRU footprint</p>
+          <div class="footprint-meta"><strong id="footprintValue">4.2 GiB of 20 GiB</strong><span id="footprintPercent">21%</span></div>
+          <div class="footprint-track" id="footprintTrack" aria-label="LRU footprint"><div class="footprint-fill" id="footprintFill"></div></div>
+        </div>
+        <div class="store-subpanel">
+          <p class="subpanel-title">Quarantined outputs</p>
+          <div id="quarantineList" class="quarantine-empty">empty · no outputs held for review</div>
+        </div>
+      </div>
+    </section>
+
+    <footer>generated by jet explain-build --html · data embedded · no network</footer>
+  </main>
+
+  <div class="tooltip" id="timelineTooltip" hidden></div>
+
+  <script type="application/json" id="build-data">
+  {
+    "metadata": {
+      "program": "shop",
+      "profile": "release",
+      "target": "x86_64-linux",
+      "jet_version": "0.9.1",
+      "rustc_version": "1.97.1",
+      "wall_ms": 4100,
+      "units_total": 21,
+      "compiled": 3,
+      "reused": 18,
+      "store_tiers_used": ["local", "team"],
+      "critical_path_ms": 3900,
+      "critical_path": ["check:shop/net", "emit:shop/net", "compile:shop/net·impl", "link:shop"]
+    },
+    "packages": [
+      {
+        "name": "json",
+        "dependency": "base",
+        "color": "#7398bd",
+        "units": [
+          {"id":"json/parse","label":"parse","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":120,"reproducibility":"exact","modules":["src/json/parse.jet"]},
+          {"id":"json/value","label":"value","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":130,"reproducibility":"exact","modules":["src/json/value.jet"]},
+          {"id":"json/number","label":"number","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":95,"reproducibility":"exact","modules":["src/json/number.jet"]},
+          {"id":"json/schema","label":"schema","state":"restored","store_tier":"team","reason":"restored from team store","duration_ms":0,"source_duration_ms":160,"reproducibility":"team-exact","modules":["src/json/schema.jet"]},
+          {"id":"json/encode","label":"encode","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":110,"reproducibility":"exact","modules":["src/json/encode.jet"]}
+        ]
+      },
+      {
+        "name": "httpkit",
+        "dependency": "json",
+        "color": "#ab8bd3",
+        "units": [
+          {"id":"httpkit/client","label":"client","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":180,"reproducibility":"exact","modules":["src/http/client.jet"]},
+          {"id":"httpkit/headers","label":"headers","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":145,"reproducibility":"exact","modules":["src/http/headers.jet"]},
+          {"id":"httpkit/body","label":"body","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":115,"reproducibility":"exact","modules":["src/http/body.jet"]},
+          {"id":"httpkit/url","label":"url","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":105,"reproducibility":"exact","modules":["src/http/url.jet"]},
+          {"id":"httpkit/tls","label":"tls","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":205,"reproducibility":"exact","modules":["src/http/tls.jet"]},
+          {"id":"httpkit/codec","label":"codec","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":130,"reproducibility":"exact","modules":["src/http/codec.jet"]},
+          {"id":"httpkit/trace","label":"trace","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":100,"reproducibility":"exact","modules":["src/http/trace.jet"]}
+        ]
+      },
+      {
+        "name": "shop",
+        "dependency": "httpkit",
+        "color": "#79e2af",
+        "units": [
+          {"id":"shop/core","label":"core","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":170,"reproducibility":"exact","modules":["src/core/model.jet","src/core/store.jet"]},
+          {"id":"shop/net","label":"net","state":"compiled","store_tier":"local","reason":"src/net/client.jet changed (fetch_all body)","duration_ms":2100,"reproducibility":"source-change","modules":["src/net/client.jet"],"inputs":[{"path":"src/net/client.jet","old_digest":"sha256:6fa81c2d","new_digest":"sha256:bf993a10"}]},
+          {"id":"shop/render","label":"render","state":"compiled","store_tier":"local","reason":"src/render/table.jet changed (Row.width signature) → 1 dependent","duration_ms":1220,"reproducibility":"source-change","modules":["src/render/table.jet"],"inputs":[{"path":"src/render/table.jet","old_digest":"sha256:24b19f5a","new_digest":"sha256:913ce742"}]},
+          {"id":"shop/cli","label":"cli","state":"compiled","store_tier":"local","reason":"depends on shop/render interface","duration_ms":330,"reproducibility":"interface-change","modules":["src/cli/main.jet"],"inputs":[{"path":"shop/render/interface","old_digest":"sha256:7a8d1e90","new_digest":"sha256:9e13c6a4"}]},
+          {"id":"shop/auth","label":"auth","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":150,"reproducibility":"exact","modules":["src/auth/session.jet"]},
+          {"id":"shop/assets","label":"assets","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":75,"reproducibility":"exact","modules":["src/assets/catalog.jet"]},
+          {"id":"shop/routes","label":"routes","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":135,"reproducibility":"exact","modules":["src/routes.jet"]},
+          {"id":"shop/tests","label":"tests","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":190,"reproducibility":"exact","modules":["src/tests/shop.jet"]},
+          {"id":"shop/bin","label":"bin","state":"reused","store_tier":"local","reason":"store · local · exact inputs","duration_ms":0,"source_duration_ms":90,"reproducibility":"exact","modules":["src/bin/shop.jet"]}
+        ]
+      }
+    ],
+    "edges": [
+      {"from":"json/parse","to":"httpkit/client","state":"reused"},
+      {"from":"json/value","to":"httpkit/client","state":"reused"},
+      {"from":"json/schema","to":"httpkit/headers","state":"restored"},
+      {"from":"httpkit/client","to":"shop/net","state":"compiled"},
+      {"from":"httpkit/headers","to":"shop/net","state":"compiled"},
+      {"from":"httpkit/body","to":"shop/net","state":"compiled"},
+      {"from":"httpkit/codec","to":"shop/render","state":"compiled"},
+      {"from":"httpkit/trace","to":"shop/cli","state":"compiled"}
+    ],
+    "timeline": [
+      {"id":"fetch:team/json-schema","label":"team json/schema","kind":"fetch","state":"restored","lane":"cpu 1","start_ms":0,"end_ms":120,"reason":"restored from team store","duration_ms":120,"inputs":[]},
+      {"id":"check:json/parse","label":"check json/parse","kind":"check","state":"reused","lane":"cpu 2","start_ms":60,"end_ms":60,"reason":"memoized module check","duration_ms":0,"source_duration_ms":120,"inputs":[]},
+      {"id":"check:json/value","label":"check json/value","kind":"check","state":"reused","lane":"cpu 3","start_ms":60,"end_ms":60,"reason":"memoized module check","duration_ms":0,"source_duration_ms":130,"inputs":[]},
+      {"id":"check:httpkit/client","label":"check httpkit/client","kind":"check","state":"reused","lane":"cpu 4","start_ms":80,"end_ms":80,"reason":"memoized module check","duration_ms":0,"source_duration_ms":180,"inputs":[]},
+      {"id":"check:httpkit/headers","label":"check httpkit/headers","kind":"check","state":"reused","lane":"cpu 5","start_ms":80,"end_ms":80,"reason":"memoized module check","duration_ms":0,"source_duration_ms":145,"inputs":[]},
+      {"id":"check:httpkit/body","label":"check httpkit/body","kind":"check","state":"reused","lane":"cpu 6","start_ms":80,"end_ms":80,"reason":"memoized module check","duration_ms":0,"source_duration_ms":115,"inputs":[]},
+      {"id":"check:shop/core","label":"check shop/core","kind":"check","state":"reused","lane":"cpu 7","start_ms":0,"end_ms":0,"reason":"memoized module check","duration_ms":0,"source_duration_ms":170,"inputs":[]},
+      {"id":"check:shop/net","label":"check shop/net","kind":"check","state":"compiled","lane":"cpu 8","start_ms":0,"end_ms":180,"reason":"src/net/client.jet changed","duration_ms":180,"critical":true,"inputs":[{"path":"src/net/client.jet","old_digest":"sha256:6fa81c2d","new_digest":"sha256:bf993a10"}]},
+      {"id":"check:shop/render","label":"check shop/render","kind":"check","state":"compiled","lane":"cpu 9","start_ms":0,"end_ms":180,"reason":"Row.width signature changed","duration_ms":180,"inputs":[{"path":"src/render/table.jet","old_digest":"sha256:24b19f5a","new_digest":"sha256:913ce742"}]},
+      {"id":"check:shop/cli","label":"check shop/cli","kind":"check","state":"compiled","lane":"cpu 10","start_ms":180,"end_ms":240,"reason":"depends on shop/render interface","duration_ms":60,"inputs":[{"path":"shop/render/interface","old_digest":"sha256:7a8d1e90","new_digest":"sha256:9e13c6a4"}]},
+      {"id":"emit:json","label":"emit json","kind":"emit","state":"reused","lane":"cpu 11","start_ms":180,"end_ms":180,"reason":"unit interface already in store","duration_ms":0,"source_duration_ms":40,"inputs":[]},
+      {"id":"emit:httpkit","label":"emit httpkit","kind":"emit","state":"reused","lane":"cpu 12","start_ms":180,"end_ms":180,"reason":"unit interface already in store","duration_ms":0,"source_duration_ms":60,"inputs":[]},
+      {"id":"emit:shop/net","label":"emit shop/net","kind":"emit","state":"compiled","lane":"cpu 13","start_ms":180,"end_ms":200,"reason":"interface follows changed check","duration_ms":20,"critical":true,"inputs":[{"path":"src/net/client.jet","old_digest":"sha256:6fa81c2d","new_digest":"sha256:bf993a10"}]},
+      {"id":"emit:shop/render","label":"emit shop/render","kind":"emit","state":"compiled","lane":"cpu 14","start_ms":180,"end_ms":210,"reason":"interface follows Row.width change","duration_ms":30,"inputs":[{"path":"src/render/table.jet","old_digest":"sha256:24b19f5a","new_digest":"sha256:913ce742"}]},
+      {"id":"compile:json/parse·impl","label":"rustc json/parse","kind":"compile","state":"reused","lane":"cpu 15","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":120,"inputs":[]},
+      {"id":"compile:httpkit/client·impl","label":"rustc httpkit/client","kind":"compile","state":"reused","lane":"cpu 16","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":180,"inputs":[]},
+      {"id":"compile:shop/core·impl","label":"rustc shop/core","kind":"compile","state":"reused","lane":"cpu 1","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":170,"inputs":[]},
+      {"id":"compile:shop/net·impl","label":"rustc shop/net","kind":"compile","state":"compiled","lane":"cpu 8","start_ms":200,"end_ms":2300,"reason":"src/net/client.jet changed (fetch_all body)","duration_ms":2100,"critical":true,"inputs":[{"path":"src/net/client.jet","old_digest":"sha256:6fa81c2d","new_digest":"sha256:bf993a10"}]},
+      {"id":"compile:shop/render·impl","label":"rustc shop/render","kind":"compile","state":"compiled","lane":"cpu 9","start_ms":210,"end_ms":1430,"reason":"Row.width signature changed","duration_ms":1220,"inputs":[{"path":"src/render/table.jet","old_digest":"sha256:24b19f5a","new_digest":"sha256:913ce742"}]},
+      {"id":"compile:shop/cli·impl","label":"rustc shop/cli","kind":"compile","state":"compiled","lane":"cpu 10","start_ms":1430,"end_ms":1760,"reason":"depends on shop/render interface","duration_ms":330,"inputs":[{"path":"shop/render/interface","old_digest":"sha256:7a8d1e90","new_digest":"sha256:9e13c6a4"}]},
+      {"id":"compile:httpkit/body·impl","label":"rustc httpkit/body","kind":"compile","state":"reused","lane":"cpu 2","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":115,"inputs":[]},
+      {"id":"compile:httpkit/headers·impl","label":"rustc httpkit/headers","kind":"compile","state":"reused","lane":"cpu 3","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":145,"inputs":[]},
+      {"id":"compile:json/value·impl","label":"rustc json/value","kind":"compile","state":"reused","lane":"cpu 4","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":130,"inputs":[]},
+      {"id":"compile:json/schema·impl","label":"rustc json/schema","kind":"compile","state":"reused","lane":"cpu 5","start_ms":240,"end_ms":240,"reason":"artifact restored from team","duration_ms":0,"source_duration_ms":160,"inputs":[]},
+      {"id":"compile:shop/auth·impl","label":"rustc shop/auth","kind":"compile","state":"reused","lane":"cpu 6","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":150,"inputs":[]},
+      {"id":"compile:shop/assets·impl","label":"rustc shop/assets","kind":"compile","state":"reused","lane":"cpu 7","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":75,"inputs":[]},
+      {"id":"action:shop/post-build","label":"action shop/post-build","kind":"action","state":"reused","lane":"cpu 11","start_ms":1760,"end_ms":1760,"reason":"no package action work","duration_ms":0,"source_duration_ms":50,"inputs":[]},
+      {"id":"fetch:team/httpkit","label":"fetch team/httpkit","kind":"fetch","state":"reused","lane":"cpu 12","start_ms":220,"end_ms":220,"reason":"team tier not needed; local hit","duration_ms":0,"source_duration_ms":90,"inputs":[]},
+      {"id":"compile:shop/routes·impl","label":"rustc shop/routes","kind":"compile","state":"reused","lane":"cpu 13","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":135,"inputs":[]},
+      {"id":"compile:shop/tests·impl","label":"rustc shop/tests","kind":"compile","state":"reused","lane":"cpu 14","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":190,"inputs":[]},
+      {"id":"compile:shop/bin·impl","label":"rustc shop/bin","kind":"compile","state":"reused","lane":"cpu 15","start_ms":240,"end_ms":240,"reason":"artifact already in local store","duration_ms":0,"source_duration_ms":90,"inputs":[]},
+      {"id":"link:shop","label":"link shop","kind":"link","state":"compiled","lane":"link","start_ms":2300,"end_ms":3900,"reason":"3 units changed","duration_ms":1600,"critical":true,"inputs":[{"path":"shop/{net,render,cli}.rlib","old_digest":"sha256:4fd80a11","new_digest":"sha256:7a1ce390"}]}
+    ],
+    "why": [
+      {"node":"json/parse","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"json/value","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"json/number","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"json/schema","kind":"compile","state":"restored","reason":"restored from team store","changed_input":"—","duration_ms":0,"store_tier":"team","reproducibility":"team-exact","inputs":[]},
+      {"node":"json/encode","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"httpkit/client","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"httpkit/headers","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"httpkit/body","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"httpkit/url","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"httpkit/tls","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"httpkit/codec","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"httpkit/trace","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"shop/core","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"shop/net","kind":"compile","state":"compiled","reason":"src/net/client.jet changed (fetch_all body)","changed_input":"src/net/client.jet","duration_ms":2100,"store_tier":"local","reproducibility":"source-change","inputs":[{"path":"src/net/client.jet","old_digest":"sha256:6fa81c2d","new_digest":"sha256:bf993a10"}]},
+      {"node":"shop/render","kind":"compile","state":"compiled","reason":"src/render/table.jet changed (Row.width signature) → 1 dependent","changed_input":"src/render/table.jet","duration_ms":1220,"store_tier":"local","reproducibility":"source-change","inputs":[{"path":"src/render/table.jet","old_digest":"sha256:24b19f5a","new_digest":"sha256:913ce742"}]},
+      {"node":"shop/cli","kind":"compile","state":"compiled","reason":"depends on shop/render interface","changed_input":"shop/render/interface","duration_ms":330,"store_tier":"local","reproducibility":"interface-change","inputs":[{"path":"shop/render/interface","old_digest":"sha256:7a8d1e90","new_digest":"sha256:9e13c6a4"}]},
+      {"node":"shop/auth","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"shop/assets","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"shop/routes","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"shop/tests","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"shop/bin","kind":"compile","state":"reused","reason":"store · local · exact inputs","changed_input":"—","duration_ms":0,"store_tier":"local","reproducibility":"exact","inputs":[]},
+      {"node":"link shop","kind":"link","state":"compiled","reason":"3 units changed","changed_input":"shop/{net,render,cli}.rlib","duration_ms":1600,"store_tier":"local","reproducibility":"derived","inputs":[{"path":"shop/{net,render,cli}.rlib","old_digest":"sha256:4fd80a11","new_digest":"sha256:7a1ce390"}]}
+    ],
+    "store": {
+      "tiers": [
+        {"name":"local","hits":18,"misses":3,"bytes_moved":"8.6 MiB","state":"used"},
+        {"name":"team","hits":1,"misses":0,"bytes_moved":"2.1 MiB","state":"used"},
+        {"name":"public","hits":0,"misses":0,"bytes_moved":"—","state":"idle"}
+      ],
+      "footprint":"4.2 GiB of 20 GiB",
+      "footprint_used_gib":4.2,
+      "footprint_capacity_gib":20,
+      "quarantined":[]
+    }
+  }
+  </script>
+
+  <script>
+    (() => {
+      const dataNode = document.getElementById('build-data');
+      const data = JSON.parse(dataNode.textContent);
+      const meta = data.metadata;
+      const stateLabels = { compiled: 'compiled', reused: 'reused', restored: 'restored', failed: 'failed' };
+      const stateColors = { compiled: '#79e2af', reused: '#82a9d1', restored: '#e6b968', failed: '#ee737b' };
+      const formatSeconds = (ms) => ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : ms + 'ms';
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+      const allUnits = data.packages.flatMap((pkg) => pkg.units);
+
+      function renderHeader() {
+        const stats = [
+          ['program', meta.program, 'mono'],
+          ['profile', meta.profile, 'mono'],
+          ['target', meta.target, 'mono'],
+          ['Jet version', meta.jet_version, 'mono'],
+          ['rustc version', meta.rustc_version, 'mono'],
+          ['total wall time', formatSeconds(meta.wall_ms), 'accent'],
+          ['units', meta.compiled + ' of ' + meta.units_total + ' compiled · ' + meta.reused + ' reused', 'accent'],
+          ['store tiers', meta.store_tiers_used.join(' + '), 'mono']
+        ];
+        document.getElementById('headStats').innerHTML = stats.map(([label, value, cls]) => '<div class="stat" role="listitem"><span class="stat-label">' + escapeHtml(label) + '</span><span class="stat-value ' + cls + '">' + escapeHtml(value) + '</span></div>').join('');
+      }
+
+      const laneNames = Array.from({ length: 16 }, (_, index) => 'cpu ' + (index + 1)).concat('link');
+      let zoom = 1;
+      const timelineBoard = document.getElementById('timelineBoard');
+      const tooltip = document.getElementById('timelineTooltip');
+      const maxTimeline = Math.max(meta.wall_ms, ...data.timeline.map((node) => node.end_ms));
+
+      function tooltipMarkup(node) {
+        const inputs = node.inputs || [];
+        const inputText = inputs.length ? inputs.map((input) => '<code>' + escapeHtml(input.path) + '</code><br><span class="digest">' + escapeHtml(input.old_digest) + ' → ' + escapeHtml(input.new_digest) + '</span>').join('<br>') : 'none · exact store key';
+        return '<strong>' + escapeHtml(node.id) + '</strong><dl><dt>state</dt><dd>' + escapeHtml(stateLabels[node.state] || node.state) + '</dd><dt>reason</dt><dd>' + escapeHtml(node.reason) + '</dd><dt>duration</dt><dd>' + formatSeconds(node.duration_ms) + '</dd></dl><div class="input-diff">inputs that changed<br>' + inputText + '</div>';
+      }
+      function showTooltip(node, x, y) {
+        tooltip.innerHTML = tooltipMarkup(node);
+        tooltip.hidden = false;
+        const margin = 12;
+        const maxX = window.innerWidth - tooltip.offsetWidth - margin;
+        const maxY = window.innerHeight - tooltip.offsetHeight - margin;
+        tooltip.style.left = Math.max(margin, Math.min(maxX, x + 12)) + 'px';
+        tooltip.style.top = Math.max(margin, Math.min(maxY, y + 16)) + 'px';
+      }
+      function hideTooltip() { tooltip.hidden = true; }
+
+      function renderRuler() {
+        const rulerTicks = [];
+        const step = maxTimeline > 6000 ? 1000 : 500;
+        for (let ms = 0; ms <= maxTimeline; ms += step) rulerTicks.push(ms);
+        if (rulerTicks[rulerTicks.length - 1] !== maxTimeline) rulerTicks.push(maxTimeline);
+        const ruler = document.createElement('div');
+        ruler.className = 'ruler';
+        ruler.id = 'timelineRuler';
+        ruler.title = 'Drag horizontally to zoom. Double-click to reset.';
+        rulerTicks.forEach((ms) => {
+          const tick = document.createElement('i');
+          tick.className = 'ruler-tick';
+          tick.style.left = (ms / maxTimeline * 100) + '%';
+          tick.innerHTML = '<span>' + (ms / 1000).toFixed(1) + 's</span>';
+          ruler.append(tick);
+        });
+        return ruler;
+      }
+
+      function renderTimeline() {
+        const width = Math.max(1040, Math.round(1040 * zoom));
+        timelineBoard.style.width = width + 'px';
+        timelineBoard.replaceChildren();
+        const rulerRow = document.createElement('div');
+        rulerRow.className = 'ruler-row';
+        const rulerName = document.createElement('div');
+        rulerName.className = 'ruler-name';
+        rulerName.textContent = 'time';
+        rulerRow.append(rulerName, renderRuler());
+        timelineBoard.append(rulerRow);
+        laneNames.forEach((laneName) => {
+          const laneRow = document.createElement('div');
+          laneRow.className = 'lane-row';
+          const label = document.createElement('div');
+          label.className = 'lane-label' + (laneName === 'link' ? ' link-label' : '');
+          label.textContent = laneName;
+          const track = document.createElement('div');
+          track.className = 'track';
+          data.timeline.filter((node) => node.lane === laneName).forEach((node) => {
+            const bar = document.createElement('div');
+            bar.className = 'timeline-bar kind-' + node.kind + ' ' + node.state + (node.critical ? ' critical' : '');
+            bar.dataset.nodeId = node.id;
+            bar.tabIndex = 0;
+            bar.setAttribute('role', 'img');
+            bar.setAttribute('aria-label', node.label + ', ' + stateLabels[node.state] + ', ' + formatSeconds(node.duration_ms));
+            bar.style.left = (node.start_ms / maxTimeline * 100) + '%';
+            if (node.state === 'reused' && node.start_ms === node.end_ms) bar.style.width = '0px';
+            else bar.style.width = Math.max(0.18, (node.end_ms - node.start_ms) / maxTimeline * 100) + '%';
+            bar.addEventListener('pointerenter', (event) => showTooltip(node, event.clientX, event.clientY));
+            bar.addEventListener('pointermove', (event) => showTooltip(node, event.clientX, event.clientY));
+            bar.addEventListener('pointerleave', hideTooltip);
+            bar.addEventListener('focus', () => {
+              const rect = bar.getBoundingClientRect();
+              showTooltip(node, rect.left, rect.bottom);
+            });
+            bar.addEventListener('blur', hideTooltip);
+            track.append(bar);
+          });
+          laneRow.append(label, track);
+          timelineBoard.append(laneRow);
+        });
+        const ruler = document.getElementById('timelineRuler');
+        let drag = null;
+        ruler.addEventListener('pointerdown', (event) => {
+          drag = { x: event.clientX, zoom };
+          ruler.setPointerCapture(event.pointerId);
+        });
+        ruler.addEventListener('pointermove', (event) => {
+          if (!drag) return;
+          const delta = event.clientX - drag.x;
+          zoom = Math.max(1, Math.min(3.5, drag.zoom * Math.exp(delta / 260)));
+          timelineBoard.style.width = Math.max(1040, Math.round(1040 * zoom)) + 'px';
+          document.getElementById('zoomReadout').textContent = 'zoom ' + zoom.toFixed(1) + '× · drag ruler to zoom';
+        });
+        ruler.addEventListener('pointerup', (event) => {
+          drag = null;
+          if (ruler.hasPointerCapture(event.pointerId)) ruler.releasePointerCapture(event.pointerId);
+        });
+        ruler.addEventListener('pointercancel', () => { drag = null; });
+        ruler.addEventListener('dblclick', () => {
+          zoom = 1;
+          document.getElementById('zoomReadout').textContent = 'zoom 1.0× · drag ruler to zoom';
+          timelineBoard.style.width = Math.max(1040, Math.round(1040 * zoom)) + 'px';
+          renderTimeline();
+        });
+      }
+
+      function stateText(state) { return stateLabels[state] || state; }
+      function renderGraph() {
+        const columns = document.getElementById('graphColumns');
+        columns.replaceChildren();
+        data.packages.forEach((pkg, packageIndex) => {
+          const column = document.createElement('div');
+          column.className = 'package-column';
+          column.style.setProperty('--package-color', pkg.color);
+          const head = document.createElement('div');
+          head.className = 'package-head';
+          head.innerHTML = '<span class="package-name">' + escapeHtml(pkg.name) + '</span><span class="package-dep">← ' + escapeHtml(pkg.dependency) + '</span>';
+          const list = document.createElement('div');
+          list.className = 'unit-list';
+          pkg.units.forEach((unit, unitIndex) => {
+            const row = document.createElement('div');
+            row.className = 'unit-row';
+            row.dataset.unitId = unit.id;
+            row.tabIndex = 0;
+            row.setAttribute('role', 'button');
+            row.setAttribute('aria-pressed', 'false');
+            row.setAttribute('aria-label', 'Filter Why table by ' + unit.id);
+            const toggle = document.createElement('button');
+            toggle.className = 'unit-toggle';
+            toggle.type = 'button';
+            toggle.textContent = '›';
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.setAttribute('aria-label', 'Show modules for ' + unit.id);
+            const dot = document.createElement('i');
+            dot.className = 'state-dot ' + unit.state;
+            dot.style.setProperty('--state-color', stateColors[unit.state]);
+            const name = document.createElement('span');
+            name.className = 'unit-name';
+            name.textContent = unit.id;
+            const state = document.createElement('span');
+            state.className = 'unit-state ' + unit.state;
+            state.textContent = stateText(unit.state);
+            const modules = document.createElement('div');
+            modules.className = 'unit-modules';
+            modules.id = 'modules-' + packageIndex + '-' + unitIndex;
+            modules.hidden = true;
+            modules.innerHTML = unit.modules.map((module) => '<code>' + escapeHtml(module) + '</code>').join('');
+            toggle.setAttribute('aria-controls', modules.id);
+            toggle.addEventListener('click', (event) => {
+              event.stopPropagation();
+              const open = !modules.hidden;
+              modules.hidden = open;
+              toggle.textContent = open ? '›' : '⌄';
+              toggle.setAttribute('aria-expanded', String(!open));
+              toggle.setAttribute('aria-label', (open ? 'Show' : 'Hide') + ' modules for ' + unit.id);
+              window.requestAnimationFrame(drawEdges);
+            });
+            const select = () => filterWhy(unit.id);
+            row.addEventListener('click', select);
+            row.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(); }
+            });
+            row.append(toggle, dot, name, state);
+            list.append(row, modules);
+          });
+          column.append(head, list);
+          columns.append(column);
+        });
+        window.requestAnimationFrame(drawEdges);
+      }
+      function drawEdges() {
+        const canvas = document.getElementById('graphCanvas');
+        const svg = document.getElementById('graphEdges');
+        const canvasRect = canvas.getBoundingClientRect();
+        svg.setAttribute('width', String(Math.max(canvas.offsetWidth, 1)));
+        svg.setAttribute('height', String(Math.max(canvas.offsetHeight, 1)));
+        svg.replaceChildren();
+        const rows = new Map([...canvas.querySelectorAll('.unit-row')].map((row) => [row.dataset.unitId, row]));
+        data.edges.forEach((edge) => {
+          const from = rows.get(edge.from);
+          const to = rows.get(edge.to);
+          if (!from || !to) return;
+          const fromRect = from.getBoundingClientRect();
+          const toRect = to.getBoundingClientRect();
+          const x1 = fromRect.right - canvasRect.left;
+          const y1 = fromRect.top - canvasRect.top + fromRect.height / 2;
+          const x2 = toRect.left - canvasRect.left;
+          const y2 = toRect.top - canvasRect.top + toRect.height / 2;
+          const bend = Math.max(22, (x2 - x1) * .42);
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.classList.add('graph-edge');
+          path.setAttribute('d', 'M ' + x1 + ' ' + y1 + ' C ' + (x1 + bend) + ' ' + y1 + ', ' + (x2 - bend) + ' ' + y2 + ', ' + x2 + ' ' + y2);
+          path.setAttribute('stroke', stateColors[edge.state] || stateColors.reused);
+          svg.append(path);
+        });
+      }
+
+      let activeFilter = '';
+      let sortKey = 'node';
+      let sortDirection = 1;
+      let focusedIndex = 0;
+      const search = document.getElementById('whySearch');
+      const whyBody = document.getElementById('whyBody');
+      const filterChip = document.getElementById('filterChip');
+      const tableCount = document.getElementById('tableCount');
+
+      function filteredRows() {
+        const query = search.value.trim().toLowerCase();
+        return data.why.filter((row) => {
+          const matchesFilter = !activeFilter || row.node === activeFilter || row.node.startsWith(activeFilter + '/');
+          const haystack = Object.values(row).concat((row.inputs || []).flatMap((input) => Object.values(input))).join(' ').toLowerCase();
+          return matchesFilter && (!query || haystack.includes(query));
+        }).sort((a, b) => {
+          const left = a[sortKey] ?? '';
+          const right = b[sortKey] ?? '';
+          if (typeof left === 'number' && typeof right === 'number') return (left - right) * sortDirection;
+          return String(left).localeCompare(String(right)) * sortDirection;
+        });
+      }
+      function detailMarkup(row) {
+        if (!(row.inputs || []).length) return '<div class="detail-content"><span class="detail-title">key inputs</span><span class="empty-input">No changed inputs · exact store key was reusable.</span></div>';
+        return '<div class="detail-content"><span class="detail-title">key inputs changed since the last build</span>' + row.inputs.map((input) => '<div class="input-line"><code>' + escapeHtml(input.path) + '</code><span><span class="digest">' + escapeHtml(input.old_digest) + '</span><br><span class="digest">' + escapeHtml(input.new_digest) + '</span></span></div>').join('') + '</div>';
+      }
+      function toggleRow(row, detail) {
+        const open = detail.hidden;
+        detail.hidden = !open;
+        row.setAttribute('aria-expanded', String(open));
+        row.setAttribute('aria-selected', String(open));
+      }
+      function renderWhy() {
+        const rows = filteredRows();
+        whyBody.replaceChildren();
+        rows.forEach((row, index) => {
+          const tr = document.createElement('tr');
+          tr.className = 'why-row';
+          tr.tabIndex = 0;
+          tr.dataset.rowIndex = String(index);
+          tr.setAttribute('aria-expanded', 'false');
+          tr.setAttribute('aria-selected', 'false');
+          const changed = row.changed_input || '—';
+          tr.innerHTML = '<td class="node-cell">' + escapeHtml(row.node) + '</td><td>' + escapeHtml(row.kind) + '</td><td><span class="badge ' + escapeHtml(row.state) + '">' + escapeHtml(stateText(row.state)) + '</span></td><td class="reason-cell">' + escapeHtml(row.reason) + '</td><td class="input-cell">' + escapeHtml(changed) + '</td><td class="duration-cell">' + formatSeconds(row.duration_ms) + '</td><td class="tier-cell">' + escapeHtml(row.store_tier) + '</td><td>' + escapeHtml(row.reproducibility) + '</td>';
+          const detail = document.createElement('tr');
+          detail.className = 'detail-row';
+          detail.hidden = true;
+          const detailCell = document.createElement('td');
+          detailCell.colSpan = 8;
+          detailCell.innerHTML = detailMarkup(row);
+          detail.append(detailCell);
+          tr.addEventListener('click', () => toggleRow(tr, detail));
+          tr.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleRow(tr, detail); }
+          });
+          tr.addEventListener('focus', () => { focusedIndex = index; });
+          whyBody.append(tr, detail);
+        });
+        tableCount.textContent = rows.length + ' of ' + data.why.length + ' nodes';
+        if (activeFilter) {
+          filterChip.hidden = false;
+          filterChip.innerHTML = '<strong>filter</strong> ' + escapeHtml(activeFilter) + ' <button type="button" class="filter-clear" aria-label="Clear unit filter">×</button>';
+          filterChip.querySelector('.filter-clear').addEventListener('click', () => filterWhy(''));
+        } else filterChip.hidden = true;
+      }
+      function filterWhy(node) {
+        activeFilter = activeFilter === node ? '' : node;
+        document.querySelectorAll('.unit-row').forEach((row) => row.setAttribute('aria-pressed', String(row.dataset.unitId === activeFilter)));
+        renderWhy();
+        document.getElementById('whyTitle').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      document.querySelectorAll('th button[data-sort]').forEach((button) => button.addEventListener('click', () => {
+        const nextKey = button.dataset.sort;
+        if (sortKey === nextKey) sortDirection *= -1;
+        else { sortKey = nextKey; sortDirection = 1; }
+        document.querySelectorAll('th button[data-sort]').forEach((other) => {
+          const active = other.dataset.sort === sortKey;
+          other.setAttribute('aria-sort', active ? (sortDirection === 1 ? 'ascending' : 'descending') : 'none');
+          other.querySelector('.sort-mark').textContent = active ? (sortDirection === 1 ? '↑' : '↓') : '↕';
+        });
+        renderWhy();
+      }));
+      search.addEventListener('input', renderWhy);
+      function isTypingTarget(element) {
+        return element && (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT' || element.isContentEditable);
+      }
+      document.addEventListener('keydown', (event) => {
+        if (event.key === '/' && !isTypingTarget(document.activeElement)) {
+          event.preventDefault();
+          search.focus();
+          search.select();
+          return;
+        }
+        if ((event.key === 'j' || event.key === 'k') && !isTypingTarget(document.activeElement)) {
+          const visible = [...whyBody.querySelectorAll('tr.why-row')];
+          if (!visible.length) return;
+          event.preventDefault();
+          focusedIndex = Math.max(0, Math.min(visible.length - 1, focusedIndex + (event.key === 'j' ? 1 : -1)));
+          visible[focusedIndex].focus();
+          visible[focusedIndex].scrollIntoView({ block: 'nearest' });
+          return;
+        }
+      });
+
+      function renderStore() {
+        const grid = document.getElementById('storeGrid');
+        grid.innerHTML = data.store.tiers.map((tier) => {
+          const total = tier.hits + tier.misses;
+          const hitWidth = total ? tier.hits / total * 100 : 0;
+          const missWidth = total ? tier.misses / total * 100 : 0;
+          return '<article class="tier-card"><div class="tier-top"><span class="tier-name">' + escapeHtml(tier.name) + '</span><span class="tier-state ' + escapeHtml(tier.state) + '">' + (tier.state === 'used' ? 'used' : 'idle') + '</span></div><div class="hit-miss" aria-label="' + tier.hits + ' hits, ' + tier.misses + ' misses"><span class="hit" style="width:' + hitWidth + '%"></span><span class="miss" style="width:' + missWidth + '%"></span></div><p class="tier-count"><strong>' + tier.hits + '</strong> hits · <strong>' + tier.misses + '</strong> misses</p><p class="tier-bytes">bytes moved · ' + escapeHtml(tier.bytes_moved) + '</p></article>';
+        }).join('');
+        document.getElementById('footprintValue').textContent = data.store.footprint;
+        const footprintPercent = data.store.footprint_used_gib / data.store.footprint_capacity_gib * 100;
+        document.getElementById('footprintPercent').textContent = Math.round(footprintPercent) + '%';
+        document.getElementById('footprintFill').style.width = footprintPercent + '%';
+        document.getElementById('footprintTrack').setAttribute('aria-label', data.store.footprint + ' used');
+        const quarantine = document.getElementById('quarantineList');
+        quarantine.innerHTML = data.store.quarantined.length ? data.store.quarantined.map((output) => '<code>' + escapeHtml(output) + '</code>').join('') : 'empty · no outputs held for review';
+      }
+
+      renderHeader();
+      renderTimeline();
+      renderGraph();
+      renderWhy();
+      renderStore();
+      window.addEventListener('resize', () => window.requestAnimationFrame(drawEdges));
+    })();
+  </script>
+</body>
+</html>

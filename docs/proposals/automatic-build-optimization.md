@@ -1,299 +1,538 @@
 # Automatic build optimization
 
-**Status:** proposal. This document replaces the prior draft in full. The prior draft was never committed; its claims were re-verified against the tree, Tower, and the specs, and several were stale or wrong. Corrections are recorded inline.
-**Scope:** compiler, package manager, dependency graph, build actions, caches, code generation, and linking.
-**Goal:** beat Rust and Cargo on matched clean and incremental workloads without sacrificing safety, diagnostics, determinism, or execution-tier parity (I9).
-**Hard rule:** optimization never changes user-declared package, subpackage, or workspace boundaries. Declared authority, policy, visibility, outputs, and dependency edges are preserved exactly. Optimization works only inside those boundaries and across their declared graph. A large package gains fine-grained reuse without reorganization.
+**Status:** proposal, 2026-09-01. Replaces the prior draft in full. The prior draft was treated as untrusted input; every claim below was re-derived from the tree at commit `8b9933668`, the live Tower board, and first-hand measurements taken on 2026-09-01. Nothing in this document is implemented.
 
-The document has three parts. Part I states verified current facts. Part II states the proposed design. Part III states the proof still required. Nothing in Part I is proposed. Nothing in Part II is claimed to exist.
+**Scope:** compiler, package manager, dependency graph, build actions, caches, code generation, and linking, for every lens (`jet build`, `jet build --profile=debug`, `jet run`, `jet dev`, web).
+
+**Goal:** beat Rust and Cargo on matched clean and incremental build workloads while Jet still transpiles to Rust, without giving up safety (I1), hidden rustc (I2), sema as the only checker (I3), diagnostics as products (I4), determinism, or execution-tier parity (I9).
+
+**Hard rule:** optimization never changes a user-defined package, subpackage, or workspace boundary. Declared authority, policy, visibility, outputs, and dependency edges are preserved exactly. The optimizer works only inside those boundaries and across their declared graph. A large package gains fine-grained reuse without reorganization.
+
+**Owner decisions taken on 2026-09-01 (chat, verbatim in Appendix A):** cards and ballots go to Tower now; the claim is a strict win against out-of-box *and* tuned Cargo unless impossibility is proven; hidden units inside a package are allowed; memoized module checks count as checking; the resident build session is opt-in; the store cap is adaptive (`min(20 GiB, 10% of disk)`, least-recently-used pruning); the project designs the public prebuilt-object seam now and operates it when infrastructure exists; the terminal shows a rich live board and `jet explain-build --html` ships; real programs gate the benchmark and synthetic twins are scaling curves only.
+
+How to read this document: Part I is what exists today, with citations. Part II is the design. Part III is the proof still owed, the benchmark method, the hostile cases, the owner gates, and the card slate. A term is defined the first time it is used.
 
 ---
 
-## Part I — Current facts (verified 2026-08-30)
+## Summary
 
-### I.1 The measured problem
+A build is a graph of small jobs: check a module, emit Rust for a unit, run rustc on a unit, link an output. Today Jet runs that graph as one monolithic pass with eleven separate caches bolted on. Cargo runs it as one crate per package with mtime fingerprints. This proposal makes Jet run it as **one content-addressed action graph in one machine-wide store**, and gives the graph three things Cargo cannot have:
 
-The Jetpack canary is the best real-program evidence we have (`docs/audits/dogfood-jetpack-2026-08-28.md:25-38`, `dogfood/jetpack/METRICS.md:144-161`):
+1. **Hidden units.** A package is compiled as several rustc crates that the user never names. A body edit recompiles one unit and relinks. Cargo must recompile the whole crate, and in release mode it must re-run the entire optimizer.
+2. **Optimization that remembers.** Release builds emit LLVM bitcode per unit and let `rust-lld` run ThinLTO with a persistent cache in the store. Unchanged units skip optimization even though the whole program is link-time optimized. Cargo release builds have no such cache.
+3. **A front end that never repeats itself.** Module checks are memoized on disk and shared by every lens. A no-change build verifies digests and replays its recorded diagnostics in tens of milliseconds. Dependencies are restored as sealed unit sets from local, team, and public store tiers instead of being recompiled per project.
 
-| Workload (3,064-LOC Jet package vs Rust jetpack) | Jet | Rust | Result |
-|---|---:|---:|---|
-| Cold build | 19.695 s | 121.942 s | Jet 6.19× faster |
-| Comment-only warm rebuild (median of 5) | 8.096 s | 3.622 s | **Rust 2.24× faster** |
-| Cold build peak RSS | 1,097,280 KiB | 2,819,324 KiB | Jet 2.57× smaller |
-| Optimized binary | 1,377,432 B | 65,947,688 B | Jet 47.9× smaller |
+The fast profile (`jet build --profile=debug`) does not use rustc at all: the ratified Cranelift path (D-AOT-CRANELIFT1=B) emits objects from checked TIR and links them against a prebuilt optimized runtime. That is the peer of `cargo build`, and it is where the largest margins are structural.
 
-The Rust source envelope is conservative (14,875 LOC with behavior beyond the canary phases), so the source ratio is directional. The build timings are direct measurements of matched commands.
+The hardest cell is a truly cold, single-package, optimized build of a tiny program, where fixed costs dominate and both sides run one rustc. The design attacks that cell with prebuilt runtime objects, cheaper generated Rust, parallel unit front ends, and a version-matched fast linker. It does not claim the cell is won until the benchmark says so.
 
-The warm number is the important one. The warm rebuild reports a final-binary cache **hit** with `backend=0` and `link=0` (#2371, closed). The remaining 8.1 seconds are pure front-end re-execution: package entry discovery, the programmable-build front end (full parse and sema of the whole bundle), semantic-index program-value construction, and native key derivation, all before the cache gate (`docs/audits/dogfood-jetpack-usage-experience-2026-08-30.md:122-130`). Jet already wins cold builds and already caches the backend. Jet loses warm builds because the front end runs in full on every invocation.
+---
 
-Two more lived failures shape this proposal:
+## Part I — Current facts (verified 2026-09-01, commit `8b9933668`)
 
-- Before #2371, the Jetpack warm rebuild took 21.3 s against an 18.2 s cold build (`dogfood/jetpack/METRICS.md:209`). That is Theo anti-goal 1 (`docs/plans/compiler-speed.md:223-225`) observed in our own tree: incremental worse than clean. The cause was a hidden FFI bridge missing from the cache key. Identity gaps do not degrade politely; they invert the cache.
-- #2346 (phase: building) records `aot-release-no-change` observing cache hits 0 / misses 1 in the perf dashboard. The latest diagnosis on the card says the native keys are identical and the miss sits in the **receipt replay layer**; the dashboard currently works around it with `JET_RECEIPT_BYPASS=1`. The no-change fast path exists and is broken, which is worse than absent: it is unmeasured and untrusted.
+Documentation under `docs/` is stale by default; every fact here is backed by code, the Tower CLI, or a command run on this machine. Evidence files from the fact lanes live under `~/.cache/jet-luna/abo/` (session evidence, not repository content).
 
-### I.2 The pipeline
+### I.1 What `jet build` does today
 
-Ordinary native compilation is whole-program and batch: Loader lex/parse with a bounded 8-worker fan-out and deterministic source-order reassembly (`crates/jet-driver/src/Loader.rs:17-24,75-153`) → sequential sema, FFI prep, TIR lower (`crates/jet-driver/src/Driver/mod.rs:5240-5413`) → one flat generated Rust crate with modules as nested `mod` blocks (`crates/jet-codegen/src/Codegen/mod.rs:5144-5252`) → one `rustc` process for backend and link (`Source/CmdCompile.rs:7483-7555`; a split-runtime rejection can retry inline at `7551-7555`). There is no per-module backend action graph on this path.
+1. `jet build` enters `run_native_execution`, prepares the programmable-build front end, computes a native cache key, and calls the builder (`Source/CmdCompile.rs:2244-2314`, `:2490-2534`).
+2. The front end loads, lexes, parses, resolves modules, runs sema, and classifies diagnostics into a reusable `PreparedBuildFrontEnd` (`crates/jet-driver/src/Driver/mod.rs:2990-3260`, `:3263-3295`). Lex and parse use a bounded eight-worker fan-out consumed serially in stable module order; the loader appends modules depth-first in import order and rejects import cycles with `E0604` (`crates/jet-driver/src/Loader.rs:3685-3705`, `:3774-3916`).
+3. The native cache probe runs only after the front end has completed. Cache lookup is authorized only when parse, sema, policy, and diagnostics flags are all set (`crates/jet-comptime/src/Comptime/Build/cache_cas.rs:177-220`; `Source/CmdCompile.rs:2290-2314`, `:2371-2395`). A warm build can skip codegen, rustc, and link; it never skips the front end.
+4. Codegen emits **one Rust source string**: the runtime prelude and Core closure marked by begin/end comments, one `mod __jet_<mangled>` per non-entry module with `super::` as its root prefix, then entry items at crate root and a `main` wrapper when needed (`crates/jet-codegen/src/Codegen/mod.rs:5291-5509`, `:335-341`, `:549-588`). Every generated crate starts with `#![allow(warnings)]` (`mod.rs:5319-5323`). Dependency packages are flattened into the same program carrier (`crates/jet-driver/src/Loader.rs:3440-3585`, `:3660-3925`; `crates/jet-pkg-model/src/Package/mod.rs:646-719`).
+5. `RuntimeCache` splits the marked runtime and Core blocks into `jet_runtime` and `jet_runtime_core` rlibs under `~/.cache/jet/runtime` (or `JET_RUNTIME_CACHE_DIR`), keyed on source, `rustc -vV`, flags, and environment, verified by SHA-256 sidecars, bounded to 512 MiB (`Source/RuntimeCache.rs:33-37`, `:185-270`, `:489-547`, `:637-721`). The Core rlib content depends on the program's used-Core set (`crates/jet-codegen/src/Codegen/mod.rs:1214-1259`), so it is per program shape, not per toolchain.
+6. One `rustc --edition 2021` invocation compiles the thin user crate against those rlibs and links it, in a private per-process work directory; the binary is stored in `BuildCache` and published atomically (`Source/CmdCompile.rs:7962-7975`, `:8167-8242`, `:8331-8347`). If the thin crate is rejected by rustc, the exact inline monolith is retried (`:8252-8309`). No `-C incremental` is passed; the source states the compiler recompiles from scratch each invocation (`Source/main.rs:3485-3488`).
+7. Profiles: `jet build` default is opt-level 2 with thin LTO and strip; `--release` is opt-level 3; `run`/`dev` fast is opt-level 0, 256 codegen units, no LTO; host native builds add `target-cpu=native` (`Source/main.rs:306-326`, `:432-491`, `:495-604`).
+8. Linker: `RUSTC_LINKER`, then `CC`, then mold, then lld through the C driver, else the target's system linker (`Source/NativeLinker.rs:96-165`, precedence at `:108-117`). A missing explicit linker is tool error `L2101`, exit 1, never an ICE (`Source/CmdCompile.rs:8306-8315`; `tests/cli_compiler_speed.rs:833-869`).
+9. Toolchain: rustc is taken from `PATH`; `jet self doctor` requires `rustc 1.97.1` (`Source/Doctor.rs:17-18`, `:125-159`). No `rust-toolchain*` file exists. The environment receipt records rustc 1.97.1, LLVM 21.1.8, and a 32-thread Ryzen 9 7950X3D (`docs/reference/compiler-speed-environment-2026-08-25.json:1-55`).
+10. Cranelift: `crates/jet-jit` pins `cranelift-jit`, `-module`, `-frontend`, `-codegen`, `-native`, and `-object` at 0.112 (`crates/jet-jit/Cargo.toml:17-31`). `try_compile_debug_aot` emits relocatable object bytes, but no CLI path calls it (`crates/jet-jit/src/jit/api_debug.rs:30-118`; `crates/jet-jit/src/lib.rs:504-510`). D-AOT-CRANELIFT1=B is ratified and unwired. Host support is x86_64 only (`api_debug.rs:24-28`).
+11. `jet dev` is a foreground process: `WatchSession` samples existence, mtime, and length with a 30 ms debounce and a 120 ms tick, and hot-swaps a resident Cranelift program (`crates/jet-devserver/src/WatchService.rs:49-82`, `:713-879`; `Source/CmdDevTools.rs:462-596`, `:807-970`). It spawns a stdin reader thread and, for Canvas or static web hosts, binds TCP listeners for the browser (`Source/CmdDevTools.rs:348-361`, `:441-474`; `crates/jet-devserver/src/WebHost.rs:595-601`). Nothing survives the process, and no socket accepts build requests.
+12. Generics: generic modules are expanded in sema (`crates/jet-sema/src/Sema/Bundle/GenericModules.rs:18-70`). Generic functions and methods are emitted as Rust generics (`crates/jet-codegen/src/Codegen/TIR/emit/functions.rs:849-878`, `:1247-1260`) and monomorphized by rustc; the JIT path instead asks sema to specialize demanded generic methods under a stable instance key (`crates/jet-codegen/src/Codegen/TIR/mod.rs:994-1012`, `:1135-1310`) and specializes a generic free function only when one concrete shape is demanded, skipping functions with several shapes (`:1387-1393`). Jet enforces an orphan rule: a trait impl needs a local target type or a local/builtin trait (`crates/jet-foundation/src/Traits.rs:947-1030`); an imported-provider/imported-target derive pair is `E2711` (`crates/jet-sema/src/Sema/Bundle/Pipeline.rs:1207-1218`).
+13. Cross-module references render as `{root}{rust_mod}::{rust_fn}` or an inline-mangled name; user items are `pub` (`crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs:1761-1829`; `Items.rs:323-445`; `emit/functions.rs:756-805`). Single-crate globals in the program crate are the `#[used] #[no_mangle] #[link_section]` static `__JET_COMMAND_SCHEMA` and, for the counting allocator policy, one `#[global_allocator]` (`mod.rs:619-636`, `:1921-1935`). Runtime state lives in the runtime rlibs.
+14. Interpolated strings emit Rust `format!` (`emit/helpers.rs:297-348`); scalar functions emit `#[inline(never)]`, `#Inline` markers emit `#[inline]`/`#[inline(always)]` (`emit/functions.rs:801-825`).
+15. Web builds emit one `wasm_rust` string and run rustc once with `--target wasm32-unknown-unknown --crate-type cdylib`; web and cross builds never use the native cache (`crates/jet-codegen/src/Codegen/Web.rs:250-288`; `Source/CmdCompile.rs:6972-6997`, `:2119-2123`).
+16. Inspection: `jet graph`, `jet query build`, and `jet explain-build` exist and read the declared `BuildPlan` (targets, actions, files, toolchains, probes, generated modules); compiler work is not in that plan (`crates/jet-cli/src/CLI.rs:388-393`; `Source/CmdCompile.rs:137-307`; `crates/jet-driver/src/Driver/mod.rs:2465-2578`).
+17. Progress: `jet build` prints `Reading`, `Checking program and build plan`, `Generating native code`, `Building backend artifacts`, `Verifying build budgets`, and `Built <path> in <elapsed> ✓` to stderr without testing for a TTY (`Source/CmdCompile.rs:18-76`, labels at `:1829-1831`, `:2255`, `:2408`, `:2771`, `:2864`, `:2898-2902`). Phase timing is opt-in via `JET_TIMING=1` and writes `jet-timing.json` (`crates/jet-driver/src/PhaseTiming.rs:80-116`, `:244-329`).
 
-Tier routing is ratified and implemented: `jet run` and `jet dev` use the fast profile and the JIT lens; `jet build` is optimized AOT (D-BUILD-DEFAULT1=B; `Source/main.rs:490-520`, `Source/CmdCompile.rs:1216-1281`). Linker selection is explicit `RUSTC_LINKER`/`CC` override, then host mold, then lld, then the system linker; cross targets use the system linker (`Source/NativeLinker.rs:96-165`). rustc rejection of generated code maps to an internal compiler error, never a user diagnostic (I2; `Source/CmdCompile.rs:7562-7596`).
+### I.2 The eleven reuse mechanisms
 
-The typed programmable build graph is real but separate: `BuildPlan`/`BuildGraph` with deterministic Kahn stages, `BTreeSet` ready order, and CPU/memory/linker/console/GPU pools (`crates/jet-comptime/src/Comptime/Build/plan_graph.rs:12-90`, `execution_helpers.rs:53-126`). It executes only when the package selects a `fn build` (`Driver/mod.rs:3001-3013,3295-3406`). An ordinary build runs the programmable-build front end for checking, then falls into the monolithic `build()` path (`Source/CmdCompile.rs:1800-1839,2234-2325`). Graph execution for ordinary compilation does not exist today.
+| # | Mechanism | Store | Key | Integrity | Bound | Used by |
+|---|---|---|---|---|---|---|
+| 1 | `BuildCache` (final binary) | `~/.cache/jet/build` or `JET_CACHE_DIR`, `bin` + `bin.sha256` | canonical AST, target, profile, toolchain/compiler/linker identity, manifest and dependency interfaces, runtime/Core digests, instances, bridge identity, comptime inputs (`Source/CmdCompile.rs:6476-6592`) | SHA-256 on read (`Source/BuildCache.rs:109-166`) | none (`BuildCache.rs:1-347`) | `jet build` (not web, cross, C-linked, embed, or library outputs: `CmdCompile.rs:6453-6473`, `:8079-8086`) |
+| 2 | `RuntimeCache` (runtime/Core rlibs) | `~/.cache/jet/runtime` | source, `rustc -vV`, flags, env (`RuntimeCache.rs:489-547`) | SHA-256 sidecar | 512 MiB FIFO | all native AOT |
+| 3 | `RunCache` (tier-1 JIT module) | `~/.cache/jet/run` | source and dependency bytes and stamps, compiler identity, args (`Source/RunCache.rs:92-185`) | format-5 header only (`crates/jet-jit/src/jit/tier_cache.rs:31-41`, `:562-580`); no digest sidecar (`RunCache.rs:192-231`) | none | default `jet run`; all-or-nothing |
+| 4 | `ReceiptStore` (whole invocation) | `<package>/.jet/receipts` | verb, cwd, argv, full env, tool identities, terminal mode, input digests (`Source/ReceiptStore.rs:88-125`, `:1054-1166`) | authenticated body digest, `jet-receipt-v2` | 64 MiB fields, 100k inputs | `check`, `build`, `test`, `prove`, `budget check`; disabled by `JET_RECEIPT_BYPASS` or `JET_TIMING` (`:502-557`) |
+| 5 | Declared-action CAS and records | `.jet/build-cache/cas`, `.jet/build-cache/actions` | `act-sha256` over kind, argv, allowlisted env, inputs, outputs, caps, tool digests, target, toolchain, probes, labels (`crates/jet-comptime/src/Comptime/Build/errors_keys.rs:253-423`) | SHA-256 on read; atomic restore (`cache_cas.rs:3094-3258`) | remote 4 MiB/64 MiB/100k limits | `b.action`, compiler-owned package actions |
+| 6 | Compiler package actions (#1422) | `.jet/build-cache/package-artifacts/<pkg>.sealed` | package, source digest, compiler, target, profile, dependency snapshots (`plan_impl.rs:263-295`, `:384-434`) | as #5 | as #5 | metadata receipt only; no Rust, TIR, or rlib payload (`Driver/mod.rs:3568-3594`) |
+| 7 | `IncrementalSemaCache` / `CompilerQueries` | process memory only | module interfaces, dependencies, per-function bodies (`crates/jet-sema/src/Sema/Bundle.rs:748-977`) | n/a | n/a | `CompileMode::Check` only (`Pipeline/Completion.rs:242-247`); never `build`, `run`, or `dev` |
+| 8 | Rust FFI bridge | `~/.cache/jet/ffi/` | toolchain, target, profile, rustflags, foreign descriptors (`crates/jet-pkg-model/src/FFI.rs:1-12`) | Cargo project cache | none | FFI builds |
+| 9 | C bindings cache | see `GapFacts2.md §8` | binding inputs | digest | none | C imports |
+| 10 | `BuildPlanReplay` | in memory | `jet-build-plan-replay-v1` codec | version check | n/a | jetpack provider and store replay (`crates/jetpack/src/Provider.rs:269-275`, `:1685-1692`; `crates/jetpack/src/Store.rs:1480-1493`); not used by the compiler's build path (`Comptime/Build/replay.rs:4-250`) |
+| 11 | `PhaseTiming` JSON | `jet-timing.json` | n/a | n/a | n/a | perf dashboard; disables receipts when set |
 
-### I.3 The reuse mechanisms that exist today
+Each has its own key derivation, storage, integrity rule, and failure behavior. Two of them (4 and 11) fight: measuring a build disables its replay.
 
-Ten build-relevant reuse mechanisms coexist, each with its own key derivation, storage, integrity rules, and failure behavior:
+### I.3 Law that already applies
 
-1. **`BuildCache`** — whole-program native binary at `~/.cache/jet/build/<key>/bin` with a `bin.sha256` sidecar, keyed on canonical AST bytes, toolchain, dependencies, runtime, and settings (`Source/BuildCache.rs:17-41,90-167,208-295`; key assembly `Source/CmdCompile.rs:5795-6002`). No size bound, no pruning. Two hit timings exist: plain `jet build` probes only **after** the full front end (`CmdCompile.rs:1910-1937`); AOT-profile `jet run` probes and executes the cached binary **before** the front end (`CmdCompile.rs:1695-1767`).
-2. **`RuntimeCache`** — content-addressed `jet_runtime`/`jet_runtime_core` rlibs at `~/.cache/jet/runtime`; 512 MiB bound, digest sidecars, oldest-entry eviction, per-key locks, fail-open to inline code (`Source/RuntimeCache.rs:18-35,101-148,316-421,636-790`). Bypassed entirely when FFI is present (`CmdCompile.rs:7397-7423`).
-3. **`RunCache` + JIT tier cache** — warm default-`jet run` Cranelift machine code (`module.bin`, format 5 in `crates/jet-jit/src/jit/tier_cache.rs:31-41`) at `~/.cache/jet/run`, keyed on compiler identity plus the absolute watched-path closure with content digests and mtime/length stamps (`Source/RunCache.rs:75-185,192-261`). A warm hit returns **before** the front end (`Source/Interpreter.rs:924-944`); a miss runs the full front end, lowering, and Cranelift compile (`:945-1065`). All-or-nothing over the whole watched closure. Structural decode validation but no cryptographic sidecar, no size bound, no pruning.
-4. **`jet-queries` + `IncrementalSemaCache`** — in-process demand cache with module-interface fingerprints, reverse-import-closure invalidation, and a checked-body cache (`crates/jet-queries/src/lib.rs:60-287`, `crates/jet-sema/src/Sema/Bundle.rs:738-933`, `Validation.rs:481-624`, `crates/jet-driver/src/QueryService.rs:274-395`). Wired into LSP, `jet try`, default `jet check` (`Source/lib.rs:250-251`), `lint --a11y/--complexity`, `prove`, and `supply`. **Not** wired into `jet build`, default `jet run`, or `jet dev`. In-memory only; nothing persists across processes.
-5. **Programmable action layer** — canonical action keys (`jet.action-key.v2`, length-prefixed SHA-256 over content snapshots, no mtimes; `errors_keys.rs:253-423`; argv/input/output order is caller-defined and preserved), `LocalCas` and action records under `.jet/build-cache/{cas,actions,explanations}` (`execution_runtime.rs:465-477,1588-1598`), a `FrontEndCompletion` gate that forbids cache restore before parser, sema, policy, and diagnostics complete (`cache_cas.rs:177-211`), sandboxed execution, remote wire records and a remote scheduler (`cache_cas.rs:2872-3015`, `remote_scheduler.rs`), and a versioned deterministic `BuildPlanReplay` record (`replay.rs:1-61`).
-6. **Compiler-owned `compile-package:<name>` actions** — minted per package when dependency roots exist (`plan_impl.rs:229-232,263-279,385-443`) and executed through the graph (`Driver/mod.rs:3231-3293`). The cached payload today is a `jet.sealed-package.v1` **text stamp** (name, source digest, compiler identity, target, profile, dependency digests; `Driver/mod.rs:3277-3292`). #1422 is done: the identity and action layer exist and are proven. The payload is not a compiled object, and nothing restores dependency compile work from it. The sidequest's line "sealed package-object reuse remains unbuilt" (`docs/sidequests/library-reuse-and-linking.md:7`) is true of the payload and false of the action layer; both facts matter.
-7. **FFI bridge cache** — per-key Cargo-built bridge artifacts with provenance at `~/.cache/jet/ffi` (`crates/jet-pkg-model/src/FFI.rs:1993-2030,2619-2690,3246-3251`). The one place user builds invoke Cargo.
-8. **C binding caches** — header-hash keyed generated bindings under project `.jet/bindings/<lang>/` with hash sidecars and auto-regeneration (`CBind.rs:16-49`, `CFFI.rs:1344-1467,1552-1588`).
-9. **Package source stores, two layers** — Jetpack's Hangar under `$XDG_DATA_HOME/jet` (or `~/.local/share/jet`) with a shared CAS, strict metadata checks, lock-connected receipts, and a 128 GiB default quota with unreachable-object eviction (`crates/jet-pkg-model/src/Store.rs:19-70,164-230`, `crates/jetpack/src/Store/Quota.rs:20-97`, `Provider.rs:924-1001`); and the compiler Loader's legacy locked-source staging fallback at `~/.jet/store/<name>-<version>-<fingerprint>` with exact tree-hash verification (`crates/jet-driver/src/Loader.rs:2241-2305`). The generic `Lock::verify_store_fingerprint` helper is an incomplete stub (`crates/jet-pkg-model/src/Lock.rs:3731-3757`).
-10. **`ReceiptStore`** — content-addressed whole-invocation records for `check`, `build`, `test`, `prove`, and `budget check` under project `.jet/receipts`, with input-closure validation on replay (`Source/ReceiptStore.rs:69-125,247-575`). `run` and `dev` are excluded. This is the layer #2346's diagnosis implicates.
+Ratified on the Tower board (quoted from `decision show`):
 
-Workspace membership is declared in `workspace.jet` and mirrored in `.jet/lock` (`crates/jet-pkg-model/src/WorkspacePlan.rs:19-58`, `Lock.rs:592-637`). The `workspace` key inside `package.jet` is reserved-empty (`Package/mod.rs:2168-2177`). Package facts parse name, version, deps, boundaries, members, outputs, settings, build profiles, build allowances, authority, and policy (`Package/mod.rs:175-236,2033-2165`).
+- **D-INCR-UNIT1=A** — three-layer dirty model: item/query reuse (layer 1), module interface fingerprint invalidating importers only (layer 2), sealed package artifacts (layer 3). "No path skips sema or diagnostics on a cache hit that still needs checking."
+- **D-LIB-REUSE1=B** — sealed package objects keyed on exact identity; generic bodies travel as typed IR and instantiate at the use site; a compiler upgrade empties the cache and rebuilds once; pinned Jet dynamic libraries with a checked compiler identity.
+- **D-AOT-CRANELIFT1=B** — `jet build --profile=debug` lowers checked TIR through Cranelift to objects and links without rustc; unsupported targets fall back to rustc opt-level 0 and name the fallback in `jet explain build`. Owner comment: `jet check 0.007s vs ~12s rustc path`.
+- **D-BUILD-DEFAULT1=B** — `run`/`dev` fast, `build` optimized; explicit `--profile` overrides.
+- **D-BUILDACTION1=A, D-BUILDCACHE1=A, D-BUILDSCHED1=A, D-BUILDQUERY1=A, D-BUILDNORM1=A, D-BUILDREMOTE1=A, D-BUILDTOOLCHAIN1=A, D-BUILDPROBE1=A** — typed actions with declared inputs/outputs/argv/env/caps; default-on local action cache with a full explainable key, `--no-cache`, `jet explain-build`; deterministic scheduler with named pools (`cpu`, `memory`, `linker`, `console`, `gpu`, project pools); `jet graph`, `jet explain-build`, `jet query build` sharing one provenance API with the LSP; AST-level rename-sensitive cache normalization; local by default with remote cache and remote execution as separate policy grants; lock-recorded toolchains; reproducibility-class probes.
+- **D-JPK-CACHEAUTH1=D, D-JPK-CACHECONFIG1=D, D-JPK-REPROCACHE1=D, D-JPK-REMOTE1=D, D-JPK-CACHE1=A, D-JPK-SELECTOR1, D-CASTORE1=A** — signed provenance from allowlisted writers with verify-on-read; host-bound mirror bindings (`jet cache bind`), never repo flags; quarantine of unreproducible outputs; offline-first ordered mirrors; `-p` and `--affected` derived from action-cache input hashes.
+- **D-JPK-NODAEMON1=A** — "No daemon, no root ... no resident process ever — supervision parents services from the jet dev session ... violations need a new ballot."
+- **D-JPK-SANDBOX2** — fetched or transitive executable steps require a strong sandbox; copy and prebuilt verification proceed.
+- **D-PERFBUDGET-COMPILE1=C** — typed Clean, NoChange, and named-Edit compile workloads, one warmup, twenty samples, exact patch on a copied tree.
+- **D-COSTLAW1=A (+C by owner comment)** — transparency surfaces plus a first-class optimizer.
+- **D-VERDICT-687-1** — `jet run` is the JIT lens, `jet build` the AOT lens; missing JIT coverage is a compiler defect.
 
-### I.4 What a one-line edit costs today
+Open records that touch this scope: **D-BUILDPROFILE1** (spec-only import: blessed profiles `release`, `debug`, `ci`; `E1219`), **D-BUILD1**, **D-WORKSPACE2**, **D-JPK-NIXCACHE1**, **D-JPK-NIXINDEX1**. This proposal does not depend on any of them.
 
-- **`jet build`:** full front end, whole-crate TIR and Rust emission, whole-crate rustc, backend, link. Only runtime/Core rlibs, FFI bridges, C bindings, and declared-action records are reused. On a no-change build the front end still runs in full before the post-front-end cache probe.
-- **Default `jet run`:** warm hit skips everything (pre-front-end); any change in the watched closure discards the whole artifact and pays full front end plus full JIT lowering and compilation.
-- **`jet dev`:** full bundle reload and `check_bundle_gates` on every detected change (`Source/CmdDevTools.rs:846-896`); the incremental sema cache is not used. Dev's benefit is resident runtime state, not compiler-work elimination. The watcher trusts existence/mtime/length stamps with no content digest (`crates/jet-devserver/src/WatchService.rs:49-71`).
-- **Web:** whole re-emission and a whole wasm crate per change (`Source/CmdCompile.rs:6163-6422`).
+Competitive gate (`AGENTS.md`): per cell and metric; Rust parity only at Jet/Rust ≤ 1.05; the owner has tightened build cells to a strict win (Appendix A).
 
-### I.5 Ratified law this proposal composes (not reopens)
+### I.4 Measured baseline
 
-Decision IDs verified against the live Tower store and its archive; archived records remain law.
+Measured on 2026-09-01 with `target/debug/jet` (a debug build of the compiler; **front-end phases are inflated by that, rustc and link phases are not**), rustc 1.97.1, LLVM 21.1.8, 32 threads, load average ≈ 9 before the runs, three trials per state, `JET_TIMING=1` (which disables receipt replay), all caches redirected into scratch so the machine's real caches were untouched. Wall seconds, median of three. Full tables: `~/.cache/jet-luna/abo/MeasureNow.md`.
 
-- **Two-lens law:** one core, one TIR; the JIT lens wins dev velocity, the AOT lens ships optimized binaries (D-VERDICT-666-1, D-ONECORE1=A, D-VERDICT-687-1, D-LENS-RUN2=A, D-BUILD-DEFAULT1=B). Cranelift AOT is only the explicit debug profile (D-AOT-CRANELIFT1=B). R12 makes parity structural: one structured TIR, exhaustive consumers per backend, interpreter reference semantics, no durable unsupported gaps (`docs/spec/architecture.md:729-755`).
-- **D-INCR-UNIT1=A:** the dirty model is three layers — item/query reuse, module-interface invalidation, sealed package artifacts. Package-only dirty sets punish large packages; file-only sets ignore module boundaries.
-- **D-LIB-REUSE1=B**, both halves: sealed package objects keyed on exact identity (sources, dependency digests, compiler identity, target, profile), typed generic bodies traveling in the artifact, a compiler upgrade emptying the cache with a one-line message; and pinned Jet dynamic libraries with a checked compiler-identity match before mapping. "No cache path skips parsing, sema, policy, or diagnostics" and "a package restore skips recompiling that package; it never skips checking the package being edited" (`docs/sidequests/library-reuse-and-linking.md:69-76,134-142`). Restore serves every lens identically.
-- **D-ECO-GRAPH1=A / D-ECO1=A:** one typed source-to-machine graph and one lock identity power run, test, build, and explain; outputs are thin projections.
-- **The D-BUILD slate:** typed actions with declared inputs/outputs/argv/env/caps (D-BUILDACTION1=A); a default-on local action cache with full identity including tool, compiler, toolchain, target, policy, and generated hashes (D-BUILDCACHE1=A); deterministic scheduling with named pools (D-BUILDSCHED1=A); read-only inspection as `jet graph`, `jet query build`, and `jet explain-build` (D-BUILDQUERY1=A; these spellings, no `inspect` prefix); typed lock-recorded toolchains (D-BUILDTOOLCHAIN1=A); typed reproducibility-class probes (D-BUILDPROBE1=A); local by default with remote cache and remote execution as separate policy grants (D-BUILDREMOTE1=A); AST-level rename-sensitive normalization for cache identity (D-BUILDNORM1=A).
-- **The D-JPK cache slate:** private namespaces and allowlisted signed writers (D-JPK-CACHEAUTH1=D); host-bound typed cache bindings, never repo or flags (D-JPK-CACHECONFIG1=D); verify-every-hit with quarantine of divergent outputs (D-JPK-REPROCACHE1=D); offline-first ordered mirrors with separate write grants (D-JPK-REMOTE1=D); signed output-hash substitution (D-JPK-CACHE1=A); sealed verification manifests with explicit full rehash (D-JPK-VERIFYONCE1=A); bounded typed dynamic plan stages with fragment digests in action identity and the lock (D-JPK-DYNAMICPLAN1=D); typed store endpoint capabilities (D-JPK-STOREBACKEND1=D); `-p <member>` and `--affected[-since]` derived from action-cache input hashes with the dependent closure always included (D-JPK-SELECTOR1=C). D-JPK-NIXCACHE1 is an **open** ballot, not law.
-- **Content-addressed package identity** (D-CASTORE1=A) and the shared verified generated-Rust test cache (D-VERIFY-CACHE1=C).
-- **R8:** verified warm object reuse; corrupt, rejected, or malformed artifacts fall back to complete inline compilation; caches are bounded; the final key carries relevant runtime/Core digests, not a compiler-binary hash (`docs/spec/architecture.md:665-679`). R2: any sema-pass program must produce compiling Rust (`:641-643`).
-- **Comptime effects:** D-CTEFFECT1=A (Tier 0 pure; Tier 1 hashed into `.jet/lock`; Tier 2 ambient behind `#Impure` and a gate) and D-MODCOMPUTE1=A (pure computed-field graphs, deterministic order). D-DET1 is an **imported open record**, not a ratified decision; its operative text lives in `docs/spec/syntax-decisions.md`.
-- **Measurement law:** D-PERFBUDGET-COMPILE1=C (typed Clean/NoChange/named-Edit compile workloads, exact recorded patch on a copied tree, one warmup, twenty samples; `docs/spec/performance-budget-decisions.md:25-40`) plus the ratified perf-budget slate (surfaces, baselines, grammar, reports, providers, integration). D-COSTLAW1=A is a standing law with a loop lint and a per-line cost view, not just a CLI flag. Benchmarks use `.measure`/`jet test --measure` with tier labels and the `keep(x)` sink (D-BENCH-MARKER1=A, D-CLAIM-BENCH1=A, D-BENCH-KEEP1=A). Script warm budget: ≤ 2× the fastest peer (D-SCRIPT-BUDGET1=B; #741 done).
-- **Theo/Xcode anti-goals** (`docs/plans/compiler-speed.md:216-237`): incremental never worse than clean; no world rebuilds for a local edit; bounded pinpoint type-checker diagnostics (D-TYPECHECK-BOUND1=A, ratified); no cache-purge folk remedies; dev profile never silently diverges from ship profile.
-- **Honest physics** (`docs/plans/compiler-speed.md:273-280`): the dev loop can beat Cargo by large multiples because it does strictly less work. Transpile-era optimized AOT is Cargo-release parity at best on cold single-package builds. Claiming otherwise is dishonest.
+| Program | LOC | State | Wall | Front end (parse+sema) | Backend (rustc of user crate) | Link (includes thin LTO) |
+|---|---|---|---|---|---|---|
+| `examples/features/devloop/job_runner.jet` | 15 | cold | 19.8 s | 0.10 s | 17.7 s (compiles runtime rlib) | 1.30 s |
+| same | | no-change | 2.52 s | 0.10 s | 0.44 s | 1.28 s |
+| same | | edit | 2.54 s | 0.10 s | 0.44 s | 1.29 s |
+| `examples/features/time/datetime_accuracy_civil_arithmetic.jet` | 3349 | cold | 108.7 s | 26.6 s | 15.5 s | 28.7 s |
+| same | | no-change | 103.3 s | 30.0 s | 0.43 s | 30.5 s |
+| same | | edit | 99.5 s | 33.0 s | 0.43 s | 28.7 s |
+| `gauntlet/entries/nbody/jet-expert/run.jet` | 144 | cold | 24.1 s | 0.20 s | 20.8 s (runtime rlib) | 1.75 s |
+| same | | no-change | 0.97 s | 0.22 s | 0 (BuildCache hit) | 0 |
+| same | | edit | 2.95 s | 0.20 s | 0.49 s | 1.48 s |
+| `dogfood/jetpack` copy (package build) | 4358 | all three | ≈ 15 s to failure | 4.4 s | — | — (exit 101, see I.5) |
 
-### I.6 Known defects and determinism holes
+Three findings the numbers make plain:
 
-- **#2346** (building): the no-change AOT miss, diagnosed to the receipt replay layer; the dashboard bypasses receipts. **#2345** (ready, blocked by #2346): perf-harness acceptance and a baseline never regenerated. #666, #1023, #1026, #1027, #1028 wait on them; #1025 (reusable stdlib objects) is ready with a stale blocker pointing at completed #1024.
-- **Nondeterministic ownership tie-breaks:** `dep_roots` is a `HashMap` (`crates/jet-foundation/src/AST/program_imports.rs:618-620`), and three sites select owners by `.max_by_key` over its iteration order when depths tie: `crates/jet-codegen/src/Codegen/Context.rs:3499-3517`, `crates/jet-sema/src/Sema/BudgetSpecs.rs:164-175`, and `crates/jet-driver/src/Loader.rs:2599-2610` (with `realized_authorities: HashMap` at `Loader.rs:325-327`).
-- **Ambient environment:** the cache env recorded for the final rustc invocation is empty while the spawned process inherits the full ambient environment (`Source/CmdCompile.rs:7409-7413,7503-7517`).
-- **Paths in artifacts and keys:** the native generated-source comment embeds `module.display`, which can be absolute (`Codegen/mod.rs:5159-5165`); web source maps are project-relative by design (`Web.rs:25-30`). `RunCache` hashes absolute watched paths (`RunCache.rs:148-185`).
-- **Watcher stamps:** existence, mtime, and length only; a same-size mtime-preserving rewrite is invisible to the dev watcher (`WatchService.rs:49-71`).
-- **Store verification split:** the Loader verifies exact tree hashes itself; the generic `Lock::verify_store_fingerprint` is a stub. Two source-store layers (Hangar, legacy `~/.jet/store`) coexist.
-- **Nixpkgs cold path:** the native store audit measured 0/28 `env.jet`, 0/22 direct-shell, and 0/48 full-shell selections on a cold no-Nix machine (`docs/audits/jetpack-native-nixpkgs-2026-08-24.md`). No part of this proposal may assume that support exists.
+- **The runtime rlib is the cold tax.** 17–21 s of every cold build on this machine is rustc compiling `jet_runtime` once per (rustc, flags, used-Core) identity. Cargo users pay nothing comparable because `std` ships prebuilt.
+- **Thin LTO over the runtime is the warm tax.** The 3349-line program spends ≈ 29 s in link on *every* build, including no-change, because the default optimized profile runs thin LTO across the program and the full runtime bitcode each time. A per-module ThinLTO cache removes this for unchanged modules.
+- **Reuse is inconsistent.** `nbody` hits the binary cache on no-change (0.97 s); `job_runner` and the 3349-line program do not (backend and link run again). The graph below has one rule for all of them.
+
+Cargo peer rows for the `nbody` pair (`gauntlet/entries/nbody/rust-expert/main.rs`, 240 LOC): see §I.4a, filled from `~/.cache/jet-luna/abo/CargoPeer.md`.
+
+### I.4a Cargo peer baseline
+
+Same machine, same day, `cargo 1.97.0`, rustc 1.97.1, `RUSTC_WRAPPER` unset, default linker, three samples, wall seconds median. The Rust twin of `nbody` is `gauntlet/entries/nbody/rust-expert/main.rs` (240 LOC, no dependencies). The 1113-line row is `tools/ci/compiled-workload-peer-launcher.rs`, a Rust-only program with no Jet twin, included to show how Cargo scales. Full tables: `~/.cache/jet-luna/abo/CargoPeer.md`.
+
+| Program | Command | cold | no-change | edit |
+|---|---|---|---|---|
+| nbody (Rust, 240 LOC) | `cargo build --release` | 0.62 s | 0.28 s | 0.55 s |
+| nbody | `cargo build` (dev) | 0.55 s | 0.28 s | 0.46 s |
+| peer-launcher (Rust, 1113 LOC) | `cargo build --release` | 1.05 s | 0.27 s | 1.05–1.58 s |
+| peer-launcher | `cargo build` (dev) | 0.82 s | 0.27 s | 0.58 s |
+| nbody (Jet, 144 LOC) | `jet build` (opt-level 2, thin LTO) | 24.1 s | 0.97 s | 2.95 s |
+| nbody (Jet) | `jet build --profile=debug` (falls back to rustc opt-level 0 today) | 13.7 s | — | 2.86 s |
+| nbody (Jet) | `jet run` (JIT) | 1.19 s | 1.20 s (warm) | — |
+
+Today Jet loses every cell of this small program by 2× to 40×. The losses decompose exactly onto the levers in Part II: the cold cell is the runtime rlib compile (17–21 s; prebuilt runtime objects, II.7), the edit cell is thin LTO over the runtime at link (≈ 1.5 s here, ≈ 29 s on the 3349-line program; ThinLTO cache, II.6) plus a whole-crate rustc (hidden units, II.4), the no-change cell is a front end that always runs plus an unreliable binary-cache hit (memoized checks and receipts, II.3), and the debug cell is rustc at opt-level 0 where the ratified Cranelift path is unwired (II.6). The warm `jet run` shows no reuse at all on this program (`JET_RUN_TRACE=1` printed nothing), which the per-unit run artifacts replace.
+
+### I.5 Defects found during measurement
+
+- **Jetpack package build ICEs on master.** `jet build` at the root of a copy of `dogfood/jetpack` exits 101 with `internal compiler error: the generated Rust did not compile.` in all nine runs. Re-running rustc on the preserved generated file yields 49 errors: `E0308` ×33 (nominal module mismatch between `manifest`/`ref` `ParseError` types), `E0382` ×9 (`DataTree` value reused after move), `E0507` ×7 (moves out of optional `String`). Card #2350 fixed a different exit-101 cause at `77df06cc6`; this is a new one. Evidence: `~/.cache/jet-luna/abo/JetpackIce.md`, preserved generated source `~/.cache/jet-luna/abo/jetpack-ice-main.rs` (6,075,674 bytes including the embedded runtime and Core blocks). This is an I2 P0 and blocks the only large real program in the corpus.
+- **Whole-invocation receipts never replay for `jet build`.** Two consecutive builds of the same unchanged program with the same copied `jet` binary (SHA-256 `cf196767…`) and receipts enabled produced two different receipt contexts (`35cbc60e…` and `086a4036…`); the second run rebuilt (68.8 s) instead of printing `ok: build current (receipt …)`. Something outside the inputs enters the receipt claim (`Source/ReceiptStore.rs:88-125`, `:1054-1166` hash verb, cwd, argv, the full environment, tool identities, and terminal mode). Evidence: `~/.cache/jet-luna/abo/CargoPeer.md`. Under the design, the receipt key is the invocation closure digest and nothing else; the hostile matrix (III.3, case 1) makes this a permanent test.
+- **No-change builds under measurement re-run backend and link** for two of three programs (I.4). The receipt finding above explains the receipt half; whether the binary-cache misses share the cause is settled by the same test.
+- **`RunCache` artifacts have no digest sidecar and no bound** (`Source/RunCache.rs:192-231`); `BuildCache` has no bound (`Source/BuildCache.rs:1-347`).
+
+### I.6 Where the prior draft was wrong
+
+- "Jet already wins cold builds by 6×": no source for that ratio exists; the Jetpack ledger marks every build metric *not measured* (`dogfood/jetpack/METRICS.md:1-14`, `:102-149`). Cold builds today are dominated by the runtime rlib compile.
+- "Sealed package objects exist via #1422": the per-package action produces a `jet.sealed-package.v1` text receipt, not a compiled payload (I.2 row 6).
+- "Incremental sema serves `jet build`/`jet run`/`jet dev`": it serves `CompileMode::Check` only, in memory only (I.2 row 7).
+- It rejected hidden units and a resident session as out of scope for the transpile era. The owner has overruled both (Appendix A); Part II designs them.
 
 ---
 
 ## Part II — Proposed design
 
-### II.1 The thesis
+### II.1 Why Jet can beat Cargo while transpiling to Rust
 
-The measured enemy is unconditional front-end re-execution, not missing backend caches. Jet already wins cold builds by 6× and already skips warm backend and link work. It loses the warm race because every invocation replays the whole front end before any cache gate, and its ten reuse mechanisms each carry private keys, private stores, and private failure rules.
+Cargo's unit of compilation, dependency, caching, and parallelism is the crate the user wrote. Everything below follows from Jet owning the semantics (I3) and the whole program graph, so Jet can choose different units than the user's files without changing what the user declared.
 
-The design is four laws:
+| Lever | What Cargo does | What Jet does | Kind of win |
+|---|---|---|---|
+| Front end | rustc re-parses, re-resolves, type-checks, and borrow-checks the whole crate on every build | Jet checks per module, memoizes on disk, and emits Rust that rustc accepts by construction; rustc still parses and type-checks that Rust, but it is explicit, macro-free, and lint-free | structural on no-change and edits; fought on cold |
+| Incremental unit | crate; `cargo build --release` has incremental off | hidden units: an edit recompiles one unit's implementation crate | structural |
+| Optimizer | release re-runs LLVM on every codegen unit of the crate | per-unit bitcode plus ThinLTO with a persistent cache in the store; unchanged modules skip optimization | structural |
+| Dependencies | compiled from source per project; sccache is opt-in | sealed unit sets restored from local, team, and public tiers by exact identity | structural |
+| Standard library | `std` ships prebuilt | runtime and Core ship as prebuilt per-module objects for the pinned toolchain; today they compile once per machine | parity restored, then structural once the public tier exists |
+| Parallelism | one serial front end per crate; LLVM parallel across codegen units | many unit front ends in parallel; ThinLTO parallel across modules | structural for large packages |
+| Dev builds | rustc + LLVM at opt-level 0 | Cranelift objects from checked TIR, no rustc (D-AOT-CRANELIFT1) | structural |
+| No-change | fingerprint walk with mtimes | digest verify with stamps as a first filter, replayed diagnostics | fought; small absolute numbers |
+| Link | `rust-lld` by default on x86_64 Linux since 1.90 | `rust-lld` for release (version-matched ThinLTO plugin and cache); mold for the fast profile when present | parity to small win |
 
-1. **One graph.** Every invocation lowers to the existing typed `BuildPlan`. Ordinary compilation becomes compiler-owned nodes in the same graph that runs user `fn build` actions. D-ECO-GRAPH1=A already demands this; the work is promotion and deletion, not invention.
-2. **One identity.** Every durable artifact is keyed by the canonical action-key discipline, on an identity ladder from declared boundary facts down to per-item fingerprints.
-3. **No-change is an invocation-level replay.** When the complete input closure is digest-identical, the invocation replays its receipt: recorded diagnostics, verified terminal artifact, exit. Target: under 100 ms.
-4. **An edit pays for its dirty set.** The front end re-checks the changed module and its dependents through the already-built incremental sema engine; engines rebuild only dirty fragments. Work is proportional to the edit, in every lens.
+Honest physics. The irreducible work of a truly cold, single-package optimized build is rustc's front end on the generated Rust, LLVM optimization, and the link. Jet cannot skip any of the three while transpiling. It can shrink the first (cheaper Rust, parallel unit front ends), reorder the second (bitcode per unit, optimization once at link, cached), and match the third. For programs above a few hundred lines that arithmetic favors Jet. For hello-world-sized programs the two sides run about one rustc each and the result depends on fixed costs; that cell is measured, not asserted (III.1, A4).
 
-### II.2 The canonical work graph
+### II.2 The one graph
 
-Every `jet build`, `jet run`, `jet dev`, `jet test`, and web build lowers to one `BuildPlan`, whether or not the package declares `fn build`. Node kinds, all expressed as today's typed actions:
+Every command (`jet build`, `jet build --profile=debug`, `jet run`, `jet dev`, `jet test`, web) lowers to one `BuildPlan`, whether or not the package declares `fn build`. Today's plan holds only declared actions; the compiler's own work joins it as nodes of the same kind, keyed by the same `jet.action-key.v2` discipline (`errors_keys.rs:253-423`), stored in the same store (II.7), scheduled by the same scheduler (II.8), and explained by the same commands (II.11). No second graph, no second key format, no second cache.
 
-| Node | Today | Becomes |
-|---|---|---|
-| Package front end (parse, sema, TIR per package) | implicit driver phases | compiler-owned node; internally demand-driven via `jet-queries` |
-| Sealed package object (dependency compile) | `compile-package:<name>` action with a v1 stamp payload | real object payload; restore from local, team, and public tiers |
-| Runtime/Core rlib compile | standalone `RuntimeCache` | compiler-owned action; same key discipline; rlib split mechanics and 512 MiB bound retained |
-| FFI bridge, C binding | standalone caches | compiler-owned actions (keys already compatible) |
-| Generated-crate emit, rustc, link (AOT lens) | monolithic `build()` | terminal actions; linker keeps its pool of 1 |
-| JIT module artifact (JIT lens) | all-or-nothing `RunCache` | per-module tier-artifact node |
-| User actions, generated sources | already actions | unchanged |
-| Final binary, web artifact set | `BuildCache`, ad-hoc writes | terminal action outputs in the action-record store |
+| Node | Inputs (all by content digest) | Output | Executor |
+|---|---|---|---|
+| `Source` | file bytes; manifest; lock; workspace index; toolchain identity; settings; allowlisted environment | leaf digests | stamp-then-hash reader |
+| `Check(module)` | module source; interfaces of imported modules; package policy and authority facts; comptime inputs; compiler identity | module **interface record** (signatures, types, layouts, exported generics), module **body record** (checked TIR incl. generic templates), diagnostics record, item digests | the existing `jet-queries` / `IncrementalSemaCache` engine, persisted (II.3) |
+| `Partition(package)` | module import graph; impl-placement edges; entry module | unit manifest: unit id → sorted member modules; unit dependency DAG | pure function (II.4) |
+| `Emit(unit, lens, profile, target)` | body records of members; interface records of imported units; emission policy version | generated Rust for `unit.iface` and `unit.impl` (release lens) or nothing (fast lens uses TIR directly) | codegen |
+| `Compile(unit.iface)` / `Compile(unit.impl)` | generated Rust; `rmeta` of dependency `iface` crates; runtime object identities; rustc identity; flags; target | `.rlib` containing bitcode (release) | rustc |
+| `Object(unit)` | body records; runtime symbol table; Cranelift version; target | `.o` | Cranelift (fast lens) |
+| `Action(name)` | as today (D-BUILDACTION1) | declared outputs | sandboxed runner |
+| `Link(output)` | all unit artifacts in dependency order; runtime objects; C libraries; linker identity; ThinLTO cache handle | binary, library, or wasm | `rust-lld` (release), mold or `rust-lld` (fast), `wasm-ld` |
+| `Receipt(invocation)` | closure digest of every leaf the invocation read; verb; argv; terminal mode | recorded stdout/stderr, exit status, terminal artifact digests | replay |
 
-The scheduler is the existing deterministic one: Kahn topological stages, `BTreeSet` ready order, automatic CPU/memory pools, serial linker/console/GPU pools (`execution_helpers.rs:53-126`). No second scheduler. The lens changes which terminal nodes are demanded, never which dependency work is reusable (D-LIB-REUSE1, I9). The Loader fan-out cap becomes `min(available_parallelism, configured jobs)`, recorded in receipts. Sema stays single-threaded per bundle; parallel sema is a self-host architecture bet owned by #669. Independent package front-end nodes parallelize as ordinary graph stages.
+Invariants:
 
-**What is deleted, and by what.** `BuildCache` → terminal-action records plus CAS. `RuntimeCache`'s private store logic → compiler-owned actions (its mechanics survive as the action implementation). `RunCache`'s bespoke store → per-module tier-artifact nodes with standard integrity and bounds. The two ad-hoc pre-front-end probes (AOT-profile `jet run` binary probe, `RunCache` warm hit) → the one receipt-replay discipline of II.4. `ReceiptStore` stays: it answers the invocation-level question, and its input closure derives from graph node snapshots instead of a parallel walk. The Hangar package store stays: it is the immutable source-input layer, not an output cache. The Loader's legacy `~/.jet/store` staging folds into the Hangar layer, and `Lock::verify_store_fingerprint` is completed or deleted in the same change. Nothing new is layered beside anything.
+- **Front end first.** No node that produces machine code or restores an artifact may run until every `Check` node the invocation demands is complete and its diagnostics are classified (today's `FrontEndCompletion` gate, kept: `cache_cas.rs:177-220`). Errors stop the graph before any rustc starts; warnings are recorded with the `Check` node and replayed verbatim on hits.
+- **One key law.** A node's key is the canonical serialization of its input digests plus the executor identity. No mtimes, no absolute paths, no ambient environment beyond the allowlist. Sequence order is preserved where order is semantic; sets are sorted.
+- **Early cutoff.** A node whose output digest equals the stored one marks its dependents' inputs unchanged. A comment-only edit changes a `Source` digest, re-runs one `Check`, and stops there because the body record digest is unchanged.
+- **Same graph, every lens.** The lens changes which executors run (`Compile` vs `Object`) and which profile flags enter keys; it never changes `Check`, `Partition`, or dependency restore (D-LIB-REUSE1's "same artifact identity and the same restore path serve every lens").
 
 ### II.3 Identity and invalidation
 
-One key discipline for all durable artifacts: `jet.action-key.v2` (`errors_keys.rs:253-423`). Canonical serialization, length-prefixed SHA-256, content snapshots, declared inputs, no ambient state, no mtimes. Sequence order is preserved where order is semantic (argv, declared outputs); unordered sets are serialized sorted. The identity ladder, coarse to fine:
+The identity ladder, coarse to fine:
 
-1. **Boundary identity** — the declared facts: `package.jet` facts as parsed (name, version, deps, boundaries, members, outputs, authority, policy, settings, build profiles), `workspace.jet` membership, `.jet/lock` including Tier-1 comptime input hashes (D-CTEFFECT1) and dynamic-plan fragment digests (D-JPK-DYNAMICPLAN1). Changing a declared fact invalidates everything it governs. Nothing else may.
-2. **Package identity** — canonical module bytes under D-BUILDNORM1 normalization, sorted relative module paths, sorted dependency artifact digests, compiler identity, target, profile, toolchain record (D-BUILDTOOLCHAIN1). This keys sealed objects.
-3. **Module interface identity** — the existing interface fingerprint (`Sema/Bundle.rs:738-933`). An interface change dirties the reverse import closure; a body change dirties one module.
-4. **Item identity** — the existing checked-body cache key (`Validation.rs:481-624`). Comptime-dependent bodies stay uncacheable, as today.
-5. **Engine-partition identity** — content keys for emitted-Rust fragments and per-module JIT artifacts. These exist only inside engines and have no user-visible meaning.
+1. **Invocation** — `Receipt` key: verb, argv, terminal mode, and the closure digest. A hit re-renders the recorded typed diagnostics for the current terminal, re-verifies the terminal artifact's digest in the store, and prints the receipt line. Owner ruling: memoized module checks satisfy D-INCR-UNIT1's "no path skips sema or diagnostics on a cache hit that still needs checking", because a module whose inputs are identical does not need checking; the recorded diagnostics are the check (ballot D-BUILD-NOCHANGE1). Diagnostics are stored typed (code, message, spans, severity) and rendered per invocation, so color, width, and `--json` are always right; `--json` records are byte-identical under a versioned schema.
+2. **Package** — manifest, lock entry, member module digests, policy, authority, dependency package identities, compiler identity, target, profile. This is the sealed package object identity (D-LIB-REUSE1).
+3. **Unit** — sorted member module names plus the package identity. Unit identity is a function of structure, never of an index or a size, so adding a module changes only the units whose membership changed.
+4. **Module** — the `Check` key is the module's raw source bytes plus its path plus the digests of every other input the check reads (imported interfaces, package policy and authority facts, lint settings, target and profile facts, compiler identity, generated or external inputs). Raw bytes, not a canonical AST, because diagnostics carry source positions. The canonical AST digest (D-BUILDNORM1: whitespace and comments stripped, names kept), the **interface digest**, and the **body digest** are outputs of `Check` that later nodes key on; a comment-only edit therefore re-runs `Check` and stops there. An audit test instruments every read a check performs and fails on an undeclared one; a node kind that fails the audit checks fresh until fixed.
+5. **Item** — per-item digests inside the body record, used by the query engine for editor and warm-check reuse (D-INCR-UNIT1 layer 1) and by `Emit` for fragment reuse.
 
-Comment-only and formatting-only edits preserve identity at layers 2–5 because normalization excludes them (D-BUILDNORM1); the edited package still gets a real front end and fresh spans. Invalidation is exact, monotone, and boring: a changed input changes a key; a changed key is a miss; a miss rebuilds that node and re-demands dependents. No timestamp heuristics, no "probably fresh," and no invalidation that requires user action. `jet clean` as a remedy is a compiler bug (Theo anti-goal 4). The Jetpack FFI-bridge inversion (I.1) is the standing lesson: every engine input, including hidden bridges, must appear in the key, and the hostile matrix in Part III tests for the class, not the instance.
+Change detection: every leaf is content-hashed with SHA-256 (the existing std-only implementation). Stamps (size, mtime, ctime, inode) let the reader skip hashing an unchanged file; a stamp can only *skip* a hash, never *assert* a change or a non-change on its own. A file whose bytes change under a preserved mtime (`cp -p`) is caught by ctime; a file rewritten with identical bytes is a hit.
 
-### II.4 The no-change law
+Invalidation is dependents-only along recorded edges. A body edit changes the module body digest and therefore `Emit(unit)` and `Compile(unit.impl)`; the interface digest is unchanged, so no dependent unit re-runs rustc (II.4 explains how the two-crate unit makes rustc agree). A signature edit changes the interface digest and re-runs `Compile` for units that import that module's unit. A dependency version bump changes that package's identity and the interface digests of whatever the root imports from it.
 
-A no-change invocation must not re-run the front end. Mechanism: the invocation computes its input-closure digest (sources, manifest, workspace, lock, toolchain, settings, environment allowlist) from graph node snapshots. If a stored receipt matches exactly, the invocation replays: recorded diagnostics byte-identical, terminal artifact digest re-verified, exit. Any digest difference disqualifies replay entirely, and the affected packages get a real front end.
+### II.4 Hidden units
 
-This is composition, not new law. `ReceiptStore` already records and validates whole invocations for `check`, `build`, `test`, `prove`, and `budget check`. The shipped warm `jet run` path already returns before the front end on an exact-identity hit, and #741 closed with that behavior under the ratified D-SCRIPT-BUDGET1=B budget. The AOT-profile run probe does the same for cached binaries. What changes: the replay layer becomes the single product path for every verb in every lens, it is fixed (#2346 lives exactly there), and the two ad-hoc probes are deleted into it.
+A **unit** is a set of modules of one package that rustc compiles together. Units are invisible: no name in the manifest, no authority, no policy scope, no import semantics. They appear only as detail rows under their package in `jet explain-build`.
 
-**One interpretive point is flagged rather than assumed.** D-LIB-REUSE1's clause "no cache path skips parsing, sema, policy, or diagnostics" governs artifact restore; its own beginner pass promises "the second build is fast" with no re-check, and the shipped run path already skips the front end on unchanged inputs. This proposal reads the clause as governing builds where something is being compiled, with digest-identical invocation replay as the no-change path that reproduces the recorded front-end verdict exactly. If the owner reads the clause strictly (every invocation re-runs sema), sub-second no-change builds are impossible and law wins; the target then falls back to the II.5 incremental front end (warm-process fingerprint hits, not replay). Confirm before slice 1 changes `jet build` semantics.
+**Partition.** Build the module graph of the package: nodes are modules, edges are imports (acyclic today, `E0604`) plus **impl-placement edges**: a trait impl written in module M for type T (module `mod(T)`) and trait R (module `mod(R)`) must live in the crate of T or of R under Rust's orphan rule, so the partition adds the edge M → `mod(T)` (or `mod(R)` when T is foreign to the package) and places the impl's emission with that module. Collapse strongly connected components into units. Because imports are acyclic, cycles come only from impl placement; a cycle is a legal Jet program and simply yields a larger unit. The entry module is always its own unit. Units are named by the sorted list of member module paths (identity), and displayed as `<package>/<first-member>` (label). The partition is a pure function of the package's structure: identical on every machine, so sealed unit sets are shareable across the team.
 
-### II.5 Incrementality per lens
+Coalescing small units by size or by machine core count is **not** done: it would make identity depend on edit-sensitive sizes or on the machine, which breaks both stability and sharing. If measurement shows per-unit fixed costs dominate for packages with hundreds of tiny modules, coalescing by directory (a structural rule) is the fallback, gated on evidence (III.4).
 
-**Front end (all lenses).** Wire `CompilerQueries`/`IncrementalSemaCache` into `jet build`, default `jet run`, and `jet dev` — the same engine that already serves `check`, LSP, `try`, `prove`, and `supply` (D-INCR-UNIT1 layers 1–2). Persist module-interface fingerprints and the checked-body cache into `.jet/build-cache` so warm starts across processes skip unchanged-module sema. The `FrontEndCompletion` gate is unchanged: no artifact restore before parser, sema, policy, and diagnostics complete for the demanded set. The dev watcher adds content-digest confirmation; stamps stay as the cheap first filter.
+**Two-crate unit (release lens).** rustc invalidates a dependent crate whenever a dependency's crate hash changes, and that hash covers every body in the crate. A single crate per unit would therefore recompile every transitive dependent on any body edit. Each unit is emitted as two crates:
 
-**AOT lens (`jet build`).** In honesty order:
+- `unit.iface` — every type and enum with its fields and layout, every trait, every inherent impl and trait impl for the unit's types (Rust requires inherent impls in the crate that defines the type), every generic function and generic method body (rustc must see generic bodies to monomorphize them), non-generic method bodies as **forwarders** to implementation symbols, and one `unsafe extern "Rust" { pub safe fn ... }` declaration per non-generic free function of the unit, with a Jet-chosen symbol name.
+- `unit.impl` — the non-generic bodies (free functions and the targets of method forwarders), each with `#[export_name = "<jet symbol>"]`. It depends on its own `iface` and on the `iface` crates of the units it imports. Nothing depends on an `impl` crate; they are only linked.
 
-1. *No-change:* receipt replay (II.4). Cargo's no-change is also cheap; parity plus replayed diagnostics.
-2. *Dependency work:* sealed package objects restored from local, team, and public tiers. This is the structural beat: Cargo recompiles every dependency per project and per clean checkout; Jet restores exact-identity artifacts machine- and team-wide. Clean builds of multi-package projects become "compile the root, link the rest." The #1422 action layer is the landing pad; the work is the real payload (typed TIR with generic bodies, interface, emitted fragment) and restore into emit and link.
-3. *Current-package edit:* incremental front end on the dirty set plus per-module emitted-Rust fragment reuse, so emission cost is proportional to the edit. The final rustc invocation stays whole-crate in the transpile era; its cost is bounded by sealed dependencies (less input), cached rlibs, mold, and fast-profile flags. We do not pretend LLVM away: optimized single-package cold AOT targets a stated factor of `cargo build --release`, not a win. The AOT win claims live in rows 1–2 and in multi-package topologies.
-4. Splitting the current package's generated Rust into multiple rustc crates is rejected for the transpile era: it multiplies I2 surface and link complexity for a backend the self-hosted compiler replaces.
+A body edit changes only `unit.impl`. Dependents compile against `unit.iface`, whose bytes did not change, so their `Compile` keys hit. A signature, type, trait, or generic-body edit changes `unit.iface` and correctly recompiles its importers.
 
-**JIT lens (`jet run`, `jet dev`).** Replace the all-or-nothing `RunCache` with per-module tier artifacts: content-keyed Cranelift machine code per module (same format-5 payload, standard integrity sidecar, bound, pruning, root-relative keys). An edit re-lowers and recompiles only dirty modules; unchanged modules reload machine code. A `jet dev` iteration becomes: digest-confirm the dirty set → incremental sema on it → per-module JIT rebuild → resident swap. This is where "beats Cargo" is structural and large: the JIT lens does no optimization, no rustc, and no link, and after this change does work proportional to the edit.
+Symbols: `_JET_<package-hash>_<module-path>_<item>_<abi-hash>`, where the ABI hash covers the signature and the ABI record (exact rustc build, target triple and features, panic strategy, layout-affecting flags). Every unit of a program is compiled by the same rustc, and the ABI record is in every `Compile` key, so the hash turns any iface/impl skew into a link error (an ICE, never undefined behavior). `safe fn` declarations in `unsafe extern` blocks are stable Rust since 1.82 (RFC 3484) and are exactly the construct for "the declarer vouches for these signatures", which is what a checked interface record is. Under I1, generated Rust `unsafe` is allowed only in user `#Unsafe` regions or vetted std/mem internals; the compiler's own symbol declarations for symbols it emitted are proposed as vetted internals, and that reading is an owner gate (ballot D-BUILD-UNITS1). Per-target contract: ELF and Mach-O keep export names through `--gc-sections`; COFF/MSVC keeps them through `/OPT:REF`; wasm units use `wasm-ld`. A target that cannot honor the contract falls back to single-crate units for that target and `jet explain-build` says so. If the owner declines the reading entirely, the fallback is single-crate units everywhere: still parallel, still edit-proportional for the optimizer (II.6), but transitive dependents re-run rustc on body edits. A one-interface-crate-per-package variant was considered and rejected: it is a serial rustc run on every critical path and recompiles every unit after any signature change.
 
-**Interpreter and web.** The interpreter tier stays cache-free; deopt and ambient paths call the same Prelude semantics (I9), and replay never serves a tier the receipt did not record. Web builds route through the same graph (front-end nodes shared with native; wasm rustc and artifact writes become terminal actions), gaining the no-change short-circuit and front-end incrementality. Per-fragment wasm reuse waits for the web backend to stabilize.
+Cross-unit calls to `extern` symbols are not inlinable by rustc. The release lens restores cross-unit inlining at link time through ThinLTO (II.6); the fast lens does not inline in any case.
 
-### II.6 The package boundary law, mechanically
+**Generics, two phases.**
 
-The optimizer's only units with user-visible meaning are the declared ones: package, module, item.
+- *Phase 1:* generic functions and methods are emitted as Rust generics in `unit.iface`, as today; rustc monomorphizes each instantiation in the unit that uses it. Correct, simple, and the same LLVM duplication Cargo has across crates.
+- *Phase 2:* Jet instantiates generics itself, extending the sema specialization path the JIT already uses for demanded methods (`TIR/mod.rs:1135-1310`) and for single-shape free functions (`:1381-1473`, which today skips functions demanded in several shapes at `:1387-1393`), and places each instance deterministically in the unit that owns its most specific package-local type argument (ties: the generic's own unit). Instances become ordinary non-generic functions with exported symbols; `unit.iface` then contains no bodies at all except impl forwarders, so interface digests change only on real interface changes, and every instantiation is compiled exactly once in the program. Phase 2 lands only if Phase 1 measurement shows duplicate monomorphization or interface churn in the top costs (III.4).
 
-- Sealed-object granularity is exactly the declared package. The compiler never splits one declared package into artifacts with independent trust, authority, or visibility, and never merges packages into one artifact identity.
-- Fine-grained reuse inside a large package uses ladder layers 3–5, which are invisible: no name, no manifest presence, no authority, no policy scope, no import semantics. `jet explain-build` may show them as detail rows under their owning package node; nothing else surfaces them.
-- Dependency edges derive from resolved cross-package imports and declared `deps`, never from source-path coincidence, and are never rewritten for scheduling convenience. Workspace membership authority is `workspace.jet`, exactly as declared.
-- `-p` and `--affected` selection semantics (D-JPK-SELECTOR1=C) are identical with optimization warm, cold, or disabled.
-- Boundary regression proof: builds with optimization fully warm, fully cold, and disabled produce byte-identical manifest facts, lock contents, authority and policy decisions, diagnostics, outputs, and selection behavior.
+**Placement of single-crate globals.** `__JET_COMMAND_SCHEMA`, the optional `#[global_allocator]`, and the `main` wrapper are emitted only in the entry unit's `impl` crate. Runtime state already lives in the runtime objects.
 
-### II.7 Cache integrity, trust, and failure behavior
+**Visibility.** Generated items are `pub` across the package's crates. Product visibility (`pub`, `pub(package)`, private) is enforced by sema (`crates/jet-sema/src/Sema/Bundle/Outputs.rs:121-137`) and is unchanged; rustc visibility was never the product's visibility (today's single crate already makes everything reachable).
 
-One law, applied to every store (today it is applied piecemeal):
+### II.5 The package boundary law, mechanically
 
-- **Verify on read.** A digest sidecar is checked on every hit. Sealed objects and remote hits additionally verify signatures and provenance (D-JPK-CACHEAUTH1, D-JPK-CACHE1), with sealed verification manifests and explicit full rehash (D-JPK-VERIFYONCE1).
-- **Fail open, silently, once.** A corrupt, truncated, wrong-format, or rejected artifact is deleted and rebuilt inline (R8). Never a user diagnostic, never a stale result, never "try `jet clean`."
-- **Bounded.** Every store has a byte bound and age-based pruning under lock. This fixes `BuildCache` and `RunCache`, which are unbounded today. `jet self doctor` reports every footprint.
-- **Atomic.** Temp-write plus rename publication everywhere. A cancelled build (SIGINT mid-graph) publishes nothing; the next build finds a consistent store.
-- **Concurrent.** Per-key build locks across all stores, as `RuntimeCache` and the FFI cache do today: two concurrent builds of one key produce one artifact and one waiter.
-- **Compiler upgrade** empties artifact tiers keyed on compiler identity and prints one line: dependencies rebuild once (D-LIB-REUSE1).
-- **Remote** is exactly the ratified D-JPK machinery: host-bound endpoints, ordered mirrors, first verifying hit wins, writes need a separate grant, unreproducible outputs are quarantined with downstream taint (D-JPK-REPROCACHE1), remote execution is a separate policy grant (D-BUILDREMOTE1), and offline beats every mirror. No new trust anything.
-- **Diagnostics parity law.** For every cache state (cold, warm, corrupted-then-recovered, remote, replayed), diagnostics for the same source state are byte-identical to a fresh build's. This is testable and gates every reuse slice.
+- **Sealed package object = the package's unit set.** For a dependency package the `Emit`/`Compile`/`Object` nodes of its units, its interface records, and its generic templates (typed TIR, D-LIB-REUSE1 half one) form one artifact identity keyed at ladder level 2. Restore is per package: a package never splits into artifacts with independent trust, authority, or visibility, and packages never merge into one artifact.
+- **Authority and policy** (`PackageAuthority`, `policy.contain`, `policy.harden`, lint deny, effect ceilings, unsafe paths: `crates/jet-pkg-model/src/Package/mod.rs:241-340`) are decided by sema per package exactly as today and recorded in every `Check` node of that package. Containment fences are dependency boundaries, which are package boundaries. Crate-level attributes a package's policy requires are emitted on every crate of that package.
+- **Dependency edges** derive from declared `deps:` and resolved cross-package imports, never from path coincidence, and are never rewritten for scheduling convenience. Workspace membership is exactly the `workspace` index.
+- **Outputs** remain the nine closed kinds (`Library`, `Executable`, `Service`, `Check`, `Environment`, `Image`, `Bundle`, `System`, `Fleet`); each is a `Link` sink or an action sink. `Library{native:true}` and `.jetlib` sealing are unchanged.
+- **Build actions** (`b.action`) stay declared graph nodes with the D-JPK-SANDBOX2 sandbox law; generated modules flow into `Check` nodes through declared outputs.
+- **Selectors** `-p` and `--affected[-since]` (D-JPK-SELECTOR1) compute identically with the store warm, cold, or bypassed.
+- **Boundary regression proof** (III.1, A9): warm, cold, and `--no-cache` builds produce byte-identical manifest facts, lock contents, authority and policy decisions, diagnostics, outputs, and selection results.
 
-### II.8 Determinism prerequisites
+### II.6 Lenses
 
-Keys are only as sound as their inputs. Before widening reuse:
+**Release lens (`jet build`, `--release`, blessed profiles).** `Compile(unit.*)` runs rustc with the profile's `opt-level`, `-C linker-plugin-lto`, `-C embed-bitcode=yes`, `-C codegen-units=1` per unit (units are already small; the linker parallelizes), `-C metadata=<unit key>`, `--remap-path-prefix <workdir>=/jet/build`, and `--crate-type rlib`. `Link` runs `rust-lld` (shipped with rustc, so its LLVM matches the bitcode) with `--thinlto-cache-dir=<store>/lto/<output identity>` and a size-bounded pruning policy. ThinLTO keys each module's optimized object by its summary and imports, so an edit re-optimizes the changed unit and the modules that inlined from it, not the program; the runtime's modules are optimized once and reused forever. Runtime performance is unchanged: thin LTO across units at link time equals today's thin LTO within one crate, and the gauntlet runtime cells guard it (III.1, A10). mold stays out of the release lens because rustc's LTO plugin is version-bound and mold's plugin path has known failures with `-C linker-plugin-lto`; mold remains the fast-profile linker when installed.
 
-- Replace the three `HashMap`-iteration `.max_by_key` ownership tie-breaks (I.6) with total-order selection, plus an audit pass for the class.
-- Run the final rustc with an explicit allowlisted environment; the allowlist enters the action key, closing the ambient-env hole at `CmdCompile.rs:7503`.
-- Make native generated-source comments and provenance paths project-root-relative, as web maps already are; key the `RunCache` successor on root-relative paths so artifacts survive checkout moves and team-tier hits are honest.
-- Add watcher content-digest confirmation (II.5).
-- Complete or delete `Lock::verify_store_fingerprint`; one authoritative store-verification path.
-- Standing check: two independent builds of the pinned corpus produce identical artifact digests, using the D-BUILDPROBE1 typed probes; the first differing path is named.
+**Fast lens (`jet build --profile=debug`).** `Object(unit)` lowers checked TIR through Cranelift to relocatable objects (D-AOT-CRANELIFT1=B; the entry point exists: `api_debug.rs:30-118`) and `Link` joins them with the **prebuilt optimized runtime** objects (II.7), the way Rust links an optimized `std` into debug binaries. No generated Rust, no rustc. Unsupported targets fall back to the release-lens executors at opt-level 0 and the fallback is named in `jet explain-build`, as ratified.
 
-### II.9 Beginner defaults, expert inspection
+**Run lens (`jet run`, `jet dev`).** The all-or-nothing `RunCache` becomes per-unit tier artifacts: `Object(unit)` outputs in the JIT's format-5 payload, keyed like every other node, with digest sidecars and bounds. An edit re-lowers and recompiles the dirty unit; unchanged units reload machine code. `jet dev`'s resident swap swaps the dirty units. The default lens stays the tiered JIT (D-VERDICT-687-1); interpreter deopt paths call the same Prelude symbols (I9).
 
-**Beginner:** nothing to type, nothing to configure, nothing to learn. The first build compiles; the second build is fast; an upgrade prints one line; a broken cache heals itself. No cache flag, no clean step, no stale-artifact failure mode. This is the ratified beginner pass of D-LIB-REUSE1 applied to the whole graph.
+**Interpreter.** No artifacts; it is the reference semantics and takes part in every differential (R12).
 
-**Expert (ratified surfaces only; this proposal adds no syntax and no new commands):**
+**Web.** `Emit`/`Compile` wasm units, `Link` with `wasm-ld`, through the same graph and store. Web builds gain the no-change short circuit and front-end memoization immediately; per-unit wasm ThinLTO is measured, not assumed.
 
-- `jet graph`, `jet query build`, `jet explain-build <node>` (D-BUILDQUERY1=A spellings): the graph, its provenance, and per-node hit/miss reasons. The `.jet/build-cache/explanations` directory becomes the backing store.
-- `jet explain --cost` stays the semantic-cost surface (D-COSTLAW1); build caching never hides a semantic cost row.
-- `jet cache bind`: mirror order, roles, credentials (D-JPK-CACHECONFIG1).
-- `jet self doctor`: every store footprint and bound.
-- `JET_TIMING=1` phase receipts extend to per-node graph timing; `jet dev` iterations gain a per-phase breakdown instead of one elapsed number.
+### II.7 The store
 
-### II.10 Clean cutover
+One machine-wide store replaces rows 1–6 and 8–9 of I.2:
 
-Greenfield law applies: each slice migrates every consumer and deletes the replaced mechanism in the same change. No compat flags, no fallback readers, no parallel caches. Order:
+```
+~/.cache/jet/store/
+  cas/<sha256>                 immutable blobs (rlib, .o, rmeta, generated Rust, records)
+  ac/<action-key>              action-cache records: output digests, diagnostics, timings, executor identity
+  lto/<output-identity>/       ThinLTO caches, each bounded, pruned by the linker's policy and by the store
+  journal                      append-only last-use log for LRU; compacted on prune
+  store.lock                   short critical sections for publish and prune
+```
 
-1. **Fix the replay layer.** Close #2346 where its diagnosis points (receipts), remove `JET_RECEIPT_BYPASS=1` from the dashboard, close #2345, regenerate the v4 baseline. No optimization claim before this. Requires the II.4 owner confirmation if replay semantics for `jet build` change.
-2. **Determinism hardening** (II.8). Prerequisite for wider keying.
-3. **Graph promotion:** ordinary compilation lowers to `BuildPlan`; final binary and web artifacts become terminal actions; `BuildCache` is deleted; the two ad-hoc pre-front-end probes are deleted into replay; explanations feed `jet explain-build`.
-4. **Front-end incrementality:** queries wired into build/run/dev; fingerprints and the body cache persisted; watcher digests. #1026's canary already proves the batch dirty-set behavior this extends.
-5. **Sealed package objects:** real payload and local-tier restore on the #1422 action layer; `RuntimeCache` store logic folded into compiler-owned actions; #1025's stdlib-object scope lands here as the first proven package.
-6. **Per-module JIT artifacts:** `RunCache` successor with standard integrity and bounds; the old whole-closure store deleted.
-7. **Team and public tiers:** sealed objects through the ratified mirror and trust machinery.
-8. **Benchmark harness** (II.11): built alongside slices 3–6, reporting continuously.
+Rules, applied to every entry, not piecemeal:
 
-Every slice lands with its hostile-invalidation tests (Part III) and the diagnostics-parity differential green on every applicable tier: parser → sema → TIR → AOT → JIT/dev → interpreter → web where applicable (I9). No slice closes with a `jit_gaps` entry.
+- **Write:** temp file in the same directory, fsync, rename. A crash never leaves a partial entry.
+- **Read:** verify the SHA-256 of every blob before use; a mismatch is a miss, the entry is removed, one `note:` line is printed, and the build proceeds. Never a failure, never a silent stale result.
+- **Records are versioned** (`jet.store.v1`); a reader refuses other versions and treats them as misses. A compiler upgrade changes every key (compiler identity is in every node) and prints one line: `note: Jet X → Y: the store holds nothing for this compiler; rebuilding once` (D-LIB-REUSE1's accepted loss).
+- **Bound (ballot D-BUILD-STORE1, recommended option E):** the default cap is `min(20 GiB, 10% of the filesystem holding the store)`, and a stricter host policy may lower it outside any repository. Admission is checked **before** every write against available space (`statvfs` available blocks, or the Windows volume API), never leaving less than a 2 GiB reserve free and always leaving room for the temp-plus-rename; the store evicts before it admits and refuses an entry that cannot fit safely with a tool error naming the path. Eviction is least-recently-used from a checksummed, size-counted journal, run opportunistically after a command (D-JPK-NODAEMON1: post-command work, no resident process). `jet cache status` prints the footprint, the effective limit and where it came from, and the tiers; `jet cache prune [--to <size>]` prunes now; `jet self doctor` shows the footprint row.
+- **Concurrency:** two `jet` processes publishing the same blob race benignly (same content, same name); action records are immutable per key; a per-key in-flight lock lets a second process wait instead of duplicating rustc work and falls back to computing if the lock holder dies; **live leases** with crash recovery pin every entry a running build reads, so no process can prune another build's inputs.
+- **Project directory:** `.jet/` keeps the lock, the workspace index, and a small pointer to the last receipt. Deleting `.jet/` loses nothing but that pointer; deleting the store loses only time.
+- **Tiers:** `local` (this store), `team`, `public`, exactly as D-JPK-CACHECONFIG1/D-JPK-REMOTE1/D-JPK-CACHEAUTH1/D-JPK-REPROCACHE1 ratified: host-bound ordered mirrors, signed provenance from allowlisted writers, verify every hit, quarantine divergent outputs. Sealed unit sets and prebuilt runtime objects are two more object kinds flowing through the same tiers; nothing is re-encoded.
+- **Prebuilt runtime and Core (ballot D-BUILD-PREBUILT1, recommended option D).** Core is split into fixed per-module units (`core.json`, `core.http`, …) instead of one program-shaped closure, so runtime objects have a fixed identity per (compiler, `rustc -vV`, target triple, ISA level, platform ABI such as glibc/musl baseline or macOS deployment target or MSVC toolset, linker and LTO version, panic/unwind settings, target features, profile flags). The first machine build compiles them once and stores them; the public tier, when the project operates it, serves them signed by the project's release key so a fresh machine downloads instead of compiling (the Rust `std` model). Third-party package objects may also appear on the public tier, but only under separate signing roots of registry-authorized builders, only when reproducible, and only for hosts whose policy opts in; the project's key never vouches for builds it did not perform. Signed provenance carries expiry or transparency checkpoints and revocation metadata, and the toolchain pins the expected runtime identity so a stale signed runtime cannot be substituted. Pay-for-what-you-call (R10) moves from compile time to link time: only referenced units are linked and ThinLTO or `--gc-sections` drop the rest. Shared objects are built for the family baseline (`x86-64` psABI level 1 on x86_64, base `aarch64`, per-architecture objects on macOS, no CPU tuning for wasm) with optional higher levels selected after CPU detection; the root package keeps `target-cpu=native` on host builds unless the user asks for shareable output.
 
-### II.11 Matched Cargo benchmark method
+### II.8 Scheduling
 
-**Comparison boundary.** User command to verified artifact. Jet's total always includes its rustc and link time; Jet pays for the backend it chose. A generated-Rust-versus-direct-rustc row may exist for engineering, but it is never a Jet-versus-Rust result.
+D-BUILDSCHED1's scheduler runs the whole graph. Pools: `cpu` (rustc, Cranelift, checks; limit = logical cores), `link` (limit 2; memory heavy), `io` (store reads, hashing), `net` (remote tiers). Additional rule for rustc: the effective `cpu` limit is `min(cores, available RAM / 1.5 GiB)` so a large package cannot swap the machine. Ready nodes are ordered by longest remaining path (estimated from durations recorded in the store; estimates change order, never outputs), then by key for a total order, so two runs with the same inputs schedule identically. Independent subgraphs keep going after a failure; dependents of a failed node are cancelled (as ratified). Diagnostics print in stable module order regardless of completion order. Speculative work (compiling units unaffected by an error while the user fixes it) runs only inside an opt-in resident session (II.12).
 
-**Harness.** Extend `tools/perf/dashboard.sh` with a Cargo command adapter, preserving the v4 receipt schema, cache-state checks, output-digest validation, phase receipts, and identity records; `ci-perf-check.sh` rejects missing Cargo-side identity exactly as it rejects missing Jet identity. Workload states follow D-PERFBUDGET-COMPILE1=C: Clean, NoChange, and named Edits as exact recorded patches on a copied tree, one warmup, twenty samples. Gauntlet's report-only win/parity/loss grading carries over.
+### II.9 Failure behavior
 
-**Matched workloads.** The same semantic program in both languages, specified first (inputs, algorithm, observable output, error paths, package topology, dependency set), not line-by-line translation. The Jetpack canary stays as the standing real-program row with its envelope caveat stated. Matrix:
+| Situation | Behavior | What the user sees |
+|---|---|---|
+| Sema error in any module | graph stops before any `Emit`/`Compile`; nothing is stored for the failed invocation | diagnostics, then `✗ shop not built · 2 errors · 0.31s · nothing compiled, store unchanged` |
+| rustc rejects a unit | ICE (exit 101), generated Rust preserved for the report; **no inline-monolith retry** (the fallback in `CmdCompile.rs:8252-8309` is deleted: a rejected unit is a compiler bug, not a fallback case) | the existing ICE text plus the unit and generated path |
+| Store entry fails verification | miss, entry removed, rebuild | `note: rebuilt shop/net — store entry failed verification (why: jet explain-build shop/net)` |
+| Store version mismatch or compiler upgrade | every key misses once | one `note:` line |
+| Disk full during publish | tool error naming the path; no partial entry | `Error [L21xx]` with the path and the `jet cache prune` fix |
+| Linker missing | existing `L2101` | unchanged |
+| Remote tier unreachable | offline-first: local only, recorded in explain-build | `note: team store unreachable (cache.acme.dev); using local store only` |
+| Remote object fails signature or digest | quarantine (D-JPK-REPROCACHE1), local compile | `note:` line naming the object and the tier |
+| Resident session stale or dead | `jet build` runs as a fresh process; outputs identical by construction | nothing, unless `--verbose` |
+| Two builds of the same project at once | both proceed; identical results; duplicate work avoided where the in-flight lock is taken | nothing |
 
-- LOC tiers: small (~100–300), medium (~1k–3k), large (~10k–30k) authored LOC; a generated ~50–100k scale row reported separately.
-- Topologies: single package, and a matched multi-package workspace where Jet packages map one-to-one to Cargo workspace crates by declaration. Never let one Jet package silently map to many crates or the reverse.
-- States per row: clean; no-change; comment-only edit; private-body edit; public-interface edit; dependency edit; manifest or lock edit.
+Every `note:` and error text is registered product copy with a UI snapshot (I4).
 
-**Protocol.** One pinned machine (CPU, topology, governor recorded); pinned rustc, Cargo, and Jet identities; the same linker (mold) on both sides, recorded; the same explicit job count on both sides; disk-backed fresh target and build directories per temperature; sccache off or identically provisioned and reported; Cargo incremental state and fingerprint reuse reported per row; medians, IQR, Tukey outliers; wall time primary, CPU time and peak RSS recorded; samples interleaved between tools; outputs digest-verified before any timing is trusted. Lens mapping: `jet build` ↔ `cargo build --release --locked`; default `jet run` and `jet dev` ↔ `cargo run` dev profile. Interpreter and web rows are parity evidence, not speed rows.
+### II.10 Beginner defaults
 
-**Reporting.** Every row is win, parity, or loss with full identity. No aggregate "Jet beats Cargo" claim without the complete matrix. A row that skipped a diagnostic, reused a stale artifact, or diverged in output is a failed row, not a fast one. The two standing targets from current evidence: erase the Jetpack 2.24× warm loss, and keep the 6.19× cold win while doing it.
+Nothing to type, nothing to configure, nothing to learn. `jet build` is optimized and fast; the second build is faster; a no-change build is instant; an upgrade prints one line; a broken cache heals itself. The words *unit*, *store*, *ThinLTO*, and *tier* never appear unless the user runs `jet explain-build`. There is no clean step and no cache flag a beginner needs (`--no-cache` exists for experts, ratified). The only new default-visible surfaces are the live board and the receipt line (II.11).
+
+### II.11 Expert inspection and UI
+
+Owner direction: rich live board plus HTML report. Command names are law (D-BUILDQUERY1). Mockups for visual acceptance: `docs/proposals/automatic-build-optimization/mockups/terminal.html` and `report.html` (self-contained; verified structurally, not yet rendered in a browser on this machine — see III.6).
+
+**Live board (TTY).** A ≤ 8-line region redrawn in place at ≤ 10 fps: one row per stage (`check` modules, `emit` units, `compile` units with a `reused` count, `link` outputs; `actions` and `fetch` rows appear only when relevant), a `cpu` row with occupancy (`cpu 2/16`) naming the running rustc processes, and a `path` row with the critical path and an estimate of the time left. Diagnostics and notes print above the region. On completion the board collapses to a receipt line:
+
+```
+✓ shop built in 4.1s · 3 of 21 units compiled, 18 reused · release · ./build/shop
+  why: jet explain-build shop
+✓ shop up to date · 38 ms · 21 units reused · release · ./build/shop
+✗ shop not built · 2 errors · 0.31s · nothing compiled, store unchanged
+```
+
+Width 80–99 columns shortens counts; below 80 drops the `cpu` and `path` rows. The `cpu` row reports occupancy (`cpu 2/16` when two slots run), and the `path` row shows an estimate only when recorded durations exist for the remaining nodes; otherwise the row is omitted. Non-TTY output is one line per stage as it completes, then the receipt. `NO_COLOR` removes color only (per no-color.org); a non-UTF-8 locale or `--ascii` uses ASCII bars and `[ok]`/`[x]` markers. One renderer owns stderr: it handles resize and `SIGTSTP`/`SIGCONT`, restores the cursor on every exit path, and falls back to plain lines when cursor control is unsafe (`TERM=dumb`, consoles without VT support). `--json` emits NDJSON events (`stage`, `node`, `receipt`) that editors and CI consume and that the HTML report embeds; `--trace` writes the same events in the Chrome Trace Event format for standard viewers. The full state matrix (archetypes × widths × TTY/pipe × color × terminal height, Unicode cell width, CI log folding, and multiplexers) is snapshot-tested.
+
+**`jet explain-build <target|unit|file>`** prints why each node ran (the input that changed, by path and digest prefix), the critical path with per-node durations, store hits and misses per tier, and unit detail rows under their package. `--why <node>` prints one node's full input diff. `--json` returns the graph record. `--html [path]` writes a self-contained dark page: header strip, per-lane timeline with the critical path outlined, package/unit graph, sortable why-table with keyboard navigation, store panel, and the reproducibility class of every node (D-BUILDPROBE1). `--open` opens it. The LSP reads the same record for hover provenance (ratified).
+
+**Timing.** `JET_TIMING` and `jet-timing.json` are replaced by per-node durations in the graph record; the perf dashboard reads `jet explain-build --json`. The receipt/timing conflict of I.2 disappears because measuring no longer disables replay.
+
+### II.12 Opt-in resident session
+
+Owner choice: opt-in. D-JPK-NODAEMON1 forbids a resident process but names the `jet dev` session as the process that may parent work, and says a change needs a new ballot. The design uses exactly that session: `jet dev --serve` keeps the existing foreground dev process (`Source/CmdDevTools.rs:409-596`) and additionally listens on a per-user, per-workspace endpoint (a Unix-domain socket in a user-owned 0700 directory under `$XDG_RUNTIME_DIR/jet/`, or a private per-user directory when that variable is absent; a named pipe on Windows). A `jet build`, `jet run`, or `jet test` started in that workspace attaches, submits a serialized request envelope (argv, cwd, environment allowlist, terminal mode), and receives the same NDJSON events and exit status it would have produced itself. `--session=auto|off|required` controls attachment. The session authenticates the peer's OS identity, requires a per-session nonce stored under the workspace's `.jet/`, rejects symlinked endpoints, allows one owner per workspace, refuses clients of a different Jet or protocol version (they run fresh), resets request-scoped state per request, binds each request to one source snapshot, re-verifies leaf digests (it never trusts its watch stream alone), schedules deterministically, holds output-path locks, propagates Ctrl-C as cancellation, bounds its queue, and may compile units affected by the last edit before anyone asks. No background process survives the terminal; nothing runs as root; there is no `start`/`stop` verb. Outputs are byte-identical to the fresh-process path, proven by a differential across success, warning, error, cancellation, and concurrent-edit cases (III.3, case 26). The session ships only if the measured fresh-process overhead after memoized checks exceeds 100 ms or 20% of the median edit build on the corpus (ballot D-BUILD-SESSION1).
+
+### II.13 Determinism prerequisites
+
+Keys are only as sound as their inputs and outputs. Before widening reuse beyond one machine:
+
+- rustc runs with `--remap-path-prefix <workdir>=/jet/build` and `-C metadata=<unit key>`; generated Rust carries project-relative source-map comments only (today's loader fallback can retain a host path for files outside the root: `crates/jet-driver/src/Loader.rs:2057-2085`, `:4658-4663`; that path is made project-relative or rejected).
+- Every emission order is a stable order. The prior draft named four `HashMap`-order tie-breaks in ownership selection; they are verified and replaced by ordered maps as the first slice, with a test that two builds of the corpus are byte-identical (III.1, A8).
+- D-BUILDPROBE1 reproducibility classes are recorded per node and shown in `explain-build`; an output that differs between two builds with identical keys is quarantined from sharing (D-JPK-REPROCACHE1) and reported as a defect.
+
+### II.14 Code generation for compile speed
+
+rustc's cost on generated Rust is proportional to what it must parse, resolve, type-check, and hand to LLVM. Levers, each measured on the corpus before adoption (III.4):
+
+- **Volume.** The preserved Jetpack file is 6.1 MB with the runtime blocks inline; the thin user crate is what rustc compiles after the split, and units shrink it further per invocation. Emission removes dead helper imports per unit (today a "giant `use super::{...}`" import list: `crates/jet-codegen/src/Codegen/Context.rs:453`).
+- **Macros.** `format!` for interpolated strings (`emit/helpers.rs:297-348`) becomes direct calls into a runtime builder; generated code otherwise stays macro-free, so rustc's expansion pass is near zero.
+- **Derives.** Representation derives (`Debug`, `Clone`, `PartialEq`, …: `Items.rs:323-418`) are emitted only when the interface record proves a use.
+- **Types.** Every generated local carries an explicit type where inference would otherwise run.
+- **Lints.** `#![allow(warnings)]` stays; `--cap-lints allow` is passed so rustc can skip lint emission work.
+- **Instances.** Phase 2 of II.4 compiles each generic instantiation once per program.
+
+### II.15 Clean cutover
+
+Greenfield law: each slice migrates every consumer and deletes what it replaces in the same change. No compatibility flags, no fallback readers, no parallel caches.
+
+| Today | Becomes | Deleted in the same slice |
+|---|---|---|
+| `Source/BuildCache.rs` | `Link` node output in the store | `BuildCache.rs`, `JET_CACHE_DIR` |
+| `Source/RuntimeCache.rs` | prebuilt runtime unit nodes in the store | `RuntimeCache.rs`, `JET_RUNTIME_CACHE_DIR`, `JET_RUNTIME_CACHE_STATS`, the 512 MiB FIFO |
+| `Source/RunCache.rs` | per-unit `Object` artifacts | `RunCache.rs`, `JET_RUN_CACHE_DIR`, `JET_RUN_TRACE` (folded into `--json`/`explain-build`) |
+| `Source/ReceiptStore.rs` | `Receipt` node in the store | `ReceiptStore.rs`, `JET_RECEIPT_DIR`, `JET_RECEIPT_BYPASS` (use `--no-cache`) |
+| `.jet/build-cache/{cas,actions,package-artifacts}` | the store | project-local CAS; `.sealed` receipts replaced by real sealed unit sets |
+| `IncrementalSemaCache` in memory, Check-only | persisted `Check` records, all modes | the `CompileMode::Check` gate on incrementality |
+| `BuildPlanReplay` (compiler side) | nothing in the compiler build path | none: the codec stays for its jetpack provider/store callers; the cleanup card confirms no compiler use remains |
+| `PhaseTiming` + `JET_TIMING*` | per-node durations in the graph record | `PhaseTiming.rs` JSON writers, `JET_TIMING`, `JET_TIMING_DIR`, `JET_TIMING_SOURCE` |
+| inline-monolith retry on split rejection | ICE | `CmdCompile.rs:8252-8309` retry |
+| `BuildProgress` stage lines | live board / non-TTY lines / `--json` | old stage strings and their snapshots |
+| one flattened crate | units per package | `emit_bundle_dbg_inner`'s single-string assembly for native |
+| `tools/perf/dashboard.sh` phase parsing | reads `explain-build --json` | `jet-timing.json` parsing |
+
+Order of slices (each independently shippable; each deletes its predecessor): determinism prerequisites → the store with `BuildCache`/`RuntimeCache` cutover → persisted checks and receipts → compiler nodes in the graph and inspection → hidden units phase 1 → ThinLTO cache → fast lens → per-unit run artifacts → sealed unit sets with payload → prebuilt runtime → scheduler completion → board and HTML → resident session → benchmark harness → web through the graph → cleanup and docs.
+
+### II.16 Production seams
+
+- `crates/jet-comptime/src/Comptime/Build/` — `plan_graph.rs`, `plan_impl.rs`: compiler node kinds (`Check`, `Partition`, `Emit`, `Compile`, `Object`, `Link`, `Receipt`) join `BuildPlan`; `errors_keys.rs`: one key domain per node kind; `execution_runtime.rs`: pools, priority, RAM cap.
+- New `crates/jet-store/` (std-only, path dependency, I6): CAS, action records, journal, bound, tiers adapter, ThinLTO cache handles. Replaces the storage halves of `BuildCache`, `RuntimeCache`, `RunCache`, `ReceiptStore`, and `cache_cas.rs`.
+- `crates/jet-driver/src/QueryService.rs`, `crates/jet-sema/src/Sema/Bundle.rs`: interface and body record serialization; incrementality for every `CompileMode`.
+- `crates/jet-codegen/src/Codegen/mod.rs`, `Imports.rs`, `TIR/emit/*`: per-unit emission (`iface`/`impl`), symbol naming, root-prefix remap to dependency crates, entry-unit globals; `TIR/mod.rs`: Phase 2 instance placement.
+- `crates/jet-jit/src/jit/api_debug.rs`: `Object(unit)` executor from `try_compile_debug_aot`.
+- `Source/CmdCompile.rs`: becomes graph submission plus rendering; `Source/NativeLinker.rs`: `rust-lld` for release with ThinLTO cache flags, mold for fast.
+- `Source/CmdDevTools.rs`, `crates/jet-devserver/`: `--serve` socket and attach protocol.
+- `Source/Cmd*` for `jet cache status|prune`, `jet explain-build --html`; `crates/jet-cli/src/CLI.rs` registry.
+- `tools/perf/`: peer producer, state matrix, wall/CPU/RSS rows, dashboard cutover.
+- `docs/spec/architecture.md`, `docs/plans/compiler-speed.md`, `docs/spec/syntax-decisions.md` ledger, `docs/spec/diagnostics.md`: updated in the cleanup slice.
+
+### II.17 Self-hosting continuity
+
+Everything above except `Compile(unit.*)` and the linker choice is backend-agnostic: the graph, identity ladder, store, units, scheduler, board, and inspection survive rustc's replacement unchanged. When the self-hosted optimizing backend arrives, `Compile` becomes `Object` for every profile and the ThinLTO cache becomes the backend's own per-module optimization cache. The interface/implementation split, Jet-owned symbols, and Jet-owned instantiation are exactly the properties that backend needs on day one.
 
 ---
 
 ## Part III — Proof still required
 
-Nothing below exists yet. Each item names its observable evidence.
+Nothing below exists. Each item names its observable evidence.
 
 ### III.1 Acceptance criteria
 
-- **A1 (dev loop, the structural win).** Default `jet run` and `jet dev` clean and representative-edit medians beat the matched `cargo run` dev-profile rows at every LOC tier and both topologies.
-- **A2 (no-change).** `jet build` no-change completes via receipt replay in under 100 ms on the pinned machine and is at or under the matched Cargo no-change row, with replayed diagnostics byte-identical. Requires #2346 closed and the receipt bypass removed from the dashboard.
-- **A3 (warm edit, the Jetpack row).** The Jetpack-canary comment-only and private-body warm rows beat the measured Rust warm rebuild (3.622 s). Phase receipts prove unchanged-module sema hits and emission work proportional to the dirty set.
-- **A4 (dependency reuse).** A multi-package clean build with a warm local sealed tier beats `cargo build --release` clean at medium and large tiers. Cold single-package clean `jet build` stays within a stated factor of Cargo release (target ≤ 1.5×, measured then recorded); this is a parity claim, not a win claim.
-- **A5 (parity).** Zero R12 tier diffs on the golden suite; the dev-corpus gate green at its fixed denominator; diagnostics byte-identical between cached, replayed, and fresh builds in every cache state.
-- **A6 (boundaries).** The II.6 regression proof: byte-identical declared facts, lock, authority and policy decisions, selection semantics, and outputs across optimization on, warm, cold, and disabled.
-- **A7 (integrity).** The fault-injection rows of III.2 green, with no user diagnostic and no purge instruction ever emitted.
-- **A8 (determinism).** Two independent builds of the pinned corpus produce identical artifact digests, D-BUILDPROBE1 probes green, and the three tie-break sites fixed with a regression test for the class.
-- **A9 (footprint).** Every store bounded; `jet self doctor` reports each; no store grows without bound under a 1,000-build soak.
+- **A1 — Dev loop.** `jet build --profile=debug` (Cranelift) and default `jet run` beat `cargo build` (dev) and `cargo run` on every corpus program in the cold, no-change, and every edit state: Jet/Cargo < 1.00 on wall time against out-of-box and tuned Cargo.
+- **A2 — No-change.** `jet build` no-change completes in under 50 ms on the pinned machine for every corpus program, replays diagnostics byte-identical to the last real run, and beats the matched Cargo no-change row.
+- **A3 — Edit-proportional release builds.** For every corpus program with more than one unit, a body-only edit in a leaf unit runs exactly one `Compile(unit.impl)`, zero dependent `Compile`s, one `Link`; wall time beats the matched `cargo build --release` edit row against out-of-box and tuned Cargo.
+- **A4 — Cold optimized builds.** `jet build` and `jet build --release` cold (project artifacts absent, toolchain-level runtime objects present on both sides) beat `cargo build --release` on every corpus program including the smallest. This is the cell the design fights rather than owns; it gates the epic and stays open until measured.
+- **A5 — Multi-package clean.** A clean checkout of a multi-package corpus program with a warm local store compiles only the root package and links the rest; wall time beats both Cargo columns.
+- **A6 — Binary performance unchanged.** Every gauntlet runtime cell holds its current ratio within noise after hidden units and ThinLTO-at-link; binary size within 2% of today.
+- **A7 — Parity.** Every hostile case (III.3) produces the same program output and diagnostics on AOT release, AOT debug (Cranelift), default `jet run`, and `jet run --interpret` (R12, I9).
+- **A8 — Determinism.** Two builds of every corpus program from identical inputs on two different checkout paths produce byte-identical binaries and store records.
+- **A9 — Boundary invariance.** Warm, cold, and `--no-cache` builds produce byte-identical manifest facts, lock contents, authority and policy decisions, diagnostics, outputs, and `-p`/`--affected` selections.
+- **A10 — Integrity.** Every corruption case in III.3 rebuilds correctly with one `note:` line and no wrong output; a fuzzed store never produces a binary whose digest differs from a clean build's.
+- **A11 — One store.** After cutover, `rg` finds no reference to `BuildCache`, `RuntimeCache`, `RunCache`, `ReceiptStore`, `JET_TIMING`, `JET_RUN_TRACE`, `JET_RECEIPT_BYPASS`, or `.jet/build-cache` in `Source/`, `crates/`, `tools/`, or `docs/spec/`, and `BuildPlanReplay` is referenced only from `crates/jetpack/`; `~/.cache/jet/{build,runtime,run}` are never created.
+- **A12 — UI.** The live board, receipt lines, notes, non-TTY, `NO_COLOR`, narrow, and `--json` variants are snapshot-tested across the archetype × width matrix; the owner has visually accepted the board and the HTML report from the mockups or their implementation.
+- **A13 — Resident session parity.** Every corpus program built through `jet dev --serve` attachment and through a fresh process yields byte-identical outputs and NDJSON event streams modulo timestamps.
 
-### III.2 Hostile invalidation matrix
+### III.2 Matched Cargo benchmark method
 
-Each case is a test with an exact expected outcome: hit set, miss set, diagnostics, output.
+**Comparison boundary.** User command to verified artifact, wall clock. Jet's total always includes its rustc, ThinLTO, and link time. No row subtracts Jet's backend cost or compares Jet's front end alone.
 
-1. Comment-only edit — layers 2–5 identity preserved (D-BUILDNORM1); the edited package still gets a real front end; diagnostics carry fresh spans; terminal artifact reused.
-2. Whitespace and formatting edit — same as 1.
-3. Rename-only edit — identity changes (normalization is rename-sensitive by decision); dependents of the interface miss.
-4. Private-body edit — one module re-checked; dependents hit; sealed dependencies hit; terminal miss.
-5. Public-interface edit — reverse import closure re-checked; same-package artifacts miss; other packages hit.
-6. Item reorder without interface change — module identity changes; dependents' interface fingerprints may still hit.
-7. Tier-1 comptime input change (hashed file, find, fetch) — lock identity changes; dependent generated sources and their consumers miss (D-CTEFFECT1).
-8. Dynamic-plan fragment change — fragment digest changes action identity and lock (D-JPK-DYNAMICPLAN1); offline replay stays deterministic.
-9. Dependency version bump — that package's sealed object and dependents miss; unrelated packages hit.
-10. Lock edit without manifest edit — fail closed per locked-mode rules; no reuse from a mismatched lock.
-11. Policy tightening — governed artifacts miss; forbidden loosening is rejected before any build; capability widening via cache is impossible because keys include grants.
-12. Target, profile, or linker change — full artifact-tier miss along the changed axis; no cross-profile bleed (Theo anti-goal 5).
-13. Compiler upgrade — one-line message; one full rebuild; old artifacts unreachable and pruned.
-14. Hidden engine input (the #2371 class) — an FFI bridge, C binding, or generated-source change misses every artifact it feeds; a warm build is never slower than its cold build on the same state.
-15. Corrupted CAS blob, sealed object, tier artifact, or final binary — digest refuses; entry deleted; silent rebuild; correct output.
-16. Truncated or wrong-format artifact — same as 15; strict format decode refuses.
-17. mtime-preserving same-length edit — content digest catches it in both the watcher and the keys.
-18. Ambient environment change (PATH, locale, RUSTFLAGS) — no key change unless allowlisted; an allowlisted change misses.
-19. Remote cache serving wrong bytes or a bad signature — refused; next mirror or local build; provenance failure quarantines the writer's output (D-JPK-REPROCACHE1).
-20. Unreproducible action output — untrusted namespace, downstream taint, no silent promotion.
-21. Concurrent builds of one project — per-key locks serialize; both succeed; one compile.
-22. Cancelled build (SIGINT mid-graph) — no partial publication; the next build finds a consistent store.
-23. Receipt replay with any single input digest changed — replay refused entirely; real front end runs; no stale diagnostic survives.
-24. Interpreter, JIT, and AOT cross-check after every case above — same output, same diagnostics (I9).
+**Peers.** Two columns, both required (owner decision):
 
-### III.3 Open points
+- *out-of-box:* `cargo build` / `cargo build --release` with a rustup-installed stable toolchain pinned to the same rustc Jet uses (1.97.1 today), default profile, default linker (`rust-lld` on x86_64 Linux), no `.cargo/config.toml`.
+- *tuned:* per profile and target, the fastest valid pre-registered Cargo configuration, published with every config file and version: mold configured as linker, `sccache` as `RUSTC_WRAPPER` with a warm cache where the state permits, `RUSTFLAGS=-C target-cpu=native` (matching Jet's host native profile), and for the dev column a nightly toolchain of the same date with `-Zthreads=8` and `-Zcodegen-backend=cranelift`, recorded as a separate exact toolchain identity (it is a different compiler build, not the pinned stable rustc). A tuned configuration that fails output or runtime parity is rejected.
 
-- **The II.4 interpretive point** is the one owner call in this proposal: whether digest-identical invocation replay satisfies D-LIB-REUSE1's no-skip clause for `jet build`. Everything else composes ratified decisions and adds no syntax, no dependency, and no invariant carve-out.
-- Three numbers are set by measurement and then recorded: the A4 cold-clean factor, the AOT-edit factor, and the store byte bounds.
-- If measurement forces a change that touches ratified scope (for example, engine partitioning of the current package after all), that returns as a Tower ballot with the evidence attached.
+**Profile mapping.** `jet build --profile=debug` ↔ `cargo build`; `jet build --release` ↔ `cargo build --release`; `jet build` (default: opt-level 2, thin LTO, strip) is reported against `cargo build --release` as the "what users type" row and must also win.
 
-### III.4 What this proposal explicitly rejects
+**States** (each with the exact recorded patch on a copied tree, D-PERFBUDGET-COMPILE1): `cold-machine` (all caches empty on both sides, including sccache and the store; toolchain-provided objects present: Rust `std`, Jet runtime units), `clean-project-warm-machine` (project artifacts removed; machine caches warm; for out-of-box Cargo this equals cold and is recorded as such), `no-change`, `edit-body-leaf`, `edit-body-hot` (a module imported by many), `edit-signature`, `edit-dependency-body`, `add-module`, `comment-only`, `reformat`.
 
-- A new universal graph, store, or identity layer beside `jet-queries`, the action graph, and the receipt store. The seams are real, ratified, and load-bearing; unification happens by promotion and deletion, not by an eleventh mechanism.
-- Splitting the current package's generated Rust into multiple rustc crates in the transpile era: I2 surface and link complexity for a temporary backend.
-- Package-boundary inference, splitting, or merging for optimization. Forbidden by the hard rule, full stop.
-- De-optimizing AOT to win benchmarks, benchmarking Jet's front end against Cargo-plus-rustc totals, or any row that subtracts Jet's rustc cost.
-- Daemons, background watchers, or a second runner as the reuse mechanism. Warm reuse stays at command boundaries, as #741 ratified.
-- Any reliance on the open D-JPK-NIXCACHE1 ballot or on Nix-backed store paths the 2026-08-24 audit measured at zero coverage.
+**Metrics.** Wall time is the gate. CPU seconds, peak RSS, binary size, and the binary's runtime cells are recorded and reported per row. One warmup, twenty samples per cell (ratified); median gates, interquartile spread and Tukey outliers as today.
+
+**Corpus.** Real programs gate: every gauntlet Jet/Rust pair, the Jetpack package once its Rust twin exists, and the Tower port when it exists (D-MEGAPROJ1). Synthetic twins generated from one seed at 10k, 50k, and 200k lines and 1, 10, and 100 modules, in both languages from the same shape, are published as scaling curves and never gate. The twin generator is reviewed for bias toward Jet's strengths before its first publication.
+
+**Comparator (ballot D-BUILDBENCH1, recommended option E).** Runs are paired and randomized; a cell is a **win** only when the upper bound of a bootstrap confidence interval on Jet/peer is below 1.00 against both peer columns (owner decision; the 1.05 Rust band does not apply to build cells). A cell whose interval straddles 1.00 is inconclusive and keeps the gate open. CPU seconds, peak RSS, and binary size carry independent non-regression ceilings; runtime cells of the produced binary must hold. A cell without a valid peer row, with a mismatched input identity, or with a failed parity check is unavailable and fails the gate; no averaging. Matched pairs record source lines, module and package graph, dependency closure, enabled features, output identity, and the exact edit patch, reviewed before a pair enters the corpus. Claims are made per measured host/target class; unmeasured targets are unavailable, not assumed.
+
+**Producer.** An in-repo peer producer under `tools/perf/` writes the ratified peer report format (`JET_PERF_PEER_REPORT`), runs on the same machine and target identity as Jet, and is itself snapshot-tested; today only synthetic fixture rows exist (`tools/perf/test-ci-perf-check.sh:86-108`).
+
+### III.3 Hostile invalidation matrix
+
+Each case is a test with an exact expected outcome (hit set, miss set, diagnostics, output) on every tier (A7).
+
+1. Comment-only edit → one `Check` re-runs; body digest unchanged; no `Emit`/`Compile`/`Link`; receipt line says up to date except the check count.
+2. Reformat (whitespace only) → as 1 (D-BUILDNORM1).
+3. Body edit, non-generic fn, leaf unit → `Emit(unit)`, `Compile(unit.impl)`, `Link`; zero dependent `Compile`s; ThinLTO re-optimizes only that module and its importers.
+4. Body edit, generic fn → `Compile(unit.iface)` and every unit that instantiates it (Phase 1) / only the units owning instances (Phase 2).
+5. Signature change → `Compile(unit.iface)` and every importing unit; non-importing units untouched.
+6. Add a module → `Partition` changes; only units whose membership changed re-key; others hit.
+7. Delete a module → as 6; stale artifacts remain in the store until pruned, never linked.
+8. Trait impl moved between modules → impl-placement edge changes; only affected units re-key.
+9. Dependency version bump → that package's sealed set restores or compiles; root units that import changed interfaces re-run rustc; others hit.
+10. rustc upgrade → every `Compile`/`Object`/`Link` misses; every `Check`/`Emit` hits; one `note:` line.
+11. Jet upgrade → every node misses; one `note:` line (D-LIB-REUSE1).
+12. Profile switch `debug` ↔ `release` and back → both artifact sets remain valid; no thrash.
+13. Target switch → as 12.
+14. `PATH` or unrelated environment change → no miss; `RUSTC_LINKER` change → `Link` misses only.
+15. `touch` without content change → all hits (stamp differs, hash equal).
+16. `cp -p` a different file of equal length over a source → `Check` misses (ctime differs; hash differs).
+17. Bit flip in a stored blob → digest mismatch → miss, removal, `note:`, correct rebuild.
+18. Truncated action record → version/length check fails → miss.
+19. Two concurrent builds of one project → identical outputs; at most one rustc per unit when the in-flight lock is honored.
+20. Two concurrent builds of different projects sharing a dependency → one sealed set in the store.
+21. Disk full during publish → tool error; no partial entry; next build succeeds after `jet cache prune`.
+22. Project moved to another path → all hits (no absolute paths in keys or outputs).
+23. Generated module from `b.action` changes → dependent `Check` misses via the declared output digest.
+24. Remote tier returns wrong bytes or bad signature → quarantine, local compile, `note:`.
+25. `--no-cache` → every executor runs; outputs byte-identical to the cached build.
+26. Resident session vs fresh process → identical outputs and events (A13); session with a stale watch stream re-verifies digests and still builds correctly.
+27. Cranelift-unsupported target → release executors at opt-level 0; `explain-build` names the fallback.
+28. Store cap reached → LRU eviction; the current build's inputs are never evicted mid-build.
+29. Package with an import cycle attempt → `E0604` before any node runs (unchanged).
+30. Package with `policy.harden: true` → every crate of that package carries the required attributes; fences unchanged (A9).
+
+### III.4 Risks and kill criteria
+
+- **Per-unit fixed cost.** If a 200-module package spends more than 25% of a cold build in rustc process start-up and metadata loading, adopt structural coalescing by directory (II.4) before widening.
+- **Duplicate monomorphization.** If Phase 1 shows more than 15% of LLVM time in duplicated instances across units, land Phase 2.
+- **ThinLTO cache misses.** If a leaf body edit re-optimizes more than the changed module plus its direct importers, the import summary policy is tuned (`-import-instr-limit`) before A3 is claimed.
+- **Default profile cost in the cold cell.** If `jet build`'s thin LTO costs more than the margin in A4 for small programs, propose a profile adjustment by ballot (D-BUILDPROFILE1 territory); never de-optimize silently.
+- **`unsafe extern` reading of I1.** If D-BUILD-UNITS1 is declined, single-crate units remain; A3 weakens to "transitive dependents recompile in parallel", and the claim is re-measured.
+- **Prebuilt runtime without a public tier.** Until the tier exists, A4's "toolchain objects present" means "compiled once on this machine"; the benchmark records which.
+
+### III.5 Owner gates (ballots on the board)
+
+| Ballot | Question | Recommendation |
+|---|---|---|
+| D-BUILD-UNITS1 | hidden units: two-crate units with compiler-declared `unsafe extern { safe fn }` as vetted internals under I1, single-crate units, or none | A: two-crate units |
+| D-BUILD-NOCHANGE1 | memoized module checks satisfy the no-skip clause; byte-identical replay | A: yes |
+| D-BUILD-SESSION1 | opt-in resident session as `jet dev --serve`, a background `jet daemon`, or none; amends D-JPK-NODAEMON1's scope | A: `jet dev --serve` |
+| D-BUILD-STORE1 | one store; adaptive cap `min(20 GiB, 10%)` with a free-space reserve, pre-write admission, live leases, and host override; `jet cache status|prune`; `.jet/` shrink | E: adaptive with reserve, leases, and override |
+| D-BUILD-PREBUILT1 | prebuilt runtime/Core signed by the project; third-party objects under registry-authorized builder roots; family-baseline ISA for shared objects; seam now, operation later | D: federated roots |
+| D-BUILDBENCH1 | matched Cargo method: strict win against both columns on wall clock with confidence bounds, resource ceilings, real-program gate, synthetic curves | E: strict with confidence bounds |
+| D-BUILD-UI1 | live board + receipt + `explain-build --html` with the mockups as the accepted look | A: board + HTML |
+
+### III.6 What remains unverified in this document
+
+- The HTML mockups were checked by parsing and by exact text comparison with this document's frames; no browser was available on this machine to render them. Owner visual acceptance is the render check.
+- The `HashMap` ordering claims of the prior draft were not re-verified line by line; slice 1 verifies and fixes them.
+- Cargo peer rows (I.4a) come from the `CargoPeer` lane; the front-end numbers in I.4 are from a debug build of the compiler and are upper bounds.
+
+### III.7 Card slate (on the board, 2026-09-01)
+
+Parent epic **#2514** — *Automatic build optimization: one graph, hidden units, one store* (epoch e11, milestone e11-m02 Fast compiler loop; refs this document). Children, in dependency order; each carries actual/expected behavior, exact paths, non-goals, invariants, criteria, and a proof command on the board. Ballots live on the card they gate: D-BUILD-UNITS1 (#2519), D-BUILD-NOCHANGE1 (#2517), D-BUILD-SESSION1 (#2529), D-BUILD-STORE1 (#2516), D-BUILD-PREBUILT1 (#2525), D-BUILDBENCH1 (#2530), D-BUILD-UI1 (#2527).
+
+1. **#2515** Determinism prerequisites (remap, metadata, ordered maps, two-build identity test) — no gate.
+2. **#2516** `jet-store` and `BuildCache`/`RuntimeCache` cutover — after D-BUILD-STORE1.
+3. **#2517** Persisted module checks for every `CompileMode`; `Receipt` node; no-change replay — after D-BUILD-NOCHANGE1 (absorbs #1026's incremental batch sema).
+4. **#2518** Compiler work as graph nodes; `graph`/`query build`/`explain-build` read them; `PhaseTiming` deleted; the compiler's use of `BuildPlanReplay` (none) confirmed; dashboard reads `--json`.
+5. **#2519** Hidden units, phase 1 — after D-BUILD-UNITS1.
+6. **#2520** Hidden units, phase 2 (Jet-owned instantiation) — measurement-gated.
+7. **#2521** Sealed unit sets with payload (retargets the receipt-only result of #1422).
+8. **#2522** Release lens ThinLTO with store cache; gauntlet non-regression.
+9. **#2523** Fast lens wiring (Cranelift objects + prebuilt runtime link) — absorbs #1028.
+10. **#2524** Per-unit run artifacts; `RunCache` deleted.
+11. **#2525** Prebuilt runtime/Core units and the public-tier seam — after D-BUILD-PREBUILT1 (absorbs #1025).
+12. **#2526** Scheduler completion for compiler nodes (pools, priority, RAM cap, keep-going, stable diagnostics).
+13. **#2527** Live board, receipt, notes, `--json`, `--trace` — after D-BUILD-UI1 and owner visual acceptance.
+14. **#2528** `explain-build` why/critical-path/store panel and `--html` — after D-BUILD-UI1 and owner visual acceptance.
+15. **#2529** Resident session `jet dev --serve` — after D-BUILD-SESSION1 and its adoption measurement.
+16. **#2530** Matched Cargo benchmark harness and peer producer; baseline regeneration — after D-BUILDBENCH1 (absorbs the harness half of #2345; #666 closeout depends on it).
+17. **#2531** Hostile invalidation matrix as a cross-tier test suite.
+18. **#2532** Web builds through the graph.
+19. **#2533** Generated-code compile-cost levers (II.14), measured.
+20. **#2534** Cutover cleanup and documentation.
+21. **#2535** Defect (sidequest, P0): Jetpack package `jet build` ICE on master (I.5); blocks the real-program corpus.
+22. **#2536** Defect (sidequest, P1): `jet build` receipts never replay because the receipt context differs between identical invocations (I.5); the store's `Receipt` node replaces the mechanism, and this card records the cause so the replacement's test covers it.
+
+Existing cards updated with absorption notes and new blockers: #1026, #1028, #1025, #2345, #1422, #666.
+
+---
+
+## Appendix A — Owner decisions, 2026-09-01 (chat, verbatim)
+
+- board_writes: "Write cards and ballots to Tower now"
+- win_definition: "Strict win against both unless you can prove it is literally impossible to do so while we still transpile to rust"
+- hidden_units: "Yes, automatic hidden units"
+- no_change_law: "Yes, memoized module checks count"
+- daemon: "Opt-in daemon"
+- store_cap: "Adaptive cap: min(20 GiB, 10% of disk), LRU prune"
+- public_mirror: "Yes: design the seam now, operate it when infra exists"
+- ui_direction: "Rich live status board + HTML report"
+- bench_corpus: "Real programs gate; synthetic twins as scaling curves"
+
+Earlier in the same session: "Documentation is likely old. Do not rely on its accuracy unless it provides a philosophical position." and "YOUR GOAL IS TO BEAT RUST while transpiling to rust. We will try to beat rust even more when we transition to self hosting."
+
+## Appendix B — Evidence files (session, not repository)
+
+`~/.cache/jet-luna/abo/`: `PipelineFacts` (inline in agent output), `PackageFacts` (inline), `TowerFacts.md`, `LawSheet.md`, `BenchFacts.md`, `UIFacts.md`, `GapFacts.md`, `GapFacts2.md`, `MeasureNow.md`, `CargoPeer.md`, `JetpackIce.md`, `jetpack-ice-main.rs`, `ui-spec.md`.

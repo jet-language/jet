@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2537,
-    "rev": 48461,
+    "rev": 48469,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -175445,7 +175445,7 @@
       "parentId": "c0rak5ve",
       "needsAcceptance": false,
       "created": "2026-09-02T03:37:37.020Z",
-      "updated": "2026-09-02T04:03:44.328Z",
+      "updated": "2026-09-02T04:30:54.139Z",
       "updatedBy": "fable"
     },
     {
@@ -175513,7 +175513,7 @@
       "parentId": "c0rak5ve",
       "needsAcceptance": false,
       "created": "2026-09-02T03:37:47.540Z",
-      "updated": "2026-09-02T04:03:33.913Z",
+      "updated": "2026-09-02T04:30:34.563Z",
       "updatedBy": "fable"
     },
     {
@@ -175641,7 +175641,7 @@
       "parentId": "c0rak5ve",
       "needsAcceptance": false,
       "created": "2026-09-02T03:38:04.797Z",
-      "updated": "2026-09-02T04:03:21.163Z",
+      "updated": "2026-09-02T04:30:25.286Z",
       "updatedBy": "fable"
     },
     {
@@ -176015,7 +176015,7 @@
       "parentId": "c0rak5ve",
       "needsAcceptance": false,
       "created": "2026-09-02T03:39:04.563Z",
-      "updated": "2026-09-02T04:03:48.590Z",
+      "updated": "2026-09-02T04:31:03.979Z",
       "updatedBy": "fable"
     },
     {
@@ -176142,7 +176142,7 @@
       "parentId": "c0rak5ve",
       "needsAcceptance": true,
       "created": "2026-09-02T03:39:17.758Z",
-      "updated": "2026-09-02T04:04:02.719Z",
+      "updated": "2026-09-02T04:31:26.287Z",
       "updatedBy": "fable"
     },
     {
@@ -176270,7 +176270,7 @@
       "parentId": "c0rak5ve",
       "needsAcceptance": false,
       "created": "2026-09-02T03:39:36.306Z",
-      "updated": "2026-09-02T04:03:39.626Z",
+      "updated": "2026-09-02T04:30:43.724Z",
       "updatedBy": "fable"
     },
     {
@@ -176338,7 +176338,7 @@
       "parentId": "c0rak5ve",
       "needsAcceptance": false,
       "created": "2026-09-02T03:39:43.986Z",
-      "updated": "2026-09-02T04:03:52.702Z",
+      "updated": "2026-09-02T04:31:15.442Z",
       "updatedBy": "fable"
     },
     {
@@ -240905,8 +240905,8 @@
       "group": "safety",
       "title": "Hidden compile units inside one package",
       "gist": "Whether the compiler may split one package into several hidden Rust crates so an edit recompiles only the touched part.",
-      "lesson": "Terms: a package is one project part you declare; a module is one source file inside it; a crate is one box of code. that rustc compiles in one go; linking joins compiled boxes into a program; the optimizer is the slow step that makes release code fast. Today one package becomes one crate. Any edit recompiles the whole crate, and an optimized build re-runs the optimizer over all of it. A hidden unit is a group of modules the compiler puts in its own crate without you naming it. Units never change what a package declares: authority, policy, visibility, outputs, and dependencies stay exactly as written. The open question is how units refer to each other in the generated Rust, because that decides how much a body edit recompiles.",
-      "explainer": "",
+      "lesson": "Today one package becomes one crate. Any edit recompiles the whole crate, and an optimized build re-runs the optimizer over all of it. A hidden unit is a group of modules the compiler puts in its own crate without you naming it. Units never change what a package declares: authority, policy, visibility, outputs, and dependencies stay exactly as written. The open question is how units refer to each other in the generated Rust, because that decides how much a body edit recompiles.",
+      "explainer": "Terms: a package is one project part you declare. A module is one source file inside it. A crate is one box of code that rustc compiles in one go. Linking joins compiled boxes into a program. The optimizer is the slow step that makes release code fast.",
       "story": "Priya maintains a package with 40 source files, so 40 modules. She changes one line inside one function body and runs jet build. Today she waits for the whole package to compile and optimize. She wants to wait only for the file she touched, and she does not want to split her package into smaller packages to get that.",
       "inWild": "# shop/package.jet            (one package: shop; two dependency packages: httpkit, json)\nname: \"shop\"\nversion: \"1.4.0\"\ndeps: { httpkit: httpkit#2.1.0, json: json#1.4.0 }\n\n# shop/src/net/client.jet     (40 modules in shop; the compiler groups them into 21 hidden units)\nfn fetch_all(urls: [String]) [Response] {\n  ...\n  retries = 3   # was 2: a body edit, no signature change\n}\n\n$ jet build\n# today: check 40 modules, rustc the whole package as one crate, optimize everything, link\n# with hidden units: check 1 module, rustc 1 unit, optimize 1 unit, link",
       "detail": "",
@@ -240914,8 +240914,8 @@
         {
           "key": "A",
           "name": "Two-crate units with compiler-declared symbols",
-          "detail": "Each unit becomes two hidden crates. The interface crate holds the unit's types, traits, method tables, generic bodies, and one declaration per plain function. The body crate holds the plain function bodies. Other units depend only on the interface crate, so a body edit recompiles one body crate and relinks. Nothing you write changes. What can go wrong: a declaration and a body could disagree. The compiler prevents that by writing both from the same proved signature and by putting a fingerprint of the signature into the symbol name. so any disagreement stops the build at link time instead of running wrong code.",
-          "technical": "iface crate: types (pub fields), traits, every inherent impl and trait impl for the unit's types (Rust requires inherent impls in the type's crate), generic fns. and methods with bodies, non-generic method and impl bodies as forwarders to body-crate symbols, and `unsafe extern \"Rust\" { pub safe fn f(...) -> T; }` per plain function. body crate: `#[export_name = \"_JET_<pkg>_<module>_<item>_<abihash>\"]` definitions; depends on its own iface and imported ifaces; nothing depends on a body crate. `<abihash>` covers the signature plus the ABI record: exact rustc build, target triple and features, panic strategy, and layout-affecting flags. every unit in a program is compiled by the same rustc, and the ABI record is in every Compile key. `safe fn` inside `unsafe extern` is stable since Rust 1.82 (RFC 3484). Under I1 the compiler's own declarations for symbols it emitted are classified as vetted internals. Per-target contract: ELF and Mach-O keep exported symbols through `#[used]`-free export names and `--gc-sections`. COFF/MSVC uses the same export names with the MSVC linker's `/OPT:REF`; wasm units use the same symbol scheme with `wasm-ld`. If a target cannot honor the contract, that target falls back to option B for its units and `jet explain-build` says so. Cross-unit inlining returns at link time through ThinLTO in the release profile. Adoption gate: A ships only if measured body-edit savings on the corpus exceed its extra rustc processes and metadata loading, and the iface/body differential passes on every supported target.",
+          "detail": "Each unit becomes two hidden crates. The interface crate holds the unit's types, traits, method tables, generic bodies, and one declaration per plain function. The body crate holds the plain function bodies. Other units depend only on the interface crate, so a body edit recompiles one body crate and relinks. Nothing you write changes.\n\nWhat can go wrong: a declaration and a body could disagree. The compiler writes both from the same proved signature. It puts a fingerprint of the signature into the symbol name. Any disagreement stops the build at link time instead of running wrong code.",
+          "technical": "iface crate: types (pub fields), traits, every inherent impl and trait impl for the unit's types. Rust requires inherent impls in the type's crate. It also contains generic fns and methods with bodies. Non-generic method and impl bodies are forwarders to body-crate symbols. `unsafe extern \"Rust\" { pub safe fn f(...) -> T; }` is emitted per plain function. body crate: `#[export_name = \"_JET_<pkg>_<module>_<item>_<abihash>\"]` definitions. It depends on its own iface and imported ifaces. Nothing depends on a body crate.\n\n`<abihash>` covers the signature plus the ABI record. The ABI record contains exact rustc build, target triple and features, panic strategy, and layout-affecting flags. Every unit in a program is compiled by the same rustc, and the ABI record is in every Compile key. `safe fn` inside `unsafe extern` is stable since Rust 1.82 (RFC 3484). Under I1 the compiler's own declarations for symbols it emitted are classified as vetted internals.\n\nPer-target contract: ELF and Mach-O keep exported symbols through `#[used]`-free export names and `--gc-sections`. COFF/MSVC uses the same export names with the MSVC linker's `/OPT:REF`. wasm units use the same symbol scheme with `wasm-ld`. If a target cannot honor the contract, that target falls back to option B for its units and `jet explain-build` says so. Cross-unit inlining returns at link time through ThinLTO in the release profile.\n\nAdoption gate: A ships only if measured body-edit savings on the corpus exceed its extra rustc processes and metadata loading, and the iface/body differential passes on every supported target.",
           "code": "# illustrative timings; nothing here is measured yet\n$ jet build\n✓ shop built in 1.9s · 1 of 21 units compiled, 20 reused · release · ./build/shop\n$ ./build/shop --check\nok\n\n$ jet explain-build shop\nwhy\n  shop/net       compiled   src/net/client.jet changed (fetch_all body)\n  link shop      relinked   1 unit changed\n  20 units       reused     store · local\n\n# a forced declaration/body mismatch (test only) never links:\ninternal compiler error: unit shop/net: symbol _JET_shop_net_fetch_all_9f3a... not found at link"
         },
         {
@@ -240935,7 +240935,7 @@
         {
           "key": "D",
           "name": "One interface crate per package, one body crate per unit",
-          "detail": "All of a package's types, traits, method tables, and declarations live in one interface crate; each unit still gets its own body crate. A body edit costs one body crate and a relink, like option A. A signature change anywhere in the package recompiles the one interface crate and then every body crate. and that interface crate is one serial rustc run on the critical path of every build.",
+          "detail": "All of a package's types, traits, method tables, and declarations live in one interface crate; each unit still gets its own body crate. A body edit costs one body crate and a relink, like option A. A signature change anywhere in the package recompiles the one interface crate. It then recompiles every body crate. That interface crate is one serial rustc run on the critical path of every build.",
           "technical": "iface: one crate per package. body: one crate per unit, depending on the package iface and dependency ifaces. Fewer rustc processes (N+1 instead of 2N) and one metadata load per unit; broader invalidation after interface edits; the package iface is a serial bottleneck for large packages.",
           "code": "# illustrative timings\n$ jet build                     # body edit\n✓ shop built in 1.9s · 1 of 21 units compiled, 20 reused · release · ./build/shop\n$ jet build                     # one signature edit in shop/net\n✓ shop built in 5.1s · 21 of 21 units compiled (package interface changed) · release · ./build/shop"
         }
@@ -240959,11 +240959,11 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Option A is the only option where a body edit costs one unit and one link and a signature edit stays local to the units that import it. It keeps the package boundary exactly as written, needs no new syntax, and its unsafe surface is a compiler-generated declaration. for a symbol the same compiler emitted, checked against a proved signature and guarded by a fingerprint in the symbol name.",
+        "why": "Option A is the only option where a body edit costs one unit and one link and a signature edit stays local to the units that import it. It keeps the package boundary exactly as written and needs no new syntax. Its unsafe surface is a compiler-generated declaration for a symbol the same compiler emitted. The declaration is checked against a proved signature and guarded by a fingerprint in the symbol name.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Rust's crate hash makes every dependent recompile on any body edit, so a change in a widely used module still rebuilds most of the package. its lower process count is bought with the most common edit being expensive."
+            "reason": "Rust's crate hash makes every dependent recompile on any body edit. A change in a widely used module still rebuilds most of the package. Its lower process count is bought with the most common edit being expensive."
           },
           {
             "key": "C",
@@ -240982,14 +240982,14 @@
       "ballotProcessVersion": 2,
       "reviewPasses": {
         "base": "The first draft compared two-crate units, single-crate units, and no units, and recommended two-crate units.",
-        "boilOcean": "The breadth review tested item-level units, size-based coalescing, a patched rustc that skips borrow checking, and one package-wide interface crate. Item-level units churn on every new call edge; size-based grouping breaks cross-machine identity; a rustc fork fails I2. The package-wide interface crate is a genuine alternative and became option D.",
-        "hybrid": "The hybrid review combined option A's interface crates with option B's single rustc run by putting generic bodies. and forwarders in the interface crate only, and made option B the per-target fallback when a linker cannot honor A's symbol contract.",
+        "boilOcean": "The breadth review tested item-level units, size-based coalescing, a patched rustc that skips borrow checking, and one package-wide interface crate. Item-level units churn on every new call edge; size-based grouping breaks cross-machine identity; a rustc fork fails I2; the package-wide interface crate is a genuine alternative and became option D.",
+        "hybrid": "The hybrid review combined option A's interface crates with option B's single rustc run by putting generic bodies and forwarders in the interface crate only. It made option B the per-target fallback when a linker cannot honor A's symbol contract.",
         "cooperative": "The cooperative review strengthened option B with its lower process count and absent ABI boundary, option C with sealed dependency objects, and option D with its N+1 process count. Each still pays whole-package or whole-dependents recompiles on the most common edit.",
         "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (package, module, unit, crate, optimizer, link), mismatched counts between story and example, and a hidden safety tradeoff. The lesson now defines each term, every count is labeled, option A states what can go wrong and how the fingerprint stops it, and timings are marked illustrative.",
-        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found that inherent impls must live in the type's crate, that the ABI record must be part of the symbol fingerprint, a wrong Swift claim, a missing package-wide-interface option. and unmeasured timings presented as results; all were repaired and option D was added."
+        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found inherent impls must live in the type's crate, the ABI record must be part of the symbol fingerprint, a wrong Swift claim, and a missing package-wide-interface option. It also found unmeasured timings presented as results; all were repaired and option D was added."
       },
       "checkInstructions": null,
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-09-02T03:46:22.002Z"
     },
@@ -240999,8 +240999,8 @@
       "group": "tooling",
       "title": "What an unchanged build is allowed to skip",
       "gist": "Whether a module whose inputs did not change may reuse its recorded check result and warnings instead of being checked again.",
-      "lesson": "Terms: checking a module means parsing it, understanding its meaning, applying the package's policy, and producing its warnings and errors; a digest is a fingerprint of exact bytes. so two inputs with the same digest are the same bytes; a module's interface is the part other modules can see. D-INCR-UNIT1 (ratified) says no path skips sema or diagnostics on a cache hit that still needs checking. The library-reuse plan text is stricter: no cache path skips parsing, sema, policy, or diagnostics. A memoized check stores the full result of checking a module, keyed by the digest of the module's own bytes plus every other input the check read. The choice is whether reusing that stored result counts as checking. It decides how fast an unchanged jet build can be and where its warnings come from.",
-      "explainer": "",
+      "lesson": "D-INCR-UNIT1 (ratified) says no path skips sema or diagnostics on a cache hit that still needs checking. The library-reuse plan text is stricter: no cache path skips parsing, sema, policy, or diagnostics. A memoized check stores the full result of checking a module, keyed by the digest of the module's own bytes plus every other input the check read. The choice is whether reusing that stored result counts as checking. It decides how fast an unchanged jet build can be and where its warnings come from.",
+      "explainer": "Terms: checking a module means parsing it, understanding its meaning, applying the package's policy, and producing its warnings and errors. A digest is a fingerprint of exact bytes, so two inputs with the same digest are the same bytes. A module's interface is the part other modules can see.",
       "story": "Dana runs jet build, gets two warnings, reads them, and runs jet build again ten seconds later without changing anything. She expects the same two warnings and an answer in well under a second. On a large program a fresh check of every module costs seconds even when nothing changed.",
       "inWild": "$ jet build\nWarning [L2510] (hidden_cost_in_loop): this implicit clone of `String` repeats inside a loop.\nWarning [L0514] (same_subject_dispatch): adjacent categorical guards over `ch` can be one ordered subject table\n✓ shop built in 4.1s · 3 of 21 units compiled, 18 reused · release · ./build/shop\n\n$ jet build      # nothing changed\n# question: re-check all 40 modules, or reuse the recorded result?",
       "detail": "",
@@ -241008,8 +241008,8 @@
         {
           "key": "A",
           "name": "Memoized module checks count as checking",
-          "detail": "A module reuses its recorded check result when its own bytes, the interfaces it imports, the package policy. and settings, the target and profile, the compiler version, and every generated or external input it read are all unchanged. Changed modules and modules that import a changed interface are always checked for real. The recorded warnings are stored as typed diagnostics with their source positions and are drawn again for the current terminal, so color, width, and --json all render correctly. An unchanged jet build verifies digests, redraws the warnings, confirms the output is still in the store, and prints the receipt line in tens of milliseconds. This option ships only with an audit test that fails if a check reads any input outside its key.",
-          "technical": "Check(module) key = raw source bytes + module path + imported interface digests + package policy/authority facts + lint settings + target/profile facts + compiler identity + digests of generated or external inputs read. Canonical-AST, interface, and body digests are derived outputs used by later nodes, not the Check key. Diagnostics are stored typed (code, message, spans, severity) and rendered per invocation; `--json` records are byte-identical under a versioned schema. Input audit: every file, environment, and facts read during a check goes through one instrumented reader. an undeclared read fails the test suite, and any node kind that fails the audit checks fresh until fixed. Snapshot coherence: read through stable handles, compare metadata before and after hashing, retry on change, and bind every node of one invocation to one source snapshot. Records are verified by digest and schema at use time; corruption is quarantined. This reading treats D-INCR-UNIT1's 'still needs checking' as 'has a changed input'.",
+          "detail": "A module reuses its recorded check result when its own bytes, the interfaces it imports, the package policy and settings, the target and profile, and the compiler version are all unchanged. Every generated or external input it read must also be unchanged. Changed modules and modules that import a changed interface are always checked for real.\n\nThe recorded warnings are stored as typed diagnostics with their source positions and are drawn again for the current terminal, so color, width, and --json all render correctly. An unchanged jet build verifies digests, redraws the warnings, confirms the output is still in the store, and prints the receipt line in tens of milliseconds. This option ships only with an audit test that fails if a check reads any input outside its key.",
+          "technical": "Check(module) key = raw source bytes + module path + imported interface digests + package policy/authority facts + lint settings + target/profile facts + compiler identity. It also includes digests of generated or external inputs read. Canonical-AST, interface, and body digests are derived outputs used by later nodes, not the Check key. Diagnostics are stored typed (code, message, spans, severity) and rendered per invocation; `--json` records are byte-identical under a versioned schema.\n\nInput audit: every file, environment, and facts read during a check goes through one instrumented reader. An undeclared read fails the test suite, and any node kind that fails the audit checks fresh until fixed. Snapshot coherence: read through stable handles, compare metadata before and after hashing, retry on change, and bind every node of one invocation to one source snapshot. Records are verified by digest and schema at use time; corruption is quarantined. This reading treats D-INCR-UNIT1's 'still needs checking' as 'has a changed input'.",
           "code": "$ jet build      # nothing changed\nWarning [L2510] (hidden_cost_in_loop): this implicit clone of `String` repeats inside a loop.\nWarning [L0514] (same_subject_dispatch): adjacent categorical guards over `ch` can be one ordered subject table\n✓ shop up to date · 38 ms · 40 checks reused, 21 units reused, link reused · release · ./build/shop\n\n$ jet explain-build shop --why src/net/client.jet\ncheck shop/net/client   reused   key: bytes 4f2a…, imports 3 (unchanged), policy 91c0…, compiler 0.9.1, target x86_64-linux/release"
         },
         {
@@ -241045,7 +241045,7 @@
         "whyNot": [
           {
             "key": "B",
-            "reason": "It spends seconds re-deriving a result the key already proves and makes the unchanged build slower than Cargo's. it remains the fallback for any node kind whose inputs are not yet sealed by the audit."
+            "reason": "It spends seconds re-deriving a result the key already proves and makes the unchanged build slower than Cargo's. It remains the fallback for any node kind whose inputs are not yet sealed by the audit."
           },
           {
             "key": "C",
@@ -241060,14 +241060,14 @@
       "ballotProcessVersion": 2,
       "reviewPasses": {
         "base": "The first draft compared memoized checks, always re-checking the root package, and timestamp-only reuse, and recommended memoized checks.",
-        "boilOcean": "The breadth review tested a partial variant that re-checks only the entry module and a variant that stores rendered text instead of typed diagnostics. The first buys nothing the digest does not prove; the second breaks when terminal width, color, or output mode changes. Typed diagnostics with per-invocation rendering became part of option A.",
-        "hybrid": "The hybrid review kept memoized checks and added the rule that a changed module and every importer of a changed interface always get a fresh check. plus the fallback to option B for any node kind that fails the input audit.",
+        "boilOcean": "The breadth review tested a partial variant that re-checks only the entry module and a variant that stores rendered text instead of typed diagnostics. The first buys nothing the digest proves; the second breaks when terminal width, color, or output mode changes; typed diagnostics with per-invocation rendering became part of option A.",
+        "hybrid": "The hybrid review kept memoized checks and added the rule that a changed module and every importer of a changed interface always get a fresh check. It also added the fallback to option B for any node kind that fails the input audit.",
         "cooperative": "The cooperative review gave option B its strongest form as the safe fallback while inputs are unproven, and option C its honest speed number. Neither survives the stale-warning and stale-binary cases.",
-        "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (checking, digest, interface), an unlisted key, and examples that could not show what was reused. The lesson now defines the terms, option A lists the whole key and shows it in explain-build, receipts separate check, compile. and link reuse, and option C shows the stale file and the stale warning.",
-        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found the no-skip rule misattributed, a key that used a canonical AST instead of raw bytes and omitted policy and environment inputs, byte-for-byte replay that breaks under different terminals. and no snapshot coherence rule; the ballot now cites D-INCR-UNIT1, keys on raw bytes. plus the full read closure with an audit test, stores typed diagnostics, and binds an invocation to one snapshot."
+        "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (checking, digest, interface), an unlisted key, and examples that could not show what was reused; the lesson defines the terms. Option A lists the whole key and shows it in explain-build; receipts separate check, compile, and link reuse; option C shows the stale file and stale warning.",
+        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found a misattributed no-skip rule, a key using canonical AST instead of raw bytes, omitted policy and environment inputs, byte-for-byte replay that breaks across terminals, and no snapshot coherence. The ballot now cites D-INCR-UNIT1, keys on raw bytes plus the full read closure with an audit test, stores typed diagnostics, and binds an invocation to one snapshot."
       },
       "checkInstructions": null,
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-09-02T03:52:51.173Z"
     },
@@ -241077,8 +241077,8 @@
       "group": "tooling",
       "title": "An opt-in resident build session",
       "gist": "Whether a running jet dev may also serve jet build and jet run from its already-loaded state, and how that is spelled.",
-      "lesson": "Terms: a process is one running program; warm means the work of reading and checking the program is already loaded in memory; attaching means sending a command to a process. that is already running instead of starting a new one; a daemon is a background process that keeps running after you close your terminal. Every jet command today is a fresh process. It reads the store, rebuilds what changed, and exits. A resident session keeps the checked program and the build graph in memory while it runs. so the next build starts warm and can even compile what the last edit touched before anyone asks. D-JPK-NODAEMON1 (ratified) forbids a resident background process and says the jet dev session is the process allowed to parent work. This ballot decides whether builds may attach to that session, under which name, and with which safety rules. Results must be the same either way.",
-      "explainer": "",
+      "lesson": "Every jet command is a fresh process. It reads the store, rebuilds changes, and exits. A resident session keeps the checked program and build graph in memory while it runs. The next build starts warm and can compile what the last edit touched before anyone asks. D-JPK-NODAEMON1 (ratified) forbids a resident background process and says the jet dev session is the process allowed to parent work. This ballot decides whether builds may attach, under which name, and with which safety rules. Results must match either way.",
+      "explainer": "Terms: a process is one running program. Warm means the work of reading and checking the program is already loaded in memory. Attaching means sending a command to a process that is already running instead of starting a new one. A daemon is a background process that keeps running after you close your terminal.",
       "story": "Marco keeps jet dev open all day while editing a service. Every few minutes he runs jet build in a second terminal to produce the release binary his tests need. Each build pays process start and store reads that the dev session already did. He wants the second terminal to reuse the first one's work, and he does not want a background process he did not start. When he closes the dev terminal, nothing should keep running.",
       "inWild": "# terminal 1\n$ jet dev --serve src/main.jet\n  dev  watching 40 modules · serving builds for this workspace (session 7c1e)\n\n# terminal 2, a minute later\n$ jet build\n✓ shop built in 0.9s · 1 of 21 units compiled, 20 reused · release · ./build/shop · session 7c1e\n\n# terminal 1 closed → nothing keeps running\n$ jet build\n✓ shop built in 1.8s · 1 of 21 units compiled, 20 reused · release · ./build/shop   # fresh process",
       "detail": "",
@@ -241086,8 +241086,8 @@
         {
           "key": "A",
           "name": "Attach to a running jet dev with --serve",
-          "detail": "jet dev gains a --serve flag. While that foreground process runs, jet build, jet run, and jet test started in the same workspace attach to it. and get the same output and exit status they would produce alone, faster. A policy flag --session=auto|off|required controls attachment; off forces a fresh process. Closing the dev terminal ends the session. No new verb, no background process, nothing runs as root. If no valid session owns the workspace, or the session is a different Jet version, the command runs as a fresh process and says why only with --verbose.",
-          "technical": "Endpoint: Unix-domain socket in a user-owned 0700 directory ($XDG_RUNTIME_DIR/jet/ when set, else a private per-user directory with a warning per the XDG spec). Windows named pipe; symlinks rejected; peer OS identity checked; protocol versioned; a random session nonce in the workspace's .jet/session file that the client must present. One owner per workspace by lock; a second --serve refuses with a diagnostic. Request envelope carries every invocation input (argv, cwd, env allowlist, terminal mode). the session resets all request-scoped state, binds the request to one source snapshot, re-verifies leaf digests, schedules deterministically, holds output-path locks, propagates Ctrl-C. as cancellation, bounds its queue, and never inherits secrets absent from the envelope. Speculative pre-compilation of units touched by the last edit is allowed and never blocks a request. Amends D-JPK-NODAEMON1 only by letting the existing dev session accept build requests. Adoption gate: ship only if the measured fresh-process overhead after memoized checks exceeds 100 ms. or 20% of the median edit build on the corpus, and session memory stays under a stated ceiling.",
+          "detail": "jet dev gains a --serve flag. While that foreground process runs, jet build, jet run, and jet test started in the same workspace attach to it. They get the same output and exit status they would produce alone, faster.\n\nA policy flag --session=auto|off|required controls attachment; off forces a fresh process. Closing the dev terminal ends the session. No new verb, no background process, nothing runs as root. If no valid session owns the workspace, or the session is a different Jet version, the command runs as a fresh process and says why only with --verbose.",
+          "technical": "Endpoint: Unix-domain socket in a user-owned 0700 directory ($XDG_RUNTIME_DIR/jet/ when set, else a private per-user directory with a warning per the XDG spec). Windows named pipe. Symlinks rejected. Peer OS identity checked. Protocol versioned. A random session nonce in the workspace's .jet/session file must be presented by the client. One owner per workspace by lock. A second --serve refuses with a diagnostic.\n\nRequest envelope carries every invocation input (argv, cwd, env allowlist, terminal mode). The session resets all request-scoped state, binds the request to one source snapshot, and re-verifies leaf digests. It schedules deterministically, holds output-path locks, propagates Ctrl-C as cancellation, bounds its queue, and never inherits secrets absent from the envelope. Speculative pre-compilation of units touched by the last edit is allowed and never blocks a request.\n\nAmends D-JPK-NODAEMON1 only by letting the existing dev session accept build requests. Adoption gate: ship only if measured fresh-process overhead after memoized checks exceeds 100 ms or 20% of the median edit build on the corpus. Session memory must stay under a stated ceiling.",
           "code": "$ jet dev --serve src/main.jet\n  dev  watching 40 modules · serving builds for this workspace (session 7c1e)\n\n$ jet build            # other terminal, attaches\n✓ shop built in 0.9s · 1 of 21 units compiled, 20 reused · release · ./build/shop · session 7c1e\n\n$ jet build --session=off\n✓ shop built in 1.8s · 1 of 21 units compiled, 20 reused · release · ./build/shop\n$ sha256sum build/shop   # identical for both runs (this is a permanent test)\n\n$ jet build            # after the dev terminal closed\n✓ shop built in 1.8s ...   # fresh process, no socket left behind"
         },
         {
@@ -241132,7 +241132,7 @@
           },
           {
             "key": "C",
-            "reason": "It leaves process start and store reads on every build for people who already keep a dev session open. it stays the default whenever no session is running and is the outcome if the adoption gate fails."
+            "reason": "It leaves process start and store reads on every build for people who already keep a dev session open. It stays the default whenever no session is running and is the outcome if the adoption gate fails."
           }
         ],
         "tradeoff": "Two execution paths must stay identical, which needs a permanent differential test across success, warning, error, cancellation, and concurrent-edit cases, plus an authenticated local protocol. The session only helps while jet dev is running."
@@ -241143,14 +241143,14 @@
       "ballotProcessVersion": 2,
       "reviewPasses": {
         "base": "The first draft compared attaching to a running dev session, a background daemon, and no session, and recommended attaching.",
-        "boilOcean": "The breadth review tested an editor-hosted session (the LSP server as the warm host), a systemd user service, and a three-state attach policy. The LSP host is option A with a different parent and is noted there. the user service is option B in different clothes; the policy flag became part of option A as --session=auto|off|required.",
-        "hybrid": "The hybrid review kept option A and gave it option C's explain-build cost line. so the saving a session provides is always visible, and made fresh execution the automatic fallback whenever no valid session exists.",
+        "boilOcean": "The breadth review tested an editor-hosted session (the LSP server as the warm host), a systemd user service, and a three-state attach policy. The LSP host is option A with a different parent, noted there; the user service is option B in different clothes; the policy flag became option A as --session=auto|off|required.",
+        "hybrid": "The hybrid review kept option A and gave it option C's explain-build cost line, so the saving a session provides is always visible. It made fresh execution the automatic fallback whenever no valid session exists.",
         "cooperative": "The cooperative review gave option B its idle timeout and lifecycle verbs, and option C its visible-cost argument and its role as the default when no session runs. Option B still contradicts ratified law; option C still pays on every build.",
         "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (resident, warm, attach, daemon, socket), no visible rule for a missing or stale session, and identity only asserted. The lesson defines the terms, option A shows the fresh-process fallback and the digest comparison, and option B shows stop and idle exit.",
-        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found byte identity unproven, a non-portable socket path, no authentication or symlink defense, undefined concurrency and cancellation, a misleading --detached name, a wrong Vite comparison. and no adoption threshold; option A now specifies the envelope, endpoint rules, single ownership, request isolation, --session=off, a Gradle comparison, and a measured gate."
+        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found byte identity unproven, a non-portable socket path, no authentication or symlink defense, undefined concurrency and cancellation, a misleading --detached name, a wrong Vite comparison, and no adoption threshold. Option A now specifies the envelope, endpoint rules, single ownership, request isolation, --session=off, a Gradle comparison, and a measured gate."
       },
       "checkInstructions": null,
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-09-02T03:54:22.632Z"
     },
@@ -241160,30 +241160,30 @@
       "group": "tooling",
       "title": "One machine-wide artifact store and its size limit",
       "gist": "Whether Jet keeps one shared folder of built results on the machine, and how large it may grow before it prunes itself.",
-      "lesson": "Terms: an artifact is one built result, such as a compiled unit or a final binary; a store is one folder. where every artifact is saved under the fingerprint of its contents and reused by any project on the machine; an entry is one saved result; pruning removes entries, least recently used first. Jet has eleven reuse mechanisms today: the final-binary cache, the runtime-library cache, the warm JIT module cache, whole-invocation receipts, the declared-action content store. and its records, package receipts, the in-memory sema cache, the Rust FFI bridge cache, the C bindings cache, a replay codec with no caller, and the timing JSON. Eight of them keep files, each with its own folder, key, integrity rule, and failure behavior, and only the runtime cache has a size limit. The store replaces those eight; the in-memory sema cache becomes store records, and the replay codec and timing JSON are deleted. The remaining choice is the default size rule and how the store behaves when the disk is nearly full.",
-      "explainer": "",
-      "story": "Nate's build folder once reached 619 GB without anyone noticing. He also has a laptop with a 256 GB disk that is often nearly full. He wants builds to reuse everything they can, he never wants to discover a cache by running out of disk. and he wants a CI runner with a small quota to be able to say so once.",
+      "lesson": "Jet has eleven reuse mechanisms today. The store replaces those eight. The remaining choice is the default size rule and how the store behaves when the disk is nearly full.",
+      "explainer": "An artifact is one built result, such as a compiled unit or a final binary. A store is one folder where every artifact is saved under the fingerprint of its contents. Any project on the machine can reuse it. An entry is one saved result. Pruning removes entries, least recently used first.\n\nEight of them keep files. They are the final-binary cache, the runtime-library cache, the warm JIT module cache, and whole-invocation receipts. They also include the declared-action content store and its records, package receipts, the Rust FFI bridge cache, and the C bindings cache. Each has its own folder, key, integrity rule, and failure behavior. Only the runtime cache has a size limit. The in-memory sema cache becomes store records. The replay codec and the timing JSON are deleted.",
+      "story": "Nate's build folder once reached 619 GB without anyone noticing. He also has a laptop with a 256 GB disk that is often nearly full. He wants builds to reuse everything they can. He never wants to discover a cache by running out of disk. He wants a CI runner with a small quota to be able to say so once.",
       "inWild": "$ jet cache status\nstore      ~/.cache/jet/store\nlimit      20 GiB   (rule: min(20 GiB, 10% of the 512 GiB filesystem holding the store) = 20 GiB)\nreserve    keep 2 GiB free on that filesystem\nused       4.2 GiB · 1,204 blobs · 388 records · 3 ThinLTO caches\ntiers      local · team off · public off\nlast prune 2026-09-01 09:14 · freed 1.1 GiB · 0 live entries touched\n\n# on the 256 GiB laptop the same rule gives min(20 GiB, 25.6 GiB) = 20 GiB, and the 2 GiB reserve still holds",
       "detail": "",
       "options": [
         {
           "key": "A",
           "name": "Adaptive limit: the smaller of 20 GiB and 10% of the filesystem",
-          "detail": "The store keeps at most 20 GiB, or 10% of the filesystem holding the store when that is smaller. When full, it removes the least recently used entries after a command finishes. A small laptop disk gets a small store; a workstation gets 20 GiB. It does not look at how much space is actually free, so a store under its limit can still fill a nearly full disk.",
+          "detail": "The store keeps at most 20 GiB, or 10% of the filesystem holding the store when that is smaller. When full, it removes the least recently used entries after a command finishes. A small laptop disk gets a small store; a workstation gets 20 GiB. It does not look at how much space is actually free. A store under its limit can still fill a nearly full disk.",
           "technical": "Bound = min(20 GiB, 10% of total capacity). LRU from a last-use journal. Pruning is post-command work (D-JPK-NODAEMON1). Entries used by the current process are not evicted.",
           "code": "$ jet cache status\nlimit 20 GiB · used 19.8 GiB · prune after this command\n\n# disk has 1.1 GiB free, store has 3 GiB of room left:\n$ jet build\nError [L21xx]: no space left on device while publishing shop/net   # the limit did not protect the disk"
         },
         {
           "key": "B",
           "name": "Fixed 10 GiB",
-          "detail": "One number on every machine. Simple to explain and predictable, which matters on CI runners and containers. A large workspace with several targets and profiles will evict and rebuild more often, and a tiny disk still gives up 10 GiB.",
+          "detail": "One number on every machine. Simple to explain and predictable, which matters on CI runners and containers. A large workspace with several targets and profiles will evict and rebuild more often. A tiny disk still gives up 10 GiB.",
           "technical": "Bound = 10 GiB; LRU; same journal and prune mechanics.",
           "code": "$ jet cache status\nlimit 10 GiB · used 9.7 GiB\n# laptop (256 GiB) and workstation (2 TiB): same 10 GiB; the workstation with three targets evicts every few days"
         },
         {
           "key": "C",
           "name": "Fixed 50 GiB",
-          "detail": "Almost never evicts on a workstation. On a laptop it can quietly take a fifth of the disk, which repeats the build-folder story at a smaller scale.",
+          "detail": "Almost never evicts on a workstation. On a laptop it can quietly take a fifth of the disk. That repeats the build-folder story at a smaller scale.",
           "technical": "Bound = 50 GiB; LRU; same mechanics.",
           "code": "$ jet cache status\nlimit 50 GiB · used 38.2 GiB\n# laptop (256 GiB): the store may hold 50 GiB, one fifth of the disk"
         },
@@ -241197,15 +241197,15 @@
         {
           "key": "E",
           "name": "Adaptive limit with a free-space reserve, admission control, live leases, and host override",
-          "detail": "Same default rule as A: at most 20 GiB, or 10% of the filesystem when smaller. Three additions. First, a reserve: the store never leaves the filesystem with less than 2 GiB free, whatever the limit says, and it checks that before every write, not after. Second, live leases: an entry that any running build is using cannot be pruned, even by another Jet process. Third, a host override: a machine or organization can set a stricter limit once, outside any repository, and jet cache status shows where the effective limit came from. jet cache prune [--to <size>] prunes now.",
-          "technical": "Bound = min(20 GiB, 10% of total capacity) unless a stricter host policy applies; admission = free space. after write ≥ reserve (2 GiB default, host-settable), measured with statvfs available blocks (or the Windows volume API), including room. for temp+rename; evict before admit; refuse an entry that cannot fit safely with a tool error naming the path. Cross-process leases with crash recovery pin entries a live build reads. Journal: checksummed frames, counted in the cap, single-writer lock, compaction by fsync+rename, rebuilt from the cas on corruption. Pruning is post-command work.",
+          "detail": "Same default rule as A: at most 20 GiB, or 10% of the filesystem when smaller. Three additions. First, a reserve: the store never leaves the filesystem with less than 2 GiB free, whatever the limit says. It checks that before every write, not after. Second, live leases: an entry that any running build is using cannot be pruned, even by another Jet process.\n\nThird, a host override. A machine or organization can set a stricter limit once, outside any repository. jet cache status shows where the effective limit came from. jet cache prune [--to <size>] prunes now.",
+          "technical": "Bound = min(20 GiB, 10% of total capacity) unless a stricter host policy applies. Admission: free space after the write must stay at or above the reserve (2 GiB default, host-settable). Free space is read from statvfs available blocks, or the Windows volume API, and includes room for temp-plus-rename. The store evicts before it admits. An entry that cannot fit safely is refused with a tool error naming the path.\n\nCross-process leases with crash recovery pin entries a live build reads. The journal has checksummed frames, counts toward the cap, uses a single-writer lock, compacts by fsync plus rename, and is rebuilt from the cas on corruption. Pruning is post-command work.",
           "code": "$ jet cache status\nlimit      20 GiB   (min(20 GiB, 10% of 512 GiB); host policy: none)\nreserve    2 GiB free\nused       4.2 GiB · 1 live lease (this build)\n\n# disk has 1.1 GiB free:\n$ jet build\nnote: store pruned 3.4 GiB before compiling to keep 2 GiB free\n✓ shop built in 4.1s ...\n\n# CI runner, once, outside the repo:\n$ jet cache limit --host 4G\n$ jet cache status\nlimit      4 GiB    (host policy)"
         }
       ],
       "comparisons": [
         {
           "lang": "Cargo",
-          "note": "Cargo does not bound a project's target directory; since 1.88 it garbage-collects its global download and registry cache automatically. The unbounded target directory is how 619 GB happens.",
+          "note": "Cargo does not bound a project's target directory. Since 1.88 it garbage-collects its global download and registry cache automatically. The unbounded target directory is how 619 GB happens.",
           "code": "$ du -sh target/\n619G    target/"
         },
         {
@@ -241215,13 +241215,13 @@
         },
         {
           "lang": "Nix",
-          "note": "The store has no automatic limit; users run nix-collect-garbage or set min-free/max-free thresholds so the daemon collects when free space drops. Option E takes the free-space floor idea and adds a default cap.",
+          "note": "The store has no automatic limit. Users run nix-collect-garbage or set min-free/max-free thresholds so the daemon collects when free space drops. Option E takes the free-space floor idea and adds a default cap.",
           "code": "$ nix-collect-garbage -d\nfreeing 41.2 GiB"
         }
       ],
       "rec": "E",
       "recommendation": {
-        "why": "Option E keeps the owner's adaptive default and closes the two ways a capped store can still hurt: it checks free space. before every write instead of after, and it never prunes an entry another running build depends on. The host override answers quota-limited CI and containers without any repository setting.",
+        "why": "Option E keeps the owner's adaptive default and closes the two ways a capped store can still hurt. It checks free space before every write instead of after. It never prunes an entry another running build depends on. The host override answers quota-limited CI and containers without any repository setting.",
         "whyNot": [
           {
             "key": "A",
@@ -241229,7 +241229,7 @@
           },
           {
             "key": "B",
-            "reason": "Ten gigabytes evicts too often on a workstation with several targets and profiles, and predictability is provided in E by the host override instead."
+            "reason": "Ten gigabytes evicts too often on a workstation with several targets and profiles. Predictability is provided in E by the host override instead."
           },
           {
             "key": "C",
@@ -241240,7 +241240,7 @@
             "reason": "The store is discovered only when the disk is nearly full, which is the failure this ballot exists to prevent."
           }
         ],
-        "tradeoff": "Pre-write admission and leases add a small amount of bookkeeping to every publish, and a machine with many large projects will evict. and rebuild some artifacts under the 20 GiB ceiling; jet cache status makes both visible."
+        "tradeoff": "Pre-write admission and leases add a small amount of bookkeeping to every publish. A machine with many large projects will evict and rebuild some artifacts under the 20 GiB ceiling. jet cache status makes both visible."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -241249,13 +241249,13 @@
       "reviewPasses": {
         "base": "The first draft compared an adaptive limit, two fixed limits, and no limit, and recommended the adaptive limit.",
         "boilOcean": "The breadth review tested a per-project quota, a time-based expiry, and an adaptive cap with a free-space reserve and host override. A per-project quota defeats sharing across projects; time-based expiry evicts hot dependencies on a quiet week; the reserve-aware cap is a genuine alternative and became option E.",
-        "hybrid": "The hybrid review combined option A's default rule with option D's free-space awareness and option B's predictability. as a host override, into option E, and added the rule that a live build's entries are never pruned by any process.",
+        "hybrid": "The hybrid review combined option A's default rule with option D's free-space awareness and option B's predictability, as a host override, into option E. It added the rule that a live build's entries are never pruned by any process.",
         "cooperative": "The cooperative review gave each fixed limit its predictability argument, option D its zero-rebuild argument, and option A its simplicity. Predictability survives inside E's host override; the others lose to the small-disk and disk-full cases.",
-        "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (store, artifact, entry, LRU), an unclear '10% of which disk', two options that differed only by a number, and no visible protection of in-use entries. The lesson defines the terms, the example states which filesystem and works a laptop case, B and C are shown on the same two machines, and E shows a live lease.",
-        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found the mechanism count wrong, a cap that ignores available space and quotas, post-command pruning that can arrive after a disk-full failure, no cross-process protection. for in-use entries, an unbounded journal, and an imprecise Cargo claim. the recommendation changed to a new option E with a free-space reserve, pre-write admission, live leases, journal integrity, and a host override."
+        "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (store, artifact, entry, LRU), an unclear '10% of which disk', options differing only by a number, and no protection for in-use entries. The lesson defines the terms; the example states the filesystem and laptop case; B and C use the same machines; E shows a live lease.",
+        "adversarial": "Author model family: anthropic. Adversarial model family: openai. Rival review found wrong mechanism count, cap ignoring available space and quotas, post-command pruning after disk-full failure, no cross-process protection for in-use entries, unbounded journal, and imprecise Cargo claim. Recommendation changed to new option E with a free-space reserve, pre-write admission, live leases, journal integrity, and a host override."
       },
       "checkInstructions": null,
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-09-02T03:54:49.055Z"
     },
@@ -241265,8 +241265,8 @@
       "group": "tooling",
       "title": "Prebuilt runtime objects and who may publish to the public store tier",
       "gist": "Whether Jet's runtime ships as prebuilt objects a fresh machine downloads, which CPU level shared objects target, and whose signatures the public tier trusts.",
-      "lesson": "Terms: the runtime and Core are the shared support code every Jet program links; an object is compiled code ready to link; a mirror is a server that hands out saved artifacts. the public tier is the last mirror in the ordered list every machine may read. the baseline CPU level is the smallest set of processor features an object needs, so a baseline object runs on every machine of that family. Every first build on a machine compiles the runtime with rustc, which took 17 to 21 seconds on the reference workstation. Rust users never pay this because Rust ships its standard library prebuilt. Ratified law already allows ordered mirrors with signed provenance and verify-on-read. This ballot decides whether the project publishes prebuilt runtime objects, what CPU level shared objects use, and whether the project's own signing key may also vouch for other people's packages.",
-      "explainer": "",
+      "lesson": "Every first build on a machine compiles the runtime with rustc, which took 17 to 21 seconds on the reference workstation. Rust users never pay this because Rust ships its standard library prebuilt. Ratified law already allows ordered mirrors with signed provenance and verify-on-read. This ballot decides whether the project publishes prebuilt runtime objects, what CPU level shared objects use, and whether the project's own signing key may also vouch for other people's packages.",
+      "explainer": "Terms: the runtime and Core are the shared support code every Jet program links. An object is compiled code ready to link. A mirror is a server that hands out saved artifacts. The public tier is the last mirror in the ordered list every machine may read. The baseline CPU level is the smallest set of processor features an object needs, so a baseline object runs on every machine of that family.",
       "story": "Aisha installs Jet on a new laptop and runs jet build on a ten-line program. She waits twenty seconds while the runtime compiles and wonders whether Jet is slow. Her second build takes under a second because the objects are now in her store. Her Rust colleague's first hello world links in under a second because std came with the toolchain.",
       "inWild": "$ jet build hello.jet     # fresh machine, today\nnote: compiling the Jet runtime for rustc 1.97.1 once (about 20s); later builds reuse it\n✓ hello built in 21.4s\n$ jet build hello.jet     # same machine, second time\n✓ hello up to date · 38 ms\n\n$ jet build hello.jet     # fresh machine, with a public tier\n  fetch    runtime 1.4.2 · x86-64 baseline · 38 MiB · signed by jet-release · verified\n✓ hello built in 0.7s\n\n$ jet build hello.jet     # fresh machine, mirror unreachable\nnote: public store unreachable; compiling the Jet runtime once (about 20s)\n✓ hello built in 21.4s",
       "detail": "",
@@ -241281,7 +241281,7 @@
         {
           "key": "B",
           "name": "Prebuilt objects for runtime and Core only",
-          "detail": "The project publishes and signs only code it wrote: the runtime and Core, split into fixed per-module objects, built. for the baseline CPU level, with an identity that names the compiler, rustc, target, platform, and profile. Third-party packages compile locally or come from a team mirror. Simplest trust story; the multi-package clean build still pays for dependencies.",
+          "detail": "The project publishes and signs only code it wrote: the runtime and Core. They are split into fixed per-module objects, built for the baseline CPU level, with an identity that names the compiler, rustc, target, platform, and profile. Third-party packages compile locally or come from a team mirror. This is the simplest trust story. The multi-package clean build still pays for dependencies.",
           "technical": "Public mirror allowlist contains only the jet-release writer and only runtime/Core object kinds. Identity and ISA rules as in option D.",
           "code": "$ jet build\n  fetch    runtime 1.4.2 · x86-64 baseline · signed by jet-release · verified\n  compile  httpkit 2.1.0, json 1.4.0   # third-party packages compile here\n✓ shop built in 9.8s"
         },
@@ -241295,8 +241295,8 @@
         {
           "key": "D",
           "name": "Federated tier: Jet signs runtime and Core; registry-authorized builders sign third-party objects under their own roots",
-          "detail": "Two kinds of signature live on the public tier. The project's release key signs only the runtime and Core. Third-party package objects may be published by builders the package registry has authorized, each under its own signing root, only. when the build is reproducible, and a machine accepts them only when its policy opts in. Every download is verified against the digest and the signature of its own root, and a bad signature or a mismatched digest means the object is refused and the package compiles locally. Shared objects target the baseline CPU level of their family, with optional higher levels chosen after CPU detection; your own package still gets native tuning on host builds.",
-          "technical": "Namespaces and writer roots per D-JPK-CACHEAUTH1: jet-release for runtime/Core; registry-authorized builders for third-party objects with signed provenance, revocation metadata, and expiry or transparency checkpoints. consumers re-verify on every hit; divergent bytes are quarantined (D-JPK-REPROCACHE1); the toolchain pins the expected runtime identity so a stale signed runtime cannot be substituted. Object identity = compiler, rustc -vV, target triple, ISA level, platform ABI (OS SDK/deployment target or glibc/musl baseline. or MSVC toolset/CRT), linker and LTO version, panic/unwind settings, target features, profile flags, and dependency identities; any difference is a miss. ISA policy: x86-64 (psABI v1) baseline with optional v2/v3 variants; aarch64 base with optional feature levels; macOS per-architecture objects; wasm has no CPU tuning. Core is split into fixed per-module units so pay-for-what-you-call moves to link time. Third-party acceptance is off by default and enabled per host policy, never by a repository setting.",
+          "detail": "Two kinds of signature live on the public tier. The project's release key signs only the runtime and Core. Third-party package objects may be published by builders the package registry has authorized, each under its own signing root, only when the build is reproducible. A machine accepts them only when its policy opts in.\n\nEvery download is verified against the digest and the signature of its own root. A bad signature or a mismatched digest means the object is refused and the package compiles locally. Shared objects target the baseline CPU level of their family, with optional higher levels chosen after CPU detection. Your own package still gets native tuning on host builds.",
+          "technical": "Namespaces and writer roots per D-JPK-CACHEAUTH1: jet-release for runtime/Core. Registry-authorized builders sign third-party objects with signed provenance, revocation metadata, and expiry or transparency checkpoints. Consumers re-verify on every hit. Divergent bytes are quarantined (D-JPK-REPROCACHE1). The toolchain pins the expected runtime identity, so a stale signed runtime cannot be substituted.\n\nObject identity = compiler, rustc -vV, target triple, ISA level, and platform ABI (OS SDK/deployment target or glibc/musl baseline or MSVC toolset/CRT). It also includes linker and LTO version, panic/unwind settings, target features, profile flags, and dependency identities. Any difference is a miss.\n\nISA policy: x86-64 (psABI v1) baseline with optional v2/v3 variants. aarch64 base with optional feature levels. macOS uses per-architecture objects. wasm has no CPU tuning. Core is split into fixed per-module units, so pay-for-what-you-call moves to link time. Third-party acceptance is off by default and enabled per host policy, never by a repository setting.",
           "code": "$ jet build\n  fetch    runtime 1.4.2 · x86-64 baseline · signed by jet-release · verified\n  fetch    httpkit 2.1.0 · signed by builder acme-ci (registry-authorized) · verified\n  compile  json 1.4.0                     # no trusted object available; built locally\n✓ shop built in 2.3s\n\n$ jet build      # a download whose signature does not verify\nnote: public object for httpkit 2.1.0 failed verification; quarantined; compiling locally\n✓ shop built in 6.1s"
         }
       ],
@@ -241319,7 +241319,7 @@
       ],
       "rec": "D",
       "recommendation": {
-        "why": "Option D removes the one cost Rust users never see, keeps the structural clean-build win for multi-package programs, and draws the trust line. where the responsibility is: the project signs what it built, authorized builders sign what they built, and every machine verifies both before use.",
+        "why": "Option D removes the one cost Rust users never see and keeps the structural clean-build win for multi-package programs. It draws the trust line where responsibility is: the project signs what it built, authorized builders sign what they built, and every machine verifies both before use.",
         "whyNot": [
           {
             "key": "A",
@@ -241343,13 +241343,13 @@
       "reviewPasses": {
         "base": "The first draft compared a full public tier under one key, a runtime-only public tier, and local-plus-team tiers, and recommended the full tier.",
         "boilOcean": "The breadth review tested shipping runtime objects inside the installer and a federated tier with separate signing roots. The installer is the same object kind by a different transport and is the first-run fallback; the federated tier is a genuine alternative and became option D.",
-        "hybrid": "The hybrid review combined option A's coverage with option B's trust boundary into option D. and added the CPU-level rule: baseline objects for shared tiers, optional higher levels after CPU detection, native tuning for the root package.",
+        "hybrid": "The hybrid review combined option A's coverage with option B's trust boundary into option D. It added the CPU-level rule: baseline objects for shared tiers, optional higher levels after CPU detection, and native tuning for the root package.",
         "cooperative": "The cooperative review gave option A its speed argument, option B its narrow-trust argument, and option C its no-operations argument. Speed survives in D; narrow trust survives in D's separate roots; no operations leaves the cold cell lost.",
         "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (runtime, Core, object, mirror, tier, ISA), an ideal fetch with no failure path, and two options whose examples looked alike. The lesson defines the terms, the example shows the second build and the unreachable-mirror case, and each option's example names where every dependency came from.",
-        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found x86-64-v3 called a baseline, one release key vouching for third-party builds, a wrong Go claim, an overstated Nix reproducibility claim, an incomplete object identity, and no revocation. or target-matrix rule; the recommendation changed to a new federated option D with separate signing roots, a true x86-64 baseline, a complete identity, revocation and pinning rules, and a per-target policy."
+        "adversarial": "Author model family: anthropic. Adversarial model family: openai. Rival review found x86-64-v3 called a baseline, one release key vouching for third-party builds, wrong Go and overstated Nix reproducibility claims, incomplete object identity, and no revocation or target-matrix rule. Recommendation changed to federated option D with separate signing roots, true x86-64 baseline, complete identity, revocation and pinning rules, and per-target policy."
       },
       "checkInstructions": null,
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-09-02T03:55:15.973Z"
     },
@@ -241359,8 +241359,8 @@
       "group": "tooling",
       "title": "How Jet's build speed is measured against Cargo",
       "gist": "Which Cargo setups Jet must beat, on which programs, by which clock, and with what statistical rule, for the public build-speed claim.",
-      "lesson": "Terms: a peer is the tool Jet is compared with; a cell is one measured case (one program, one profile, one state such as a clean build. or a small edit); a gate is the pass rule; a strict win means Jet's time is below the peer's, with no allowed tie. Ordinary Cargo is plain cargo build on a stock stable toolchain. Expert Cargo is what a Rust expert sets up: a faster linker, a warm compile cache, native CPU flags. and for debug builds a nightly compiler with the parallel front end and the Cranelift backend. The competitive gate in AGENTS.md allows Rust parity within 5% for runtime cells; the owner asked for a strict win on build cells. Because build times are noisy, a rule also has to say how many runs and how close is too close to call.",
-      "explainer": "",
+      "lesson": "The competitive gate in AGENTS.md allows Rust parity within 5% for runtime cells; the owner asked for a strict win on build cells. Because build times are noisy, a rule also has to say how many runs and how close is too close to call.",
+      "explainer": "Terms: a peer is the tool Jet is compared with. A cell is one measured case (one program, one profile, one state such as a clean build or a small edit). A gate is the pass rule. A strict win means Jet's time is below the peer's, with no allowed tie.\n\nOrdinary Cargo is plain cargo build on a stock stable toolchain. Expert Cargo is what a Rust expert sets up: a faster linker, a warm compile cache, and native CPU flags. For debug builds it uses a nightly compiler with the parallel front end and the Cranelift backend.",
       "story": "Sam reads 'Jet builds faster than Rust' and tries it on his own project with mold and sccache already configured. If Jet only beat plain Cargo, Sam's first experience contradicts the claim. The claim has to survive Sam's machine, and it has to survive being re-run by someone who does not want it to be true.",
       "inWild": "$ jet perf build-matrix --peer cargo --peer cargo-tuned\n# columns: jet = Jet wall time · cargo = ordinary Cargo · tuned = expert Cargo · ratio = Jet/peer with its 95% upper bound\nprogram      profile  state        jet     cargo   tuned   ratio(cargo)   ratio(tuned)   verdict\nnbody        release  cold         0.41s   0.62s   0.58s   0.66 [≤0.71]   0.71 [≤0.77]   win\nnbody        release  edit-body    0.19s   0.55s   0.31s   0.35 [≤0.38]   0.61 [≤0.67]   win\nnbody        debug    cold         0.22s   0.55s   0.29s   0.40 [≤0.44]   0.76 [≤0.83]   win\nshop(3 pkgs) release  clean-warm   1.90s   6.80s   2.10s   0.28 [≤0.30]   0.90 [≤0.97]   win\nhello        release  cold         0.31s   0.30s   0.28s   1.03 [≤1.09]   1.11 [≤1.18]   LOSS  ← gate stays open\n# illustrative values; nothing above is measured yet",
       "detail": "",
@@ -241396,8 +241396,8 @@
         {
           "key": "E",
           "name": "Strict wall-clock win with a confidence bound, plus independent resource ceilings",
-          "detail": "Wall clock stays the gate and both Cargo columns must be beaten, but a cell counts as a win only when the statistics say. so: runs are paired and their order randomized, and the upper end of a 95% confidence interval on Jet divided by the peer must be below 1.00. A cell whose interval touches 1.00 is 'too close to call' and keeps the gate open rather than passing. Processor seconds, peak memory, binary size, and the produced binary's own speed are recorded for every cell. and each has its own ceiling: a build-speed win that doubles memory or slows the binary fails. Real programs gate; synthetic twins are curves. The expert column is defined per profile and target as the fastest valid published Cargo configuration, and a claim is made only for the host and target classes actually measured.",
-          "technical": "Paired randomized interleaving of Jet and peer runs; bootstrap (or hierarchical) confidence interval on the ratio; win iff upper 95% bound < 1.00 against both columns; inconclusive otherwise. One warmup, twenty samples per side minimum; more when the interval straddles. Secondary gates: cpu_ns ≤ 1.10 × peer for the same cell class (parallelism may cost some CPU. but not unboundedly), peak RSS ≤ 1.25 × peer, binary size within 2% of the previous Jet baseline, gauntlet runtime cells unchanged within noise. Peers: ordinary = stable rustc 1.97.1, default profile and linker, no .cargo/config.toml; expert = per profile and target the fastest valid pre-registered configuration (mold, warm sccache. where the state permits, RUSTFLAGS=-C target-cpu=native, nightly-of-the-day with -Zthreads=8 and -Zcodegen-backend=cranelift. for dev), each toolchain recorded as its own exact identity and rejected if it fails output or runtime parity. Profile mapping: jet build --profile=debug vs cargo build; jet build --release vs cargo build --release; default jet build also reported against cargo build --release. Toolchain-level objects (Rust std, Jet runtime units) count as present in the cold cell on both sides. Matched pairs record LOC, module/package graph, dependency closure, features, output identity, and the exact edit patch, reviewed before entering the corpus. Missing peer row, mismatched identity, or failed parity = unavailable = gate fails; no averaging; claims per measured host/target class.",
+          "detail": "Wall clock stays the gate and both Cargo columns must be beaten. A cell counts as a win only when the statistics say so: runs are paired and their order randomized. The upper end of a 95% confidence interval on Jet divided by the peer must be below 1.00. A cell whose interval touches 1.00 is 'too close to call' and keeps the gate open rather than passing.\n\nProcessor seconds, peak memory, binary size, and the produced binary's own speed are recorded for every cell. Each has its own ceiling: a build-speed win that doubles memory or slows the binary fails. Real programs gate; synthetic twins are curves. The expert column is defined per profile and target as the fastest valid published Cargo configuration. A claim is made only for the host and target classes actually measured.",
+          "technical": "Paired randomized interleaving of Jet and peer runs; bootstrap (or hierarchical) confidence interval on the ratio; win iff upper 95% bound < 1.00 against both columns; inconclusive otherwise. One warmup, twenty samples per side minimum; more when the interval straddles.\n\nSecondary gates: cpu_ns ≤ 1.10 × peer for the same cell class (parallelism may cost some CPU but not unboundedly). Peak RSS ≤ 1.25 × peer. Binary size stays within 2% of the previous Jet baseline. Gauntlet runtime cells stay unchanged within noise.\n\nPeers: ordinary = stable rustc 1.97.1, default profile and linker, no .cargo/config.toml. Expert = per profile and target the fastest valid pre-registered configuration (mold, warm sccache where the state permits, RUSTFLAGS=-C target-cpu=native, nightly-of-the-day with -Zthreads=8 and -Zcodegen-backend=cranelift for dev). Each toolchain is recorded as its own exact identity and rejected if it fails output or runtime parity.\n\nProfile mapping: jet build --profile=debug vs cargo build. jet build --release vs cargo build --release. Default jet build also reported against cargo build --release. Toolchain-level objects (Rust std, Jet runtime units) count as present in the cold cell on both sides.\n\nMatched pairs record LOC, module/package graph, dependency closure, features, output identity, and the exact edit patch, reviewed before entering the corpus. Missing peer row, mismatched identity, or failed parity = unavailable = gate fails; no averaging; claims per measured host/target class.",
           "code": "$ jet perf build-matrix --check\n64 cells · 61 win · 1 inconclusive (hello/release/no-change, ratio 0.97 [≤1.02]) · 2 loss\ngate: OPEN — report: tools/perf/build-matrix/2026-09-01.md (one row per cell: values, interval, peer config, samples, verdict)\n# illustrative"
         }
       ],
@@ -241409,7 +241409,7 @@
         },
         {
           "lang": "Cargo and rustc-perf",
-          "note": "cargo build --timings reports wall-clock per unit and in total. rustc-perf gates the compiler's own performance on instructions retired because it is far less noisy than wall time, and publishes wall time alongside; both are per-benchmark, never averaged. Option E takes the lesson: gate on what users feel, but demand a noise-aware rule and keep work metrics as guards.",
+          "note": "cargo build --timings reports wall-clock per unit and in total. rustc-perf gates the compiler's own performance on instructions retired because it is far less noisy than wall time. It publishes wall time alongside, and both are per-benchmark, never averaged. Option E takes the lesson: gate on what users feel, but demand a noise-aware rule and keep work metrics as guards.",
           "code": "$ cargo build --release --timings\n  Finished `release` profile in 1.05s"
         },
         {
@@ -241425,7 +241425,7 @@
       ],
       "rec": "E",
       "recommendation": {
-        "why": "Option E keeps the owner's strict wall-clock win against both columns and makes it defensible: a win is a statistical fact, not a lucky median. and a build-speed win cannot be bought with memory, processor time, or a slower binary. Real programs gate because synthetic twins can be shaped, knowingly or not, toward the tool that generated them.",
+        "why": "Option E keeps the owner's strict wall-clock win against both columns and makes it defensible. A win is a statistical fact, not a lucky median, and a build-speed win cannot be bought with memory, processor time, or a slower binary. Real programs gate because synthetic twins can be shaped, knowingly or not, toward the tool that generated them.",
         "whyNot": [
           {
             "key": "A",
@@ -241453,13 +241453,13 @@
       "reviewPasses": {
         "base": "The first draft compared strict-both, strict-plus-band, band-only, and a processor-time metric, and recommended strict-both on wall clock with real programs gating.",
         "boilOcean": "The breadth review tested gating on the geometric mean across programs, on a percentile of edits, and on a confidence-bounded ratio with resource ceilings. Averages hide a loss, which the competitive gate forbids; the confidence-bounded rule is a genuine alternative and became option E.",
-        "hybrid": "The hybrid review combined option A's strict wall-clock rule with option D's processor-time guard and a statistical win rule into option E. and added that toolchain-level objects count as present on both sides in the cold cell, mirroring Rust's prebuilt std.",
+        "hybrid": "The hybrid review combined option A's strict wall-clock rule with option D's processor-time guard and a statistical win rule into option E. It added that toolchain-level objects count as present on both sides in the cold cell, mirroring Rust's prebuilt std.",
         "cooperative": "The cooperative review gave option B its honesty argument about expert Cargo, option C its consistency with the runtime band, and option D its noise-resistance argument. Noise resistance survives in E's interval and ceilings; none of the others changes what users feel.",
         "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (peer, cell, gate, strict win), a table with no legend, options B and C that looked alike, and no view of noise or outliers. The lesson defines the terms, the example carries a legend and ratios, and option E states the sample rule and the too-close-to-call outcome.",
-        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found a median rule that cannot distinguish 0.999 from 1.001, a nightly toolchain described. as the same rustc, an expert column that mixed profile-specific tunings, a processor-time definition mislabeled. as latency, unmatched workload shapes, and a claim generalized past the measured host. the recommendation changed to a new option E with confidence bounds, per-profile expert configurations, separate toolchain identities, workload shape records, resource ceilings, and per-target claims."
+        "adversarial": "Author model family: anthropic. Adversarial model family: openai. Rival review found median ambiguity at 0.999 versus 1.001, nightly rustc mislabeling, mixed expert profile tunings, latency mislabeled processor time, unmatched workload shapes, and a host-overgeneralized claim. Recommendation changed to option E with confidence bounds, per-profile expert configurations, separate toolchain identities, workload shape records, resource ceilings, and per-target claims."
       },
       "checkInstructions": null,
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-09-02T03:55:43.124Z"
     },
@@ -241469,8 +241469,8 @@
       "group": "tooling",
       "title": "What jet build shows while it works",
       "gist": "The look of the build progress in a terminal, the one-line result, and whether a saved HTML report of the build ships.",
-      "lesson": "Terms: a live board is a small block of lines in the terminal that redraws in place while work runs. piped output is what you get when the command's output goes to a file or another program instead of a terminal, as in CI logs. the critical path is the longest chain of work that decides when the build finishes; an event stream is one line of structured data per thing. that happens, for tools to read; the HTML report is a saved web page you open later. Today jet build prints five fixed stage lines and a final 'Built ... in 4.1s'. With one build graph, Jet knows exactly how many modules it checked, how many units it compiled. or reused, which chain is the critical path, and, when it has history, roughly how long is left. This ballot decides how much of that a person sees while waiting, what the one-line result says, and whether jet explain-build can write a self-contained HTML page. Command names are already law: jet graph, jet query build, jet explain-build. Mockups for the look are in docs/proposals/automatic-build-optimization/mockups/.",
-      "explainer": "",
+      "lesson": "Today jet build prints five fixed stage lines and a final 'Built ... in 4.1s'. With one build graph, Jet knows exactly how many modules it checked and how many units it compiled or reused. It knows which chain is the critical path and, when it has history, roughly how long is left. This ballot decides how much of that a person sees while waiting, what the one-line result says, and whether jet explain-build can write a self-contained HTML page.",
+      "explainer": "Terms: a live board is a small block of lines in the terminal that redraws in place while work runs. Piped output is what you get when the command's output goes to a file or another program instead of a terminal, as in CI logs. The critical path is the longest chain of work that decides when the build finishes. An event stream is one line of structured data per thing that happens, for tools to read. The HTML report is a saved web page you open later.\n\nCommand names are already law: jet graph, jet query build, jet explain-build. Mockups for the look are in docs/proposals/automatic-build-optimization/mockups.",
       "story": "Lena runs jet build on a program with 40 modules that the compiler groups into 21 units. She wants to know at a glance that it is working, roughly how long is left, and afterwards why it took 4 seconds instead of 1. In CI the same command must print plain lines that read well in a log.",
       "inWild": "# terminal, 100+ columns (counts: 42 modules checked, 3 of 21 units compiled this time)\n▶ jet build shop · release · x86_64-linux                                  2.4s ⠹\n  check    ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰  42/42 modules · 3 rechecked      0.18s\n  emit     ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰   3/3 units                       0.02s\n  compile  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱   2/3 units · 18 reused            2.1s\n  link     ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  waiting on compile\n  cpu 2/16   rustc shop/net  ·  rustc shop/render  ·  14 slots idle\n  path  shop/core → shop/net → link                             est. 3.9s left\n\n✓ shop built in 4.1s · 3 of 21 units compiled, 18 reused · release · ./build/shop\n  why: jet explain-build shop\n\n# piped (CI log)\njet build shop (release, x86_64-linux)\ncheck    42 modules, 3 rechecked                          0.18s\ncompile  3 units compiled, 18 reused                       2.6s\nlink     shop                                              1.3s\nbuilt shop in 4.1s -> ./build/shop\n\n# 70 columns: cpu and path rows dropped, bars 16 cells",
       "detail": "",
@@ -241478,14 +241478,14 @@
         {
           "key": "A",
           "name": "Live board in a terminal, one-line receipt, HTML report, standard trace export",
-          "detail": "In a terminal, a small board redraws in place: one row per stage with a bar and counts, a row showing how many CPU slots are busy. and with what, and the critical path with an estimate of the time left, shown only when Jet has enough history to estimate. It collapses to one receipt line when done. Warnings and notes print above it in the normal format. When output is piped, each stage prints one plain line as it finishes. NO_COLOR removes color and nothing else; a non-UTF-8 terminal or --ascii gets ASCII bars. jet explain-build --html writes a self-contained dark page with a timeline, the graph, a why-table. and the store panel; --trace writes the same data in the standard Chrome trace format for existing viewers.",
-          "technical": "≤ 8 lines, ≤ 10 fps, cursor-up redraw; widths ≥ 100 full, 80–99 shortened counts, < 80 drops cpu and path rows; never wraps. One renderer owns stderr: handles resize and SIGTSTP/SIGCONT, restores cursor state on every exit path, rate-limits by terminal capability, falls back to plain lines. when cursor control is unsafe (TERM=dumb, consoles without VT support, slow links). Estimate shown only with recorded durations for remaining nodes; labeled 'est.'. --json emits NDJSON stage/node/receipt events under a versioned schema; the HTML page renders from that same record embedded. as escaped JSON (never HTML concatenation), ships a restrictive CSP meta tag, redacts secrets, and is tested against hostile names containing </script>, URIs, bidi, and control characters. Snapshot matrix: archetype × width × tty/pipe × color × terminal height, Unicode cell width, CI log folding, multiplexers, concurrent child output. Accessibility: the receipt and piped lines are screen-reader friendly; the board is decoration over the same events. Mockups: mockups/terminal.html and mockups/report.html.",
+          "detail": "In a terminal, a small board redraws in place. It has one row per stage with a bar and counts. It shows how many CPU slots are busy and with what. It shows the critical path with an estimate of the time left, shown only when Jet has enough history to estimate. It collapses to one receipt line when done. Warnings and notes print above it in the normal format.\n\nWhen output is piped, each stage prints one plain line as it finishes. NO_COLOR removes color and nothing else. A non-UTF-8 terminal or --ascii gets ASCII bars. `jet explain-build --html` writes a self-contained dark page with a timeline, the graph, a why-table, and the store panel. `--trace` writes the same data in the standard Chrome trace format for existing viewers.",
+          "technical": "≤ 8 lines, ≤ 10 fps, cursor-up redraw. Widths ≥ 100 are full. Widths 80–99 use shortened counts. Widths < 80 drop cpu and path rows. It never wraps. One renderer owns stderr. It handles resize and SIGTSTP/SIGCONT, restores cursor state on every exit path, and rate-limits by terminal capability. It falls back to plain lines when cursor control is unsafe (TERM=dumb, consoles without VT support, slow links).\n\nEstimate is shown only with recorded durations for remaining nodes and is labeled 'est.'. --json emits NDJSON stage/node/receipt events under a versioned schema. The HTML page renders from that same record embedded as escaped JSON (never HTML concatenation). It ships a restrictive CSP meta tag, redacts secrets, and is tested against hostile names containing </script>, URIs, bidi, and control characters.\n\nSnapshot matrix: archetype × width × tty/pipe × color × terminal height, Unicode cell width, CI log folding, multiplexers, concurrent child output. Accessibility: the receipt and piped lines are screen-reader friendly. The board is decoration over the same events. Mockups: mockups/terminal.html and mockups/report.html.",
           "code": "$ jet build            # terminal: board above, then\n✓ shop built in 4.1s · 3 of 21 units compiled, 18 reused · release · ./build/shop\n  why: jet explain-build shop\n\n$ jet build | cat      # piped\njet build shop (release, x86_64-linux)\ncheck    42 modules, 3 rechecked                          0.18s\ncompile  3 units compiled, 18 reused                       2.6s\nlink     shop                                              1.3s\nbuilt shop in 4.1s -> ./build/shop\n\n$ jet explain-build shop --html --open\nwrote build/shop.explain.html   # header strip · timeline with critical path · package/unit graph · why-table (/ j k Enter) · store panel · works offline\n$ jet explain-build shop --trace > shop.trace.json   # opens in Perfetto or chrome://tracing"
         },
         {
           "key": "B",
           "name": "Live board and receipt, text and JSON only",
-          "detail": "The same terminal experience, but the deep view stays in the terminal: jet explain-build prints the why-table, critical path. and store summary as text and --json, and --trace exports the standard trace format for existing viewers. One fewer renderer to maintain and no local web page to secure; no clickable graph or store panel of Jet's own.",
+          "detail": "The same terminal experience, but the deep view stays in the terminal. `jet explain-build` prints the why-table, critical path, and store summary as text and --json. `--trace` exports the standard trace format for existing viewers. This is one fewer renderer to maintain and no local web page to secure. There is no clickable graph or store panel of Jet's own.",
           "technical": "Identical board, receipt, events, and --trace; no HTML template.",
           "code": "$ jet build            # identical board and receipt to option A\n✓ shop built in 4.1s · 3 of 21 units compiled, 18 reused · release · ./build/shop\n\n$ jet explain-build shop\nwhy\n  shop/net       compiled   src/net/client.jet changed (fetch_all body)\n  18 units       reused     store · local\ncritical path  3.9s   check 0.18 → emit 0.02 → rustc shop/net 2.1 → link 1.3\n$ jet explain-build shop --trace > shop.trace.json"
         },
@@ -241523,11 +241523,11 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Option A shows what is happening, what is reused, and roughly how long is left while it runs, then gets out of the way with one line. and gives experts both a standard trace for existing viewers and a self-contained page that answers 'why did this rebuild' with the store and unit context no generic viewer knows about.",
+        "why": "Option A shows what is happening, what is reused, and roughly how long is left while it runs. It then gets out of the way with one line. It gives experts a standard trace for existing viewers and a self-contained page that answers 'why did this rebuild' with the store and unit context no generic viewer knows about.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "A generic trace viewer shows timing but not the why-table, the unit map, or the store panel. the page is what makes a slow build explainable without another tool, and its security and schema costs are bounded by rendering from the same versioned record."
+            "reason": "A generic trace viewer shows timing but not the why-table, the unit map, or the store panel. The page makes a slow build explainable without another tool. Its security and schema costs are bounded by rendering from the same versioned record."
           },
           {
             "key": "C",
@@ -241538,7 +241538,7 @@
             "reason": "Long builds show no sign of life."
           }
         ],
-        "tradeoff": "The board is more code and a larger snapshot matrix to keep green across widths, modes, and terminals. and the HTML page is a second rendering of the same record that must stay in sync with the JSON schema and pass hostile-input tests. The owner's visual acceptance of the rendered page is part of shipping it."
+        "tradeoff": "The board is more code and a larger snapshot matrix to keep green across widths, modes, and terminals. The HTML page is a second rendering of the same record; it must stay in sync with the JSON schema and pass hostile-input tests. The owner's visual acceptance of the rendered page is part of shipping it."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -241547,13 +241547,13 @@
       "reviewPasses": {
         "base": "The first draft compared a live board with an HTML report, a board without it, Cargo-like lines, and a quiet receipt, and recommended the board with the report.",
         "boilOcean": "The breadth review tested a browser-based live view served during the build, a desktop notification on completion, and a standard trace export instead of a custom page. The live browser view is a resident surface the session ballot owns; notifications are a shell concern; the trace export is real and was added to options A, B, and D.",
-        "hybrid": "The hybrid review kept option A and added the width rules, the piped-mode line format, the honest estimate rule. and the standard trace export, so one option covers terminal, CI, ASCII, existing viewers, and the deep page without a second mode switch.",
+        "hybrid": "The hybrid review kept option A and added the width rules, the piped-mode line format, the honest estimate rule, and the standard trace export. One option now covers terminal, CI, ASCII, existing viewers, and the deep page without a second mode switch.",
         "cooperative": "The cooperative review gave option B its one-fewer-renderer and no-injection-surface arguments, option C its familiarity argument, and option D its calm-terminal argument. B's arguments now bound A's page (same record, escaped JSON, CSP, hostile tests); familiarity does not explain a slow build; calm hides a hung one.",
-        "beginner": "Fresh agent: BallotBeginner. Skill: rli5. The beginner pass found undefined terms (live board, TTY, pipe, critical path, event stream), a sample without a legend or narrow and piped variants, options A. and B whose difference was hidden in prose, a progress count with an unclear denominator, and no long-build example for the quiet option. The lesson defines the terms, the example carries counts and the piped and narrow variants, A. and B show identical terminals beside their different commands, C's count names compiled and reused, and D shows a forty-second build.",
-        "adversarial": "Author model family: anthropic. Adversarial model family: openai. The rival review found an impossible cpu row, NO_COLOR misread as ASCII, an estimate presented. as knowledge, an under-specified redraw path, an unescaped HTML injection surface, a wrong Bazel claim, and a missing standard-trace option. the sample now reads cpu 2/16, NO_COLOR removes only color, the estimate is labeled and conditional, the renderer contract. and CSP-guarded escaped rendering are specified, Bazel is corrected, and --trace export is part of the recommendation."
+        "beginner": "Fresh agent: BallotBeginner. Skill: rli5. Beginner pass found undefined terms (live board, TTY, pipe, critical path, event stream), a sample lacking legend and narrow/piped variants, hidden A/B differences, unclear denominator, and no quiet long-build example. The lesson defines terms; the example carries counts plus piped and narrow variants; A and B show identical terminals beside different commands; C names compiled and reused; D shows a forty-second build.",
+        "adversarial": "Author model family: anthropic. Adversarial model family: openai. Rival review found an impossible cpu row, NO_COLOR misread as ASCII, an estimate presented as knowledge, an under-specified redraw path, unescaped HTML injection, a wrong Bazel claim, and no standard-trace option. The sample now reads cpu 2/16; NO_COLOR removes only color; the estimate is labeled and conditional; renderer/CSP escaping, corrected Bazel, and --trace are specified."
       },
       "checkInstructions": null,
-      "draft": true,
+      "draft": false,
       "status": "open",
       "created": "2026-09-02T03:56:12.110Z"
     }
@@ -243628,6 +243628,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-09-02T04:31:26.287Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BUILD-UI1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-09-02T04:31:15.442Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BUILDBENCH1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-09-02T04:31:03.979Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BUILD-PREBUILT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-09-02T04:30:54.139Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BUILD-STORE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-09-02T04:30:43.724Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BUILD-SESSION1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-09-02T04:30:34.564Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BUILD-NOCHANGE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-09-02T04:30:25.286Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BUILD-UNITS1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-09-02T04:18:10.384Z",
+      "by": "Main",
+      "action": "papercut.add",
+      "ref": "pc08gqt38",
+      "note": ""
+    },
     {
       "at": "2026-09-02T04:07:47.562Z",
       "by": "fable",
@@ -247071,62 +247127,6 @@
       "action": "card.update",
       "ref": "c0p17tvy",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-09-01T20:44:03.002Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0p17tvy",
-      "note": "#7"
-    },
-    {
-      "at": "2026-09-01T20:44:01.103Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0p17tvy",
-      "note": "#4"
-    },
-    {
-      "at": "2026-09-01T20:43:59.202Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0p17tvy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-09-01T20:42:10.411Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cyxijw5j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-09-01T20:42:08.047Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "cyxijw5j",
-      "note": "#9 The compiler API package witness marks `use core.compiler as"
-    },
-    {
-      "at": "2026-09-01T20:36:59.219Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01vyo8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-09-01T20:36:57.129Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01vyo8j",
-      "note": "#5 Fresh synthesis consumes strict-law evidence from #2253 and "
-    },
-    {
-      "at": "2026-09-01T20:36:56.263Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hx9cco",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
@@ -247912,6 +247912,14 @@
       "text": "tools/ci/compiled-workload-runner.mjs staged every runtime argv=input-root fixture inside the Jet package before compilation while peer builds received no input; systems-file-index then failed E1334 on its hostile symlink tree before measurement. Fixed staging so only the declared build-input authority embeds input at compile time.",
       "cardId": null,
       "created": "2026-09-01T22:43:24.988Z",
+      "status": "open"
+    },
+    {
+      "id": "pc08gqt38",
+      "by": "Main",
+      "text": "scripts/agent/proof-parallel.sh documents mixing SUITE and --crate targets, but cargo test --no-run applies each --test name to every -p crate and fails deterministically: no test target named fresh_agent_t4 in jet-foundation. Split suite/crate build invocations internally.",
+      "cardId": null,
+      "created": "2026-09-02T04:18:10.384Z",
       "status": "open"
     }
   ]

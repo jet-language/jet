@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jet build · terminal states</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080b0f;
+      --panel: #10161d;
+      --panel-hi: #151d26;
+      --line: #26333d;
+      --line-soft: #1b252d;
+      --text: #dce8e3;
+      --muted: #7f9294;
+      --dim: #617174;
+      --accent: #85e6bf;
+      --accent-strong: #b4f5d8;
+      --danger: #ed777c;
+      --amber: #e5b96a;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(133, 230, 191, .07), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.5 var(--sans);
+    }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 42px 0 56px; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font: 11px/1.2 var(--mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; font-size: clamp(25px, 4vw, 38px); letter-spacing: -.035em; font-weight: 650; }
+    .lede { max-width: 680px; margin: 10px 0 28px; color: var(--muted); }
+    .selector {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 14px;
+    }
+    .state-button {
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 8px 11px;
+      background: #0d1319;
+      color: #a9bab8;
+      cursor: pointer;
+      font: 12px/1.2 var(--mono);
+      transition: border-color .15s ease, color .15s ease, background .15s ease, transform .15s ease;
+    }
+    .state-button:hover { border-color: #4c666d; color: var(--text); }
+    .state-button:active { transform: translateY(1px); }
+    .state-button[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: rgba(133, 230, 191, .1);
+      color: var(--accent-strong);
+    }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .terminal-frame {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0b1015;
+      box-shadow: 0 22px 65px rgba(0, 0, 0, .28), 0 0 0 1px rgba(255,255,255,.015) inset;
+    }
+    .titlebar {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      height: 38px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line-soft);
+      background: linear-gradient(#141c24, #10161c);
+      color: var(--dim);
+      font: 11px var(--mono);
+    }
+    .dots { display: flex; gap: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #34424a; }
+    .dot:first-child { background: #895e64; }
+    .dot:nth-child(2) { background: #9d8752; }
+    .dot:nth-child(3) { background: #5e947e; }
+    .titlebar .title { margin-left: 4px; }
+    .titlebar .mode { margin-left: auto; color: #658078; }
+    .screen-wrap { min-height: 326px; padding: 24px clamp(16px, 3vw, 31px) 28px; }
+    .screen-wrap pre {
+      margin: 0;
+      overflow-x: auto;
+      color: var(--text);
+      font: 13px/1.7 var(--mono);
+      tab-size: 2;
+      white-space: pre;
+    }
+    .screen-wrap pre .accent { color: var(--accent); }
+    .screen-wrap pre .muted { color: var(--muted); }
+    .screen-wrap pre .danger { color: var(--danger); }
+    .screen-wrap pre .amber { color: var(--amber); }
+    .screen-wrap pre.live { color: var(--text); }
+    .screen-wrap pre.receipt { color: var(--accent-strong); }
+    .screen-wrap pre.failure { color: var(--danger); }
+    .screen-wrap pre.notes { color: var(--amber); }
+    .caption {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 13px;
+      color: var(--dim);
+      font: 11px/1.4 var(--mono);
+    }
+    .caption span:last-child { text-align: right; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    @media (max-width: 700px) {
+      .shell { width: min(100% - 20px, 1180px); padding-top: 26px; }
+      .screen-wrap { min-height: 300px; padding: 18px 13px 22px; }
+      .screen-wrap pre { font-size: 11px; line-height: 1.75; }
+      .caption { display: block; }
+      .caption span { display: block; }
+      .caption span:last-child { margin-top: 5px; text-align: left; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <p class="eyebrow">Automatic build optimization · terminal mockup</p>
+    <h1>One build, many honest states.</h1>
+    <p class="lede">The rich TTY board gives experts the critical path, then leaves a compact receipt. Select a frame to inspect the output in place.</p>
+
+    <div class="selector" role="group" aria-label="Terminal output state">
+      <button class="state-button" type="button" data-state="tty-building" aria-pressed="true">tty-building</button>
+      <button class="state-button" type="button" data-state="tty-success-receipt" aria-pressed="false">tty-success-receipt</button>
+      <button class="state-button" type="button" data-state="tty-no-change" aria-pressed="false">tty-no-change</button>
+      <button class="state-button" type="button" data-state="tty-failure" aria-pressed="false">tty-failure</button>
+      <button class="state-button" type="button" data-state="tty-notes" aria-pressed="false">tty-notes</button>
+      <button class="state-button" type="button" data-state="tty-explain" aria-pressed="false">tty-explain</button>
+      <button class="state-button" type="button" data-state="piped" aria-pressed="false">piped</button>
+      <button class="state-button" type="button" data-state="no-color" aria-pressed="false">ascii</button>
+      <button class="state-button" type="button" data-state="narrow-70-cols" aria-pressed="false">narrow-70-cols</button>
+    </div>
+
+    <section class="terminal-frame" aria-label="Terminal preview">
+      <div class="titlebar">
+        <span class="dots" aria-hidden="true"><i class="dot"></i><i class="dot"></i><i class="dot"></i></span>
+        <span class="title">jet build shop</span>
+        <span class="mode" id="modeLabel">TTY · color · ≥100 cols</span>
+      </div>
+      <div class="screen-wrap" id="screen" aria-live="polite"></div>
+    </section>
+    <div class="caption"><span id="stateCaption">Animated board · spinner and compile bar are live.</span><span>Static frames are preserved verbatim from the UI spec.</span></div>
+  </main>
+
+  <template id="frame-tty-building"><pre>▶ jet build shop · release · x86_64-linux                                  2.4s ⠹
+  check    ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰  42/42 modules · 3 rechecked      0.18s
+  emit     ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰   3/3 units                       0.02s
+  compile  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱   2/3 units · 18 reused            2.1s
+  link     ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  waiting on compile
+  cpu 2/16   rustc shop/net  ·  rustc shop/render  ·  14 slots idle
+  path  shop/core → shop/net → link                             est. 3.9s left
+</pre></template>
+  <template id="frame-tty-success-receipt"><pre>✓ shop built in 4.1s · 3 of 21 units compiled, 18 reused · release · ./build/shop
+  why: jet explain-build shop
+</pre></template>
+  <template id="frame-tty-no-change"><pre>✓ shop up to date · 38 ms · 21 units reused · release · ./build/shop
+</pre></template>
+  <template id="frame-tty-failure"><pre>✗ shop not built · 2 errors · 0.31s · nothing compiled, store unchanged
+</pre></template>
+  <template id="frame-tty-notes"><pre>note: compiling the Jet runtime for rustc 1.97.1 once (about 20s); later builds reuse it
+note: Jet 0.9.0 → 0.9.1: the store holds nothing for this compiler; rebuilding once
+note: rebuilt shop/net — store entry failed verification (why: jet explain-build shop/net)
+note: team store unreachable (cache.acme.dev); using local store only
+</pre></template>
+  <template id="frame-tty-explain"><pre>$ jet explain-build shop
+shop · release · x86_64-linux · built 4.1s ago · 3 of 21 units compiled
+
+why
+  shop/net       compiled   src/net/client.jet changed (fetch_all body)
+  shop/render    compiled   src/render/table.jet changed (Row.width signature) → 1 dependent
+  shop/cli       compiled   depends on shop/render interface
+  link shop      relinked   3 units changed
+  18 units       reused     store · local
+
+critical path  3.9s   check 0.18 → emit 0.02 → rustc shop/net 2.1 → link 1.3
+store          local hits 18 · misses 3 · team off · 4.2 GiB of 20 GiB
+</pre></template>
+  <template id="frame-piped"><pre>jet build shop (release, x86_64-linux)
+check    42 modules, 3 rechecked                          0.18s
+emit     3 units                                           0.02s
+compile  3 units compiled, 18 reused                       2.6s
+link     shop                                              1.3s
+built shop in 4.1s -> ./build/shop
+</pre></template>
+  <template id="frame-no-color"><pre>[ok] jet build shop (release, x86_64-linux)                       2.4s -
+  check    ################################  42/42 modules, 3 rechecked      0.18s
+  emit     ################################   3/3 units                       0.02s
+  compile  ##############..................   2/3 units, 18 reused            2.1s
+  link     ................................  waiting on compile
+  cpu 2/16   14 slots idle
+  path  shop/core -> shop/net -> link                             est. 3.9s left
+</pre></template>
+  <template id="frame-narrow-70-cols"><pre>▶ jet build shop · release · x86_64-linux              2.4s ⠹
+  check    ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰  42/42 · 3 re
+  emit     ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰  3/3 units
+  compile  ▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱  2/3 · 18 re
+  link     ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  waiting on compile
+</pre></template>
+
+  <script>
+    (() => {
+      const screen = document.getElementById('screen');
+      const modeLabel = document.getElementById('modeLabel');
+      const stateCaption = document.getElementById('stateCaption');
+      const buttons = [...document.querySelectorAll('.state-button')];
+      const spinner = ['⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+      const totalCompileCells = 32;
+      let selectedState = 'tty-building';
+      let timer = 0;
+      let animationStarted = 0;
+
+      const templateText = (name) => document.getElementById('frame-' + name).content.querySelector('pre').textContent;
+      const frameClass = (name) => {
+        if (name === 'tty-success-receipt' || name === 'tty-no-change') return 'receipt';
+        if (name === 'tty-failure') return 'failure';
+        if (name === 'tty-notes') return 'notes';
+        return '';
+      };
+      const modeFor = (name) => ({
+        'tty-building': 'TTY · color · ≥100 cols',
+        'tty-success-receipt': 'TTY · receipt',
+        'tty-no-change': 'TTY · memoized',
+        'tty-failure': 'TTY · diagnostics',
+        'tty-notes': 'TTY · notes above board',
+        'tty-explain': 'TTY · explain-build',
+        piped: 'pipe · no cursor movement',
+        'no-color': 'non-UTF-8 locale or --ascii · no color',
+        'narrow-70-cols': 'TTY · color · <80 cols'
+      }[name]);
+      const captionFor = (name) => ({
+        'tty-building': 'Animated board · spinner and compile bar are live.',
+        'tty-success-receipt': 'Success collapses the board to a receipt and hint.',
+        'tty-no-change': 'Memoized checks leave every unit in the store.',
+        'tty-failure': 'Failure leaves diagnostics above the ordinary receipt line.',
+        'tty-notes': 'Notes print above the board or before the receipt.',
+        'tty-explain': 'Terminal detail view · one node can be expanded with --why.',
+        'no-color': 'ASCII fallback for a non-UTF-8 locale or --ascii: no color escapes, ASCII bars, markers [ok], [x], note:. NO_COLOR alone keeps the Unicode board and removes only color.',
+        'narrow-70-cols': 'The compact <80-column variant drops cpu and path rows.'
+      }[name]);
+
+      function showStatic(name) {
+        screen.replaceChildren();
+        const pre = document.createElement('pre');
+        pre.className = frameClass(name);
+        pre.textContent = templateText(name);
+        screen.append(pre);
+        modeLabel.textContent = modeFor(name);
+        stateCaption.textContent = captionFor(name);
+      }
+
+      function bar(filled, full, on = '▰', off = '▱') {
+        return on.repeat(filled) + off.repeat(full - filled);
+      }
+
+      function buildingFrame(progress, tick) {
+        const filled = Math.max(14, Math.min(totalCompileCells, Math.round(14 + 18 * progress)));
+        const elapsed = (0.4 + 2 * progress).toFixed(1);
+        const compileElapsed = (0.4 + 1.7 * progress).toFixed(1);
+        return [
+          '▶ jet build shop · release · x86_64-linux                                  ' + elapsed + 's ' + spinner[tick % spinner.length],
+          '  check    ' + bar(32, 32) + '  42/42 modules · 3 rechecked      0.18s',
+          '  emit     ' + bar(32, 32) + '   3/3 units                       0.02s',
+          '  compile  ' + bar(filled, 32) + '   2/3 units · 18 reused            ' + compileElapsed + 's',
+          '  link     ' + bar(0, 32) + '  waiting on compile',
+          '  cpu 2/16   rustc shop/net  ·  rustc shop/render  ·  14 slots idle',
+          '  path  shop/core → shop/net → link                             est. 3.9s left'
+        ].join('\n') + '\n';
+      }
+
+      function stopAnimation() {
+        if (timer) window.clearInterval(timer);
+        timer = 0;
+      }
+
+      function runBuilding() {
+        stopAnimation();
+        screen.replaceChildren();
+        const pre = document.createElement('pre');
+        pre.className = 'live';
+        screen.append(pre);
+        modeLabel.textContent = modeFor('tty-building');
+        stateCaption.textContent = captionFor('tty-building');
+        animationStarted = performance.now();
+        const render = () => {
+          const progress = Math.min(1, (performance.now() - animationStarted) / 3000);
+          pre.textContent = buildingFrame(progress, Math.floor((performance.now() - animationStarted) / 100));
+          if (progress >= 1) {
+            stopAnimation();
+            window.setTimeout(() => {
+              if (selectedState === 'tty-building') {
+                showStatic('tty-success-receipt');
+                stateCaption.textContent = 'Build complete · the animated board collapsed to the success receipt.';
+              }
+            }, 180);
+          }
+        };
+        render();
+        timer = window.setInterval(render, 100);
+      }
+
+      function selectState(name) {
+        selectedState = name;
+        buttons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.state === name)));
+        if (name === 'tty-building') runBuilding();
+        else { stopAnimation(); showStatic(name); }
+      }
+
+      buttons.forEach((button) => button.addEventListener('click', () => selectState(button.dataset.state)));
+      window.addEventListener('beforeunload', stopAnimation, { once: true });
+      runBuilding();
+    })();
+  </script>
+</body>
+</html>
