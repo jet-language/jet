@@ -44,6 +44,40 @@ short ballot in the current request.
 
 "Simple ballot" is not a profile name. `/simple` applies to both profiles.
 
+## The reading surface (write it first)
+
+The owner reads the surface and decides from it; the long-form fields below
+are provenance behind a fold. Owner law (2026-09-02): "I want to see current,
+proposed, and the best in-the-wild option side by side; the comparison, what
+the recommended option loses and gains, and why not the other options. The
+rest can be hidden." Tower refuses a ballot without a valid `surface`.
+
+`surface` is an object:
+
+- **`gist`** — one question, under 22 words: what is being decided?
+- **`lesson`** — one plain paragraph, under 70 words: the concepts a beginner
+  needs, what Jet has today, what stays owed whichever option wins.
+- **`trio.current`** — `{note, code}`: what a Jet user types and sees today
+  (the real error or the workaround). `trio.wild` — `{lang, note, code}`: the
+  best-in-the-wild tool doing the same job, real API, cited in a code comment.
+- **`options[]`** — one per ballot option, same keys and order:
+  `{key, name, gist, gains[1-3], losses[1-3], proposed: {code}}`. `proposed.code`
+  is the same workload as `trio.current` and `trio.wild`, at most 14 lines.
+- **`recommendation`** — `{rec, why, gains[], losses[], whyNot[{key, reason}], tradeoff}`.
+  `rec` equals the ballot `rec`; `why` under 40 words; `whyNot` names every
+  losing option.
+
+Caps Tower enforces: sentences under 24 words, bullets under 14 words, the
+whole surface under 430 words of prose, and no project jargon ("ratchet",
+"seam", "facet", "substrate", "tier parity", "Ring 0/1"). Say the plain thing:
+"core owns the meaning", "a package backend", "the same answer on every run
+mode", "field group". Exemplar: `D-M-SIGNAL1`.
+
+Write the surface before any long-form field. The long-form fields restate
+and ground it; they never re-decide it. `gist`, `lesson`, option `detail`, and
+`recommendation.why` carry the surface wording (option `detail` is the option
+gist plus its gains and losses); anything longer goes in `technical`.
+
 ## The decision fields
 
 - **`gist`** — one very short plain-language sentence: what is being chosen.

@@ -1825,7 +1825,9 @@ const PLAIN_SENTENCE_WORDS = 32;
 const PLAIN_PARAGRAPH_WORDS = 90;
 const LEGACY_REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'adversarial'];
 const REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'beginner', 'adversarial'];
-const BALLOT_PROCESS_VERSION = 2;
+// Process 2 added the beginner pass; process 3 adds the reading surface.
+const BEGINNER_PROCESS_VERSION = 2;
+const BALLOT_PROCESS_VERSION = 3;
 const SYSTEM_ACCEPTANCE = Symbol('system acceptance');
 const words = (text) => String(text || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || [];
 const sentences = (text) => String(text || '').trim().split(/(?<=[.!?])\s+/).filter(Boolean);
@@ -1940,8 +1942,96 @@ export function plainLanguageGaps(p) {
   return gaps;
 }
 
-export function ballotGaps(p, { requireBeginner = Number(p.ballotProcessVersion || 0) >= BALLOT_PROCESS_VERSION } = {}) {
+// The reading surface: the short owner-facing layer the UI shows first. Caps are
+// owner law (2026-09-02): one question, one plain lesson, a current / proposed /
+// in-the-wild code trio, one to three gains and losses per option, why-not for
+// every losing option, and no project jargon.
+const SURFACE_GIST_WORDS = 22;
+const SURFACE_LESSON_WORDS = 70;
+const SURFACE_WHY_WORDS = 40;
+const SURFACE_SENTENCE_WORDS = 24;
+const SURFACE_BULLET_WORDS = 14;
+const SURFACE_TOTAL_WORDS = 430;
+const SURFACE_CODE_LINES = 14;
+const SURFACE_JARGON = /\b(ratchet|seam|facet|substrate|tier[- ]parity|ring [01]|RINGS)\b/i;
+
+export function surfaceGaps(p) {
+  const s = p.surface;
+  if (!plainObject(s)) return ['surface (object)'];
+  const gaps = [];
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  const count = (v) => words(text(v)).length;
+  const prose = [];
+  const need = (label, v, max) => {
+    if (!text(v)) { gaps.push(`surface.${label}`); return; }
+    prose.push([label, text(v)]);
+    if (max && count(v) > max) gaps.push(`surface.${label} has ${count(v)} words (max ${max})`);
+  };
+  need('gist', s.gist, SURFACE_GIST_WORDS);
+  if (text(s.gist) && !/\?$/.test(text(s.gist))) gaps.push('surface.gist (must be a question)');
+  need('lesson', s.lesson, SURFACE_LESSON_WORDS);
+  if (text(s.lesson).split(/\n\s*\n/).length > 1) gaps.push('surface.lesson (one paragraph maximum)');
+  const trio = plainObject(s.trio) ? s.trio : {};
+  for (const side of ['current', 'wild']) {
+    const pane = plainObject(trio[side]) ? trio[side] : {};
+    need(`trio.${side}.note`, pane.note);
+    if (!text(pane.code)) gaps.push(`surface.trio.${side}.code`);
+  }
+  if (!text(trio.wild?.lang)) gaps.push('surface.trio.wild.lang');
+  const optionKeys = (Array.isArray(p.options) ? p.options : []).map(o => o?.key).filter(Boolean);
+  const surfaceOptions = Array.isArray(s.options) ? s.options : [];
+  if (surfaceOptions.map(o => o?.key).join('\u0000') !== optionKeys.join('\u0000'))
+    gaps.push('surface.options (keys must match options[] in order)');
+  for (const o of surfaceOptions) {
+    const key = o?.key || '?';
+    need(`options[${key}].name`, o?.name);
+    need(`options[${key}].gist`, o?.gist);
+    for (const list of ['gains', 'losses']) {
+      const items = Array.isArray(o?.[list]) ? o[list] : [];
+      if (items.length < 1 || items.length > 3) gaps.push(`surface.options[${key}].${list} (need 1-3 items)`);
+      items.forEach((item, i) => {
+        need(`options[${key}].${list}[${i + 1}]`, item);
+        if (count(item) > SURFACE_BULLET_WORDS) gaps.push(`surface.options[${key}].${list}[${i + 1}] has ${count(item)} words (max ${SURFACE_BULLET_WORDS})`);
+      });
+    }
+    const code = text(o?.proposed?.code);
+    if (!code) gaps.push(`surface.options[${key}].proposed.code`);
+    else if (code.split('\n').length > SURFACE_CODE_LINES) gaps.push(`surface.options[${key}].proposed.code (max ${SURFACE_CODE_LINES} lines)`);
+  }
+  const r = plainObject(s.recommendation) ? s.recommendation : {};
+  if (r.rec !== p.rec) gaps.push('surface.recommendation.rec (must equal rec)');
+  need('recommendation.why', r.why, SURFACE_WHY_WORDS);
+  for (const list of ['gains', 'losses']) {
+    const items = Array.isArray(r[list]) ? r[list] : [];
+    if (!items.length) gaps.push(`surface.recommendation.${list}`);
+    items.forEach((item, i) => {
+      need(`recommendation.${list}[${i + 1}]`, item);
+      if (count(item) > SURFACE_BULLET_WORDS) gaps.push(`surface.recommendation.${list}[${i + 1}] has ${count(item)} words (max ${SURFACE_BULLET_WORDS})`);
+    });
+  }
+  const whyNot = Array.isArray(r.whyNot) ? r.whyNot : [];
+  for (const key of optionKeys.filter(key => key !== p.rec)) {
+    const item = whyNot.find(x => x?.key === key);
+    if (!text(item?.reason)) gaps.push(`surface.recommendation.whyNot[${key}]`);
+    else prose.push([`recommendation.whyNot[${key}]`, text(item.reason)]);
+  }
+  need('recommendation.tradeoff', r.tradeoff);
+  let total = 0;
+  for (const [label, value] of prose) {
+    total += words(value).length;
+    for (const sentence of sentences(value))
+      if (words(sentence).length > SURFACE_SENTENCE_WORDS)
+        gaps.push(`surface.${label} sentence has ${words(sentence).length} words (max ${SURFACE_SENTENCE_WORDS})`);
+    const jargon = value.match(SURFACE_JARGON);
+    if (jargon) gaps.push(`surface.${label} uses project jargon "${jargon[0]}"`);
+  }
+  if (total > SURFACE_TOTAL_WORDS) gaps.push(`surface prose has ${total} words (max ${SURFACE_TOTAL_WORDS})`);
+  return gaps;
+}
+
+export function ballotGaps(p, { requireBeginner = Number(p.ballotProcessVersion || 0) >= BEGINNER_PROCESS_VERSION, requireSurface = Number(p.ballotProcessVersion || 0) >= BALLOT_PROCESS_VERSION } = {}) {
   const missing = [];
+  if (p.surface != null || requireSurface) missing.push(...surfaceGaps(p));
   const ballotMode = p.ballotMode || 'full';
   if (!['full', 'short'].includes(ballotMode)) missing.push('ballotMode (full or short)');
   if (!p.gist || !String(p.gist).trim()) missing.push('gist');
@@ -2022,7 +2112,7 @@ export function addDecision(s, p) {
     fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
   const draft = !!p.draft;
   if (!systemAcceptance && p.group !== 'acceptance') {
-    const gaps = ballotGaps(p, { requireBeginner: true });
+    const gaps = ballotGaps(p, { requireBeginner: true, requireSurface: true });
     const metadataGaps = (p.ballotMode || 'full') === 'full'
       ? [...beginnerMetadataGaps(p), ...dissentMetadataGaps(p)]
       : [];
@@ -2042,7 +2132,7 @@ export function addDecision(s, p) {
     ballotMode, shortAuthorizedBy: ballotMode === 'short' ? p.shortAuthorizedBy : null,
     ballotProcessVersion: p.group === 'acceptance' ? null : BALLOT_PROCESS_VERSION,
     reviewPasses: ballotMode === 'full' && p.reviewPasses ? orderedReviewPasses(p.reviewPasses) : null,
-    checkInstructions: p.checkInstructions || null, ...(supersededBy ? { supersededBy } : {}),
+    checkInstructions: p.checkInstructions || null, surface: p.surface ?? null, ...(supersededBy ? { supersededBy } : {}),
     draft, status: 'open', created: now() };
   s.decisions.push(d);
   touchCard(card, p.by);
@@ -2139,7 +2229,7 @@ export function updateDecision(s, id, patch, by) {
     fail('E_INVALID', 'acceptance ballots are system-generated and cannot use decision update');
   if (d.status === 'ratified' && by !== 'owner')
     fail('E_OWNER_ONLY', 'updating a ratified decision is owner-only');
-  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy'])
+  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface'])
     if (k in patch) d[k] = patch[k];
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
@@ -2152,7 +2242,7 @@ export function updateDecision(s, id, patch, by) {
   // same while promoting a draft. Ratified records remain historical law.
   if (d.group !== 'acceptance' && d.status !== 'ratified' && (patch.ready || !d.draft)) {
     d.ballotMode ||= 'full';
-    const gaps = ballotGaps(d, { requireBeginner: true });
+    const gaps = ballotGaps(d, { requireBeginner: true, requireSurface: true });
     if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
     if (d.ballotMode === 'full') {
       d.reviewPasses = orderedReviewPasses(d.reviewPasses);

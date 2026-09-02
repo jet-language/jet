@@ -111,7 +111,8 @@ test('clearance batch ratifies without agent notifications', async () => {
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
-    options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }] });
+    options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }],
+    surface: { gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.', trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } }, options: [{ key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } }, { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } }], recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' } } });
   await ownerPost('/api/clearance', { decisionId: 'D-W1', outcome: 'A', by: 'owner' });
   await ownerPost('/api/clearance/batch', { by: 'owner', decisions: [{ decisionId: 'D-W2', outcome: 'A' }, { decisionId: 'D-W3', outcome: 'A' }] });
   const s = store.load();

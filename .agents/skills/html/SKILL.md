@@ -139,12 +139,12 @@ Status logic is an instrument panel: quiet by default (`.status`, bone outline),
 
 ### Typography carries the personality
 
-- Display (`--display`): monospace, `700`, tight (`-0.04em`), `line-height 0.95`, `clamp(40px, 6vw, 64px)` for h1; `24px/600` for h2. Titles read as engraved placards.
-- Body (`--body`): a quiet humanist sans at `15.5px/1.6`, secondary text in `--bone-dim`.
-- Labels (`--label`, same monospace): `11px`, `600`, uppercase, `0.12em` tracking, in `--smoke`; used for legends, eyebrows, table heads, status chips.
-- Big values use `.value` (monospace placard); `.value.attention` turns ember.
+- Display (`--display`): Exo 2, italic, `800`, embedded from `fonts.css`. Titles lean forward like a jet: h1 `clamp(38px, 5.2vw, 58px)`, h2 `26px`. Use it for h1, h2, and nothing else.
+- Body (`--body`): Atkinson Hyperlegible (system fallbacks) at `16px/1.6`; h3 is body at `17px/600`; secondary text in `--bone-dim`.
+- Labels and code (`--mono`): JetBrains Mono, embedded. Legends, eyebrows, table heads, and status chips at `12px` uppercase with `0.06–0.08em` tracking; code at `13.5px/1.6`. Nothing on the page is smaller than 12px; the reader must not squint.
+- Big values use `.value` (mono placard); `.value.attention` turns ember.
 
-No webfonts; the stacks in `theme.css` are the whole type system.
+Fonts are embedded as data URIs, never linked: paste `fonts.css` after `theme.css` inside the single `<style>`. It adds about 100 KB per page and keeps the page zero-network.
 
 ### Structure encodes information
 
@@ -168,7 +168,7 @@ Responsive to 360px; `:focus-visible` outline in ember; `prefers-reduced-motion`
 
 ## Design system code
 
-`theme.css` in this directory is the canonical block: paste it inline at the top of the page's single `<style>`, then add page rules that use only its tokens. Page structure:
+`theme.css` in this directory is the canonical block: paste it inline at the top of the page's single `<style>`, then `fonts.css`, then page rules that use only the tokens. Page structure:
 
 ```html
 <div class="page">
@@ -275,8 +275,8 @@ Every asset is a complete page in this identity. Read the closest one for layout
 ### Key rules
 
 - Always include `<!doctype html>`, `<meta charset="utf-8">`, the viewport meta, and `<meta name="color-scheme" content="dark">`.
-- All CSS inline in one `<style>` block that starts with `theme.css`; all script inline in one `<script>` block.
-- No external dependencies: no CDN links, no webfonts, no frameworks, no build step, no `<link>`.
+- All CSS inline in one `<style>` block that starts with `theme.css` then `fonts.css`; all script inline in one `<script>` block.
+- No external dependencies: no CDN links, no linked webfonts (embedded data URIs only), no frameworks, no build step, no `<link>`.
 - Semantic HTML; buttons are `<button>`; tables are tables.
 - Responsive to 360px; verify at 768px and 1280px.
 - Generate complete, working pages; never partial snippets.

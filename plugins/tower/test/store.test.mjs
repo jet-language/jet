@@ -38,7 +38,8 @@ test('lane derivation follows phases and decisions', () => {
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
     recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
-    options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }] }));
+    options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }],
+    surface: { gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.', trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } }, options: [{ key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } }, { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } }], recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' } } }));
   s = st.load();
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'decide');
 
@@ -60,7 +61,8 @@ test('deciding card auto-advances when last decision ratifies', () => {
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'B',
     recommendation: { why: 'B wins here.', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }], tradeoff: 'B adds one visible step.' },
     hybrid: { result: 'B', synthesis: 'B combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
-    options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }] }));
+    options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }],
+    surface: { gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.', trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } }, options: [{ key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } }, { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } }], recommendation: { rec: 'B', why: 'B best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'A', reason: 'A loses the needed guarantee.' }], tradeoff: 'B adds one explicit step.' } } }));
   st.mutate((s) => db.ratify(s, 'D-X', 'B', null, 'owner'));
   const s = st.load();
   assert.equal(db.findCard(s, '#1').phase, 'ready');

@@ -26,13 +26,63 @@ const reviewPasses = () => ({
   adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.',
 });
 
+const surface = () => ({
+  gist: 'Which option should Jet ship?',
+  lesson: 'Jet has no way to do X today. This ballot picks the shape of the call.',
+  trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } },
+  options: [
+    { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
+    { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
+  ],
+  recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
+});
+
 const ballot = (extra = {}) => ({
-  ballotMode: 'full', reviewPasses: reviewPasses(),
+  ballotMode: 'full', reviewPasses: reviewPasses(), surface: surface(),
   gist: 'a plain sentence', lesson: 'This short paragraph explains the situation and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
   options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
   recommendation: { why: 'A best serves this decision.', whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step, which keeps behavior visible.' },
   hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
   ...extra,
+});
+
+// ---- 0. the reading surface gate ---------------------------------------------
+
+test('addDecision requires a reading surface and names its gaps', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'No surface', ...ballot({ surface: undefined }) })),
+    (e) => e.code === 'E_BALLOT' && /surface \(object\)/.test(e.message));
+  const bad = surface();
+  bad.gist = 'A statement, not a question';
+  bad.options[1].gains = [];
+  bad.recommendation.whyNot = [];
+  bad.lesson = 'The facet ratchet is a seam.';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Bad surface', ...ballot({ surface: bad }) })),
+    (e) => e.code === 'E_BALLOT' && /must be a question/.test(e.message) && /options\[B\]\.gains/.test(e.message)
+      && /whyNot\[B\]/.test(e.message) && /project jargon "facet"/.test(e.message));
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-S1', title: 'Good surface', ...ballot() }));
+  assert.equal(result.ballotProcessVersion, 3);
+  assert.equal(result.surface.gist, 'Which option should Jet ship?');
+});
+
+test('surface option keys and rec must match the ballot; drafts may omit it; older ballots are not forced', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const swapped = surface();
+  swapped.options.reverse();
+  swapped.recommendation.rec = 'B';
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Swapped', ...ballot({ surface: swapped }) })),
+    (e) => e.code === 'E_BALLOT' && /keys must match/.test(e.message) && /must equal rec/.test(e.message));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-D1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: reviewPasses() }));
+  const s1 = st.load();
+  const legacy = s1.decisions.find(d => d.id === 'D-D1');
+  assert.equal(legacy.surface, null);
+  assert.deepEqual(db.ballotGaps({ ...ballot(), surface: undefined, ballotProcessVersion: 2 }), [], 'process-2 ballots stay valid without a surface');
+  assert.ok(db.ballotGaps({ ...ballot(), surface: undefined, ballotProcessVersion: 3 }).includes('surface (object)'));
 });
 
 // ---- 1. ballot-ready validation on decision add ----------------------------
