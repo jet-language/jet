@@ -13,13 +13,9 @@
     "behavior": "Compute the first 12 triangular numbers and print each as `t<i> <value>` on its own line, followed by `sum <total>`. Jet and Rust compute the series in Wasm; JavaScript runs the equivalent kernel directly.",
     "args": [],
     "fixtureGen": null,
-    "expected": "expected.out"
-  },
-  "non_applicable": {
-    "node": {
-      "basis": "workload_surface",
-      "reason": "The workload contract requires a browser/Wasm widget path; a direct Node kernel would not exercise the required browser bridge.",
-      "evidence": "spec.behavior requires Jet and Rust Wasm execution, while the declared js incumbent is the direct JavaScript comparison. A generic Node adapter would be a renamed duplicate of js, not an equivalent browser rail."
+    "expected": "expected.out",
+    "run": {
+      "node": ["node", "main.mjs"]
     }
   },
   "metric_applicability": {
@@ -32,6 +28,7 @@
   "authoring": {
     "jet": {"author": "luna-max", "turns": 3, "retries": 3, "diagnosticsHit": ["E1803: application authority is undecided for `IO, Mem.Alloc`", "E3503: package.jet needs a `name` field", "rustc E0433: cannot find `EncodingJson` in `crate`", "rustc E0308: expected `JetWasmInt`, found `Result<JetWasmInt, JetErr>`", "node MODULE_NOT_FOUND: Cannot find module `.../jet/runner.mjs`", "node ENOENT: no such file or directory, open './app.wasm'"], "notes": "Default `jet run main.jet` and native `jet build main.jet` both match expected.out. Required package authority is `IO, Mem.Alloc`. Requested `jet build --target=web main.jet` exits 101 in generated `build/app_wasm.rs`: 36 rustc errors, chiefly missing `EncodingJson` and the Int export wrapper passing `Result<JetWasmInt, JetErr>` to `jet_abi_int_ret`; no app.wasm is produced, so the Jet web runner reports ENOENT."},
     "js": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
-    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "`wasm32-unknown-unknown` target available; bare rustc cdylib build passes."}
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "`wasm32-unknown-unknown` target available; bare rustc cdylib build passes."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Mirrors the JavaScript triangular-number kernel and output contract."}
   }
 }

@@ -15,14 +15,8 @@
     "expected": "expected.out",
     "run": {
       "jet": ["node", "runner.mjs"],
-      "js": ["node", "runner.mjs"]
-    }
-  },
-  "non_applicable": {
-    "node": {
-      "basis": "workload_surface",
-      "reason": "The workload contract requires browser DOM interaction replay; a Node process alone does not provide the required DOM surface.",
-      "evidence": "spec.behavior requires mounting and clicking a DOM counter, while the declared js incumbent uses runner.mjs with a DOM shim. No generic Node rail can satisfy this browser contract without changing the workload."
+      "js": ["node", "runner.mjs"],
+      "node": ["node", "main.mjs"]
     }
   },
   "metric_applicability": {
@@ -52,6 +46,13 @@
       "retries": 0,
       "diagnosticsHit": [],
       "notes": "`fixtures/domshim.mjs` is a minimal hand-rolled DOM shim for Node replay, not a browser. `index.html` and `app.mjs` are the plain browser implementation."
+    },
+    "node": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Mirrors the JS DOM interaction replay with an in-process counter."
     }
   }
 }
