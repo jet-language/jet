@@ -39,6 +39,16 @@ set -eu
 mode=${FIXTURE_MODE:-pass}
 machine_identity=fixture
 [ "$mode" = machine ] && machine_identity=changed
+generator_version=1
+cargo_identity=1.97.0
+jet_commit_identity=0123456789abcdef0123456789abcdef01234567
+cpu_model_identity=fixture-cpu
+cpu_cores_identity=2
+[ "$mode" = cargo ] && cargo_identity=1.97.1
+[ "$mode" = jet-commit ] && jet_commit_identity=fedcba9876543210fedcba9876543210fedcba98
+[ "$mode" = generator ] && generator_version=2
+[ "$mode" = cpu-model ] && cpu_model_identity=changed-cpu
+[ "$mode" = cpu-cores ] && cpu_cores_identity=4
 corpus_identity=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 manifest_identity=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 [ "$mode" = manifest ] && manifest_identity=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -61,7 +71,7 @@ load_end=150
 peer_keys=rustc:rust,cxx:cxx
 [ "$mode" = peer-contract ] && peer_keys=rustc:rust,other:cxx
 peer_contract=$(printf "jet.compiler-speed.peer.v1\ncorpus_sha256=%s\nmanifest_sha256=%s\ntarget=target\nmachine=Linux/x86_64/cpus=2/host=%s\npeers=%s\nmetrics=latency_ns,memory_bytes\n" "$corpus_identity" "$manifest_identity" "$machine_identity" "$peer_keys" | sha256sum | awk "{print \$1}")
-printf "%s\\n" "compiler-speed version=4 corpus=1 corpus_sha256=$corpus_identity manifest_sha256=$manifest_identity stage=matrix machine=Linux/x86_64/cpus=2/host=$machine_identity target=target rustc=rustc llvm=llvm rustc_vv_sha256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee rustc_sha256=6666666666666666666666666666666666666666666666666666666666666666 compiler_sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc jet_env_sha256=abababababababababababababababababababababababababababababababab libc_sha256=1111111111111111111111111111111111111111111111111111111111111111 allocator_sha256=2222222222222222222222222222222222222222222222222222222222222222 allocator_environment_sha256=3333333333333333333333333333333333333333333333333333333333333333 hardware_sha256=4444444444444444444444444444444444444444444444444444444444444444 topology_sha256=5555555555555555555555555555555555555555555555555555555555555555 toolchain_sha256=$toolchain_identity kernel=kernel governor=governor load1_start_milli=$load_start load1_peak_milli=$load_peak load1_end_milli=$load_end memory_bytes=1024 profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=1 samples=20 outliers_discarded=0 parity=verified parity_cases=1 peer_contract_sha256=$peer_contract peer_run_id=fixture-run peer_machine=Linux/x86_64/cpus=2/host=$machine_identity peer_target=target peer_keys=$peer_keys peer_metrics=latency_ns,memory_bytes peer_count=2 peer_rows=24"
+printf "%s\\n" "compiler-speed version=4 generator_version=$generator_version corpus=1 corpus_sha256=$corpus_identity manifest_sha256=$manifest_identity stage=matrix machine=Linux/x86_64/cpus=2/host=$machine_identity target=target rustc=rustc cargo=$cargo_identity llvm=llvm rustc_vv_sha256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee rustc_sha256=6666666666666666666666666666666666666666666666666666666666666666 compiler_sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc jet_commit=$jet_commit_identity jet_env_sha256=abababababababababababababababababababababababababababababababab libc_sha256=1111111111111111111111111111111111111111111111111111111111111111 allocator_sha256=2222222222222222222222222222222222222222222222222222222222222222 allocator_environment_sha256=3333333333333333333333333333333333333333333333333333333333333333 hardware_sha256=4444444444444444444444444444444444444444444444444444444444444444 topology_sha256=5555555555555555555555555555555555555555555555555555555555555555 toolchain_sha256=$toolchain_identity kernel=kernel governor=governor cpu_model=$cpu_model_identity cpu_cores_per_socket=$cpu_cores_identity load1_start_milli=$load_start load1_peak_milli=$load_peak load1_end_milli=$load_end memory_bytes=1024 profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=1 samples=20 outliers_discarded=0 parity=verified parity_cases=1 peer_contract_sha256=$peer_contract peer_run_id=fixture-run peer_machine=Linux/x86_64/cpus=2/host=$machine_identity peer_target=target peer_keys=$peer_keys peer_metrics=latency_ns,memory_bytes peer_count=2 peer_rows=24"
 if [ "$mode" = row-format ]; then
     printf "%s\\n" "program state stage latency_ns memory_bytes variance_pct output_sha256:stderr_sha256 phases"
 else
@@ -127,6 +137,7 @@ write_baseline() {
     compiler_identity='"compiler_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",'
     [ "${2:-present}" = missing ] && compiler_identity=
     runs=
+    peers=
     for state in jit-clean jit-no-change jit-representative-edit aot-release-clean aot-release-no-change aot-release-representative-edit; do
         case "$state" in
             jit-*) stage=jit-fast ;;
@@ -135,11 +146,22 @@ write_baseline() {
         phase=$(phase_for_state "$state")
         phase=${phase%$'\n'}
         row=$(printf '{"program":"fixture.jet","state":"%s","stage":"%s","latency_ns":100,"memory_bytes":100,"variance_pct":0,"stdout_sha256":"7777777777777777777777777777777777777777777777777777777777777777","stderr_sha256":"8888888888888888888888888888888888888888888888888888888888888888","phase_totals":"%s"}' "$state" "$stage" "$phase")
+        for peer_decl in rustc:rust cxx:cxx; do
+            peer=${peer_decl%%:*}
+            language=${peer_decl#*:}
+            peer_value=100
+            [ "$language" = cxx ] && peer_value=101
+            for metric in latency_ns memory_bytes; do
+                peer_row=$(printf '{"peer":"%s","language":"%s","program":"fixture.jet","state":"%s","metric":"%s","value":%s,"workload_sha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","manifest_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","toolchain_sha256":"9999999999999999999999999999999999999999999999999999999999999999"}' "$peer" "$language" "$state" "$metric" "$peer_value")
+                [ -z "$peers" ] || peers="$peers,"
+                peers="$peers$peer_row"
+            done
+        done
         [ -z "$runs" ] || runs="$runs,"
         runs="$runs$row"
     done
     baseline_peer_contract=$(printf 'jet.compiler-speed.peer.v1\ncorpus_sha256=%s\nmanifest_sha256=%s\ntarget=target\nmachine=Linux/x86_64/cpus=2/host=fixture\npeers=rustc:rust,cxx:cxx\nmetrics=latency_ns,memory_bytes\n' "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" | sha256sum | awk '{print $1}')
-    printf '{"schema":"jet.compiler-speed","version":%s,"corpus_sha256":"%s","manifest_sha256":"%s","stage":"matrix","peer_version":1,"peer_contract_sha256":"%s","peer_run_id":"fixture-run","peer_keys":"rustc:rust,cxx:cxx","peer_metrics":"latency_ns,memory_bytes","peer_count":2,"peer_rows":24,"parity":{"status":"verified","cases":1,"semantic":"verified","diagnostics":"verified","effects":"verified","tiers":"verified"},"machine":{"allocator_source_sha256":"2222222222222222222222222222222222222222222222222222222222222222","allocator_environment_sha256":"3333333333333333333333333333333333333333333333333333333333333333","arch":"x86_64",%s"cpus":2,"governor":"governor","hardware_sha256":"4444444444444444444444444444444444444444444444444444444444444444","hostname":"fixture","kernel":"kernel","libc_sha256":"1111111111111111111111111111111111111111111111111111111111111111","load1_start_milli":100,"load1_peak_milli":200,"load1_end_milli":150,"memory_bytes":1024,"os":"Linux","rustc":"rustc","rustc_vv_sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","target":"target","toolchain_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","topology_sha256":"5555555555555555555555555555555555555555555555555555555555555555","jet_env_sha256":"abababababababababababababababababababababababababababababababab","llvm":"llvm","rustc_sha256":"6666666666666666666666666666666666666666666666666666666666666666"},"budgets":{"latency_regression_pct":15,"memory_regression_pct":15,"samples":20,"variance_pct":100,"warmups":1},"runs":[%s]}\n' "$version" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "$baseline_peer_contract" "$compiler_identity" "$runs" > "$fixture_baseline"
+    printf '{"schema":"jet.compiler-speed","version":%s,"generator_version":1,"corpus_sha256":"%s","manifest_sha256":"%s","stage":"matrix","peer_version":1,"peer_contract_sha256":"%s","peer_run_id":"fixture-run","peer_keys":"rustc:rust,cxx:cxx","peer_metrics":"latency_ns,memory_bytes","peer_count":2,"peer_rows":24,"parity":{"status":"verified","cases":1,"semantic":"verified","diagnostics":"verified","effects":"verified","tiers":"verified"},"machine":{"allocator_source_sha256":"2222222222222222222222222222222222222222222222222222222222222222","allocator_environment_sha256":"3333333333333333333333333333333333333333333333333333333333333333","arch":"x86_64",%s"cpus":2,"cpu_model":"fixture-cpu","cpu_cores_per_socket":2,"governor":"governor","hardware_sha256":"4444444444444444444444444444444444444444444444444444444444444444","hostname":"fixture","kernel":"kernel","libc_sha256":"1111111111111111111111111111111111111111111111111111111111111111","load1_start_milli":100,"load1_peak_milli":200,"load1_end_milli":150,"memory_bytes":1024,"os":"Linux","rustc":"rustc","cargo":"1.97.0","jet_commit":"0123456789abcdef0123456789abcdef01234567","rustc_vv_sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","target":"target","toolchain_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","topology_sha256":"5555555555555555555555555555555555555555555555555555555555555555","jet_env_sha256":"abababababababababababababababababababababababababababababababab","llvm":"llvm","rustc_sha256":"6666666666666666666666666666666666666666666666666666666666666666"},"budgets":{"latency_regression_pct":15,"memory_regression_pct":15,"samples":20,"variance_pct":100,"warmups":1},"outliers_discarded":0,"runs":[%s],"peers":[%s]}\n' "$version" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "$baseline_peer_contract" "$compiler_identity" "$runs" "$peers" > "$fixture_baseline"
 }
 
 fixture_mode=pass
@@ -164,6 +186,9 @@ expect_status() {
     if [ -n "$needle" ] && ! printf '%s\n' "$output" | grep -Fq -- "$needle"; then
         printf '%s: missing %s\n%s\n' "$label" "$needle" "$output" >&2
         exit 1
+    fi
+    if [ "$want" -ne 0 ] && [ -n "$needle" ]; then
+        printf '%s\n' "$output" | grep -F -- "$needle" | sed -n '1p'
     fi
 }
 
@@ -221,6 +246,16 @@ assert_dashboard_source 'FIXTURE_PACKAGE="$run_dir/package.jet"'
 assert_dashboard_source 'manifest_sha256=$(sha256 "$FIXTURE_PACKAGE")'
 assert_dashboard_source ';manifest_sha256=$manifest_sha256;'
 assert_dashboard_source "ROW_HEADER=\$(printf 'program\\tstate\\tstage\\tlatency_ns\\tmemory_bytes\\tvariance_pct\\toutput_sha256:stderr_sha256\\tphases')"
+assert_dashboard_source 'GENERATOR_VERSION=1'
+assert_dashboard_source 'cargo=%s'
+assert_dashboard_source 'jet_commit=%s'
+assert_dashboard_source 'cpu_model=%s'
+assert_dashboard_source 'cpu_cores_per_socket=%s'
+assert_checker_source 'check_optional_identity generator-version'
+assert_checker_source 'check_optional_identity cargo-version'
+assert_checker_source 'check_optional_identity Jet-commit'
+assert_checker_source 'check_optional_identity CPU-model'
+assert_checker_source 'check_optional_identity CPU-core-count'
 assert_dashboard_source 'JET_PERF_PEER_REPORT'
 assert_dashboard_source 'prepare_peer_report()'
 assert_dashboard_source 'PEER_ROW_HEADER'
@@ -383,6 +418,25 @@ expect_status 1 'toolchain identity mismatch' 'toolchain changed: dddddddddddddd
 
 fixture_mode=machine
 expect_status 1 'changed machine identity' 'host changed: fixture -> changed'
+fixture_mode=cargo
+expect_status 1 'changed cargo identity' 'cargo-version changed: 1.97.0 -> 1.97.1'
+fixture_mode=pass
+
+fixture_mode=jet-commit
+expect_status 1 'changed Jet commit identity' 'Jet-commit changed: 0123456789abcdef0123456789abcdef01234567 -> fedcba9876543210fedcba9876543210fedcba98'
+fixture_mode=pass
+
+fixture_mode=generator
+expect_status 1 'unsupported generator version' 'unsupported compiler-speed generator version: 2'
+fixture_mode=pass
+
+fixture_mode=cpu-model
+expect_status 1 'changed CPU model identity' 'CPU-model changed: fixture-cpu -> changed-cpu'
+fixture_mode=pass
+
+fixture_mode=cpu-cores
+expect_status 1 'changed CPU core-count identity' 'CPU-core-count changed: 2 -> 4'
+fixture_mode=pass
 
 write_baseline 2
 expect_status 1 'stale schema' 'unsupported compiler-speed baseline version: 2'

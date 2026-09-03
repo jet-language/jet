@@ -94,7 +94,9 @@ is_pending_peer_contract() {
 
 
 
-MAIN_META_KEYS='version corpus corpus_sha256 manifest_sha256 stage machine target rustc llvm rustc_vv_sha256 rustc_sha256 compiler_sha256 jet_env_sha256 libc_sha256 allocator_sha256 allocator_environment_sha256 hardware_sha256 topology_sha256 toolchain_sha256 kernel governor load1_start_milli load1_peak_milli load1_end_milli memory_bytes profiles backends warmups samples outliers_discarded parity parity_cases peer_contract_sha256 peer_run_id peer_machine peer_target peer_keys peer_metrics peer_count peer_rows'
+SUPPORTED_GENERATOR_VERSION=1
+MAIN_META_KEYS='version generator_version corpus corpus_sha256 manifest_sha256 stage machine target rustc cargo llvm rustc_vv_sha256 rustc_sha256 compiler_sha256 jet_commit jet_env_sha256 libc_sha256 allocator_sha256 allocator_environment_sha256 hardware_sha256 topology_sha256 toolchain_sha256 kernel governor cpu_model cpu_cores_per_socket load1_start_milli load1_peak_milli load1_end_milli memory_bytes profiles backends warmups samples outliers_discarded parity parity_cases peer_contract_sha256 peer_run_id peer_machine peer_target peer_keys peer_metrics peer_count peer_rows'
+LEGACY_MAIN_META_KEYS='version corpus corpus_sha256 manifest_sha256 stage machine target rustc llvm rustc_vv_sha256 rustc_sha256 compiler_sha256 jet_env_sha256 libc_sha256 allocator_sha256 allocator_environment_sha256 hardware_sha256 topology_sha256 toolchain_sha256 kernel governor load1_start_milli load1_peak_milli load1_end_milli memory_bytes profiles backends warmups samples outliers_discarded parity parity_cases peer_contract_sha256 peer_run_id peer_machine peer_target peer_keys peer_metrics peer_count peer_rows'
 PEER_META_KEYS='version run_id corpus_sha256 manifest_sha256 target machine peers metrics contract_sha256 peer_count rows'
 
 
@@ -102,16 +104,19 @@ baseline_schema=$(json_string schema)
 baseline_corpus=$(json_string corpus_sha256)
 baseline_manifest=$(json_string manifest_sha256)
 baseline_version=$(json_number version)
+baseline_generator_version=$(json_number generator_version)
 baseline_stage=$(json_string stage)
 baseline_os=$(json_string os)
 baseline_arch=$(json_string arch)
 baseline_target=$(json_string target)
 baseline_rustc=$(json_string rustc)
+baseline_cargo=$(json_string cargo)
 baseline_llvm=$(json_string llvm)
 baseline_rustc_vv=$(json_string rustc_vv_sha256)
 baseline_rustc_sha=$(json_string rustc_sha256)
 baseline_compiler=$(json_string compiler_sha256)
 baseline_jet_env=$(json_string jet_env_sha256)
+baseline_jet_commit=$(json_string jet_commit)
 baseline_libc=$(json_string libc_sha256)
 baseline_allocator=$(json_string allocator_source_sha256)
 baseline_allocator_environment=$(json_string allocator_environment_sha256)
@@ -120,6 +125,8 @@ baseline_topology=$(json_string topology_sha256)
 baseline_toolchain=$(json_string toolchain_sha256)
 baseline_kernel=$(json_string kernel)
 baseline_governor=$(json_string governor)
+baseline_cpu_model=$(json_string cpu_model | sed 's/[[:space:]]/_/g')
+baseline_cpu_cores=$(json_number cpu_cores_per_socket)
 baseline_cpus=$(json_number cpus)
 baseline_memory=$(json_number memory_bytes)
 baseline_load_start=$(json_number load1_start_milli)
@@ -152,6 +159,31 @@ baseline_tier_parity=$(json_string tiers)
 }
 [ -n "$baseline_version" ] || { echo "baseline has incomplete corpus/stage/machine/budget identity" >&2; exit 1; }
 [ "$baseline_version" -eq 4 ] || { echo "unsupported compiler-speed baseline version: $baseline_version" >&2; exit 1; }
+if [ -n "$baseline_generator_version" ] || [ -n "$baseline_cargo" ] || \
+    [ -n "$baseline_jet_commit" ] || [ -n "$baseline_cpu_model" ] || [ -n "$baseline_cpu_cores" ]; then
+    for value in "$baseline_generator_version" "$baseline_cargo" "$baseline_jet_commit" \
+        "$baseline_cpu_model" "$baseline_cpu_cores"; do
+        [ -n "$value" ] || {
+            echo "baseline has incomplete compiler-speed generator identity" >&2
+            exit 1
+        }
+    done
+    [ "$baseline_generator_version" -eq "$SUPPORTED_GENERATOR_VERSION" ] || {
+        echo "unsupported compiler-speed generator version: $baseline_generator_version" >&2
+        exit 1
+    }
+    is_positive_integer "$baseline_cpu_cores" || {
+        echo "baseline has invalid CPU core-count identity" >&2
+        exit 1
+    }
+    case "$baseline_jet_commit" in
+        ''|*[!0-9a-fA-F]*) echo "baseline has invalid Jet commit identity" >&2; exit 1 ;;
+    esac
+    [ "${#baseline_jet_commit}" -eq 40 ] || {
+        echo "baseline has invalid Jet commit identity" >&2
+        exit 1
+    }
+fi
 for value in "$baseline_corpus" "$baseline_manifest" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_llvm" "$baseline_rustc_vv" "$baseline_rustc_sha" "$baseline_compiler" "$baseline_jet_env" "$baseline_libc" "$baseline_allocator" "$baseline_allocator_environment" "$baseline_hardware" "$baseline_topology" "$baseline_toolchain" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
     [ -n "$value" ] || { echo "baseline has incomplete corpus/stage/machine/budget identity" >&2; exit 1; }
 done
@@ -282,16 +314,20 @@ esac
     echo "invalid compiler-speed row header" >&2
     exit 1
 }
-printf '%s\n' "$metadata" | awk -v expected_keys="$MAIN_META_KEYS" '
-    BEGIN { key_count = split(expected_keys, keys, " ") }
-    {
-        if ($1 != "compiler-speed" || NF != key_count + 1) invalid = 1
-        for (i = 1; i <= key_count; i++) {
-            if (index($(i + 1), keys[i] "=") != 1) invalid = 1
+metadata_has_keys() {
+    expected_keys=$1
+    printf '%s\n' "$metadata" | awk -v expected_keys="$expected_keys" '
+        BEGIN { key_count = split(expected_keys, keys, " ") }
+        {
+            if ($1 != "compiler-speed" || NF != key_count + 1) invalid = 1
+            for (i = 1; i <= key_count; i++) {
+                if (index($(i + 1), keys[i] "=") != 1) invalid = 1
+            }
         }
-    }
-    END { if (invalid || NR != 1) exit 1 }
-' || {
+        END { if (invalid || NR != 1) exit 1 }
+    '
+}
+metadata_has_keys "$MAIN_META_KEYS" || metadata_has_keys "$LEGACY_MAIN_META_KEYS" || {
     echo "invalid compiler-speed report metadata" >&2
     exit 1
 }
@@ -312,6 +348,7 @@ metadata_value() {
     '
 }
 current_version=$(metadata_value version)
+current_generator_version=$(metadata_value generator_version)
 current_corpus_count=$(metadata_value corpus)
 current_corpus=$(metadata_value corpus_sha256)
 current_manifest=$(metadata_value manifest_sha256)
@@ -319,10 +356,12 @@ current_stage=$(metadata_value stage)
 current_machine=$(metadata_value machine)
 current_target=$(metadata_value target)
 current_rustc=$(metadata_value rustc)
+current_cargo=$(metadata_value cargo)
 current_llvm=$(metadata_value llvm)
 current_rustc_vv=$(metadata_value rustc_vv_sha256)
 current_rustc_sha=$(metadata_value rustc_sha256)
 current_compiler=$(metadata_value compiler_sha256)
+current_jet_commit=$(metadata_value jet_commit)
 current_jet_env=$(metadata_value jet_env_sha256)
 current_libc=$(metadata_value libc_sha256)
 current_allocator=$(metadata_value allocator_sha256)
@@ -332,6 +371,8 @@ current_topology=$(metadata_value topology_sha256)
 current_toolchain=$(metadata_value toolchain_sha256)
 current_kernel=$(metadata_value kernel)
 current_governor=$(metadata_value governor)
+current_cpu_model=$(metadata_value cpu_model)
+current_cpu_cores=$(metadata_value cpu_cores_per_socket)
 current_load_start=$(metadata_value load1_start_milli)
 current_load_peak=$(metadata_value load1_peak_milli)
 current_load_end=$(metadata_value load1_end_milli)
@@ -380,6 +421,31 @@ current_os=$(printf '%s\n' "$current_machine" | cut -d/ -f1)
 current_arch=$(printf '%s\n' "$current_machine" | cut -d/ -f2)
 current_cpus=$(printf '%s\n' "$current_machine" | sed 's/.*cpus=\([^/]*\).*/\1/')
 current_host=$(printf '%s\n' "$current_machine" | sed 's/.*host=//')
+if [ -n "$current_generator_version" ] || [ -n "$current_cargo" ] || \
+    [ -n "$current_jet_commit" ] || [ -n "$current_cpu_model" ] || [ -n "$current_cpu_cores" ]; then
+    for value in "$current_generator_version" "$current_cargo" "$current_jet_commit" \
+        "$current_cpu_model" "$current_cpu_cores"; do
+        [ -n "$value" ] || {
+            echo "current report has incomplete compiler-speed generator identity" >&2
+            exit 1
+        }
+    done
+    [ "$current_generator_version" -eq "$SUPPORTED_GENERATOR_VERSION" ] || {
+        echo "unsupported compiler-speed generator version: $current_generator_version" >&2
+        exit 1
+    }
+    is_positive_integer "$current_cpu_cores" || {
+        echo "invalid current CPU core-count identity" >&2
+        exit 1
+    }
+    case "$current_jet_commit" in
+        ''|*[!0-9a-fA-F]*) echo "invalid current Jet commit identity" >&2; exit 1 ;;
+    esac
+    [ "${#current_jet_commit}" -eq 40 ] || {
+        echo "invalid current Jet commit identity" >&2
+        exit 1
+    }
+fi
 
 for value in "$current_load_start" "$current_load_peak" "$current_load_end"; do
     is_nonnegative_integer "$value" || {
@@ -459,6 +525,18 @@ check_identity() {
         exit 1
     }
 }
+check_optional_identity() {
+    identity_name=$1
+    identity_current=$2
+    identity_baseline=$3
+    if [ -n "$identity_current" ] || [ -n "$identity_baseline" ]; then
+        [ -n "$identity_current" ] && [ -n "$identity_baseline" ] || {
+            echo "$identity_name identity missing" >&2
+            exit 1
+        }
+        check_identity "$identity_name" "$identity_current" "$identity_baseline"
+    fi
+}
 
 check_identity corpus "$current_corpus" "$baseline_corpus"
 check_identity package-manifest "$current_manifest" "$baseline_manifest"
@@ -472,6 +550,11 @@ check_identity LLVM "$current_llvm" "$baseline_llvm"
 check_identity rustc-vV "$current_rustc_vv" "$baseline_rustc_vv"
 check_identity rustc-binary "$current_rustc_sha" "$baseline_rustc_sha"
 check_identity compiler "$current_compiler" "$baseline_compiler"
+check_optional_identity generator-version "$current_generator_version" "$baseline_generator_version"
+check_optional_identity cargo-version "$current_cargo" "$baseline_cargo"
+check_optional_identity Jet-commit "$current_jet_commit" "$baseline_jet_commit"
+check_optional_identity CPU-model "$current_cpu_model" "$baseline_cpu_model"
+check_optional_identity CPU-core-count "$current_cpu_cores" "$baseline_cpu_cores"
 check_identity jet-env "$current_jet_env" "$baseline_jet_env"
 check_identity libc "$current_libc" "$baseline_libc"
 check_identity allocator "$current_allocator" "$baseline_allocator"

@@ -82,6 +82,7 @@ PEER_META_PREFIX='compiler-speed-peer version='
 PEER_ROW_HEADER=$(printf 'peer\tlanguage\tprogram\tstate\tmetric\tvalue\tworkload_sha256\tsource_sha256\texpected_sha256\tmanifest_sha256\ttoolchain_sha256')
 PEER_METRICS=latency_ns,memory_bytes
 REPORT_VERSION=4
+GENERATOR_VERSION=1
 PARITY_RECEIPT=unverified
 PARITY_CASE_COUNT=0
 OUTLIER_TOTAL=0
@@ -330,11 +331,17 @@ machine_kernel=$(uname -r 2>/dev/null || echo unknown)
 machine_rustc_vv=$("$JET_ENV" rustc -vV 2>/dev/null || true)
 machine_target=$(printf '%s\n' "$machine_rustc_vv" | sed -n 's/^host: //p' | head -n1)
 machine_rustc=$(printf '%s\n' "$machine_rustc_vv" | sed -n 's/^release: //p' | head -n1)
+machine_cargo_v=$("$JET_ENV" cargo -V 2>/dev/null || true)
+machine_cargo=$(printf '%s\n' "$machine_cargo_v" | sed -n 's/^cargo \([^ ]*\).*$/\1/p' | head -n1)
 machine_llvm=$(printf '%s\n' "$machine_rustc_vv" | sed -n 's/^LLVM version: //p' | head -n1)
 machine_rustc_vv_sha=$(printf '%s\n' "$machine_rustc_vv" | sha256_text)
 machine_memory=$(awk '/^MemTotal:/ { print $2 * 1024; exit }' /proc/meminfo 2>/dev/null || true)
 machine_governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)
 compiler_sha256=$(sha256 "$JET_BIN")
+machine_jet_commit=${JET_CI_CANDIDATE_COMMIT:-${GITHUB_SHA:-}}
+if [ -z "$machine_jet_commit" ]; then
+    machine_jet_commit=$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || true)
+fi
 machine_rustc_path=$(resolve_tool_path rustc || true)
 machine_rustc_sha256=
 if [ -n "$machine_rustc_path" ]; then
@@ -401,14 +408,16 @@ machine_affinity=$(awk '/^Cpus_allowed_list:/ { print $2; exit }' /proc/self/sta
 if [ -z "$machine_affinity" ]; then
     machine_affinity=$(taskset -pc $$ 2>/dev/null | sed 's/.*current affinity list: //' || true)
 fi
+machine_cpu_model_token=$(printf '%s' "$machine_cpu_model" | tr '[:space:]' '_')
 machine_hardware_sha256=$(printf 'arch=%s\nmodel=%s\nsockets=%s\ncores_per_socket=%s\nthreads_per_core=%s\nnuma_nodes=%s\nonline=%s\ntopology=%s\naffinity=%s\ncpus=%s\nmemory=%s\nkernel=%s\ngovernor=%s\n' \
     "$machine_arch" "$machine_cpu_model" "$machine_cpu_sockets" "$machine_cpu_cores_per_socket" \
     "$machine_cpu_threads_per_core" "$machine_cpu_numa_nodes" "$machine_cpu_online" \
     "$machine_topology_sha256" "$machine_affinity" "$machine_cpus" "$machine_memory" \
     "$machine_kernel" "$machine_governor" | sha256_text)
-machine_toolchain_sha256=$(printf 'jet=%s\njet_env=%s\nrustc=%s\nrustc_path=%s\nrustc_sha256=%s\nrustc_vv=%s\nllvm=%s\ntarget=%s\n' \
+machine_toolchain_sha256=$(printf 'jet=%s\njet_env=%s\nrustc=%s\nrustc_path=%s\nrustc_sha256=%s\nrustc_vv=%s\ncargo=%s\njet_commit=%s\ngenerator_version=%s\nllvm=%s\ntarget=%s\n' \
     "$compiler_sha256" "$machine_jet_env_sha256" "$machine_rustc" "$machine_rustc_path" \
-    "$machine_rustc_sha256" "$machine_rustc_vv_sha" "$machine_llvm" "$machine_target" | sha256_text)
+    "$machine_rustc_sha256" "$machine_rustc_vv_sha" "$machine_cargo" "$machine_jet_commit" \
+    "$GENERATOR_VERSION" "$machine_llvm" "$machine_target" | sha256_text)
 
 case "$machine_cpus" in
     ''|*[!0-9]*) echo "unavailable machine CPU identity: $machine_cpus" >&2; exit 1 ;;
@@ -420,6 +429,7 @@ for identity_pair in \
     "machine host $machine_host" \
     "machine target $machine_target" \
     "machine rustc $machine_rustc" \
+    "machine cargo $machine_cargo" \
     "machine LLVM $machine_llvm" \
     "machine rustc-vV $machine_rustc_vv_sha" \
     "machine rustc path $machine_rustc_path" \
@@ -445,6 +455,13 @@ for identity_pair in \
     identity_value=$(printf '%s\n' "$identity_pair" | cut -d' ' -f3-)
     require_identity "$identity_name" "$identity_value"
 done
+case "$machine_jet_commit" in
+    ''|*[!0-9a-fA-F]*) echo "unavailable Jet commit identity" >&2; exit 1 ;;
+esac
+[ "${#machine_jet_commit}" -eq 40 ] || {
+    echo "unavailable Jet commit identity" >&2
+    exit 1
+}
 machine="$machine_os/$machine_arch/cpus=$machine_cpus/host=$machine_host"
 corpus_sha=$(sha256 "$CORPUS")
 # The package manifest is a semantic build input, not dashboard metadata. Keep
@@ -1823,18 +1840,19 @@ measure_state() {
 }
 
 print_environment_json() {
-    printf '{"schema":"jet.compiler-speed.environment","version":1,"report_version":%s,"corpus_sha256":%s,"manifest_sha256":%s,"corpus_count":%s,' \
-        "$REPORT_VERSION" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")" "$corpus_count"
-    printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"llvm":%s,"rustc":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s,"load1_start_milli":%s,"load1_peak_milli":%s,"load1_end_milli":%s},' \
+    printf '{"schema":"jet.compiler-speed.environment","version":1,"report_version":%s,"generator_version":%s,"corpus_sha256":%s,"manifest_sha256":%s,"corpus_count":%s,' \
+        "$REPORT_VERSION" "$GENERATOR_VERSION" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")" "$corpus_count"
+    printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"jet_commit":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"llvm":%s,"rustc":%s,"cargo":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s,"load1_start_milli":%s,"load1_peak_milli":%s,"load1_end_milli":%s},' \
         "$(json_q "$machine_allocator")" "$(json_q "$machine_allocator_environment_sha256")" "$(json_q "$machine_allocator_source_sha256")" \
-        "$(json_q "$machine_arch")" "$(json_q "$compiler_sha256")" "$machine_cpus" "$(json_q "$machine_cpu_model")" \
+        "$(json_q "$machine_arch")" "$(json_q "$compiler_sha256")" "$(json_q "$machine_jet_commit")" "$machine_cpus" "$(json_q "$machine_cpu_model")" \
         "$machine_cpu_numa_nodes" "$(json_q "$machine_cpu_online")" "$machine_cpu_cores_per_socket" "$machine_cpu_sockets" \
         "$machine_cpu_threads_per_core" "$(json_q "$machine_governor")" "$(json_q "$machine_hardware_sha256")" \
         "$(json_q "$machine_host")" "$(json_q "$machine_kernel")" "$(json_q "$machine_libc_path")" \
         "$(json_q "$machine_libc_sha256")" "$(json_q "$machine_libc_version")" "$machine_memory" "$(json_q "$machine_os")" \
-        "$(json_q "$machine_llvm")" "$(json_q "$machine_rustc")" "$(json_q "$machine_rustc_path")" "$(json_q "$machine_rustc_sha256")" \
-        "$(json_q "$machine_rustc_vv_sha")" "$(json_q "$machine_target")" "$(json_q "$machine_toolchain_sha256")" \
-        "$(json_q "$machine_topology_sha256")" "$(json_q "$machine_affinity")" "$(json_q "$machine_jet_env_sha256")" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli"
+        "$(json_q "$machine_llvm")" "$(json_q "$machine_rustc")" "$(json_q "$machine_cargo")" "$(json_q "$machine_rustc_path")" \
+        "$(json_q "$machine_rustc_sha256")" "$(json_q "$machine_rustc_vv_sha")" "$(json_q "$machine_target")" \
+        "$(json_q "$machine_toolchain_sha256")" "$(json_q "$machine_topology_sha256")" "$(json_q "$machine_affinity")" \
+        "$(json_q "$machine_jet_env_sha256")" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli"
     printf '"contract":{"cache_states":["Clean","NoChange","Edit"],"identity":"program+role+source_sha256+expected_sha256+source_bytes+expected_bytes+manifest_sha256+toolchain_sha256","comparison":"same workload identity only","unmatched_workloads":"reject","profiles":["fast","release"],"backends":["cranelift","rustc-llvm"]}}\n'
 }
 
@@ -2239,14 +2257,17 @@ check_peer_rows() {
 check_peer_rows
 
 print_table() {
-    printf 'compiler-speed version=%s corpus=%s corpus_sha256=%s manifest_sha256=%s stage=matrix machine=%s target=%s rustc=%s llvm=%s rustc_vv_sha256=%s rustc_sha256=%s compiler_sha256=%s jet_env_sha256=%s libc_sha256=%s allocator_sha256=%s allocator_environment_sha256=%s hardware_sha256=%s topology_sha256=%s toolchain_sha256=%s kernel=%s governor=%s load1_start_milli=%s load1_peak_milli=%s load1_end_milli=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s outliers_discarded=%s parity=%s parity_cases=%s peer_contract_sha256=%s peer_run_id=%s peer_machine=%s peer_target=%s peer_keys=%s peer_metrics=%s peer_count=%s peer_rows=%s\n' \
-        "$REPORT_VERSION" \
+    printf 'compiler-speed version=%s generator_version=%s corpus=%s corpus_sha256=%s manifest_sha256=%s stage=matrix machine=%s target=%s rustc=%s cargo=%s llvm=%s rustc_vv_sha256=%s rustc_sha256=%s compiler_sha256=%s jet_commit=%s jet_env_sha256=%s libc_sha256=%s allocator_sha256=%s allocator_environment_sha256=%s hardware_sha256=%s topology_sha256=%s toolchain_sha256=%s kernel=%s governor=%s cpu_model=%s cpu_cores_per_socket=%s load1_start_milli=%s load1_peak_milli=%s load1_end_milli=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s outliers_discarded=%s parity=%s parity_cases=%s peer_contract_sha256=%s peer_run_id=%s peer_machine=%s peer_target=%s peer_keys=%s peer_metrics=%s peer_count=%s peer_rows=%s\n' \
+        "$REPORT_VERSION" "$GENERATOR_VERSION" \
         "$corpus_count" "$corpus_sha" "$manifest_sha256" "$machine" "$machine_target" "$machine_rustc" \
-        "$machine_llvm" "$machine_rustc_vv_sha" "$machine_rustc_sha256" "$compiler_sha256" "$machine_jet_env_sha256" \
-        "$machine_libc_sha256" "$machine_allocator_source_sha256" "$machine_allocator_environment_sha256" \
-        "$machine_hardware_sha256" "$machine_topology_sha256" "$machine_toolchain_sha256" "$machine_kernel" \
-        "$machine_governor" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli" "$machine_memory" "$WARMUPS" "$SAMPLES" "$OUTLIER_TOTAL" "$PARITY_RECEIPT" "$PARITY_CASE_COUNT" \
-        "$peer_contract_sha256" "$peer_run_id" "$peer_machine" "$peer_target" "$peer_keys" "$peer_metrics" "$peer_count" "$peer_rows"
+        "$machine_cargo" "$machine_llvm" "$machine_rustc_vv_sha" "$machine_rustc_sha256" "$compiler_sha256" \
+        "$machine_jet_commit" "$machine_jet_env_sha256" "$machine_libc_sha256" "$machine_allocator_source_sha256" \
+        "$machine_allocator_environment_sha256" "$machine_hardware_sha256" "$machine_topology_sha256" \
+        "$machine_toolchain_sha256" "$machine_kernel" "$machine_governor" "$machine_cpu_model_token" \
+        "$machine_cpu_cores_per_socket" "$machine_load_start_milli" "$machine_load_peak_milli" \
+        "$machine_load_end_milli" "$machine_memory" "$WARMUPS" "$SAMPLES" "$OUTLIER_TOTAL" \
+        "$PARITY_RECEIPT" "$PARITY_CASE_COUNT" "$peer_contract_sha256" "$peer_run_id" "$peer_machine" \
+        "$peer_target" "$peer_keys" "$peer_metrics" "$peer_count" "$peer_rows"
     printf '%s\n' "$ROW_HEADER"
     while IFS="$TAB" read -r row_program row_state row_stage row_latency row_memory row_variance row_stdout_sha row_stderr_sha row_phases; do
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s:%s\tphases=%s\n' \
@@ -2260,20 +2281,20 @@ print_table() {
 }
 
 as_json() {
-    printf '{"schema":"jet.compiler-speed","version":%s,"corpus_sha256":%s,"manifest_sha256":%s,"stage":"matrix","peer_version":1,"peer_contract_sha256":%s,"peer_run_id":%s,"peer_keys":%s,"peer_metrics":%s,"peer_count":%s,"peer_rows":%s,' \
-        "$REPORT_VERSION" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")" "$(json_q "$peer_contract_sha256")" \
+    printf '{"schema":"jet.compiler-speed","version":%s,"generator_version":%s,"corpus_sha256":%s,"manifest_sha256":%s,"stage":"matrix","peer_version":1,"peer_contract_sha256":%s,"peer_run_id":%s,"peer_keys":%s,"peer_metrics":%s,"peer_count":%s,"peer_rows":%s,' \
+        "$REPORT_VERSION" "$GENERATOR_VERSION" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")" "$(json_q "$peer_contract_sha256")" \
         "$(json_q "$peer_run_id")" "$(json_q "$peer_keys")" "$(json_q "$peer_metrics")" "$peer_count" "$peer_rows"
     printf '"parity":{"status":%s,"cases":%s,"semantic":%s,"diagnostics":%s,"effects":%s,"tiers":%s,"dev_profile":"dev","aot_profile":"release"},' \
         "$(json_q "$PARITY_RECEIPT")" "$PARITY_CASE_COUNT" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")" "$(json_q "$PARITY_RECEIPT")"
-    printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"llvm":%s,"rustc":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s,"load1_start_milli":%s,"load1_peak_milli":%s,"load1_end_milli":%s},' \
+    printf '"machine":{"allocator":%s,"allocator_environment_sha256":%s,"allocator_source_sha256":%s,"arch":%s,"compiler_sha256":%s,"jet_commit":%s,"cpus":%s,"cpu_model":%s,"cpu_numa_nodes":%s,"cpu_online":%s,"cpu_cores_per_socket":%s,"cpu_sockets":%s,"cpu_threads_per_core":%s,"governor":%s,"hardware_sha256":%s,"hostname":%s,"kernel":%s,"libc_path":%s,"libc_sha256":%s,"libc_version":%s,"memory_bytes":%s,"os":%s,"llvm":%s,"rustc":%s,"cargo":%s,"rustc_path":%s,"rustc_sha256":%s,"rustc_vv_sha256":%s,"target":%s,"toolchain_sha256":%s,"topology_sha256":%s,"affinity":%s,"jet_env_sha256":%s,"load1_start_milli":%s,"load1_peak_milli":%s,"load1_end_milli":%s},' \
         "$(json_q "$machine_allocator")" "$(json_q "$machine_allocator_environment_sha256")" "$(json_q "$machine_allocator_source_sha256")" \
-        "$(json_q "$machine_arch")" "$(json_q "$compiler_sha256")" "$machine_cpus" "$(json_q "$machine_cpu_model")" \
+        "$(json_q "$machine_arch")" "$(json_q "$compiler_sha256")" "$(json_q "$machine_jet_commit")" "$machine_cpus" "$(json_q "$machine_cpu_model")" \
         "$machine_cpu_numa_nodes" "$(json_q "$machine_cpu_online")" "$machine_cpu_cores_per_socket" "$machine_cpu_sockets" \
         "$machine_cpu_threads_per_core" "$(json_q "$machine_governor")" "$(json_q "$machine_hardware_sha256")" \
         "$(json_q "$machine_host")" "$(json_q "$machine_kernel")" "$(json_q "$machine_libc_path")" \
         "$(json_q "$machine_libc_sha256")" "$(json_q "$machine_libc_version")" "$machine_memory" "$(json_q "$machine_os")" \
-        "$(json_q "$machine_llvm")" "$(json_q "$machine_rustc")" "$(json_q "$machine_rustc_path")" "$(json_q "$machine_rustc_sha256")" \
-        "$(json_q "$machine_rustc_vv_sha")" "$(json_q "$machine_target")" "$(json_q "$machine_toolchain_sha256")" \
+        "$(json_q "$machine_llvm")" "$(json_q "$machine_rustc")" "$(json_q "$machine_cargo")" "$(json_q "$machine_rustc_path")" \
+        "$(json_q "$machine_rustc_sha256")" "$(json_q "$machine_rustc_vv_sha")" "$(json_q "$machine_target")" \
         "$(json_q "$machine_topology_sha256")" "$(json_q "$machine_affinity")" "$(json_q "$machine_jet_env_sha256")" "$machine_load_start_milli" "$machine_load_peak_milli" "$machine_load_end_milli"
     printf '"peer_contract":{"version":1,"sha256":%s,"run_id":%s,"corpus_sha256":%s,"manifest_sha256":%s,"target":%s,"machine":%s,"peers":%s,"metrics":%s,"rows":%s},"budgets":{"latency_regression_pct":%s,"memory_regression_pct":%s,"samples":%s,"variance_pct":%s,"warmups":%s},"outliers_discarded":%s,"runs":[' \
         "$(json_q "$peer_contract_sha256")" "$(json_q "$peer_run_id")" "$(json_q "$corpus_sha")" "$(json_q "$manifest_sha256")" \
