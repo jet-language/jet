@@ -1182,7 +1182,9 @@ async function defaultReplayFinding(finding, manifest, options) {
     const result = await executeCommand({
       program: targetPath,
       args: ["run", ...tierFlags, sourcePath],
-      root,
+      // The lane observed the program from the frozen root; replay from the same
+      // directory so any path the binary reports is byte-identical.
+      cwd: root,
       env: {
         ...(options.env || {}),
         NO_COLOR: "1",
