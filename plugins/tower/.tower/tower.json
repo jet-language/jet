@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2816,
-    "rev": 49826,
+    "rev": 49852,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32,7 +32,7 @@
         "radar:e15"
       ]
     },
-    "completionCursor": "2026-09-02T23:53:44.278Z"
+    "completionCursor": "2026-09-03T01:10:45.661Z"
   },
   "epochs": [
     {
@@ -79236,7 +79236,7 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": "e11-m06-ecosystem-adoption",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Apply D-ADOPT-GUEST1=A. Implement the matching #Import/#Export C ABI surface, c-archive and shared-library emission, sema-derived headers, and the foreign-host runtime contract for initialization, shutdown, threads, signals, allocators, and TLS. Prove real C and C++ hosts can link and call Jet, compare results with native Jet execution, and cover ABI mismatch and lifecycle failure. Use focused guest/FFI tests; Epoch 11 closeout owns the full suite.",
       "blockedBy": [],
@@ -79257,47 +79257,47 @@
         {
           "n": 1,
           "text": "D-ADOPT-GUEST1=A is implemented end to end: the ratified #Import/#Export spelling, C-safe type law, archive/shared outputs, headers, bindings, and package metadata share one sema authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:21:21.408Z"
+          "evidence": "D-ADOPT-GUEST1=A end to end: #Import/#Export spelling registered (Syntax.rs), C-safe type law in sema (validate_export_surface, guest_import_rejects_invalid_signature_and_duplicate_native_symbol), archive/shared outputs + headers + bindings + package metadata from one sema authority (native_and_component_exports_share_one_typed_surface, library_output_selection_is_named_and_fail_closed, locked_named_library_build_selects_the_requested_output); timeout 900 scripts/agent/jet-env cargo test --test library_outputs -- --test-threads=2 -> test result: ok. 20 passed; 0 failed",
+          "at": "2026-09-03T01:07:05.189Z"
         },
         {
           "n": 2,
           "text": "A real C host and C++ host load or link the emitted library, call exported Jet functions, and receive results and errors identical to native Jet execution.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:21:21.408Z"
+          "evidence": "guest_import_library_calls_native_c_and_cpp_hosts and library_build_load_and_foreign_call_are_one_surface: real cc/c++ hosts dlopen/link the emitted library, call exported Jet functions, and receive results and errors identical to native execution (expected_output/expected_cpp_output oracles); foreign ExternCall ABI reads fn_types with sentry ref adapters (LibraryDeterminism2)",
+          "at": "2026-09-03T01:07:06.035Z"
         },
         {
           "n": 3,
           "text": "Initialization, shutdown, thread entry, re-entry, signals, allocator ownership, TLS, panic containment, and repeated load/unload have one documented safe contract; invalid use fails without leaks or undefined behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:21:21.408Z"
+          "evidence": "docs/spec/architecture.md 'Jet as guest: embedding contract' table (init, shutdown, thread entry, TLS, re-entry via #Import(c), signals, allocator ownership, panic containment E3001/status 70 fail-closed, repeated dlopen/dlclose; UB-by-C rows for stale handles/double free) citing D-ADOPT-GUEST1, D-FFI-CAP1, D-FFI-UNIFY1; test guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic (2 threads x 1000 calls per cycle, 3 dlopen/dlclose cycles, signal disposition preserved, re-entry, Text free, RSS bound, child panic -> E3001/70 with parent continuation) passes (GuestContract receipt)",
+          "at": "2026-09-03T01:07:06.986Z"
         },
         {
           "n": 4,
           "text": "Headers and ABI artifacts are deterministic and cannot drift from source types; unsupported types, symbol collisions, target mismatch, and stale artifacts fail before publication.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:21:21.408Z"
+          "evidence": "library_build_load_and_foreign_call_are_one_surface asserts byte-identical repeated builds (deterministic headers/ABI artifacts); library_rejects_colliding_c_symbols_before_codegen, guest_import_rejects_invalid_signature_and_duplicate_native_symbol, default_library_rejects_cross_target_before_publication, locked_library_compile_requires_the_lock_stamp all pass in the 20/20 run",
+          "at": "2026-09-03T01:07:07.899Z"
         },
         {
           "n": 5,
           "text": "Focused FFI/guest tests, examples, UI snapshots, Syntax records, grammars, and docs prove the production path. Full-suite proof belongs to Epoch 11 closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:21:21.408Z"
+          "evidence": "tests/library_outputs.rs (20 tests), examples/interop/guest_library (package.jet, library.jet, foreign.cpp) and existing examples/interop fixtures, tests/ui ffi_* snapshots (diagnostic_snapshots), Syntax.rs #Import/#Export records, editor grammars, docs/spec/architecture.md guest section; full-suite proof deferred to Epoch 11 closeout per the criterion",
+          "at": "2026-09-03T01:07:08.785Z"
         }
       ],
       "refs": [
@@ -79308,8 +79308,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-31T13:22:47.790Z",
-      "updated": "2026-08-23T01:07:12.990Z",
-      "updatedBy": "mse11"
+      "updated": "2026-09-03T01:07:10.008Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T01:07:10.008Z"
     },
     {
       "id": "c0wxdq1k",
@@ -169394,7 +169395,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "1. Add a per-function \"always diverges\" fact in sema, computed from the body (every path ends in panic/return/break/next, a Never-typed Core call, or a call to an always-diverging function). 2. Use the bottom fact in if/match/?? joins and in fallback positions; keep E0124 for genuinely mismatched branches and fix its text. 3. Reject `Never` in success-return and parameter positions with one registered diagnostic and snapshot, on every tier, before codegen. 4. Fixtures for the D-NEVER1 checkInstructions matrix on AOT, jet run, and jet eval.",
       "checkSteps": null,
@@ -169411,47 +169412,47 @@
         {
           "n": 1,
           "text": "D-NEVER1 option C's sample compiles and prints `Ada` on AOT, `jet run`, and `jet eval`; the same `stop(\"x\")` call type-checks inside a `??` fallback and a match arm.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T01:38:19.833Z"
+          "evidence": "D-NEVER1 option C sample (never_c_sample.jet): jet run --release -> Ada exit 0; jet run -> Ada exit 0; jet eval -> Ada exit 0; the same stop call type-checks in a ?? fallback and a match arm; timeout 900 scripts/agent/jet-env cargo test --test failure_foundation never_call_in_value_branch_agrees_across_execution_tiers -- --test-threads=2 -> test result: ok. 1 passed (NeverDivergence3 receipt; Func::diverges sema fixed point, DivergenceFlow projection, Never InlineBlock lowering with deferred-close flush before Never-returning Core calls on AOT and JIT)",
+          "at": "2026-09-03T02:20:18.041Z"
         },
         {
           "n": 2,
           "text": "`if stop -> { process.exit(3) } else -> { 5 }` compiles; `stop=false` prints 5 and `stop=true` exits 3 on AOT and `jet run`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T01:38:20.831Z"
+          "evidence": "if stop -> { process.exit(3) } else -> { 5 } compiles (jet check: 0 diagnostics); AOT stop=false prints 5 exit 0, stop=true exits 3; default jet run same; explicit_process_exit_cleanup_golden_matches_all_execution_tiers -> 1 passed (close resource runs before exit on AOT, JIT, interpreter)",
+          "at": "2026-09-03T02:20:18.958Z"
         },
         {
           "n": 3,
           "text": "`fn f() Never` and a `Never` parameter produce one registered diagnostic with a UI snapshot on AOT, `jet run`, and `jet eval`; no exit-101 path remains.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T01:38:21.736Z"
+          "evidence": "tests/ui/never_public_contract.jet (+ .stderr): E2422 registered (Compiler-only Never cannot be a function return or parameter type) with UI snapshot; jet check/build/run/eval each report exactly 2 E2422 with exit 1, no exit 101",
+          "at": "2026-09-03T02:20:19.697Z"
         },
         {
           "n": 4,
           "text": "E0124's fix text never names `Never`; snapshot updated.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T01:38:22.428Z"
+          "evidence": "E0124 fix text: 'Make both branches produce Int (a whole number) (or the same type)' — never names Never; snapshot tests/ui/if_expr_branch_type_mismatch.stderr updated",
+          "at": "2026-09-03T02:20:20.355Z"
         },
         {
           "n": 5,
           "text": "The D-NEVER1 checkInstructions matrix (panic, exit, loops, value branches, callbacks, generic calls) has fixtures on every applicable tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T01:38:23.368Z"
+          "evidence": "D-NEVER1 checkInstructions matrix fixtures in tests/failure_foundation.rs (panic, exit, loops, value branches, callbacks, generic calls) across AOT/default/forced interpreter: never_call_in_value_branch_agrees_across_execution_tiers passes; tir_control_and_data result_handler_preserves_diverging_arm_on_all_tiers, nested_return_if_keeps_live_value_branch_type, value_tail_divergence_and_loop_flow_are_deterministic, arm_head_range_dispatch, channel_select_examples_match_all_execution_tiers, task_observation_examples_match_all_execution_tiers and tir_unsafe_and_runtime task_failure_rail pass on the current tree",
+          "at": "2026-09-03T02:20:21.192Z"
         }
       ],
       "refs": [
@@ -169470,8 +169471,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T01:38:18.552Z",
-      "updated": "2026-09-02T01:44:14.923Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T02:20:22.397Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T02:20:22.397Z"
     },
     {
       "id": "c0cxwc2r",
@@ -177677,7 +177679,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m13-proof",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Actual: unit-formatting lowering at crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs:2737:14 emits the same ICE warning in both quantity probes although the program output completes. Expected: route valid unit interpolation through the normal diagnostic or formatting path, preserving the existing dimensional and exact output without internal-error text. Regression: add the positive unit-formatting case to tests/unit_family.rs and keep the two probe receipts as goldens.",
       "checkSteps": null,
@@ -177688,29 +177690,29 @@
         {
           "n": 1,
           "text": "The dimensional_quantities probe exits 0 with its existing quantity output and no internal-compiler-error warning; the chemical quantity output is also unchanged and clean. Proof: both exact probe receipts show clean stderr and expected stdout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:49.862Z"
+          "evidence": "Reprobe.md rows #2645/1: fea-structural/probes/units_positive.txt and chemical-process/probes/quantity_run_exact.txt exit 0, stdout 12 meter, empty stderr (no ICE, no warnings) on the fresh binary",
+          "at": "2026-09-03T02:26:43.831Z"
         },
         {
           "n": 2,
           "text": "A regression test or golden guards unit interpolation across unit and derived-unit values. Proof: tests/unit_family.rs and the positive quantity golden pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:49.862Z"
+          "evidence": "timeout 1500 scripts/agent/jet-env cargo test --test unit_family -- --test-threads=2 -> test result: ok. 70 passed; 0 failed (fixtures migrated to D-TYPE2-DEFAULT1 exact literals with approx(...) for Float inputs; unit interpolation across unit and derived-unit values guarded); JET_GOLDEN_FILTER=types/dimensional_quantities and types/unit_family goldens -> 1 passed each; ICE root fix: speculative comptime fold no longer panics (Comptime/Purity.rs + mod.rs guard, JET_UI_FILTER=unit_format_non_unit ui_snapshots -> 1 passed)",
+          "at": "2026-09-03T02:26:44.480Z"
         },
         {
           "n": 3,
           "text": "Both observing domains are re-probed after the lowering fix. Proof: clean receipts cover chemical-process and fea-structural.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:49.862Z"
+          "evidence": "Reprobe.md rows #2645/3: chemical-process and fea-structural receipts re-probed after the lowering fix, both clean",
+          "at": "2026-09-03T02:26:45.140Z"
         }
       ],
       "refs": [],
@@ -177725,8 +177727,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T15:42:49.862Z",
-      "updated": "2026-09-02T21:34:07.675Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T02:26:46.247Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T02:26:46.247Z"
     },
     {
       "id": "c098d9lr",
@@ -179500,13 +179503,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: add the Time.Wait effect leaf and make blocking core calls carry it; make scalar shared cells lock-free and wait-free; honor nanosecond sleeps and add time.sleep_until(Instant); add rt.callback(rate:, frames:, fn) with a timer clock in core and an overrun receipt; audio and MIDI device sources land as first-party packages over the foreign-handle bridge. Every tier calls the same Prelude functions (I9); diagnostics registered with snapshots (I4); Syntax.rs entries for any new marker (I7). blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -179551,8 +179559,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:23.577Z",
-      "updated": "2026-09-03T00:46:12.925Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:15:30.881Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c04gn23l",
@@ -179563,13 +179571,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: the C binder maps opaque pointer typedefs to generated handle types with #Close (D-FFI-CAP1) using a recognizable free function or an overlay naming it; pointer-to-scalar parameters bind as & lends; a binding module declares its link closure once (links: [...]) resolved through c@system deps; the FFI authority error names the exact grant. Diagnostics registered with snapshots; zlib and HarfBuzz examples with goldens on every tier. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -179616,8 +179629,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:29.065Z",
-      "updated": "2026-09-03T00:46:14.115Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:15:30.881Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c09p7g8w",
@@ -179628,13 +179641,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: a guest package declares authority.needs; the host lends a tightened Authority to plugin.load; guest core.files and core.net calls route through host-provided imports checked against that Authority with a no-follow root; #Codable records, lists, Option, and Result cross through generated typed interfaces versioned by the existing interface snapshot (E1257); resource-scoped grants bind to core.files on the host too. Diagnostics with snapshots; sandbox example extended with goldens on every tier; ratify the sandbox rules under D-PLUGIN1/D-DEP-WASM1 in the same change. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -179680,8 +179698,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:35.912Z",
-      "updated": "2026-09-03T00:46:15.325Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:19:27.638Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0lgzjzw",
@@ -179692,13 +179710,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: process.on_signal(.Term | .Hup | .Int) routes the signal into cancellation of the root task; http.serve(deadline:) wraps each request in a #Context; ProcessStdin.close() sends EOF; all through the same Prelude functions on every tier; diagnostics with snapshots; backend and CLI examples with goldens. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -179745,8 +179768,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:40.978Z",
-      "updated": "2026-09-03T00:46:16.987Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:19:27.639Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0dmyfp3",
@@ -179757,13 +179780,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: the operator hooks accept a right-hand type parameter and a result type (impl Vector.Mul(Float) { fn mul(self, rhs: Float) Vector }); one implementation per (left, right) pair; #Commutative derives the mirror; symbols, precedence, and overload sets unchanged; diagnostics for a missing pair name both types; Syntax.rs entry for the marker; examples with goldens on every tier; docs/spec/syntax-decisions.md amended. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -179791,6 +179819,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-09-03T00:41:42.681Z"
+        },
+        {
+          "n": 4,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T01:20:25.899Z"
+        },
+        {
+          "n": 5,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T01:20:25.899Z"
+        },
+        {
+          "n": 6,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T01:20:25.899Z"
+        },
+        {
+          "n": 7,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T01:20:25.899Z"
         }
       ],
       "refs": [],
@@ -179809,8 +179873,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:42.681Z",
-      "updated": "2026-09-03T00:46:18.525Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:20:25.900Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c06a68ep",
@@ -179821,13 +179885,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: a type adopts Literal.Int or Literal.Float through a compile-time constructor (@fn from_literal); the Float form receives the literal digits as text so exact types stay exact; the existing context rule picks the target; no new syntax; diagnostics for a lossy or out-of-range literal with snapshots; example with goldens on every tier. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -179855,6 +179924,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-09-03T00:41:44.413Z"
+        },
+        {
+          "n": 4,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T01:21:52.201Z"
+        },
+        {
+          "n": 5,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T01:21:52.202Z"
+        },
+        {
+          "n": 6,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T01:21:52.202Z"
+        },
+        {
+          "n": 7,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T01:21:52.202Z"
         }
       ],
       "refs": [],
@@ -179872,8 +179977,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:44.413Z",
-      "updated": "2026-09-03T00:46:19.857Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:21:52.202Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c00ksm0e",
@@ -179884,13 +179989,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: text and byte iteration APIs return View<str> and View<[U8]> (storing them copies by the existing law, so callers do not change); files.map(path) lends a private read-only mapping whose windows are byte views pinned for the mapping's life; shared mappings stay an expert #Unsafe path; the same Prelude functions serve every tier; goldens for the 100 MB scan and the tokenizer with timings against Rust and Python. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -179937,8 +180047,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:46.245Z",
-      "updated": "2026-09-03T00:46:21.346Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:23:40.630Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0w0uw5o",
@@ -179949,13 +180059,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: #Receipt(\"name\") on a #Codable record declares a typed section; receipt.attach(value) writes it under the program's receipt without changing identity, claim, or the v2 fields; jet status --json, jet receipt diff, and jet perf compare read sections by name; sections are size-capped with a registered error; the same Prelude function serves every tier; example with goldens. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -180001,8 +180116,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:48.146Z",
-      "updated": "2026-09-03T00:46:22.373Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:24:13.503Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0pdgfcc",
@@ -180013,13 +180128,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: ui.host exposes typed services (open_file/save_file with filters and cancellation under a resource-scoped FS grant, clipboard with a UI.Clipboard capability, IME composition and drag/drop on text_input, shortcut: on button and a host action table, label:/description: on nodes reaching the native accessibility tree, and font.shape returning glyph runs through the HarfBuzz binding); headless hosts stub each service deterministically; one example per service with goldens on headless and native hosts. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -180063,8 +180183,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:49.921Z",
-      "updated": "2026-09-03T00:46:23.430Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:25:38.049Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0dsx7i9",
@@ -180075,13 +180195,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: the board profile carries the vendor SVD; the compiler generates typed register blocks (width, access mode, volatile) under the profile module; #Interrupt(vector, effects) binds a bounded handler that may not allocate or wait; dma.start(channel, ^buffer) transfers buffer ownership and wait() returns it; host replay keeps the same semantics; Syntax.rs entries; diagnostics with snapshots; the embedded example builds for board.sensor_v1 and replays on the host with goldens. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -180124,8 +180249,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:51.398Z",
-      "updated": "2026-09-03T00:46:24.691Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:26:44.361Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0yuxnpn",
@@ -180136,13 +180261,18 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "After ratification: each accepted item is one small card in its area milestone (created by the implementing orchestrator), implemented through the same Prelude functions on every tier, with a registered diagnostic and snapshot where a new error exists, an example with goldens, and the reference docs updated. Item 6 lands under e14 #2472; item 9 shares its bundler with e14 #2490. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-09-03",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -180183,8 +180313,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:52.671Z",
-      "updated": "2026-09-03T00:46:26.467Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T01:27:31.791Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0gn02wt",
@@ -246610,8 +246740,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:27.139Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:27.139Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-HANDLE1",
@@ -246763,8 +246895,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:33.523Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:33.523Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-SANDBOX1",
@@ -246915,8 +247049,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:37.769Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:37.769Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-LIFECYCLE1",
@@ -247067,8 +247203,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:42.088Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:42.088Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-OPMIX1",
@@ -247213,8 +247351,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:43.454Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:43.454Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-LITERAL1",
@@ -247359,8 +247499,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:45.283Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:45.283Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-VIEW1",
@@ -247511,8 +247653,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:47.152Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:47.152Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-RECEIPT1",
@@ -247658,8 +247802,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:49.023Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:49.023Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-PLATFORM1",
@@ -247811,8 +247957,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:50.649Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:50.649Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-BOARD1",
@@ -247964,8 +248112,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:51.933Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:51.933Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     },
     {
       "id": "D-FOUND-COREAPI1",
@@ -248108,8 +248258,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-09-03T00:41:53.459Z"
+      "status": "ratified",
+      "created": "2026-09-03T00:41:53.459Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03"
     }
   ],
   "questions": [
@@ -250247,6 +250399,258 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-09-03T02:26:46.247Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0vxjxgi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T02:26:45.140Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0vxjxgi",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-03T02:26:44.480Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0vxjxgi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-03T02:26:43.832Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0vxjxgi",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T02:20:22.397Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0t3mnau",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T02:20:21.192Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0t3mnau",
+      "note": "#5"
+    },
+    {
+      "at": "2026-09-03T02:20:20.355Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0t3mnau",
+      "note": "#4"
+    },
+    {
+      "at": "2026-09-03T02:20:19.697Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0t3mnau",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-03T02:20:18.959Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0t3mnau",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-03T02:20:18.041Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0t3mnau",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T01:27:31.791Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-COREAPI1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:26:44.361Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-BOARD1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:25:38.049Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-PLATFORM1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:24:13.503Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-RECEIPT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:23:40.630Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-VIEW1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:21:52.202Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-LITERAL1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:21:52.202Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c06a68ep",
+      "note": "#7 snapshots re-blessed"
+    },
+    {
+      "at": "2026-09-03T01:21:52.202Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c06a68ep",
+      "note": "#6 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-09-03T01:21:52.202Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c06a68ep",
+      "note": "#5 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-09-03T01:21:52.202Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c06a68ep",
+      "note": "#4 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-09-03T01:20:25.900Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-OPMIX1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:20:25.899Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0dmyfp3",
+      "note": "#7 snapshots re-blessed"
+    },
+    {
+      "at": "2026-09-03T01:20:25.899Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0dmyfp3",
+      "note": "#6 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-09-03T01:20:25.899Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0dmyfp3",
+      "note": "#5 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-09-03T01:20:25.899Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0dmyfp3",
+      "note": "#4 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-09-03T01:19:27.639Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-LIFECYCLE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:19:27.638Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-SANDBOX1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:15:30.881Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-HANDLE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:15:30.881Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FOUND-REALTIME1",
+      "note": "A"
+    },
+    {
+      "at": "2026-09-03T01:10:45.661Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-09-03T01:10:45.661Z"
+    },
+    {
+      "at": "2026-09-03T01:07:10.009Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c054tv3j",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T01:07:08.786Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c054tv3j",
+      "note": "#5"
+    },
+    {
+      "at": "2026-09-03T01:07:07.900Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c054tv3j",
+      "note": "#4"
+    },
+    {
+      "at": "2026-09-03T01:07:06.987Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c054tv3j",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-03T01:07:06.036Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c054tv3j",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-03T01:07:05.189Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c054tv3j",
+      "note": "#1"
+    },
     {
       "at": "2026-09-03T00:51:23.405Z",
       "by": "fable",
@@ -253494,258 +253898,6 @@
       "action": "card.delete",
       "ref": "c0krhupr",
       "note": "M-AUDIO-GRAPH: Sample-accurate audio graphs and realtime callback contracts"
-    },
-    {
-      "at": "2026-09-02T21:28:47.149Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c079ebny",
-      "note": "M-PLOTTING: Deterministic plotting, visualization, and publication export"
-    },
-    {
-      "at": "2026-09-02T21:28:43.500Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0suz47d",
-      "note": "M-EXACT-NUMERIC: Exact and arbitrary-precision numeric domains"
-    },
-    {
-      "at": "2026-09-02T21:28:42.540Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0gu04qc",
-      "note": "M-FLASH-DEBUG: Firmware artifacts, boot, flash, and debug receipts"
-    },
-    {
-      "at": "2026-09-02T21:28:41.551Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c07hrnnh",
-      "note": "M-NETWORKING: Typed network and service protocol boundaries"
-    },
-    {
-      "at": "2026-09-02T21:28:40.620Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0pz4761",
-      "note": "M-DATA-TABLES: Typed tabular, relational, and columnar data boundary"
-    },
-    {
-      "at": "2026-09-02T21:28:39.711Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0665a4s",
-      "note": "M-CONNECTORS-WEBHOOKS: Typed external connectors, webhooks, and capability injection"
-    },
-    {
-      "at": "2026-09-02T21:28:35.453Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c02o06gb",
-      "note": "M-LLM-CLIENT: Provider-neutral model calls, streaming, and bounded tool loops"
-    },
-    {
-      "at": "2026-09-02T21:28:30.752Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0gjqt2s",
-      "note": "M-FFT: Planner-backed FFT family"
-    },
-    {
-      "at": "2026-09-02T21:28:26.136Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0c4ly82",
-      "note": "M-BVH-ACCEL: Typed BVH construction and ray traversal acceleration"
-    },
-    {
-      "at": "2026-09-02T21:28:21.184Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0tnb7iw",
-      "note": "M-SOLVER-SUBSTRATE: Checked nonlinear and domain solver substrate"
-    },
-    {
-      "at": "2026-09-02T21:28:18.341Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c09qqisb",
-      "note": "M-REALTIME-STREAMS: Bounded real-time audio and device streams"
-    },
-    {
-      "at": "2026-09-02T21:28:17.433Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0mkfncc",
-      "note": "M-QUERY-PLANNER: Analytical SQL, typed plans, and physical execution"
-    },
-    {
-      "at": "2026-09-02T21:28:16.507Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c09z6oz9",
-      "note": "M-STREAM-WINDOWS: Event-time windows, keyed state, and recovery"
-    },
-    {
-      "at": "2026-09-02T21:28:15.562Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0mvdewi",
-      "note": "M-API-CONTRACT: Executable API contracts, schemas, bindings, and compatibility"
-    },
-    {
-      "at": "2026-09-02T21:28:14.792Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c085j4v1",
-      "note": "M-TEXT-SHAPING: Font discovery, Unicode shaping, and positioned glyphs"
-    },
-    {
-      "at": "2026-09-02T21:28:14.112Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c05vraaa",
-      "note": "M-ODE-DAE: Adaptive ODE/DAE integration and event results"
-    },
-    {
-      "at": "2026-09-02T21:28:09.423Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0a2ycbb",
-      "note": "platforms-infrastructure: register 17 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:08.929Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c018vz7z",
-      "note": "embedded-hardware: register 8 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:08.396Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0hkfo1x",
-      "note": "earth-space: register 7 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:07.433Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c00gzbvv",
-      "note": "science-numerics: register 12 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:06.676Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c07vao2t",
-      "note": "finance-business: register 8 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:05.920Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0x55u8b",
-      "note": "engineering: register 14 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:05.047Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0n3jvi3",
-      "note": "life-sciences-health: register 7 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:04.352Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c09nqiil",
-      "note": "tools-productivity: register 9 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:02.040Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0vfsxp9",
-      "note": "media-creative: register 8 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:01.343Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0jx1gcx",
-      "note": "ai-ml: register 12 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:28:00.872Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0mf0oay",
-      "note": "D-DOMAIN-RINGS1: How domain functionality ships and what the user types"
-    },
-    {
-      "at": "2026-09-02T21:27:58.613Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0dx4kys",
-      "note": "D-DOMAIN-ORDER1: Build order"
-    },
-    {
-      "at": "2026-09-02T21:27:57.633Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c02jegs9",
-      "note": "D-DOMAIN-GAUNTLET1: The performance proof law for the matrix"
-    },
-    {
-      "at": "2026-09-02T21:27:43.883Z",
-      "by": "owner",
-      "action": "decision.delete",
-      "ref": "D-M-SYNTAX-TREE1",
-      "note": "Lossless incremental syntax trees and structural queries"
-    },
-    {
-      "at": "2026-09-02T21:27:43.379Z",
-      "by": "owner",
-      "action": "decision.delete",
-      "ref": "D-M-STRUCTURED-FILTER1",
-      "note": "Bounded JSONL filter programs"
-    },
-    {
-      "at": "2026-09-02T21:27:42.897Z",
-      "by": "owner",
-      "action": "decision.delete",
-      "ref": "D-M-NLP1",
-      "note": "One typed path from text to aligned annotations"
-    },
-    {
-      "at": "2026-09-02T21:27:42.262Z",
-      "by": "owner",
-      "action": "decision.delete",
-      "ref": "D-M-OS-SERVICES1",
-      "note": "Authority-bound operating-system services"
-    },
-    {
-      "at": "2026-09-02T21:27:39.338Z",
-      "by": "owner",
-      "action": "decision.delete",
-      "ref": "D-M-MEDIA1",
-      "note": "How Jet joins media pipelines, timelines, audio, and plugins"
-    },
-    {
-      "at": "2026-09-02T21:27:38.438Z",
-      "by": "owner",
-      "action": "decision.delete",
-      "ref": "D-M-LEDGER1",
-      "note": "Typed double-entry ledger for balanced money movements"
-    },
-    {
-      "at": "2026-09-02T21:27:37.556Z",
-      "by": "owner",
-      "action": "decision.delete",
-      "ref": "D-M-HDL1",
-      "note": "Choose library calls, HDL blocks, or typed circuit values"
     }
   ],
   "nextNum": 368,
