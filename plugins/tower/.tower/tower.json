@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2762,
-    "rev": 49568,
+    "rev": 49608,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,14 +27,12 @@
         "radar:e5",
         "radar:e11",
         "board-ideas",
-        "radar-sq",
         "radar:e3",
         "radar:e12",
-        "radar:e15",
-        "radar:e14"
+        "radar:e15"
       ]
     },
-    "completionCursor": "2026-09-02T19:59:49.854Z"
+    "completionCursor": "2026-09-02T23:53:44.278Z"
   },
   "epochs": [
     {
@@ -167728,7 +167726,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Extend the existing typed environment lock with a portable Nix closure record for every selected package: source channel and revision, target system, signed index manifest identity, derivation identity, output store path, NAR hash, byte size, compression, ordered references, upstream proof, cache key identity, and content-addressed bundle object. The lock producer writes each required source/cache object once into the existing project-managed CAS and records its digest; it never stores an absolute Hangar path, host /nix/store path as a location, or unbound cache URL. A fully locked realization reads the lock before configure_project_catalog, verifies the complete closure and signatures, reconstructs a fresh Hangar from only lock-declared CAS bytes, and never runs catalog discovery or host-store lookup. Missing, changed, reordered, wrong-platform, wrong-key, or extra closure data fails closed before state changes with precise provenance. Update `jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures` so online production and offline consumption use separate fresh roots and processes: the offline phase receives only the repository lock plus its portable bundle, has network disabled, no Nix executable, empty host stores, no fixture env, and proves the same package receipts and physical bytes. Add warm replay and copied-repository cross-machine identity proofs. Keep the current provider, store, semantic lock, and Nix cache mechanisms; add no fallback.",
       "checkSteps": null,
@@ -167773,11 +167771,11 @@
         {
           "n": 3,
           "text": "jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures passes with network disabled and empty host stores; warm and cross-machine replay use the same lock semantics.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-01T00:51:04.740Z"
+          "evidence": "timeout 1500 scripts/agent/jet-env cargo test --test jetpack_dogfood jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures -- --test-threads=2 -> test result: ok. 1 passed (network disabled, empty host stores, self-created native catalog fixture; content-derived lock entry IDs; producer records carry the sealed lock digest via idempotent refresh_lock_digest; warm stamp recorded after sealed projection; strict online/offline/warm DU and receipt equality); timeout 900 ... --test jetpack_nix_closure_replay -> 14 passed; lane-check -p jetpack CHECK OK (PortableLock receipt ~/.cache/jet-luna/lanes/PortableLock.md; note: configure_project_catalog's complete-lock early return is not exercised by this test)",
+          "at": "2026-09-03T00:19:41.593Z"
         }
       ],
       "refs": [],
@@ -167790,8 +167788,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-01T00:50:55.025Z",
-      "updated": "2026-09-02T19:58:57.245Z",
-      "updatedBy": "fable-orchestrator"
+      "updated": "2026-09-03T00:19:42.623Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T00:19:42.623Z"
     },
     {
       "id": "c0uqihio",
@@ -176905,7 +176904,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "1. Reduce each error class to a minimal Jet program from the source-map comments in the generated file. 2. Fix the mechanism in sema/codegen per class. 3. Add examples with goldens and run them on every tier. 4. Build the Jetpack copy on all tiers as the closing proof.",
       "checkSteps": null,
@@ -176916,29 +176915,29 @@
         {
           "n": 1,
           "text": "Three minimal examples (nominal error-type identity across modules, value reuse after move in DataTree-like code, optional String move) compile and run with goldens on AOT release, AOT debug, default jet run, and jet run --interpret.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T03:40:25.487Z"
+          "evidence": "examples/features/ice/{imported_error_identity,map_repeated_owned,optional_string_move}.jet with expected outputs: JET_GOLDEN_FILTER=ice/<name> timeout 900 scripts/agent/jet-env cargo test --test golden examples_compile_and_run -- --test-threads=2 -> 1 passed each (AOT debug via golden harness); manual default jet run, jet run --interpret, jet run --profile=debug and jet run --release outputs identical; jet build --release artifacts run (JetpackGoldens lane receipt)",
+          "at": "2026-09-02T23:19:09.347Z"
         },
         {
           "n": 2,
           "text": "`jet build` from a copy of dogfood/jetpack exits 0 on the current master and the produced binary passes the existing Jetpack parity harness's smoke command recorded on this card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T03:40:25.487Z"
+          "evidence": "Isolated copy of dogfood/jetpack: JET_STORE_DIR=~/.cache/jet-test-scratch/jetpack-2535-store target/debug/jet build --verbose -> 'jet Built build/main in 26.3s' exit 0 (6,088,303 bytes generated Rust); parity smoke: timeout 900 scripts/agent/jet-env cargo test --test tir_core_and_closures core_files_absolute_path_read_matches_every_tier -- --test-threads=2 -> 1 passed (runs jet run --release/default/interpreter on dogfood/jetpack plan --json --offline and compares)",
+          "at": "2026-09-02T23:19:10.197Z"
         },
         {
           "n": 3,
           "text": "No rustc error text appears in the build output and the generated Rust for the Jetpack copy compiles under the exact rustc command Jet uses.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T03:40:25.487Z"
+          "evidence": "Verbose isolated build log has no rustc error text; Jet's own rustc stage compiled the generated Rust (JetpackBuildIce receipt); root fixes: imported same-leaf struct declarations no longer overwritten by imported shapes (TIR/lower/fields.rs), map literals clone live repeated owned values (CheckerInfer/expr.rs), ?? lowers through lower_owned_expr (TIR/lower/expressions.rs)",
+          "at": "2026-09-02T23:19:10.982Z"
         }
       ],
       "refs": [
@@ -176952,8 +176951,9 @@
       "parentId": "c0rak5ve",
       "needsAcceptance": false,
       "created": "2026-09-02T03:40:25.487Z",
-      "updated": "2026-09-02T03:40:25.487Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-02T23:19:11.930Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-02T23:19:11.930Z"
     },
     {
       "id": "c010p4ja",
@@ -177072,7 +177072,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m13-proof",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Actual: examples/features/io/os_process_control.jet matches Ok/Err and list-return patterns while current core.sys calls expose Int, Unit, and [Int]. Expected: update the example to current contracts, preserve explicit descriptor/error behavior, and keep a positive host-control receipt. Regression: tests/jet_shell_parity.rs and shell-sysadmin/probes/os_process_control.out.",
       "checkSteps": null,
@@ -177083,29 +177083,29 @@
         {
           "n": 1,
           "text": "The POSIX process-control command exits 0 with the expected host-control output and no E0305, E0307, E0107, or L0520 drift. Proof: the exact example receipt is clean.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:34.569Z"
+          "evidence": "shell-sysadmin/probes/os_process_control.out re-run on fresh target/debug/jet (Reprobe.md): exit 0, nine true lines, empty stderr; no E0305/E0307/E0107/L0520",
+          "at": "2026-09-02T23:05:34.214Z"
         },
         {
           "n": 2,
           "text": "A regression test or golden guards current Int, Unit, and [Int] core.sys signatures and the process-control example. Proof: tests/jet_shell_parity.rs and the updated probe golden pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:34.569Z"
+          "evidence": "timeout 900 scripts/agent/jet-env cargo test --test jet_shell_parity -- --test-threads=2 -> test result: ok. 1 passed; JET_GOLDEN_FILTER=os_process_control ... --test golden examples_compile_and_run -> 1 passed (ExampleFallible2); example guards session-leader hosts via getsid before setpgid/setpgrp so plain and setsid runs print the same golden",
+          "at": "2026-09-02T23:05:35.330Z"
         },
         {
           "n": 3,
           "text": "The shell-sysadmin observing row is re-probed against the current core.sys signatures. Proof: its receipt records a clean first-run witness.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:34.569Z"
+          "evidence": "shell-sysadmin observing row re-probed against current core.sys signatures: receipt records a clean first-run witness (Reprobe.md row #2640/3)",
+          "at": "2026-09-02T23:05:35.996Z"
         }
       ],
       "refs": [],
@@ -177119,8 +177119,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T15:42:34.569Z",
-      "updated": "2026-09-02T21:34:02.468Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-02T23:05:36.887Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-02T23:05:36.887Z"
     },
     {
       "id": "c0s4qz4w",
@@ -177131,7 +177132,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m13-proof",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Actual: the live probe at education-teaching/probes/type_error.jet reports Int and String, while the explain page reports U8 and I8. Expected: derive both messages from one operator/type witness and retain matching What, Why, and Fix text. Regression: tests/diagnostic_snapshots.rs plus the type_error and explain probe receipts.",
       "checkSteps": null,
@@ -177142,29 +177143,29 @@
         {
           "n": 1,
           "text": "The type-error probe still exits 1 and jet explain E0109 exits 0, but both name the same Int/String witness and repair. Proof: the two exact receipts agree on What, Why, and Fix.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:36.572Z"
+          "evidence": "education-teaching/probes/type_error.out.txt (exit 1) and explain.out.txt (exit 0) re-run on fresh binary: both name the Int/String witness and the same What/Why/Fix (Reprobe.md)",
+          "at": "2026-09-02T23:05:37.547Z"
         },
         {
           "n": 2,
           "text": "A regression test or golden guards the live diagnostic and explanation page as one contract. Proof: tests/diagnostic_snapshots.rs includes the pair and passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:36.572Z"
+          "evidence": "tests/ui/e0109_int_string.jet + .stderr is the PREFERRED_UI witness for E0109 and the generated docs/reference/errors/E0109.md page is rendered from it; JET_UI_FILTER=e0109_int_string timeout 900 scripts/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots -- --test-threads=2 -> test result: ok. 1 passed",
+          "at": "2026-09-02T23:05:38.481Z"
         },
         {
           "n": 3,
           "text": "The education-teaching observing row is re-probed after the diagnostic update. Proof: updated type_error.out.txt and explain.out.txt agree.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:36.572Z"
+          "evidence": "education-teaching row re-probed after the diagnostic update: updated type_error.out.txt and explain.out.txt agree (Reprobe.md row #2641/3)",
+          "at": "2026-09-02T23:05:39.556Z"
         }
       ],
       "refs": [],
@@ -177178,8 +177179,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T15:42:36.572Z",
-      "updated": "2026-09-02T21:34:03.362Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-02T23:05:40.955Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-02T23:05:40.955Z"
     },
     {
       "id": "c06ixfyk",
@@ -177190,7 +177192,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m13-proof",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Actual: examples/features/crypto/auth_tokens.jet and auth_sessions.jet use value-carrying `?? return` inside result-less run functions; the same stale contract appears in crypto_suite, crypto_sign, and sync_crdt. Expected: give each example a declared result/error type or remove the value from return, while retaining the intended failure path and diagnostic wording. Regression: tests/golden.rs example compilation and the five domain probe receipts.",
       "checkSteps": null,
@@ -177201,29 +177203,29 @@
         {
           "n": 1,
           "text": "The crypto, auth, CRDT, and signing examples pass their exact checks with no E0405 diagnostics and retain their intended result or error behavior. Proof: the five domain receipts show exit 0 and expected output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:41.796Z"
+          "evidence": "Reprobe.md rows #2642/1: blockchain-web3 crypto_sign (status=passed), cryptography-engineering crypto_suite (exit 0, only L0520), distributed-systems sync_example (SyncText(hello, world!)), fintech-payments check-examples (check: passed), identity-auth jet-auth-checks (status=passed); no E0405",
+          "at": "2026-09-02T23:09:12.423Z"
         },
         {
           "n": 2,
           "text": "A regression test or golden guards value-carrying failure propagation in a declared-result function and rejects only the result-less misuse. Proof: tests/golden.rs and the example goldens pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:41.796Z"
+          "evidence": "tests/ui/value_carrying_return_resultless.jet/.stderr registers the result-less misuse; JET_GOLDEN_FILTER=crypto timeout 900 scripts/agent/jet-env cargo test --test golden examples_compile_and_run -- --test-threads=2 -> 1 passed, 0 failed (auth_tokens, auth_sessions, crypto_sign, crypto_suite, crypto_envelope, crypto_migration, random_api_split, typed_crypto, vault_keys goldens; ExampleFallible2 receipt after DevServer vetted-unsafe markers and Path.write_atomic IOError fix)",
+          "at": "2026-09-02T23:09:16.388Z"
         },
         {
           "n": 3,
           "text": "Every observing domain's E0405 row is re-probed. Proof: receipts cover blockchain-web3, cryptography-engineering, distributed-systems, fintech-payments, and identity-auth.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:41.796Z"
+          "evidence": "Reprobe.md rows #2642/3: E0405 rows cleared in blockchain-web3, cryptography-engineering, distributed-systems, fintech-payments, identity-auth receipts",
+          "at": "2026-09-02T23:09:19.931Z"
         }
       ],
       "refs": [],
@@ -177243,8 +177245,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T15:42:41.796Z",
-      "updated": "2026-09-02T21:34:04.265Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-02T23:09:21.750Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-02T23:09:21.750Z"
     },
     {
       "id": "c01tvbjj",
@@ -177255,7 +177258,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m13-proof",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Actual: the canonical TIR evaluator rejects data.lazy at examples/features/tooling/data_pipeline.jet:28; it rejects GameSceneNew in the headless probe; query consumers report the same boundary. Expected: route lazy plans, data.query, and GameSceneNew through the default evaluator with the same values, errors, and tier behavior as the full evaluator, or publish an explicit boundary with positive receipts. Regression: tests/corelib_parts/runtime.rs:884-943 and the data/query probe receipts.",
       "checkSteps": null,
@@ -177266,29 +177269,29 @@
         {
           "n": 1,
           "text": "The lazy, query, and GameScene probes no longer fail solely because the default evaluator lacks their route; outputs and errors match the full evaluator contract. Proof: exact domain receipts show the invariant-preserving result.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:48.042Z"
+          "evidence": "Reprobe.md (fresh target/debug/jet after 8c2704c5b + ambient typed-SQL fix): data-engineering-etl lazy/data_pipeline exit 0 (full join/left/group output, only L0102), bi-dashboards data_query typed SQL exit 0 stdout large, 3d-animation-dcc core_game_headless exit 0 full hook/replay/frame output; no E0956",
+          "at": "2026-09-02T23:40:48.353Z"
         },
         {
           "n": 2,
           "text": "A regression test or golden guards each evaluator route, including the GameScene constructor and a value-consuming lazy or query result. Proof: tests/corelib_parts/runtime.rs:884-943 and updated probe receipts pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:48.042Z"
+          "evidence": "tests/corelib_parts/runtime.rs: core_data_lazy_and_join_routes_match_aot_in_forced_interpreter -> 1 passed; game_headless_scene_replay_transcript_is_deterministic -> 1 passed (EvaluatorRoutes3, commit 8c2704c5b: TIR evaluator inner/left join arms and Prelude-backed core.game.run adapter; ambient core.data.query marshals the typed SQL template)",
+          "at": "2026-09-02T23:40:49.477Z"
         },
         {
           "n": 3,
           "text": "Every observing domain's row is re-probed on the default tier, including 3d-animation-dcc, data-engineering-etl, databases-storage-engines, observability-platforms, quant-trading, and spreadsheets-business-logic. Proof: one receipt per listed domain.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:48.042Z"
+          "evidence": "Reprobe.md rows #2643/3: 3d-animation-dcc, data-engineering-etl, databases-storage-engines, observability-platforms, quant-trading, spreadsheets-business-logic receipts refreshed on the default tier; all exit 0",
+          "at": "2026-09-02T23:40:50.568Z"
         }
       ],
       "refs": [],
@@ -177310,8 +177313,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T15:42:48.042Z",
-      "updated": "2026-09-02T21:34:05.155Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-02T23:40:51.921Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-02T23:40:51.921Z"
     },
     {
       "id": "c0jz99ts",
@@ -177322,7 +177326,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m13-proof",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Actual: Source/CmdProve.rs:2358-2365 is the failing running-compiler identity path; the ordinary, solver, and contracts probes all stop before proof production. Expected: resolve and hash a regular compiler artifact before entering proof producers, while retaining target, hash, evidence, and divergence receipts. Regression: proof-formal/probes/basic-proof.txt and prove-contrasts.txt plus distributed-systems/probes/prove.out.",
       "checkSteps": null,
@@ -177333,29 +177337,29 @@
         {
           "n": 1,
           "text": "The ordinary jet prove probe reaches proof producers and writes its report instead of E2105; solver and contracts lenses reach their producers too. Proof: exact probe receipts show exit 0 and report output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:49.139Z"
+          "evidence": "Reprobe.md rows #2644/1 (fresh binary): proof-formal/probes/basic-proof.txt ordinary prove exit 0 result=pass; solver lens exit 0 proved; contracts lens exit 0 proved/not_observed; bogus-lens control exit 2 E2941 as expected; no E2105",
+          "at": "2026-09-02T23:51:53.762Z"
         },
         {
           "n": 2,
           "text": "A regression receipt or golden guards the regular-file identity path and preserves target and compiler hash fields. Proof: proof-formal/probes/basic-proof.txt and prove-contrasts.txt are updated and pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:49.139Z"
+          "evidence": "proof-formal/probes/basic-proof.txt and prove-contrasts.txt updated and passing; identity is content-derived through proof_compiler_digest (env!(JET_COMPILER_BUILD_ID), shared with CmdBudget, no running-exe hash); timeout 900 scripts/agent/jet-env cargo test --test prove -- --test-threads=2 -> test result: ok. 44 passed; 0 failed (ProveIdentity3; includes prove_projects_compatible_canonical_budget_identity_without_measuring and prove_rejected_budget_reports_are_unavailable_and_counted)",
+          "at": "2026-09-02T23:51:57.157Z"
         },
         {
           "n": 3,
           "text": "Every observing domain's proof or replay row is re-probed with the repaired identity path. Proof: receipts cover blockchain-web3, cryptography-engineering, digital-forensics, distributed-systems, identity-auth, proof-formal, reverse-engineering, and security-tooling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:49.139Z"
+          "evidence": "Re-probed on the repaired identity path: proof-formal (2 receipts pass), distributed-systems/probes/prove.out reaches the proof producer and reports the program's own ratified E2417 (explicit String failure domain is not an Error type) instead of E2105; blockchain-web3, cryptography-engineering, digital-forensics, identity-auth, reverse-engineering rows have no recorded prove/replay command (Reprobe.md)",
+          "at": "2026-09-02T23:51:59.614Z"
         }
       ],
       "refs": [],
@@ -177378,8 +177382,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T15:42:49.139Z",
-      "updated": "2026-09-02T21:34:06.057Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-02T23:52:00.937Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-02T23:52:00.937Z"
     },
     {
       "id": "c0vxjxgi",
@@ -177450,7 +177455,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m13-proof",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Actual: the default JIT prints rows:3 and then fails in list-length handling with a bad handle. Expected: repair the JIT handle lifetime or ownership path so list length reads a valid waveform-table handle, preserves rows:3, and exits cleanly. Regression: add the data_trace case to tests/jit_run.rs and retain geoscience-seismology/probes/data_trace.out as its golden.",
       "checkSteps": null,
@@ -177461,29 +177466,29 @@
         {
           "n": 1,
           "text": "The geoscience data_trace command exits 0, preserves the exact three-row result, and emits no internal-compiler-error text. Proof: the updated probe receipt has stdout rows:3 and clean stderr.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:50.666Z"
+          "evidence": "Reprobe 2026-09-02 (fresh target/debug/jet after d099ba751): geoscience-seismology/probes/data_trace.out exit 0, stdout rows:3, no internal-compiler-error text (~/.cache/jet-luna/lanes/Reprobe.md)",
+          "at": "2026-09-02T23:00:45.531Z"
         },
         {
           "n": 2,
           "text": "A regression test or golden guards list length after waveform-table construction on the default JIT. Proof: tests/jit_run.rs and the data_trace golden pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:50.666Z"
+          "evidence": "tests/jit_run.rs:2467 data_csv_group_mean_keeps_bare_list_handle_resident (JitListHandle, lower_ctx.rs JIT data host Result ABI adapted to bare List/String TIR); proof-w5 t_jit_run 45 passed, 0 failed",
+          "at": "2026-09-02T23:00:46.188Z"
         },
         {
           "n": 3,
           "text": "The geoscience-seismology observing row is re-probed on the repaired default path. Proof: the row receipt records clean completion and the preserved three-row output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:50.666Z"
+          "evidence": "geoscience-seismology row re-probed on the default path: data_trace.out records clean completion, rows:3 and the grouped station output (Reprobe.md)",
+          "at": "2026-09-02T23:00:46.868Z"
         }
       ],
       "refs": [],
@@ -177497,8 +177502,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T15:42:50.666Z",
-      "updated": "2026-09-02T21:34:08.386Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-02T23:00:47.921Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-02T23:00:47.921Z"
     },
     {
       "id": "c0rwya3v",
@@ -177509,7 +177515,7 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m13-proof",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Actual: crates/jet-pkg-model/src/Prelude/DB.rs:122-135 preserves NULL, integer, real, and text values but explicitly maps ValueRef::Blob(_) to Value::Null. Expected: add a typed lossless DBValue blob representation and carry bytes through binding, query, and row inspection without text conversion. Regression: extend the existing database tier coverage in tests/db_policy.rs with a BLOB round trip and a byte-consuming golden.",
       "checkSteps": null,
@@ -177520,29 +177526,29 @@
         {
           "n": 1,
           "text": "A SQLite BLOB binds, queries, and is inspected with its original bytes rather than NULL or converted text. Proof: a byte-consuming database probe reports the exact inserted and returned payload.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:53.973Z"
+          "evidence": "Byte-consuming probe = tests/db_policy.rs:326 sqlite_blob_round_trip_preserves_bytes_across_tiers (prints direct/explicit byte markers and equal:true for the inserted vs returned payload): timeout 900 scripts/agent/jet-env cargo test --test db_policy sqlite_blob_round_trip_preserves_bytes_across_tiers -- --test-threads=2 -> test result: ok. 1 passed (SqliteBlob2 lane receipt ~/.cache/jet-luna/lanes/SqliteBlob.md)",
+          "at": "2026-09-02T23:00:48.578Z"
         },
         {
           "n": 2,
           "text": "A regression test or golden guards binary values through bind and query on the production bridge. Proof: tests/db_policy.rs includes the BLOB round-trip and passes across its supported tiers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:53.973Z"
+          "evidence": "tests/db_policy.rs sqlite_blob_round_trip_preserves_bytes_across_tiers passes across AOT, default jet run and forced interpreter (same receipt); canonical DBValue::Blob rendering in Comptime/CorePureParity.rs, typed [U8] SQL binding, ambient list support, liveness-based implicit payload copy in sema core_literals.rs",
+          "at": "2026-09-02T23:00:49.258Z"
         },
         {
           "n": 3,
           "text": "The databases-storage-engines census row is re-probed with a lossless result and the source mapping no longer contains the Blob-to-NULL arm. Proof: the updated source evidence and domain receipt agree.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-02T15:42:53.973Z"
+          "evidence": "Blob-to-NULL arm removed from the SQLite bridge (DBPluginWire.rs db_encode_tagged/render_db_value now carry Blob); databases-storage-engines/probes/db_basic.run.txt re-probed exit 0 lossless (Reprobe.md; probe migrated: redundant ?? at lines 14/16 removed)",
+          "at": "2026-09-02T23:00:51.091Z"
         }
       ],
       "refs": [],
@@ -177556,8 +177562,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T15:42:53.973Z",
-      "updated": "2026-09-02T21:34:09.173Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-02T23:00:53.166Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-02T23:00:53.166Z"
     },
     {
       "id": "c03y4hd0",
@@ -245155,6 +245162,272 @@
   ],
   "events": [
     {
+      "at": "2026-09-03T00:19:42.623Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0wbpoo0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T00:19:41.593Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0wbpoo0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:53:44.278Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-09-02T23:53:44.278Z"
+    },
+    {
+      "at": "2026-09-02T23:52:00.938Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0jz99ts",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-02T23:51:59.614Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jz99ts",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:51:57.157Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jz99ts",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-02T23:51:53.762Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jz99ts",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-02T23:40:51.921Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c01tvbjj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-02T23:40:50.568Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01tvbjj",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:40:49.477Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01tvbjj",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-02T23:40:48.354Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01tvbjj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-02T23:30:20.705Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-09-02T23:30:20.705Z"
+    },
+    {
+      "at": "2026-09-02T23:19:11.930Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0r7jzhx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-02T23:19:10.982Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r7jzhx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:19:10.197Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r7jzhx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-02T23:19:09.347Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r7jzhx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-02T23:11:27.358Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-09-02T23:11:27.358Z"
+    },
+    {
+      "at": "2026-09-02T23:09:21.751Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c06ixfyk",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-02T23:09:19.931Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06ixfyk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:09:16.389Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06ixfyk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-02T23:09:12.423Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06ixfyk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-02T23:05:40.955Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0s4qz4w",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-02T23:05:39.557Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0s4qz4w",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:05:38.481Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0s4qz4w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-02T23:05:37.547Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0s4qz4w",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-02T23:05:36.888Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0v0n7ch",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-02T23:05:35.997Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0v0n7ch",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:05:35.330Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0v0n7ch",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-02T23:05:34.215Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0v0n7ch",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-02T23:00:53.167Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0rwya3v",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-02T23:00:51.091Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rwya3v",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:00:49.259Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rwya3v",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-02T23:00:48.579Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rwya3v",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-02T23:00:47.922Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c098d9lr",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-02T23:00:46.869Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c098d9lr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-02T23:00:46.188Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c098d9lr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-02T23:00:45.532Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c098d9lr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-02T22:28:05.089Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-09-02T22:28:05.089Z"
+    },
+    {
       "at": "2026-09-02T21:50:45.916Z",
       "by": "fable",
       "action": "card.add",
@@ -248386,272 +248659,6 @@
       "by": "fable",
       "action": "decision.update",
       "ref": "D-M-OS-SERVICES1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:47.678Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-OBJECT-PIPELINE1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:47.072Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-NLP1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:46.639Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-ML-LIFECYCLE1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:46.193Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-LOAD1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:45.756Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-LABELED-ARRAYS1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:45.308Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-HDL1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:44.844Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-HARDWARE-IO1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:44.409Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-GRAPHICS1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:43.975Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-GPU1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:43.528Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-GEOMETRY-MESH1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:43.079Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-FORMATS1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:42.627Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-DISTRIBUTED-EXEC1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:42.174Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-CONNECTORS1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:41.742Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-API-CONTRACT1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:07:41.315Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-DOMAIN-ORDER1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:06:42.837Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-DOMAIN-ORDER1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:06:42.332Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-STRUCTURED-FILTER1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:03:49.554Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0mf0oay",
-      "note": "plan"
-    },
-    {
-      "at": "2026-09-02T17:03:48.369Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0dx4kys",
-      "note": "plan"
-    },
-    {
-      "at": "2026-09-02T17:03:47.323Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c02jegs9",
-      "note": "plan"
-    },
-    {
-      "at": "2026-09-02T17:02:58.990Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-SYNTAX-TREE1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:58.550Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-STRUCTURED-FILTER1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:57.973Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-NLP1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:57.247Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-OS-SERVICES1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:56.544Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-MEDIA1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:55.832Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-LEDGER1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:55.127Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-HDL1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:54.356Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-OBJECT-PIPELINE1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:53.659Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-FINDINGS1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:52.943Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-STREAMS1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:52.235Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-PLUGIN-CAPS1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:51.523Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-WORKBOOK1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:50.807Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-SCENE1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:50.086Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-RASTER1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:49.623Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-LOAD1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:49.185Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-QUERY1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:48.440Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-SYMBOLIC1",
-      "note": ""
-    },
-    {
-      "at": "2026-09-02T17:02:47.644Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-M-GRAPHICS1",
       "note": ""
     }
   ],
