@@ -411,10 +411,11 @@ pub(crate) fn fn_value_signature(
     };
     let mut sig = Signature::new(module.target_config().default_call_conv);
     for param in params {
-        sig.params
-            .push(AbiParam::new(meta.clif_ty(param).ok_or_else(|| {
-                format!("jit callable param unsupported: {param:?}")
-            })?));
+        let clif = meta
+            .clif_ty(param)
+            .or_else(|| matches!(param, Type::Named(name) if name == "Unit").then_some(types::I64))
+            .ok_or_else(|| format!("jit callable param unsupported: {param:?}"))?;
+        sig.params.push(AbiParam::new(clif));
     }
     if let Some(ret) = ret {
         if matches!(ret.as_ref(), Type::Named(n) if n == jet_foundation::Syntax::TYPE_RANGE) {

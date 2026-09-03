@@ -86,6 +86,14 @@ pub(crate) mod runtime {
     pub(crate) fn password_hash_from_text(text: String) -> JetPasswordHash {
         JetPasswordHash(text)
     }
+    /// Interpreter ambient: rebuild a signing key from its source-level bytes.
+    pub(crate) fn signing_key_from_bytes(bytes: Vec<u8>) -> Result<JetSigningKey, String> {
+        if bytes.len() != 32 {
+            return Err("SigningKey needs exactly 32 bytes".into());
+        }
+        Ok(JetSigningKey(bytes))
+    }
+
 }
 
 /// Interpreter ambient: rebuild X25519SecretKey without a Cranelift heap.
@@ -108,6 +116,7 @@ pub(crate) enum CryptoValue {
     Secret(runtime::Secret),
     PasswordHash(runtime::JetPasswordHash),
     SharedSecret(runtime::JetSharedSecret),
+    WrappedKey(runtime::JetWrappedKey),
     WrappedVaultKey(runtime::JetWrappedVaultKey),
     UnlockRecipient(i64),
     UnlockPassphrase(i64),
@@ -381,6 +390,13 @@ fn jet_jit_crypto_x25519_public(handle: i64) -> i64 {
         }
     }
 }
+fn jet_jit_crypto_x25519_public_from_bytes_typed(bytes: i64) -> i64 {
+    match runtime::jet_crypto_x25519_public_from_bytes_impl(clone_bytes(bytes)) {
+        Ok(key) => result(true, push(CryptoValue::X25519PublicKey(key)) as u64),
+        Err(err) => error(err.to_string()),
+    }
+}
+
 
 fn jet_jit_crypto_x25519(secret_handle: i64, public_handle: i64) -> i64 {
     let secret_key = with_crypto(secret_handle, |value| match value {
@@ -615,6 +631,32 @@ fn jet_jit_crypto_signature_bytes(handle: i64) -> i64 {
         }
     }
 }
+fn jet_jit_crypto_verify_key_bytes(handle: i64) -> i64 {
+    match with_crypto(handle, |value| match value {
+        CryptoValue::VerifyKey(key) => Some(runtime::jet_crypto_verify_key_bytes_impl(key)),
+        _ => None,
+    }) {
+        Some(bytes) => alloc_bytes(&bytes),
+        None => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid verify key handle"));
+            0
+        }
+    }
+}
+
+fn jet_jit_crypto_wrapped_bytes(handle: i64) -> i64 {
+    match with_crypto(handle, |value| match value {
+        CryptoValue::WrappedKey(wrapped) => Some(runtime::jet_crypto_wrapped_bytes_impl(wrapped)),
+        _ => None,
+    }) {
+        Some(bytes) => alloc_bytes(&bytes),
+        None => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap("invalid wrapped key handle"));
+            0
+        }
+    }
+}
+
 
 fn jet_jit_crypto_sealed_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
@@ -672,6 +714,41 @@ fn jet_jit_crypto_secret_from_text(text: i64) -> i64 {
 
 fn jet_jit_crypto_random_bytes(count: i64) -> i64 {
     alloc_bytes(&runtime::jet_std_crypto_random_bytes(count))
+}
+
+fn jet_jit_crypto_wrap(secret_handle: i64, recipient_handle: i64) -> i64 {
+    let Some(secret) = with_crypto(secret_handle, |value| match value {
+        CryptoValue::Secret(secret) => Some(runtime::clone_secret(secret)),
+        _ => None,
+    }) else {
+        return error("invalid wrap secret handle".to_string());
+    };
+    let Some(recipient) = with_crypto(recipient_handle, |value| match value {
+        CryptoValue::X25519PublicKey(recipient) => Some(recipient.clone()),
+        _ => None,
+    }) else {
+        return error("invalid wrap recipient handle".to_string());
+    };
+    match runtime::jet_crypto_wrap_typed_impl(&secret, recipient) {
+        Ok(wrapped) => result(true, push(CryptoValue::WrappedKey(wrapped)) as u64),
+        Err(err) => error(err.to_string()),
+    }
+}
+
+fn jet_jit_crypto_unwrap(recipient: i64, wrapped: i64) -> i64 {
+    let Some(recipient) = with_crypto(recipient, |value| match value {
+        CryptoValue::X25519SecretKey(recipient) => Some(runtime::clone_x25519_secret(recipient)),
+        _ => None,
+    }) else {
+        return error("invalid unwrap recipient handle".to_string());
+    };
+    let Some(CryptoValue::WrappedKey(wrapped)) = take_crypto(wrapped) else {
+        return error("invalid wrapped key handle".to_string());
+    };
+    match runtime::jet_crypto_unwrap_typed_impl(&recipient, wrapped) {
+        Ok(secret) => result(true, push(CryptoValue::Secret(secret)) as u64),
+        Err(err) => error(err.to_string()),
+    }
 }
 
 fn jet_jit_crypto_seal(recipients: i64, plaintext: i64, aad: i64) -> i64 {
@@ -1414,6 +1491,176 @@ pub(crate) fn vault_commit_rotate_handles(
         _ => None,
     }
 }
+pub(crate) fn vault_prepare_generate_handle(
+    name: &str,
+    tag: i64,
+) -> Option<Result<i64, runtime::JetVaultError>> {
+    match tag {
+        1 => Some(
+            runtime::jet_vault_prepare_generate_impl::<runtime::JetSigningKey>(&name.to_string())
+                .map(|plan| push(CryptoValue::PlanSigning(plan))),
+        ),
+        2 => Some(
+            runtime::jet_vault_prepare_generate_impl::<runtime::JetX25519SecretKey>(
+                &name.to_string(),
+            )
+            .map(|plan| push(CryptoValue::PlanX25519(plan))),
+        ),
+        _ => None,
+    }
+}
+
+pub(crate) fn vault_prepare_store_handle(
+    name: &str,
+    key_bytes: Vec<u8>,
+    tag: i64,
+) -> Option<Result<i64, runtime::JetVaultError>> {
+    match tag {
+        1 => Some(
+            runtime::signing_key_from_bytes(key_bytes)
+                .map_err(|_| runtime::JetVaultError::InvalidEncoding)
+                .and_then(|key| {
+                    runtime::jet_vault_prepare_store_impl(&name.to_string(), key)
+                })
+                .map(|plan| push(CryptoValue::PlanSigning(plan))),
+        ),
+        2 => Some(
+            runtime::x25519_secret_from_bytes(key_bytes)
+                .map_err(|_| runtime::JetVaultError::InvalidEncoding)
+                .and_then(|key| {
+                    runtime::jet_vault_prepare_store_impl(&name.to_string(), key)
+                })
+                .map(|plan| push(CryptoValue::PlanX25519(plan))),
+        ),
+        _ => None,
+    }
+}
+
+pub(crate) fn vault_commit_generate_handles(
+    write: i64,
+    plan: i64,
+    tag: i64,
+) -> Option<Result<i64, runtime::JetVaultError>> {
+    match tag {
+        1 => match (take_crypto(write), take_crypto(plan)) {
+            (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
+                Some(
+                    runtime::jet_vault_commit_generate_impl(write, plan)
+                        .map(|key| push(CryptoValue::KeyRefSigning(key))),
+                )
+            }
+            _ => None,
+        },
+        2 => match (take_crypto(write), take_crypto(plan)) {
+            (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => {
+                Some(
+                    runtime::jet_vault_commit_generate_impl(write, plan)
+                        .map(|key| push(CryptoValue::KeyRefX25519(key))),
+                )
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+pub(crate) fn vault_commit_store_handles(
+    write: i64,
+    plan: i64,
+    tag: i64,
+) -> Option<Result<i64, runtime::JetVaultError>> {
+    match tag {
+        1 => match (take_crypto(write), take_crypto(plan)) {
+            (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => {
+                Some(
+                    runtime::jet_vault_commit_store_impl(write, plan)
+                        .map(|key| push(CryptoValue::KeyRefSigning(key))),
+                )
+            }
+            _ => None,
+        },
+        2 => match (take_crypto(write), take_crypto(plan)) {
+            (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => {
+                Some(
+                    runtime::jet_vault_commit_store_impl(write, plan)
+                        .map(|key| push(CryptoValue::KeyRefX25519(key))),
+                )
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+pub(crate) fn vault_versions_handles(
+    name: &str,
+    tag: i64,
+) -> Option<Result<Vec<i64>, runtime::JetVaultError>> {
+    match tag {
+        1 => Some(
+            runtime::jet_vault_versions_impl::<runtime::JetSigningKey>(&name.to_string()).map(
+                |keys| {
+                    keys.into_iter()
+                        .map(|key| push(CryptoValue::KeyRefSigning(key)))
+                        .collect()
+                },
+            ),
+        ),
+        2 => Some(
+            runtime::jet_vault_versions_impl::<runtime::JetX25519SecretKey>(&name.to_string()).map(
+                |keys| {
+                    keys.into_iter()
+                        .map(|key| push(CryptoValue::KeyRefX25519(key)))
+                        .collect()
+                },
+            ),
+        ),
+        _ => None,
+    }
+}
+
+pub(crate) fn vault_expert_prepare_import_signing_handle(
+    name: &str,
+    bytes: Vec<u8>,
+) -> Result<i64, runtime::JetVaultError> {
+    runtime::jet_vault_expert_prepare_import_signing_impl(&name.to_string(), bytes)
+        .map(|plan| push(CryptoValue::PlanSigning(plan)))
+}
+
+pub(crate) fn vault_expert_prepare_import_x25519_handle(
+    name: &str,
+    bytes: Vec<u8>,
+) -> Result<i64, runtime::JetVaultError> {
+    runtime::jet_vault_expert_prepare_import_x25519_impl(&name.to_string(), bytes)
+        .map(|plan| push(CryptoValue::PlanX25519(plan)))
+}
+
+pub(crate) fn vault_expert_commit_import_signing_handles(
+    write: i64,
+    plan: i64,
+) -> Option<Result<i64, runtime::JetVaultError>> {
+    match (take_crypto(write), take_crypto(plan)) {
+        (Some(CryptoValue::WriteSigning(write)), Some(CryptoValue::PlanSigning(plan))) => Some(
+            runtime::jet_vault_expert_commit_import_signing_impl(write, plan)
+                .map(|key| push(CryptoValue::KeyRefSigning(key))),
+        ),
+        _ => None,
+    }
+}
+
+pub(crate) fn vault_expert_commit_import_x25519_handles(
+    write: i64,
+    plan: i64,
+) -> Option<Result<i64, runtime::JetVaultError>> {
+    match (take_crypto(write), take_crypto(plan)) {
+        (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => Some(
+            runtime::jet_vault_expert_commit_import_x25519_impl(write, plan)
+                .map(|key| push(CryptoValue::KeyRefX25519(key))),
+        ),
+        _ => None,
+    }
+}
+
 
 fn jet_jit_vault_current(name: i64, tag: i64) -> i64 {
     let name = clone_string(name);
@@ -2013,6 +2260,28 @@ fn jet_jit_vault_expert_commit_import_signing(write: i64, plan: i64) -> i64 {
         _ => error("invalid expert import signing handles".to_string()),
     }
 }
+fn jet_jit_vault_expert_prepare_import_x25519(name: i64, bytes: i64) -> i64 {
+    match runtime::jet_vault_expert_prepare_import_x25519_impl(
+        &clone_string(name),
+        clone_bytes(bytes),
+    ) {
+        Ok(plan) => result(true, push(CryptoValue::PlanX25519(plan)) as u64),
+        Err(err) => err_debug(err),
+    }
+}
+
+fn jet_jit_vault_expert_commit_import_x25519(write: i64, plan: i64) -> i64 {
+    match (take_crypto(write), take_crypto(plan)) {
+        (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::PlanX25519(plan))) => {
+            match runtime::jet_vault_expert_commit_import_x25519_impl(write, plan) {
+                Ok(key) => result(true, push(CryptoValue::KeyRefX25519(key)) as u64),
+                Err(err) => err_debug(err),
+            }
+        }
+        _ => error("invalid expert import X25519 handles".to_string()),
+    }
+}
+
 
 host_fns! {
     struct CryptoHostFns;
@@ -2071,6 +2340,8 @@ host_fns! {
     digest512_hex: "jet_jit_crypto_digest512_hex" => jet_jit_crypto_digest512_hex: unary;
     digest512_bytes: "jet_jit_crypto_digest512_bytes" => jet_jit_crypto_digest512_bytes: unary;
     signature_bytes: "jet_jit_crypto_signature_bytes" => jet_jit_crypto_signature_bytes: unary;
+    verify_key_bytes: "jet_jit_crypto_verify_key_bytes" => jet_jit_crypto_verify_key_bytes: unary;
+    wrapped_bytes: "jet_jit_crypto_wrapped_bytes" => jet_jit_crypto_wrapped_bytes: unary;
     sealed_bytes: "jet_jit_crypto_sealed_bytes" => jet_jit_crypto_sealed_bytes: unary;
     x25519_public_bytes: "jet_jit_crypto_x25519_public_bytes" => jet_jit_crypto_x25519_public_bytes: unary;
     x25519_public_text: "jet_jit_crypto_x25519_public_text" => jet_jit_crypto_x25519_public_text: unary;
@@ -2078,6 +2349,8 @@ host_fns! {
     secret_from_text: "jet_jit_crypto_secret_from_text" => jet_jit_crypto_secret_from_text: unary;
     random_bytes: "jet_jit_crypto_random_bytes" => jet_jit_crypto_random_bytes: unary;
     seal: "jet_jit_crypto_seal" => jet_jit_crypto_seal: ternary;
+    wrap: "jet_jit_crypto_wrap" => jet_jit_crypto_wrap: binary;
+    unwrap: "jet_jit_crypto_unwrap" => jet_jit_crypto_unwrap: binary;
     open: "jet_jit_crypto_open" => jet_jit_crypto_open: ternary;
     password_hash: "jet_jit_crypto_password_hash" => jet_jit_crypto_password_hash: unary;
     password_verify: "jet_jit_crypto_password_verify" => jet_jit_crypto_password_verify: binary;
@@ -2086,6 +2359,7 @@ host_fns! {
     secret_from_bytes: "jet_jit_crypto_secret_from_bytes" => jet_jit_crypto_secret_from_bytes: unary;
     hkdf_sha256: "jet_jit_crypto_hkdf_sha256" => jet_jit_crypto_hkdf_sha256: quaternary;
     x25519_public_from_bytes: "jet_jit_crypto_x25519_public_from_bytes" => jet_jit_crypto_x25519_public_bytes_raw: unary;
+    x25519_public_typed_from_bytes: "jet_jit_crypto_x25519_public_from_bytes_typed" => jet_jit_crypto_x25519_public_from_bytes_typed: unary;
     x25519_shared: "jet_jit_crypto_x25519_shared" => jet_jit_crypto_x25519_shared: binary;
     constant_time_equal: "jet_jit_crypto_constant_time_equal" => jet_jit_crypto_constant_time_equal: binary;
     constant_time_equal_bytes: "jet_jit_crypto_constant_time_equal_bytes" => jet_jit_crypto_constant_time_equal_bytes: binary;
@@ -2149,4 +2423,6 @@ host_fns! {
     vault_commit_import_wrapped: "jet_jit_vault_commit_import_wrapped" => jet_jit_vault_commit_import_wrapped: ternary;
     vault_expert_prepare_import_signing: "jet_jit_vault_expert_prepare_import_signing" => jet_jit_vault_expert_prepare_import_signing: binary;
     vault_expert_commit_import_signing: "jet_jit_vault_expert_commit_import_signing" => jet_jit_vault_expert_commit_import_signing: binary;
+    vault_expert_prepare_import_x25519: "jet_jit_vault_expert_prepare_import_x25519" => jet_jit_vault_expert_prepare_import_x25519: binary;
+    vault_expert_commit_import_x25519: "jet_jit_vault_expert_commit_import_x25519" => jet_jit_vault_expert_commit_import_x25519: binary;
 }

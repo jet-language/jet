@@ -972,6 +972,22 @@ fn jet_jit_uuid_v5(namespace: i64, name: i64) -> i64 {
     let s = uuid_format(&bytes);
     Concurrency::with_runtime_mut(|rt| result_ok(rt.heap.alloc_string(s) as u64))
 }
+pub(crate) fn ambient_uuid_parse(text: &str) -> Result<String, String> {
+    uuid_bytes(text).map(|bytes| uuid_format(&bytes))
+}
+
+pub(crate) fn ambient_uuid_v5(namespace: &str, name: &str) -> Result<String, String> {
+    let ns = uuid_bytes(namespace)?;
+    let mut input = ns.to_vec();
+    input.extend_from_slice(name.as_bytes());
+    let digest = uuid_sha1(&input);
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Ok(uuid_format(&bytes))
+}
+
 
 fn jet_jit_uuid_v4() -> i64 {
     let s = crate::Crypto::runtime::jet_crypto_uuid_v4();

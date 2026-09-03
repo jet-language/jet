@@ -4,10 +4,6 @@ use core.crypto.vault as vault
 
 fn run() -[Secret, IO]> {
     current :: vault.current<crypto.SigningKey>("__core_conformance_load") ?? return
-    if current == .Val(reference) -> {
-        result :: vault.load<crypto.SigningKey>(&reference) ?? return
-        print(result.public_key().bytes().len())
-    } else -> {
-        print(true)
-    }
+    result :: vault.load<crypto.SigningKey>(&current) ?? return
+    print(result.public_key().bytes().len())
 }

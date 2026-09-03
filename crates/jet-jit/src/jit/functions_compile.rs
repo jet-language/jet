@@ -1420,6 +1420,7 @@ fn lower_callable_lambda_with_env(
         for (name, ty) in lam.source_params.iter().zip(&lam.param_types) {
             let clif = meta
                 .clif_ty(ty)
+                .or_else(|| matches!(ty, Type::Named(name) if name == "Unit").then_some(types::I64))
                 .ok_or_else(|| format!("jit callable param unsupported: {ty:?}"))?;
             let var = lctx.fresh_var(clif);
             lctx.b.def_var(var, values[arg_i]);

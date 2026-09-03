@@ -14443,12 +14443,15 @@ impl LowerCtx<'_, '_> {
                 | "__password_text"
                 | "__hasher_digest"
                 | "__secret_from_bytes"
+                | "__x25519_public_from_bytes"
                 | "x25519_public"
                 | "__digest256_hex"
                 | "__digest256_bytes"
                 | "__digest512_hex"
                 | "__digest512_bytes"
                 | "__signature_bytes"
+                | "__verify_key_bytes"
+                | "__wrapped_bytes"
                 | "__sealed_bytes"
                 | "__x25519_public_bytes"
                 | "__x25519_public_text"
@@ -14462,6 +14465,8 @@ impl LowerCtx<'_, '_> {
             (
                 "core.crypto",
                 "sign"
+                | "wrap"
+                | "unwrap"
                 | "password_verify"
                 | "__hasher_update"
                 | "x25519"
@@ -14529,6 +14534,9 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "__x25519_generate") => (self.host.crypto.x25519_generate, false),
             ("core.crypto", "__signing_public") => (self.host.crypto.signing_public, false),
             ("core.crypto", "__x25519_public") => (self.host.crypto.x25519_public, false),
+            ("core.crypto", "__x25519_public_from_bytes") => {
+                (self.host.crypto.x25519_public_typed_from_bytes, false)
+            }
             ("core.crypto", "sign") => (self.host.crypto.sign, false),
             ("core.crypto", "verify") => (self.host.crypto.verify, false),
             ("core.crypto", "sha256") => (self.host.crypto.sha256, false),
@@ -14555,6 +14563,8 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "__secret_from_bytes") => (self.host.crypto.secret_from_bytes, false),
             ("core.crypto", "hkdf_sha256") => (self.host.crypto.hkdf_sha256, false),
             ("core.crypto", "x25519") => (self.host.crypto.x25519, false),
+            ("core.crypto", "wrap") => (self.host.crypto.wrap, false),
+            ("core.crypto", "unwrap") => (self.host.crypto.unwrap, false),
             ("core.crypto", "x25519_public") => (self.host.crypto.x25519_public_from_bytes, false),
             ("core.crypto", "x25519_shared") => (self.host.crypto.x25519_shared, false),
             ("core.crypto", "constant_time_equal") => (self.host.crypto.constant_time_equal, false),
@@ -14567,6 +14577,12 @@ impl LowerCtx<'_, '_> {
             ("core.crypto", "__digest512_hex") => (self.host.crypto.digest512_hex, false),
             ("core.crypto", "__digest512_bytes") => (self.host.crypto.digest512_bytes, false),
             ("core.crypto", "__signature_bytes") => (self.host.crypto.signature_bytes, false),
+            ("core.crypto", "__verify_key_bytes") => {
+                (self.host.crypto.verify_key_bytes, false)
+            }
+            ("core.crypto", "__wrapped_bytes") => {
+                (self.host.crypto.wrapped_bytes, false)
+            }
             ("core.crypto", "__sealed_bytes") => (self.host.crypto.sealed_bytes, false),
             ("core.crypto", "__x25519_public_bytes") => {
                 (self.host.crypto.x25519_public_bytes, false)
@@ -18083,6 +18099,22 @@ impl LowerCtx<'_, '_> {
                                         [write, plan],
                                     ) => (
                                         self.host.crypto.vault_expert_commit_import_signing,
+                                        vec![self.lower_expr(write)?, self.lower_expr(plan)?],
+                                    ),
+                                    (
+                                        "core.crypto.vault",
+                                        "prepare_import_x25519",
+                                        [name, bytes],
+                                    ) => (
+                                        self.host.crypto.vault_expert_prepare_import_x25519,
+                                        vec![self.lower_expr(name)?, self.lower_expr(bytes)?],
+                                    ),
+                                    (
+                                        "core.crypto.vault",
+                                        "commit_import_x25519",
+                                        [write, plan],
+                                    ) => (
+                                        self.host.crypto.vault_expert_commit_import_x25519,
                                         vec![self.lower_expr(write)?, self.lower_expr(plan)?],
                                     ),
                                     _ => {

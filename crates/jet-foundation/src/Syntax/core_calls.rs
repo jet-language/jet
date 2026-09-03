@@ -530,6 +530,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.math.random", "weighted_pick"),
     ("core.math.random", "sample"),
     ("core.crypto.random", "bytes"),
+    ("core.crypto", "__verify_key_bytes"),
+    ("core.crypto", "__wrapped_bytes"),
     ("core.crypto", "hmac_sha256"),
     ("core.crypto", "sha1"),
     ("core.crypto", "sha224"),
@@ -547,6 +549,8 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.time", "parse_rfc3339"),
     ("core.time", "new"),
     ("core.crypto.uuid", "v4"),
+    ("core.crypto.uuid", "v5"),
+    ("core.crypto.uuid", "parse"),
     ("core.log", "info"),
     ("core.log", "warn"),
     ("core.log", "error"),
@@ -634,6 +638,26 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto.vault", "prepare_rotate"),
     ("core.crypto.vault", "authorize_write"),
     ("core.crypto.vault", "commit_rotate"),
+    ("core.crypto.vault", "prepare_generate"),
+    ("core.crypto.vault", "prepare_store"),
+    ("core.crypto.vault", "versions"),
+    ("core.crypto.vault", "commit_generate"),
+    ("core.crypto.vault", "commit_store"),
+    ("core.crypto.vault", "prepare_import_signing"),
+    ("core.crypto.vault", "commit_import_signing"),
+    ("core.crypto.vault", "prepare_import_x25519"),
+    ("core.crypto.vault", "commit_import_x25519"),
+    ("core.crypto.vault", "load"),
+    ("core.crypto.vault", "status"),
+    ("core.crypto.vault", "prepare_retire"),
+    ("core.crypto.vault", "prepare_revoke"),
+    ("core.crypto.vault", "commit_retire"),
+    ("core.crypto.vault", "commit_revoke"),
+    ("core.crypto.vault", "export_to_recipients"),
+    ("core.crypto.vault", "export_to_passphrase"),
+    ("core.crypto.vault", "prepare_import_wrapped"),
+    ("core.crypto.vault", "authorize_wrapped_import"),
+    ("core.crypto.vault", "commit_import_wrapped"),
     ("core.web.storage.session", "get"),
     ("core.web.storage.session", "remove"),
     // D-NETDEP1=A: stream address projections use the ambient network carrier.
@@ -2903,13 +2927,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[true],
     ),
     CoreCallRecord::new(
-        "core.encoding.base64",
-        "decode_url",
-        "jet_std_b64url_decode",
-        true,
-        &[true],
-    ),
-    CoreCallRecord::new(
         "core.encoding.base32",
         "encode",
         "jet_std_base32_encode",
@@ -2932,14 +2949,16 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_std_uuid_v5",
         true,
         &[true, true],
-    ), // #1481: `v5` (namespace+name, deterministic) and `parse` (validate // + normalize) — pure std, same UUID-as-String shape as v4/v7.
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient), // #1481: `v5` (namespace+name, deterministic) and `parse` (validate + normalize).
     CoreCallRecord::new(
         "core.crypto.uuid",
         "parse",
         "jet_std_uuid_parse",
         true,
         &[true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.files", "open", "jet_std_files_open", true, &[true])
         .with_jit_symbol("jet_jit_fs_open"),
     CoreCallRecord::new(
@@ -4602,8 +4621,20 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[true],
     )
     .with_pure_route(CoreCallPureRoute::Crypto)
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
     .without_direct_aot()
-    .without_direct_jit(),
+    .with_jit_symbol("jet_jit_crypto_verify_key_bytes"),
+    CoreCallRecord::new(
+        "core.crypto",
+        "__wrapped_bytes",
+        "jet_crypto_wrapped_bytes_impl",
+        false,
+        &[true],
+    )
+    .with_pure_route(CoreCallPureRoute::Crypto)
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .with_jit_symbol("jet_jit_crypto_wrapped_bytes"),
     CoreCallRecord::new(
         "core.crypto",
         "__x25519_public_bytes",

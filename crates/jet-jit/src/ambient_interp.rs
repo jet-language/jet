@@ -2926,6 +2926,41 @@ fn x25519_public_value(bytes: Vec<u8>) -> CtValue {
         fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
     }
 }
+fn signing_value(bytes: Vec<u8>) -> CtValue {
+    CtValue::Struct {
+        type_name: "SigningKey".to_string(),
+        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+    }
+}
+
+fn verify_value(bytes: Vec<u8>) -> CtValue {
+    CtValue::Struct {
+        type_name: "VerifyKey".to_string(),
+        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+    }
+}
+
+fn signature_value(bytes: Vec<u8>) -> CtValue {
+    CtValue::Struct {
+        type_name: "Signature".to_string(),
+        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+    }
+}
+
+fn shared_secret_value(bytes: Vec<u8>) -> CtValue {
+    CtValue::Struct {
+        type_name: "SharedSecret".to_string(),
+        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+    }
+}
+
+fn wrapped_key_value(bytes: Vec<u8>) -> CtValue {
+    CtValue::Struct {
+        type_name: "WrappedKey".to_string(),
+        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+    }
+}
+
 
 fn password_hash_value(text: String) -> CtValue {
     CtValue::Struct {
@@ -4125,6 +4160,199 @@ fn ambient_vault_call(
 
     let tag = resolved_ret.and_then(Crypto::vault_key_tag).unwrap_or(1);
     match method {
+    "prepare_generate" => {
+        let Some(CtValue::Str(name)) = args.first() else {
+            return Err(unsupported("core.crypto.vault.prepare_generate name", span));
+        };
+        let Some(result) = Crypto::vault_prepare_generate_handle(name, tag) else {
+            return Err(unsupported(
+                "core.crypto.vault.prepare_generate key type",
+                span,
+            ));
+        };
+        Ok(match result {
+            Ok(handle) => CtValue::Present(Box::new(vault_handle_value("MutationPlan", handle))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
+    "prepare_store" => {
+        let Some(CtValue::Str(name)) = args.first() else {
+            return Err(unsupported("core.crypto.vault.prepare_store name", span));
+        };
+        let key = args
+            .get(1)
+            .ok_or_else(|| unsupported("core.crypto.vault.prepare_store key", span))?;
+        let key_bytes = match tag {
+            1 => struct_bytes(key, "SigningKey", span)?,
+            2 => struct_bytes(key, "X25519SecretKey", span)?,
+            _ => return Err(unsupported("core.crypto.vault.prepare_store key type", span)),
+        };
+        let Some(result) = Crypto::vault_prepare_store_handle(name, key_bytes, tag) else {
+            return Err(unsupported(
+                "core.crypto.vault.prepare_store key type",
+                span,
+            ));
+        };
+        Ok(match result {
+            Ok(handle) => CtValue::Present(Box::new(vault_handle_value("MutationPlan", handle))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
+    "versions" => {
+        let Some(CtValue::Str(name)) = args.first() else {
+            return Err(unsupported("core.crypto.vault.versions name", span));
+        };
+        let Some(result) = Crypto::vault_versions_handles(name, tag) else {
+            return Err(unsupported("core.crypto.vault.versions key type", span));
+        };
+        Ok(match result {
+            Ok(handles) => CtValue::Present(Box::new(CtValue::List(
+                handles.into_iter().map(vault_key_ref_value).collect(),
+            ))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
+    "commit_generate" => {
+        let write = vault_handle_arg(
+            args.first()
+                .ok_or_else(|| unsupported("core.crypto.vault.commit_generate write", span))?,
+            "VaultWrite",
+            "core.crypto.vault.commit_generate write",
+            span,
+        )?;
+        let plan = vault_handle_arg(
+            args.get(1)
+                .ok_or_else(|| unsupported("core.crypto.vault.commit_generate plan", span))?,
+            "MutationPlan",
+            "core.crypto.vault.commit_generate plan",
+            span,
+        )?;
+        let Some(result) = Crypto::vault_commit_generate_handles(write, plan, tag) else {
+            return Err(unsupported(
+                "core.crypto.vault.commit_generate handles",
+                span,
+            ));
+        };
+        Ok(match result {
+            Ok(handle) => CtValue::Present(Box::new(vault_key_ref_value(handle))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
+    "commit_store" => {
+        let write = vault_handle_arg(
+            args.first()
+                .ok_or_else(|| unsupported("core.crypto.vault.commit_store write", span))?,
+            "VaultWrite",
+            "core.crypto.vault.commit_store write",
+            span,
+        )?;
+        let plan = vault_handle_arg(
+            args.get(1)
+                .ok_or_else(|| unsupported("core.crypto.vault.commit_store plan", span))?,
+            "MutationPlan",
+            "core.crypto.vault.commit_store plan",
+            span,
+        )?;
+        let Some(result) = Crypto::vault_commit_store_handles(write, plan, tag) else {
+            return Err(unsupported("core.crypto.vault.commit_store handles", span));
+        };
+        Ok(match result {
+            Ok(handle) => CtValue::Present(Box::new(vault_key_ref_value(handle))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
+    "prepare_import_signing" => {
+        let Some(CtValue::Str(name)) = args.first() else {
+            return Err(unsupported(
+                "core.crypto.vault.prepare_import_signing name",
+                span,
+            ));
+        };
+        let bytes = as_bytes(
+            args.get(1)
+                .ok_or_else(|| unsupported("core.crypto.vault.prepare_import_signing bytes", span))?,
+            span,
+        )?;
+        let result = Crypto::vault_expert_prepare_import_signing_handle(name, bytes);
+        Ok(match result {
+            Ok(handle) => CtValue::Present(Box::new(vault_handle_value("MutationPlan", handle))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
+    "prepare_import_x25519" => {
+        let Some(CtValue::Str(name)) = args.first() else {
+            return Err(unsupported(
+                "core.crypto.vault.prepare_import_x25519 name",
+                span,
+            ));
+        };
+        let bytes = as_bytes(
+            args.get(1)
+                .ok_or_else(|| unsupported("core.crypto.vault.prepare_import_x25519 bytes", span))?,
+            span,
+        )?;
+        let result = Crypto::vault_expert_prepare_import_x25519_handle(name, bytes);
+        Ok(match result {
+            Ok(handle) => CtValue::Present(Box::new(vault_handle_value("MutationPlan", handle))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
+    "commit_import_signing" => {
+        let write = vault_handle_arg(
+            args.first().ok_or_else(|| {
+                unsupported("core.crypto.vault.commit_import_signing write", span)
+            })?,
+            "VaultWrite",
+            "core.crypto.vault.commit_import_signing write",
+            span,
+        )?;
+        let plan = vault_handle_arg(
+            args.get(1).ok_or_else(|| {
+                unsupported("core.crypto.vault.commit_import_signing plan", span)
+            })?,
+            "MutationPlan",
+            "core.crypto.vault.commit_import_signing plan",
+            span,
+        )?;
+        let Some(result) = Crypto::vault_expert_commit_import_signing_handles(write, plan) else {
+            return Err(unsupported(
+                "core.crypto.vault.commit_import_signing handles",
+                span,
+            ));
+        };
+        Ok(match result {
+            Ok(handle) => CtValue::Present(Box::new(vault_key_ref_value(handle))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
+    "commit_import_x25519" => {
+        let write = vault_handle_arg(
+            args.first().ok_or_else(|| {
+                unsupported("core.crypto.vault.commit_import_x25519 write", span)
+            })?,
+            "VaultWrite",
+            "core.crypto.vault.commit_import_x25519 write",
+            span,
+        )?;
+        let plan = vault_handle_arg(
+            args.get(1).ok_or_else(|| {
+                unsupported("core.crypto.vault.commit_import_x25519 plan", span)
+            })?,
+            "MutationPlan",
+            "core.crypto.vault.commit_import_x25519 plan",
+            span,
+        )?;
+        let Some(result) = Crypto::vault_expert_commit_import_x25519_handles(write, plan) else {
+            return Err(unsupported(
+                "core.crypto.vault.commit_import_x25519 handles",
+                span,
+            ));
+        };
+        Ok(match result {
+            Ok(handle) => CtValue::Present(Box::new(vault_key_ref_value(handle))),
+            Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+        })
+    }
         "prepare_rotate" => {
             let Some(CtValue::Str(name)) = args.first() else {
                 return Err(unsupported("core.crypto.vault.prepare_rotate name", span));
@@ -6210,6 +6438,26 @@ pub fn ambient_core_call(
                 timestamp,
             ))))
         }
+        ("core.crypto.uuid", "parse") => {
+            let Some(CtValue::Str(text)) = args.first() else {
+                return Some(Err(unsupported("core.crypto.uuid.parse text", span)));
+            };
+            Some(Ok(match crate::Encoding::ambient_uuid_parse(text) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            }))
+        }
+        ("core.crypto.uuid", "v5") => {
+            let (Some(CtValue::Str(namespace)), Some(CtValue::Str(name))) =
+                (args.first(), args.get(1))
+            else {
+                return Some(Err(unsupported("core.crypto.uuid.v5 arguments", span)));
+            };
+            Some(Ok(match crate::Encoding::ambient_uuid_v5(namespace, name) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            }))
+        }
         ("core.crypto", "sha256") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
@@ -6531,6 +6779,230 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_expert_secret_bytes_impl(&secret),
             )))
         }
+        ("core.crypto", "__verify_key_bytes") => {
+            let bytes = match struct_bytes(args.first()?, "VerifyKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let key = match Crypto::runtime::jet_crypto_verify_key_from_bytes_impl(bytes) {
+                Ok(key) => key,
+                Err(error) => return Some(Err(unsupported(&error.to_string(), span))),
+            };
+            Some(Ok(CtValue::Bytes(
+                Crypto::runtime::jet_crypto_verify_key_bytes_impl(&key),
+            )))
+        }
+        ("core.crypto", "__wrapped_bytes") => {
+            let bytes = match struct_bytes(args.first()?, "WrappedKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let wrapped = match Crypto::runtime::jet_crypto_wrapped_from_bytes_impl(bytes) {
+                Ok(wrapped) => wrapped,
+                Err(error) => return Some(Err(unsupported(&error.to_string(), span))),
+            };
+            Some(Ok(CtValue::Bytes(
+                Crypto::runtime::jet_crypto_wrapped_bytes_impl(&wrapped),
+            )))
+        }
+        ("core.crypto", "__signing_generate") => Some(Ok(
+            match Crypto::runtime::jet_crypto_signing_generate_impl() {
+                Ok(key) => CtValue::Present(Box::new(signing_value(
+                    Crypto::runtime::jet_crypto_expert_signing_key_bytes_impl(&key),
+                ))),
+                Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+            },
+        )),
+        ("core.crypto", "__signing_public") => {
+            let bytes = match struct_bytes(args.first()?, "SigningKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let key = match Crypto::runtime::signing_key_from_bytes(bytes) {
+                Ok(key) => key,
+                Err(error) => return Some(Err(unsupported(&error, span))),
+            };
+            Some(Ok(verify_value(
+                Crypto::runtime::jet_crypto_verify_key_bytes_impl(
+                    &Crypto::runtime::jet_crypto_signing_public_impl(&key),
+                ),
+            )))
+        }
+        ("core.crypto", "sign") => {
+            let key_bytes = match struct_bytes(args.first()?, "SigningKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let key = match Crypto::runtime::signing_key_from_bytes(key_bytes) {
+                Ok(key) => key,
+                Err(error) => return Some(Err(unsupported(&error, span))),
+            };
+            let message = match as_bytes(args.get(1)?, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok(match Crypto::runtime::jet_crypto_sign_typed_impl(&key, &message) {
+                Ok(signature) => CtValue::Present(Box::new(signature_value(
+                    Crypto::runtime::jet_crypto_signature_bytes_impl(&signature),
+                ))),
+                Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+            }))
+        }
+        ("core.crypto", "verify") => {
+            let key_bytes = match struct_bytes(args.first()?, "VerifyKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let key = match Crypto::runtime::jet_crypto_verify_key_from_bytes_impl(key_bytes) {
+                Ok(key) => key,
+                Err(error) => {
+                    return Some(Ok(CtValue::failed(Box::new(crypto_err(
+                        error.to_string(),
+                    )))));
+                }
+            };
+            let message = match as_bytes(args.get(1)?, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let signature_bytes = match struct_bytes(args.get(2)?, "Signature", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let signature =
+                match Crypto::runtime::jet_crypto_signature_from_bytes_impl(signature_bytes) {
+                    Ok(signature) => signature,
+                    Err(error) => {
+                        return Some(Ok(CtValue::failed(Box::new(crypto_err(
+                            error.to_string(),
+                        )))));
+                    }
+                };
+            Some(Ok(match Crypto::runtime::jet_crypto_verify_typed_impl(
+                key, &message, signature,
+            ) {
+                Ok(valid) => CtValue::Present(Box::new(CtValue::Bool(valid))),
+                Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+            }))
+        }
+        ("core.crypto", "x25519") => {
+            let secret_bytes = match struct_bytes(args.first()?, "X25519SecretKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let secret = match Crypto::x25519_secret_from_vec(secret_bytes) {
+                Ok(secret) => secret,
+                Err(error) => return Some(Err(unsupported(&error, span))),
+            };
+            let public_bytes = match struct_bytes(args.get(1)?, "X25519PublicKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let public =
+                match Crypto::runtime::jet_crypto_x25519_public_from_bytes_impl(public_bytes) {
+                    Ok(public) => public,
+                    Err(error) => {
+                        return Some(Ok(CtValue::failed(Box::new(crypto_err(
+                            error.to_string(),
+                        )))));
+                    }
+                };
+            Some(Ok(
+                match Crypto::runtime::jet_crypto_x25519_typed_impl(&secret, public) {
+                    Ok(shared) => CtValue::Present(Box::new(shared_secret_value(
+                        Crypto::runtime::jet_crypto_expert_shared_secret_bytes_impl(&shared),
+                    ))),
+                    Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+                },
+            ))
+        }
+        ("core.crypto", "open") => {
+            let secret_bytes = match struct_bytes(args.first()?, "X25519SecretKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let secret = match Crypto::x25519_secret_from_vec(secret_bytes) {
+                Ok(secret) => secret,
+                Err(error) => return Some(Err(unsupported(&error, span))),
+            };
+            let sealed_bytes = match struct_bytes(args.get(1)?, "Sealed", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let sealed = match Crypto::runtime::jet_crypto_sealed_from_bytes_impl(sealed_bytes) {
+                Ok(sealed) => sealed,
+                Err(error) => {
+                    return Some(Ok(CtValue::failed(Box::new(crypto_err(
+                        error.to_string(),
+                    )))));
+                }
+            };
+            let aad = match as_bytes(args.get(2)?, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok(
+                match Crypto::runtime::jet_crypto_open_typed_impl(&secret, sealed, &aad) {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+                },
+            ))
+        }
+        ("core.crypto", "wrap") => {
+            let secret = match to_secret(args.first()?, span) {
+                Ok(secret) => secret,
+                Err(error) => return Some(Err(error)),
+            };
+            let recipient_bytes = match struct_bytes(args.get(1)?, "X25519PublicKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let recipient =
+                match Crypto::runtime::jet_crypto_x25519_public_from_bytes_impl(recipient_bytes) {
+                    Ok(recipient) => recipient,
+                    Err(error) => {
+                        return Some(Ok(CtValue::failed(Box::new(crypto_err(
+                            error.to_string(),
+                        )))));
+                    }
+                };
+            Some(Ok(match Crypto::runtime::jet_crypto_wrap_typed_impl(&secret, recipient) {
+                Ok(wrapped) => CtValue::Present(Box::new(wrapped_key_value(
+                    Crypto::runtime::jet_crypto_wrapped_bytes_impl(&wrapped),
+                ))),
+                Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+            }))
+        }
+        ("core.crypto", "unwrap") => {
+            let secret_bytes = match struct_bytes(args.first()?, "X25519SecretKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let secret = match Crypto::x25519_secret_from_vec(secret_bytes) {
+                Ok(secret) => secret,
+                Err(error) => return Some(Err(unsupported(&error, span))),
+            };
+            let wrapped_bytes = match struct_bytes(args.get(1)?, "WrappedKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let wrapped = match Crypto::runtime::jet_crypto_wrapped_from_bytes_impl(wrapped_bytes) {
+                Ok(wrapped) => wrapped,
+                Err(error) => {
+                    return Some(Ok(CtValue::failed(Box::new(crypto_err(
+                        error.to_string(),
+                    )))));
+                }
+            };
+            Some(Ok(
+                match Crypto::runtime::jet_crypto_unwrap_typed_impl(&secret, wrapped) {
+                    Ok(secret) => CtValue::Present(Box::new(secret_value(
+                        Crypto::runtime::jet_crypto_expert_secret_bytes_impl(&secret),
+                    ))),
+                    Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+                },
+            ))
+        }
         ("core.crypto", "__x25519_generate") => Some(Ok(
             match Crypto::runtime::jet_crypto_x25519_generate_impl() {
                 Ok(key) => CtValue::Present(Box::new(x25519_secret_value(
@@ -6548,6 +7020,18 @@ pub fn ambient_core_call(
                 Ok(pub_bytes) => Some(Ok(x25519_public_value(pub_bytes))),
                 Err(e) => Some(Err(unsupported(&e, span))),
             }
+        }
+        ("core.crypto", "__x25519_public_from_bytes") => {
+            let bytes = match as_bytes(args.first()?, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok(match Crypto::runtime::jet_crypto_x25519_public_from_bytes_impl(bytes) {
+                Ok(key) => CtValue::Present(Box::new(x25519_public_value(
+                    Crypto::runtime::jet_crypto_x25519_public_bytes_impl(&key),
+                ))),
+                Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+            }))
         }
         ("core.crypto", "__password_text") => {
             let text = match args.first() {
@@ -6668,6 +7152,100 @@ pub fn ambient_core_call(
                     }
                 }
                 Err(e) => CtValue::failed(Box::new(crypto_err(e))),
+            }))
+        }
+        ("core.crypto.expert", "signing_key_bytes") => {
+            let bytes = match struct_bytes(args.first()?, "SigningKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok(CtValue::Bytes(bytes)))
+        }
+        ("core.crypto.expert", "x25519_secret_bytes") => {
+            let bytes = match struct_bytes(args.first()?, "X25519SecretKey", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok(CtValue::Bytes(bytes)))
+        }
+        ("core.crypto.expert", "secret_bytes") => {
+            let bytes = match args.first()? {
+                CtValue::Struct { type_name, .. } if type_name == "Secret" => {
+                    secret_bytes(args.first()?, span)
+                }
+                CtValue::Struct { type_name, .. } if type_name == "SharedSecret" => {
+                    struct_bytes(args.first()?, "SharedSecret", span)
+                }
+                _ => Err(unsupported("expert.secret_bytes secret", span)),
+            };
+            Some(bytes.map(CtValue::Bytes))
+        }
+        ("core.crypto.expert", "shared_secret_bytes") => {
+            let bytes = match struct_bytes(args.first()?, "SharedSecret", span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok(CtValue::Bytes(bytes)))
+        }
+        ("core.crypto.expert", "open_v1") => {
+            let key = match as_bytes(args.first()?, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let envelope = match as_bytes(args.get(1)?, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            Some(Ok(
+                match Crypto::runtime::jet_crypto_expert_open_v1_impl(&key, &envelope) {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
+                },
+            ))
+        }
+        ("core.crypto.expert", "migrate_v1") => {
+            let key = match as_bytes(args.first()?, span) {
+                Ok(bytes) => bytes,
+                Err(error) => return Some(Err(error)),
+            };
+            let source = match args.get(1).and_then(path_string) {
+                Some(source) => source,
+                None => return Some(Err(unsupported("expert.migrate_v1 source", span))),
+            };
+            let recipients = match args.get(2) {
+                Some(CtValue::List(items)) => {
+                    let mut keys = Vec::with_capacity(items.len());
+                    for item in items {
+                        let bytes = match struct_bytes(item, "X25519PublicKey", span) {
+                            Ok(bytes) => bytes,
+                            Err(error) => return Some(Err(error)),
+                        };
+                        match Crypto::runtime::jet_crypto_x25519_public_from_bytes_impl(bytes) {
+                            Ok(key) => keys.push(key),
+                            Err(error) => {
+                                return Some(Ok(CtValue::failed(Box::new(crypto_err(
+                                    error.to_string(),
+                                )))))
+                            }
+                        }
+                    }
+                    keys
+                }
+                _ => return Some(Err(unsupported("expert.migrate_v1 recipients", span))),
+            };
+            let destination = match args.get(3).and_then(path_string) {
+                Some(destination) => destination,
+                None => return Some(Err(unsupported("expert.migrate_v1 destination", span))),
+            };
+            Some(Ok(match Crypto::runtime::jet_crypto_expert_migrate_v1_impl(
+                &key,
+                &source,
+                recipients,
+                &destination,
+                || false,
+            ) {
+                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                Err(error) => CtValue::failed(Box::new(crypto_err(error.to_string()))),
             }))
         }
         _ => None,
