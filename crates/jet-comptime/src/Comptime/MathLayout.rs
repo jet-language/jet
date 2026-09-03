@@ -44,7 +44,7 @@ fn fixed_result(
 ) -> Result<CtValue, Diagnostic> {
     match result {
         fixed_arithmetic::JetFixedArithmeticResult::Value(value) => {
-            let value = CtValue::Int(value);
+            let value = integer_value(value, signed, bits);
             if checked {
                 Ok(CtValue::Present(Box::new(value)))
             } else {
@@ -100,6 +100,15 @@ pub fn integer_narrow(value: i128, signed: bool, bits: u8) -> i64 {
     }
     value as i64
 }
+/// Preserve a full-width unsigned result when the evaluator's fast carrier
+/// would otherwise look like a negative `i64`.
+pub fn integer_value(value: i64, signed: bool, bits: u8) -> CtValue {
+    if !signed && bits == 64 && value < 0 {
+        CtValue::BigInt(jet_foundation::Numeric::CtBigInt::from_u64(value as u64))
+    } else {
+        CtValue::Int(value)
+    }
+}
 
 pub fn integer_show(value: i64, signed: bool) -> String {
     if signed {
@@ -112,6 +121,14 @@ pub fn integer_show(value: i64, signed: bool) -> String {
 pub fn integer_bound(signed: bool, bits: u8, maximum: bool) -> i64 {
     let (lo, hi) = crate::AST::int_range(signed, bits);
     integer_narrow(if maximum { hi } else { lo }, signed, bits)
+}
+pub fn integer_bound_value(signed: bool, bits: u8, maximum: bool) -> CtValue {
+    let (lo, hi) = crate::AST::int_range(signed, bits);
+    integer_value(
+        integer_narrow(if maximum { hi } else { lo }, signed, bits),
+        signed,
+        bits,
+    )
 }
 
 pub fn integer_bit_count(value: i64, width: u32, method: &str) -> Option<i64> {

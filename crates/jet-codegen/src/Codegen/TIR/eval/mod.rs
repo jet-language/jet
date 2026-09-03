@@ -3529,9 +3529,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         let right = crate::Comptime::MathLayout::integer_widen(right, right_signed);
         let (minimum, maximum) = crate::AST::int_range(signed, bits);
         match division_semantics::jet_division(left, right, minimum, maximum) {
-            Ok(value) => Ok(CtValue::Int(crate::Comptime::MathLayout::integer_narrow(
-                value, signed, bits,
-            ))),
+            Ok(value) => Ok(crate::Comptime::MathLayout::integer_value(
+                crate::Comptime::MathLayout::integer_narrow(value, signed, bits),
+                signed,
+                bits,
+            )),
             Err(message) => {
                 let line = self.span_line(span);
                 Err(self.runtime_stop("E3010", line, message))

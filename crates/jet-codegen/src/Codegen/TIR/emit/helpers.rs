@@ -61,7 +61,7 @@ pub(crate) fn try_carrier_error_type(inner: &TExpr, convert: &TTryConvert) -> Op
         TTryConvert::DefaultErr => Some(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
         TTryConvert::Typed { target, .. } => Some(target.clone()),
         TTryConvert::WidenUnion { enum_name, .. } => Some(Type::Named(enum_name.clone())),
-        TTryConvert::None | TTryConvert::Never => match &inner.ty {
+        TTryConvert::None | TTryConvert::Never | TTryConvert::ProtocolExit => match &inner.ty {
             Type::Result { err, .. } => Some((**err).clone()),
             _ => None,
         },

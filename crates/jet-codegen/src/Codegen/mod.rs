@@ -338,6 +338,14 @@ pub const CACHED_RUNTIME_END: &str = "// jet:cached-runtime-end\n";
 pub const CACHED_CORE_BEGIN: &str = "// jet:cached-core-begin\n";
 pub const CACHED_CORE_END: &str = "// jet:cached-core-end\n";
 
+/// The fixed runtime's Int display seam (see `push_cached_runtime_body`). The
+/// `OnceLock` takes runtime input: the Core kernel's tagged decoder.
+const INT_DECODER_SEAM: &str = "static __JET_INT_DECODER: std::sync::OnceLock<fn(i64) -> String> = std::sync::OnceLock::new();\n\
+pub fn jet_int_to_string(value: i64) -> String {\n\
+\x20   match __JET_INT_DECODER.get() { Some(decode) => decode(value), None => value.to_string() }\n\
+}\n\
+pub fn jet_install_int_decoder(decode: fn(i64) -> String) { let _ = __JET_INT_DECODER.set(decode); }\n\n";
+
 fn push_prelude(out: &mut String) {
     for (index, part) in PRELUDE_PARTS.iter().enumerate() {
         if index == 0 {
@@ -567,6 +575,12 @@ fn push_cached_runtime_body(out: &mut String, link: Option<&FfiLink>) {
     // vocabulary in the same cached rlib instead of the optional Core closure;
     // the latter is a separate crate when native runtime reuse is active.
     push_prelude_dependency_closure(out, &["encoding_json"]);
+    // Exact Int (D-INTBIG1) may spill into a tagged carrier that only the
+    // optional Core kernel can decode, and that kernel is a separate crate when
+    // native runtime reuse is active. The shared Values.rs formatter renders
+    // through this seam: the kernel installs its decoder the moment it creates
+    // the first tagged value, so until then the plain decimal form is exact.
+    out.push_str(INT_DECODER_SEAM);
     push_prelude(out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(out);
@@ -3129,6 +3143,9 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("#![allow(warnings)]\n\n");
     push_ffi_reporter(&mut out, None);
     push_prelude(&mut out);
+    // The same Int display seam as `push_cached_runtime_body`; this path may
+    // also emit the Core kernel, which installs its decoder on first use.
+    out.push_str(INT_DECODER_SEAM);
     // The Prelude names `__jet_Ordering` (`jet_list_sort_by`, `jet_ordering_then`),
     // so the one declaration travels with it. `push_cached_runtime_traits` is the
     // bundle-path twin.

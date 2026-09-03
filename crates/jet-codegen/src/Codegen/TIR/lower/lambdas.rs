@@ -194,6 +194,23 @@ pub(crate) fn lower_lambda_expecting_host_borrow(
     )
 }
 
+/// D-FAILURE-FOUNDATION1: mirror sema's implicit `Error` carrier for a lambda
+/// that writes a success/error annotation. The AST keeps those two source
+/// slots separate, while the lowered callable must expose one Rust carrier.
+fn lambda_explicit_failure_carrier(lam: &Lambda) -> Option<Type> {
+    if lam.result_type.is_none() && lam.error_type.is_none() {
+        return None;
+    }
+    Some(Type::Result {
+        ok: Box::new(lam.result_type.clone().unwrap_or_else(unit_type)),
+        err: Box::new(
+            lam.error_type
+                .clone()
+                .unwrap_or_else(|| Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+        ),
+    })
+}
+
 fn lower_lambda_expecting_with_host_borrow(
     lam: &Lambda,
     cx: &Cx,
@@ -239,8 +256,10 @@ fn lower_lambda_expecting_with_host_borrow(
     // carrier is its own body result plus the callback slot's failure type; inheriting
     // the enclosing function's success type would erase a callback tail such as `true`
     // to `Unit`.
+    let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
     let lambda_ret_ty = expected_return
         .or(lam.meta.fallible_carrier.as_ref())
+        .or(explicit_failure_carrier.as_ref())
         .or_else(|| {
             lam.meta
                 .fallible_propagation
@@ -260,6 +279,7 @@ fn lower_lambda_expecting_with_host_borrow(
     // outer error carrier while lowering `??`, but it never escapes that call.
     let direct_fallible = expected_return.is_none()
         && lam.meta.fallible_carrier.is_none()
+        && explicit_failure_carrier.is_none()
         && env
             .ret_ty
             .as_ref()
@@ -537,8 +557,10 @@ fn fallible_lambda_value(
     env: &LowerEnv,
     expected_return: Option<&Type>,
 ) -> TExpr {
+    let explicit_failure_carrier = lambda_explicit_failure_carrier(lam);
     let carrier = expected_return
         .or(lam.meta.fallible_carrier.as_ref())
+        .or(explicit_failure_carrier.as_ref())
         .or_else(|| {
             lam.meta
                 .fallible_propagation
@@ -548,6 +570,7 @@ fn fallible_lambda_value(
     if expected_return.is_none()
         && lam.meta.fallible_carrier.is_none()
         && !lam.meta.fallible_propagation
+        && explicit_failure_carrier.is_none()
     {
         return value;
     }
@@ -944,25 +967,14 @@ pub(crate) fn lower_spawn_lambda_for_jit_with_shared_block(
     lower_spawn_lambda_for_jit_expecting_with_body(lam, cx, env, &[], Some(body))
 }
 
-/// D-CONC-SPAWN1: the Rust error type a fallible `task` body early-returns.
-/// Sema proved every `?` in the body against the enclosing function's fallible
-/// return (`LambdaMeta::fallible_propagation`), so the rendered closure returns
-/// `JetOutcome<_, E>` and its happy path must build the same carrier
-/// (`Ok::<_, E>(…)`) — otherwise the `?` sits inside a `()` closure and rustc
-/// rejects the generated code (I2). Task-group normalization may attach the
-/// same carrier to an infallible sibling through `fallible_carrier`.
-fn spawn_fallible_err_rust(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Option<String> {
-    if let Some(Type::Result { err, .. }) = lam.meta.fallible_carrier.as_ref() {
+/// D-CONC-SPAWN1: every AOT task closure returns the uniform `Result<T, Err>`
+/// carrier. The source-level task still exposes `T`; `join` maps this private
+/// error value onto the public `TaskFailure` rail.
+fn spawn_fallible_err_rust(_lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Option<String> {
+    if let Some(Type::Result { err, .. }) = env.ret_ty.as_ref() {
         return Some(cx.rust_type(err));
     }
-    if !lam.meta.fallible_propagation {
-        return None;
-    }
-    match env.ret_ty.as_ref() {
-        Some(Type::Result { err, .. }) => Some(cx.rust_type(err)),
-        Some(Type::Option(_)) => Some(format!("{}JetAbsent", cx.root_prefix)),
-        _ => None,
-    }
+    Some(format!("{}JetErr", cx.root_prefix))
 }
 
 /// c109 Phase 13: render a canonical `task` lambda. It is `emit_lambda` minus the

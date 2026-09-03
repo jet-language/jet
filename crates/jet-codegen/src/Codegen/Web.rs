@@ -7881,7 +7881,15 @@ fn wasm_emit_expr(
                     "match {traced} {{ Ok(value) => value, Err(never) => match never {{}} }}"
                 ));
             }
+            if matches!(convert, TIR::TTryConvert::ProtocolExit) {
+                return Ok(format!(
+                    "match {value} {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}"
+                ));
+            }
             let propagated = match convert {
+                TIR::TTryConvert::ProtocolExit => {
+                    unreachable!("ProtocolExit Try is handled before conversion")
+                }
                 TIR::TTryConvert::DefaultErr => {
                     format!("({value}).map_err(jet_err_from_message)")
                 }
@@ -10585,6 +10593,9 @@ fn tir_js_expr(
                 .transpose()?
                 .unwrap_or_else(|| "null".to_string());
             let converter = match convert {
+                TIR::TTryConvert::ProtocolExit => {
+                    "(error) => jet_web_edge_result({ tag: \"Err\", values: [error] })".to_string()
+                }
                 TIR::TTryConvert::DefaultErr => "jet_web_default_error".to_string(),
                 TIR::TTryConvert::Typed {
                     fn_name,

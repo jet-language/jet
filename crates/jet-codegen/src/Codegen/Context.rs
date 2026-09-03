@@ -2518,12 +2518,19 @@ impl Cx {
             }
             Type::Named(n) if n == "Expired" => "JetExpired".to_string(),
             Type::Named(name) => mangle_path(name),
+            // D-CONC-FAIL1=A: every source `Task<T>` uses one AOT handle
+            // representation. A spawned body's private `Result` is the
+            // scheduler value, and its error is projected to `TaskFailure` by
+            // the join adapter; only an already-carried TIR task keeps its
+            // existing inner error type.
             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
-                format!(
-                    "{}jet_std::JetTask<{}>",
-                    self.root_prefix,
-                    self.rust_type(&args[0])
-                )
+                let item = self.rust_type(&args[0]);
+                let carrier = if matches!(args[0].without_user_tags(), Type::Result { .. }) {
+                    item
+                } else {
+                    format!("Result<{item}, {}JetErr>", self.root_prefix)
+                };
+                format!("{}jet_std::JetTask<{carrier}>", self.root_prefix)
             }
             Type::Apply { name, args }
                 if matches!(

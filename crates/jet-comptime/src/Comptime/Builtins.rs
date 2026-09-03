@@ -2027,13 +2027,36 @@ pub fn apply_method(
             Ok(CtValue::List(out))
         }
         (CtValue::List(xs), "sum") => {
-            let mut total = 0i64;
-            for x in xs {
-                total = total
-                    .checked_add(as_int(x, span)?)
-                    .ok_or_else(|| overflow("sum", span))?;
+            let Some(first) = xs.first() else {
+                return Ok(CtValue::Int(0));
+            };
+            match first {
+                CtValue::Float(first) => {
+                    let mut total = match first {
+                        CtFloat::F32(_) => CtFloat::f32(0.0),
+                        CtFloat::F64(_) => CtFloat::f64(0.0),
+                    };
+                    for value in xs {
+                        let CtValue::Float(value) = value else {
+                            return Err(unsupported("sum on mixed numeric types", span));
+                        };
+                        total = total
+                            .binop(BinOp::Add, *value)
+                            .ok_or_else(|| unsupported("sum on mixed float widths", span))?;
+                    }
+                    Ok(CtValue::Float(total))
+                }
+                CtValue::Int(_) | CtValue::BigInt(_) => {
+                    let mut total = 0i64;
+                    for value in xs {
+                        total = total
+                            .checked_add(as_int(value, span)?)
+                            .ok_or_else(|| overflow("sum", span))?;
+                    }
+                    Ok(CtValue::Int(total))
+                }
+                _ => Err(unsupported("sum on non-numeric values", span)),
             }
-            Ok(CtValue::Int(total))
         }
         (CtValue::List(xs), "product") => {
             let mut total = 1i64;

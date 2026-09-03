@@ -1,12 +1,105 @@
 use super::helpers::is_pod_uninit_type;
 use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
+use crate::Sema::Captures::{lambda_body_refs_name, stmt_refs_name};
 use crate::Sema::Diagnostics::{edit_distance, field_read_to_clone, is_task_type, type_fix_hint};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, BindPattern, Binding, CallArg, Expr, MetaAttr, MetaField, StrPart, Type,
+    AccessConvention, BindPattern, Binding, CallArg, Expr, MetaAttr, MetaField, Stmt, StrPart, Type,
 };
 
+/// A bound lambda can borrow a written capture only while every later use in
+/// the current lexical scope invokes it directly. Any other use may retain the
+/// callable, so sema keeps the conservative owning-capture route.
+fn stmt_uses_name_only_as_direct_call(stmt: &Stmt, name: &str) -> bool {
+    let mut nested_capture = false;
+    stmt.for_each_expr(|expr| {
+        let Expr::Lambda(lambda) = expr else {
+            return;
+        };
+        if lambda.params.iter().any(|param| param.name == name)
+            || (!lambda.take_names.iter().any(|(capture, _)| capture == name)
+                && !lambda_body_refs_name(&lambda.body, name))
+        {
+            return;
+        }
+        nested_capture = true;
+    });
+    if nested_capture {
+        return false;
+    }
+
+    // Remove each direct invocation, then ask the canonical capture walker
+    // whether any use remains. This keeps calls nested in ordinary argument
+    // expressions direct while rejecting passing, storing, field access, and
+    // assignment of the callable itself.
+    let mut residual = stmt.clone();
+    residual.for_each_expr_mut(|expr| {
+        let direct = match expr {
+            Expr::Call(call) => call.name == name,
+            Expr::CallValue { callee, .. } => {
+                fn is_name(expr: &Expr, name: &str) -> bool {
+                    match expr {
+                        Expr::Ident(candidate, _) => candidate == name,
+                        Expr::Paren(inner, _) => is_name(inner, name),
+                        _ => false,
+                    }
+                }
+                is_name(callee, name)
+            }
+            Expr::MethodCall {
+                receiver, method, ..
+            } if method == "call" => {
+                fn is_name(expr: &Expr, name: &str) -> bool {
+                    match expr {
+                        Expr::Ident(candidate, _) => candidate == name,
+                        Expr::Paren(inner, _) => is_name(inner, name),
+                        _ => false,
+                    }
+                }
+                is_name(receiver, name)
+            }
+            _ => false,
+        };
+        if direct {
+            let span = expr.span();
+            *expr = Expr::Absent(span);
+        }
+    });
+    !stmt_refs_name(&residual, name)
+}
+
+impl<'a> Checker<'a> {
+    /// Read the statement-tail frame installed by `check_block_inner`.
+    /// A null frame means the caller did not provide lexical-use context, so
+    /// retain the safe escaping default.
+    fn bound_lambda_escapes(&self, name: &str) -> bool {
+        if self.stmt_tail_ptr.is_null() {
+            return true;
+        }
+        let tail_requires_escape = |tail: &[Stmt]| {
+            tail.iter().any(|stmt| {
+                stmt_refs_name(stmt, name) && !stmt_uses_name_only_as_direct_call(stmt, name)
+            })
+        };
+        // SAFETY: these slices point into the live Program AST while checking
+        // the current statement; `check_block_inner` installs and restores
+        // each frame around the recursive check.
+        let tail = unsafe { std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len) };
+        if tail_requires_escape(tail) {
+            return true;
+        }
+        for &(ptr, len) in self.liveness_frames.iter().rev() {
+            if !ptr.is_null() && len > 0 {
+                let frame = unsafe { std::slice::from_raw_parts(ptr, len) };
+                if tail_requires_escape(frame) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
 fn direct_fixed_constructor(expr: &Expr) -> bool {
     matches!(
         expr,
@@ -668,7 +761,10 @@ impl<'a> Checker<'a> {
         let saved_esc = self.lambda_escapes;
         let saved_bind = self.lambda_binding.clone();
         if matches!(&b.init, Expr::Lambda(_)) {
-            self.lambda_escapes = true;
+            // S47: a local callable borrowed by direct calls can retain mutable
+            // capture borrows; keep the owning clone only when a later use can
+            // retain or move the callable.
+            self.lambda_escapes = self.bound_lambda_escapes(&b.name);
             self.lambda_binding = Some(b.name.clone());
         }
         // D-META-STAGE1=B: a marked name in a compile-time binding RHS is an

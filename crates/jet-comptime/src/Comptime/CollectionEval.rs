@@ -76,7 +76,9 @@ mod collection_semantics {
     fn jet_fault_should_fail_allocation() -> bool {
         false
     }
-
+    // Values.rs is shared with the AOT Prelude; bind its unqualified Int
+    // formatter to the comptime mirror before including that fragment.
+    use crate::Comptime::SyncLite::jet_int_to_string;
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");

@@ -1239,18 +1239,16 @@ fn emit_numeric_op(
 ) -> String {
     match op {
         TNumericOp::Predicate(m) => {
-            let helper = match m.as_str() {
-                "is_nan" => "jet_std_math_is_nan",
-                "is_infinite" => "jet_std_math_is_infinite",
-                "is_finite" => "jet_std_math_is_finite",
-                _ => unreachable!("sema only creates known numeric predicates"),
-            };
             let value = if matches!(recv_ty, Some(Type::Float32)) {
                 format!("({recv} as f64)")
             } else {
                 recv.to_string()
             };
-            format!("{}{}({value})", cx.root_prefix, helper)
+            let method = match m.as_str() {
+                "is_nan" | "is_infinite" | "is_finite" => m,
+                _ => unreachable!("sema only creates known numeric predicates"),
+            };
+            format!("({value}).{method}()")
         }
         TNumericOp::BitCount { method: m, width } => {
             if matches!(recv_ty, Some(Type::Int)) {
@@ -1804,13 +1802,10 @@ pub(crate) fn emit_inline_range_decode(
 }
 
 fn task_result_carrier(ty: &Type) -> bool {
-    let Type::Apply { name, args } = ty.without_user_tags() else {
-        return false;
-    };
-    name == "Task"
-        && args
-            .first()
-            .is_some_and(|arg| matches!(arg.without_user_tags(), Type::Result { .. }))
+    matches!(
+        ty.without_user_tags(),
+        Type::Apply { name, args } if name == "Task" && !args.is_empty()
+    )
 }
 
 fn task_result_list_carrier(ty: &Type) -> bool {
@@ -2454,10 +2449,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     };
                 }
             }
-            let place = emit_tir_expr(place, cx);
             if *mutable {
+                let place = emit_mut_collection_place(place, cx, &[]);
                 format!("&mut ({place})")
             } else {
+                let place = emit_tir_expr(place, cx);
                 format!("&({place})")
             }
         }
@@ -3168,7 +3164,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("{root}jet_iter_to_set({recv})")
                     } else {
                         format!(
-                            "({}).into_iter().collect::<std::collections::HashSet<_>>()",
+                            "({}).iter().cloned().collect::<std::collections::HashSet<_>>()",
                             recv
                         )
                     }
@@ -3384,6 +3380,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // `&(recv)` (not `.clone()`): the window borrows the list's OWN
                 // backing storage, it never makes a second copy of it.
                 TBuiltinOp::ViewNew { line } => {
+                    // A view receiver is a borrow, not a value read. Preserve
+                    // nested collection/map projections so the slice cannot
+                    // borrow from a temporary clone.
+                    let recv = super::statements::emit_collection_place(recv_expr, cx, &[]);
                     if args.len() == 1 {
                         format!(
                             "{root}jet_view_range_new(&({}), &({}), {:?}, {})",
@@ -5116,6 +5116,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             line,
             fn_name,
         } => {
+            // D-CALLVALUE1=B: a raw function-value callback is infallible. Sema
+            // may retain the enclosing function's implicit `?` wrapper around
+            // the call, but there is no Result/Option carrier to trace or
+            // propagate. Keep the callback's raw value, as the resident and
+            // interpreter evaluators do.
+            if matches!(
+                &inner.kind,
+                TExprKind::FnValue {
+                    kind: TFnValueKind::Call { .. }
+                }
+            ) && !matches!(&inner.ty, Type::Result { .. } | Type::Option(_))
+            {
+                return emit_tir_expr(inner, cx);
+            }
             let v = match &inner.kind {
                 TExprKind::ModuleCall {
                     form,
@@ -5125,6 +5139,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 } => emit_tir_module_call(inner, form, None, type_args, args, cx),
                 _ => emit_tir_expr(inner, cx),
             };
+            if matches!(convert, TTryConvert::ProtocolExit) {
+                return format!(
+                    "match {v} {{ Ok(value) => value, Err(error) => {root}jet_entry_error_exit_jet(error) }}"
+                );
+            }
             let context_helper = if note.is_some()
                 && crate::Codegen::TIR::try_target_is_default_error(inner, convert)
             {
@@ -5152,6 +5171,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 );
             }
             let propagated = match convert {
+                TTryConvert::ProtocolExit => {
+                    unreachable!("ProtocolExit Try is handled before conversion")
+                }
                 TTryConvert::DefaultErr => format!("{}.map_err({root}jet_err_from_message)", v),
 
                 // D-ERR-CONV: declared `impl Source -> Target` → `.map_err(<fn>)`.

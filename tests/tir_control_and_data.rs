@@ -2507,3 +2507,33 @@ fn run() {
 "#;
     assert_tiers_agree("tir_user_arithmetic_hooks", src, "10 6 16 4 10\n");
 }
+
+#[test]
+fn card_2841_labeled_loop_value_tier_parity() {
+    let src = r#"
+fn run() {
+    outer :: loop {
+        loop {
+            break(outer, 7)
+        }
+    }
+    answer :: outer ?? 0
+    print(answer)
+}
+"#;
+    assert_tiers_agree("tir_card_2841_labeled_loop_value", src, "7\n");
+}
+
+#[test]
+fn card_2834_negative_stride_tier_parity() {
+    let src = r#"
+fn run() {
+    total := 0
+    loop i in 5..1, -2 {
+        total += i
+    }
+    print(total)
+}
+"#;
+    assert_tiers_agree("tir_card_2834_negative_stride", src, "9\n");
+}

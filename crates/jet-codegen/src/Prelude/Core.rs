@@ -1747,6 +1747,37 @@ where
     }
 }
 
+/// Borrow one map value without materializing a clone. This is the read-side
+/// counterpart to `jet_index_map_mut`, used when a view receiver is a nested
+/// map/list place whose storage must outlive the borrowed view.
+fn jet_index_map_ref<'a, M, K: Ord + Clone + JetShow + 'a, V>(
+    m: &'a M,
+    k: &K,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+) -> &'a V
+where
+    M: std::ops::Deref<Target = std::collections::BTreeMap<K, V>>,
+{
+    match m.get(k) {
+        Some(value) => value,
+        None => jet_panic_rich(
+            file,
+            line,
+            fn_name,
+            src_line,
+            col,
+            caret_len,
+            &jet_missing_map_key_value(k.jet_show()),
+            "",
+        ),
+    }
+}
+
 fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V: Clone>(
     m: &'a mut M,
     k: K,

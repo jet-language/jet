@@ -754,7 +754,12 @@ impl<'a> Checker<'a> {
                     None => false,
                     Some(_) => true,
                 };
-                if needs_value {
+                // A lambda body runs only when its callable is invoked. Keep
+                // its terminal flow local to the deferred callable; a
+                // Never-diverging body must not make the enclosing scope
+                // unreachable merely because it was captured.
+                let reachable = self.flow.reachable;
+                let body_ret = if needs_value {
                     self.infer(e)
                 } else {
                     // The open return row still accepts value-producing calls,
@@ -762,7 +767,9 @@ impl<'a> Checker<'a> {
                     // Keep both cases on the shared statement call checker so
                     // `() -> print(...)` does not enter value-only E0116.
                     self.infer_fallible_stmt(e)
-                }
+                };
+                self.flow.reachable = reachable;
+                body_ret
             }
             LambdaBody::Block(stmts) => {
                 let value_expected = effective_ret.as_ref().filter(|ty| {

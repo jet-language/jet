@@ -1724,3 +1724,40 @@ fn run() {
         "2\ntrue\n[1, 9, 2, 3]\nfalse\n[1, 9, 2, 3]\n",
     );
 }
+
+#[test]
+fn card_2830_float_sum_tier_parity() {
+    let src = r#"
+fn run() {
+    values :: [Float]{1.0, 2.0}
+    result :: values.sum()
+    print(result)
+}
+"#;
+    assert_tiers_agree("tir_card_2830_float_sum", src, "3.0\n");
+}
+
+#[test]
+fn card_2844_struct_key_set_from_tier_parity() {
+    let src = r#"
+struct CacheKey {
+    user: String
+    resource: String
+}
+
+fn run() {
+    scores := [CacheKey:Int]{}
+    print(scores.add(CacheKey{user: "ada", resource: "profile"}, 7) ?? -1)
+    keys :: scores.keys().to_list()
+    key_set :: Set.from(keys)
+    print(keys.len())
+    print(key_set.len())
+    print(key_set.has(CacheKey{user: "ada", resource: "profile"}))
+}
+"#;
+    assert_tiers_agree(
+        "tir_card_2844_struct_key_set_from",
+        src,
+        "-1\n1\n1\ntrue\n",
+    );
+}

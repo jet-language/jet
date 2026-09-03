@@ -64,6 +64,7 @@ mod process_args_kernel {
 // adapters for JIT handles.
 #[allow(dead_code, non_camel_case_types, unused_imports)]
 mod collection_semantics {
+    use crate::Encoding::json_rt::jet_int_to_string;
     use crate::fault_injection::jet_fault_should_fail_allocation;
     pub use jet_foundation::Outcome::*;
 

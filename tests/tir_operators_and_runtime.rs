@@ -485,3 +485,68 @@ fn run() {
         "2147483649\n3221225472\n2147483649\n3\n",
     );
 }
+
+#[test]
+fn checked_add_exact_int_matches_every_tier_card_2832() {
+    let src = r#"
+use core.math as math
+
+fn run() {
+    print(math.checked_add(9223372036854775807, 1))
+}
+"#;
+    assert_tiers_agree(
+        "tir_card_2832_checked_add_exact_int",
+        src,
+        "9223372036854775808\n",
+    );
+}
+
+#[test]
+fn interpreter_u64_card_2827() {
+    let src = r#"
+fn run() {
+    print(Int.from_u64(U64{9223372036854775808}))
+}
+"#;
+    assert_tiers_agree(
+        "tir_interpreter_u64_card_2827",
+        src,
+        "9223372036854775808\n",
+    );
+}
+
+#[test]
+fn interpreter_u64_card_2828() {
+    let src = r#"
+fn run() {
+    print(U64{1} << 63)
+}
+"#;
+    assert_tiers_agree(
+        "tir_interpreter_u64_card_2828",
+        src,
+        "9223372036854775808\n",
+    );
+}
+
+#[test]
+fn interpreter_u64_card_2829() {
+    let src = r#"
+fn run() {
+    print(U64{9223372036854775808}.count_ones())
+}
+"#;
+    assert_tiers_agree("tir_interpreter_u64_card_2829", src, "1\n");
+}
+
+#[test]
+fn card_2838_float_nan_predicate_tier_parity() {
+    let src = r#"
+fn run() {
+    value :: Float.NAN
+    print(value.is_nan())
+}
+"#;
+    assert_tiers_agree("tir_card_2838_float_nan_predicate", src, "true\n");
+}

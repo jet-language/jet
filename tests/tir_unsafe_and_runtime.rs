@@ -9,8 +9,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use tir_support::{
-    assert_tiers_agree_with_application_policy, build_and_run, build_and_run_full, have_rustc,
-    write_test_package, TIR_TEST_PACKAGE,
+    assert_tiers_agree, assert_tiers_agree_with_application_policy, build_and_run, build_and_run_full,
+    have_rustc, write_test_package, TIR_TEST_PACKAGE,
 };
 const FROM_ADDR_SOURCE: &str = r###"
 use core.mem as _mem
@@ -1642,4 +1642,47 @@ fn run() {
         through_or.is_err(),
         "Optional narrowing must not travel through ||"
     );
+}
+
+#[test]
+fn card_2840_owned_task_join_helper_tier_parity() {
+    let src = r#"
+fn boom() Int -> {
+    panic("x")
+    return 0
+}
+
+fn joined(handle: ^Task<Int>) Int -> handle.join() ?? 91
+
+fn run() {
+    task.group g {
+        handle :: task boom()
+        print(joined(^handle))
+    }
+}
+"#;
+    assert_tiers_agree("tir_card_2840_owned_task_join_helper", src, "91\n");
+}
+
+#[test]
+fn spawned_diverging_callee_keeps_later_bindings_in_scope() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn value(n: Int) Int -> n
+fn boom() Int -> {
+    panic("boom")
+    return 0
+}
+fn run() {
+    task.group joined {
+        seven :: task boom()
+        eight :: task value(8)
+        print(seven.join() ?? 99)
+        print(eight.join() ?? 0)
+    }
+}
+"#;
+    assert_tiers_agree("tir_spawned_diverging_callee_scope", src, "99\n8\n");
 }

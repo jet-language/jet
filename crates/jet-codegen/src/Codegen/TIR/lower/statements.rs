@@ -21,6 +21,7 @@ use crate::Codegen::TIR::lower::lower_discarded_expr;
 use crate::Codegen::TIR::lower::reactive_block_env;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_expr_as_mut_place;
 use crate::Codegen::TIR::lower_forin_collection;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_switch;
@@ -3026,6 +3027,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // does not know the flat Rust variant spelling.
                     let skip_ct_enum_bake = matches!(b.ct, Some(crate::AST::CtValue::Enum { .. }));
                     if b.ct.is_some()
+                        && !matches!(b.ty.as_ref(), Some(Type::Result { .. }))
                         && !skip_ct_list_bake
                         && !skip_ct_view_bake
                         && !skip_ct_boxed_bake
@@ -3095,6 +3097,29 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     in_own_frame(|| {
                         let mut init =
                             moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
+                        // Inline result loops lower their body as the bare
+                        // success value. A fallible binding still needs the
+                        // enclosing Result carrier at this binding boundary.
+                        // Inline loop lowering produces a bare value in an
+                        // InlineBlock, even when its cached TIR type has already
+                        // been widened to the Result carrier.
+                        let result_loop_binding =
+                            matches!(&init.kind, TExprKind::InlineBlock(_));
+                        if result_loop_binding {
+                            if let Some(Type::Result { ok, .. }) = &b.ty {
+                                let carrier = b.ty.as_ref().expect("matched Result binding").clone();
+                                if !matches!(&init.kind, TExprKind::Ok(_)) {
+                                    let success_ty = (**ok).clone();
+                                    init.ty = success_ty;
+                                    init = TExpr {
+                                        ty: carrier,
+                                        kind: TExprKind::Ok(Box::new(init)),
+                                    };
+                                } else {
+                                    init.ty = carrier;
+                                }
+                            }
+                        }
                         // D-ALLOCFAIL1=A: a fallible allocator result carries a live view
                         // even though the source surface names only `T !AllocError`.
                         // Keep that internal carrier through TIR so every tier returns and
@@ -3176,13 +3201,19 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 }
                             }
                         }
-                        // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — an escaping FnMut
-                        // lambda binding gets `let mut` AND an `as <fn-trait(mut)>` init coercion +
-                        // a `: <fn-trait(mut)>` annotation. Decided here from `Lambda.meta`.
+                        // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — every
+                        // lambda binding that mutates a capture gets `let mut` AND an
+                        // `as <fn-trait(mut)>` init coercion plus a matching annotation.
                         let mut_fn = matches!(
+                            &b.init,
+                            Expr::Lambda(l) if l.meta.needs_fn_mut
+                        );
+                        let escaping_mut_fn = matches!(
                             &b.init,
                             Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
                         );
+                        let nonescaping_lambda =
+                            matches!(&b.init, Expr::Lambda(l) if !l.meta.escapes);
                         if mut_fn {
                             if let Some(Type::Fn {
                                 params,
@@ -3191,16 +3222,22 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 ..
                             }) = &b.ty
                             {
-                                let coerced = format!(
-                                    "{} as {}",
-                                    emit_tir_expr(&init, cx),
-                                    cx.rust_fn_trait(
-                                        params,
-                                        ret.as_deref(),
-                                        return_view_provenance.as_ref(),
-                                        true,
+                                let coerced = if escaping_mut_fn {
+                                    format!(
+                                        "Box::new({}) as {}",
+                                        emit_tir_expr(&init, cx),
+                                        cx.rust_fn_trait(
+                                            params,
+                                            ret.as_deref(),
+                                            return_view_provenance.as_ref(),
+                                            true,
+                                        )
                                     )
-                                );
+                                } else {
+                                    // A same-scope FnMut keeps a direct closure
+                                    // carrier so its borrow ends at its last call.
+                                    emit_tir_expr(&init, cx)
+                                };
                                 let init_ty = init.ty.clone();
                                 let lambda =
                                     match std::mem::replace(&mut init.kind, TExprKind::Unit) {
@@ -3330,14 +3367,17 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         } else {
                             "let"
                         };
-                        // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
-                        // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
-                        // inferred binding.
+                        // The type annotation clause, rendered exactly as `emit_let`: every local
+                        // lambda stays inferred; only escaping values use a trait-object carrier.
                         let let_ty = if allocator_carrier {
                             crate::Codegen::TIR::TLetTy::plain(ty.clone())
                         } else if spawn_carrier || ty.is_compute_view_mut() {
                             // The effective spawn carrier binds unannotated;
                             // its Rust type is fixed by the closure initializer.
+                            TLetTy::Inferred
+                        } else if nonescaping_lambda {
+                            // Every local lambda keeps its concrete closure
+                            // carrier; only escaping values need a trait object.
                             TLetTy::Inferred
                         } else if send_fn {
                             TLetTy::SendFn(ty.clone())
@@ -3347,7 +3387,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             crate::Codegen::TIR::let_ty_for_opt(
                                 Some(&ty),
                                 cx,
-                                mut_fn,
+                                escaping_mut_fn,
                                 is_resource,
                                 b.gc_promotion.is_some() || b.gc_transferred,
                             )
@@ -3355,7 +3395,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             crate::Codegen::TIR::let_ty_for_opt(
                                 b.ty.as_ref(),
                                 cx,
-                                mut_fn,
+                                escaping_mut_fn,
                                 is_resource,
                                 b.gc_promotion.is_some() || b.gc_transferred,
                             )
@@ -3559,7 +3599,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             let is_map = matches!(kind, IndexKind::Map);
                             let index_proven = matches!(kind, IndexKind::FixedListProof);
                             if is_map || index_proven || matches!(kind, IndexKind::List) {
-                                let collection_t = lower_expr(collection, cx, env);
+                                let collection_t = lower_expr_as_mut_place(collection, cx, env);
                                 let elem_ty = match &collection_t.ty {
                                     Type::List(elem) | Type::FixedList { elem, .. } => {
                                         Some((**elem).clone())

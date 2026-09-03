@@ -3845,7 +3845,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ..
                 } = inner.as_ref()
                 {
-                    let recv = lower_expr(base, cx, env);
+                    let recv = if *access == crate::AST::PlaceAccess::Write {
+                        lower_expr_as_mut_place(base, cx, env)
+                    } else {
+                        lower_expr(base, cx, env)
+                    };
                     // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
                     // Prelude. The foundation predicate is exact, so ordinary
                     // generics cannot accidentally enter the tensor-view path.
@@ -3896,7 +3900,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         },
                     }
                 } else {
-                    let place = lower_expr(inner, cx, env);
+                    let place = if *access == crate::AST::PlaceAccess::Write {
+                        lower_expr_as_mut_place(inner, cx, env)
+                    } else {
+                        lower_expr(inner, cx, env)
+                    };
                     TExpr {
                         ty: place.ty.clone(),
                         kind: TExprKind::Borrow {
@@ -5500,7 +5508,26 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ),
                         None => lowered,
                     };
-                    if cx.diverging_functions.contains(&call.name) {
+                    // A body may be flow-divergent even when its callable contract
+                    // promises a value (for example, a panic followed by an
+                    // unreachable return). Keep that declared value type at call
+                    // sites; only a source-declared `Never` is itself a stopping
+                    // expression. This matters for task payloads, whose `Task<T>`
+                    // element type is the callable's declared `T`, not its body
+                    // reachability fact.
+                    let declared_never = cx
+                        .fn_source_types
+                        .get(&call.name)
+                        .and_then(|ty| match ty {
+                            Type::Fn {
+                                ret: Some(ret), ..
+                            } => Some(cx.expand_type_aliases(ret)),
+                            _ => None,
+                        })
+                        .is_some_and(|ty| {
+                            matches!(ty, Type::Named(name) if name == Syntax::TYPE_NEVER)
+                        });
+                    if cx.diverging_functions.contains(&call.name) && declared_never {
                         let line = crate::Diagnostics::span_line_col(&cx.src, call.name_span.start).0;
                         let never = Type::Named(Syntax::TYPE_NEVER.to_string());
                         TExpr {
@@ -6456,12 +6483,25 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             },
                         };
                         let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                        // D-SERDE2: a raw Encode method cannot propagate the
+                        // getter's Result with `?`; consume it at the protocol
+                        // boundary, matching the legacy field_self_read path.
+                        let convert = if env.fn_name == "encode"
+                            && matches!(
+                                env.ret_ty.as_ref(),
+                                Some(Type::Named(name)) if name == Syntax::TYPE_DATA
+                            )
+                        {
+                            TTryConvert::ProtocolExit
+                        } else {
+                            TTryConvert::None
+                        };
                         return TExpr {
                             ty: field_ty,
                             kind: TExprKind::Try {
                                 inner: Box::new(call),
                                 note: None,
-                                convert: TTryConvert::None,
+                                convert,
                                 file: escape_rust_str(&cx.file),
                                 line,
                                 fn_name: escape_rust_str(&env.fn_name),

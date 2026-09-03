@@ -2157,6 +2157,17 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
             Some(crate::Comptime::MathLayout::integer_show(*value, signed))
         }
         (CtValue::BigInt(value), Type::Int) => Some(value.to_string_rep()),
+        (CtValue::BigInt(value), ty)
+            if crate::Comptime::MathLayout::integer_type_layout(ty).is_some() =>
+        {
+            let (signed, _) =
+                crate::Comptime::MathLayout::integer_type_layout(ty).expect("integer layout");
+            Some(if signed {
+                value.to_string_rep()
+            } else {
+                crate::Comptime::MathLayout::integer_show(value.wrapping_u64() as i64, false)
+            })
+        }
         (CtValue::Present(value), Type::Option(inner)) => {
             let rendered = show_typed_value(value, inner, debug).or_else(|| {
                 if debug {
@@ -2192,6 +2203,23 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
         }
         _ if !debug => crate::Comptime::display_core_pure_value(value),
         _ => None,
+    }
+}
+fn fixed_integer_word(
+    value: &CtValue,
+    ty: &Type,
+    span: Span,
+) -> Result<i64, Diagnostic> {
+    let Some((signed, _)) = crate::Comptime::MathLayout::integer_type_layout(ty) else {
+        return as_int(value, span);
+    };
+    if signed {
+        return as_int(value, span);
+    }
+    match value {
+        CtValue::Int(value) => Ok(*value),
+        CtValue::BigInt(value) => Ok(value.wrapping_u64() as i64),
+        _ => as_int(value, span),
     }
 }
 
@@ -6345,6 +6373,21 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 if let Some(read) = self.read_place_mut(&value, scope, self.span()) {
                     return read;
                 }
+                // Single-element split views carry a range handle internally,
+                // but a scalar binding reads the selected element itself.
+                if expr.ty.is_scalar() {
+                    if let CtValue::Struct { type_name, fields } = &value {
+                        if type_name == "__JetViewMut" {
+                            if let CtValue::List(mut items) =
+                                self.materialize_view_mut_window(fields, scope, self.span())?
+                            {
+                                if items.len() == 1 {
+                                    return Ok(items.remove(0));
+                                }
+                            }
+                        }
+                    }
+                }
                 if local.uninit_fixed {
                     if matches!(value, CtValue::List(_)) {
                         Ok(value)
@@ -6666,23 +6709,12 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     }
                 }
                 if let Type::IntN { signed, bits } = &lhs.ty {
-                    let fixed_operand = |value: &CtValue, ty: &Type| {
-                        let unsigned = crate::Comptime::MathLayout::integer_type_layout(ty)
-                            .is_some_and(|(signed, _)| !signed);
-                        if unsigned {
-                            match value {
-                                CtValue::BigInt(value) => Ok(value.wrapping_u64() as i64),
-                                _ => as_int(value, self.span()),
-                            }
-                        } else {
-                            as_int(value, self.span())
-                        }
-                    };
-                    let a = fixed_operand(&l, &lhs.ty)?;
-                    let b = fixed_operand(&r, &rhs.ty)?;
-                    let right_signed = crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
-                        .map(|(signed, _)| signed)
-                        .unwrap_or(true);
+                    let a = fixed_integer_word(&l, &lhs.ty, self.span())?;
+                    let b = fixed_integer_word(&r, &rhs.ty, self.span())?;
+                    let right_signed =
+                        crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
+                            .map(|(signed, _)| signed)
+                            .unwrap_or(true);
                     if *op == BinOp::Div && self.runtime_execution {
                         return self.eval_fixed_width_division(
                             a,
@@ -6730,15 +6762,20 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     // is narrowed back to it, the same way `-` is above; the
                     // width-free default `Int` keeps the exact whole-number
                     // result, which is `-x - 1`.
-                    (UnOp::Not, CtValue::Int(n)) if matches!(&operand.ty, Type::IntN { .. }) => {
+                    (UnOp::Not, value) if matches!(&operand.ty, Type::IntN { .. }) => {
                         let (signed, bits) =
                             crate::Comptime::MathLayout::integer_type_layout(&operand.ty)
                                 .expect("IntN layout");
-                        Ok(CtValue::Int(crate::Comptime::MathLayout::integer_narrow(
-                            !(n as i128),
+                        let value = fixed_integer_word(&value, &operand.ty, self.span())?;
+                        Ok(crate::Comptime::MathLayout::integer_value(
+                            crate::Comptime::MathLayout::integer_narrow(
+                                !(value as i128),
+                                signed,
+                                bits,
+                            ),
                             signed,
                             bits,
-                        )))
+                        ))
                     }
                     (UnOp::Not, CtValue::Int(n)) => Ok(exact_int_value(
                         jet_foundation::Numeric::CtBigInt::from_int(n)
@@ -6766,8 +6803,12 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         self.route_runtime_arithmetic(
                             crate::Comptime::MathLayout::integer_binop(
                                 *op,
-                                as_int(&vals[i], self.span())?,
-                                as_int(&vals[i + 1], self.span())?,
+                                fixed_integer_word(&vals[i], &operands[i].ty, self.span())?,
+                                fixed_integer_word(
+                                    &vals[i + 1],
+                                    &operands[i + 1].ty,
+                                    self.span(),
+                                )?,
                                 *signed,
                                 *bits,
                                 right_signed,
@@ -8746,12 +8787,16 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             },
                             "MIN",
                         ) => Ok(CtValue::Int(i32::MIN as i64)),
-                        (Type::IntN { signed, bits }, "MAX") => Ok(CtValue::Int(
-                            crate::Comptime::MathLayout::integer_bound(*signed, *bits, true),
-                        )),
-                        (Type::IntN { signed, bits }, "MIN") => Ok(CtValue::Int(
-                            crate::Comptime::MathLayout::integer_bound(*signed, *bits, false),
-                        )),
+                        (Type::IntN { signed, bits }, "MAX") => Ok(
+                            crate::Comptime::MathLayout::integer_bound_value(
+                                *signed, *bits, true,
+                            ),
+                        ),
+                        (Type::IntN { signed, bits }, "MIN") => Ok(
+                            crate::Comptime::MathLayout::integer_bound_value(
+                                *signed, *bits, false,
+                            ),
+                        ),
                         _ => Err(unsupported(
                             &format!("numeric bounds `{member}`"),
                             self.span(),
@@ -11163,10 +11208,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         .map(CtValue::Int)
                         .ok_or_else(|| unsupported(&format!("numeric `{method}`"), self.span()));
                 }
-                let CtValue::Int(value) = v else {
-                    return Err(unsupported("numeric bit-count recv", self.span()));
-                };
-                crate::Comptime::MathLayout::integer_bit_count(*value, *width, method)
+                let value = fixed_integer_word(v, recv_ty, self.span())?;
+                crate::Comptime::MathLayout::integer_bit_count(value, *width, method)
                     .map(CtValue::Int)
                     .ok_or_else(|| unsupported(&format!("numeric `{method}`"), self.span()))
             }
@@ -11219,15 +11262,13 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     _ if matches!(result_ty, Type::Int)
                         && matches!(recv_ty, Type::IntN { signed: false, .. }) =>
                     {
-                        let CtValue::Int(value) = v else {
-                            return Err(unsupported("CastAs from unsigned integer", self.span()));
-                        };
+                        let value = fixed_integer_word(v, recv_ty, self.span())?;
                         // Unsigned fixed-width values use their two's-complement
                         // i64 carrier in the evaluator. Decode that carrier
                         // before constructing exact default `Int`; this is the
                         // same operation as AOT/JIT `int_from_u64`.
                         Ok(exact_int_value(
-                            jet_foundation::Numeric::CtBigInt::from_u64(*value as u64),
+                            jet_foundation::Numeric::CtBigInt::from_u64(value as u64),
                         ))
                     }
                     _ => Ok(v.clone()),
@@ -11277,14 +11318,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 let value = if matches!(recv_ty, Type::Int) {
                     exact_big(v).and_then(|value| value.checked_widen(*target_f32))
                 } else {
-                    let CtValue::Int(value) = v else {
-                        return Err(unsupported(
-                            "checked numeric widening expects Int",
-                            self.span(),
-                        ));
-                    };
+                    let value = fixed_integer_word(v, recv_ty, self.span())?;
                     crate::numeric_widen::jet_numeric_checked_widen(
-                        *value as u64,
+                        value as u64,
                         *source_signed,
                         *target_f32,
                     )
@@ -11321,12 +11357,15 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 let value = if matches!(recv_ty, Type::Int) {
                     exact_big(v)
                 } else {
-                    match v {
-                        CtValue::Int(value) => {
-                            Some(jet_foundation::Numeric::CtBigInt::from_int(*value))
-                        }
-                        _ => None,
-                    }
+                    let value = fixed_integer_word(v, recv_ty, self.span())?;
+                    let unsigned = crate::Comptime::MathLayout::integer_type_layout(recv_ty)
+                        .map(|(signed, _)| !signed)
+                        .unwrap_or(false);
+                    Some(if unsigned {
+                        jet_foundation::Numeric::CtBigInt::from_u64(value as u64)
+                    } else {
+                        jet_foundation::Numeric::CtBigInt::from_int(value)
+                    })
                 };
                 let Some(value) = value else {
                     return Err(unsupported("TryFrom expects Int", self.span()));
@@ -11973,6 +12012,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         }
         if let Some(text) = prelude_time_render(value) {
             return Ok(text);
+        }
+        if crate::Comptime::MathLayout::integer_type_layout(ty).is_some() {
+            if let Some(text) = show_typed_value(value, ty, false) {
+                return Ok(text);
+            }
         }
         if let Some(text) = crate::Comptime::display_core_pure_value(value) {
             return Ok(text);

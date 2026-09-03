@@ -35,6 +35,9 @@ trait __jet_Decode: Sized {
 
 #[path = "SyncJetStd.rs"]
 mod jet_std;
+// Values.rs is shared with the standalone AOT Prelude. Re-export only the
+// canonical formatter needed by that shared fragment.
+pub(crate) use self::jet_std::jet_int_to_string;
 
 fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
     fn object_pairs(

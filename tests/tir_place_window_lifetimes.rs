@@ -55,6 +55,43 @@ fn run() {
 }
 "###;
 
+const CARD_2822_SOURCE: &str = r###"
+fn run() {
+    rows := [[1, 2]]
+    if true {
+        view :: &rows[0]
+        view[0] = 9
+        print(view[0])
+    }
+    print(rows[0][0])
+}
+"###;
+
+const CARD_2823_SOURCE: &str = r###"
+struct Parcel { score: Int }
+fn run() {
+    parcels := [Parcel{score: 2}]
+    if true {
+        edit :: &parcels[0].score
+        edit = 12
+        print(edit)
+    }
+    print(parcels[0].score)
+}
+"###;
+
+const CARD_2826_SOURCE: &str = r###"
+fn run() {
+    rows := [[2]]
+    if true {
+        edit :: &rows[0][0]
+        edit = 12
+        print(edit)
+    }
+    print(rows[0][0])
+}
+"###;
+
 #[test]
 fn stack_window_uses_expiring_sentry_address() {
     let rust = compile("tir_place_window_stack", STACK_SOURCE);
@@ -92,4 +129,27 @@ fn heap_element_window_stays_allocator_owned() {
     );
     assert!(!rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_stack_address_of"));
     assert_tiers_agree("tir_place_window_heap_runtime", HEAP_SOURCE, "31\n31\n");
+}
+
+#[test]
+fn card_2822_nested_write_view() {
+    assert_tiers_agree("tir_card_2822_nested_write_view", CARD_2822_SOURCE, "9\n9\n");
+}
+
+#[test]
+fn card_2823_scalar_field_write_view() {
+    assert_tiers_agree(
+        "tir_card_2823_scalar_field_write_view",
+        CARD_2823_SOURCE,
+        "12\n12\n",
+    );
+}
+
+#[test]
+fn card_2826_nested_scalar_write_view() {
+    assert_tiers_agree(
+        "tir_card_2826_nested_scalar_write_view",
+        CARD_2826_SOURCE,
+        "12\n12\n",
+    );
 }

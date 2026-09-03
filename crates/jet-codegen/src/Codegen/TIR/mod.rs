@@ -7626,6 +7626,9 @@ pub enum TLambdaBody {
 pub enum TTryConvert {
     /// Error types match — bare `jet_trace_err(x, …)?`.
     None,
+    /// A raw protocol method (for example `Encode`) consumes a computed
+    /// getter's outcome at the trait boundary instead of propagating `?`.
+    ProtocolExit,
     /// The source error is `Never`; sema proved the failure route is
     /// unreachable, so lowering unwraps the shared carrier without a
     /// conversion or propagation branch.
@@ -7656,7 +7659,7 @@ pub fn try_target_is_default_error(inner: &TExpr, convert: &TTryConvert) -> bool
             target,
             Type::Named(name) if name == crate::Syntax::TYPE_ERR
         ),
-        TTryConvert::Never | TTryConvert::WidenUnion { .. } => false,
+        TTryConvert::Never | TTryConvert::WidenUnion { .. } | TTryConvert::ProtocolExit => false,
     }
 }
 

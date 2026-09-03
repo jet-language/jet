@@ -2828,6 +2828,59 @@ pub(super) fn emit_mut_collection_place(
     }
 }
 
+/// Immutable collection place for borrowed view receivers. Indexed reads
+/// normally clone; a view source must instead retain each live projection so
+/// the returned slice never borrows from a temporary.
+pub(super) fn emit_collection_place(
+    e: &crate::Codegen::TIR::TExpr,
+    cx: &Cx,
+    cleanups: &[ActiveCleanup],
+) -> String {
+    use crate::Codegen::TIR::TExprKind;
+    match &e.kind {
+        TExprKind::Index {
+            base,
+            index,
+            is_map,
+            line,
+            ..
+        } => {
+            let b = emit_collection_place(base, cx, cleanups);
+            let i = emit_expr_with_cleanups(index, cx, cleanups);
+            if *is_map {
+                let fn_name = cx.current_fn.borrow().clone();
+                let src_line = cx
+                    .src
+                    .lines()
+                    .nth((*line as usize).saturating_sub(1))
+                    .unwrap_or_default()
+                    .to_string();
+                format!(
+                    "jet_index_map_ref(&({b}), &({i}), {:?}, {line}, {:?}, {:?}, 1, 1)",
+                    cx.file, fn_name, src_line
+                )
+            } else {
+                format!("({b})[({i}) as usize]")
+            }
+        }
+        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+            emit_collection_place(place, cx, cleanups)
+        }
+        TExprKind::Field { recv, field, boxed } => {
+            let recv_ty = &recv.ty;
+            let recv = emit_collection_place(recv, cx, cleanups);
+            let field = emit_field_rust(cx, recv_ty, field);
+            let place = format!("({recv}).{field}");
+            if *boxed {
+                format!("(*{place})")
+            } else {
+                place
+            }
+        }
+        _ => emit_expr_with_cleanups(e, cx, cleanups),
+    }
+}
+
 /// Emit a closure block while preserving Jet's final-expression return rule.
 /// Ordinary statement blocks terminate expression statements with `;`; a lambda's
 /// final expression is its value and must remain a Rust tail expression. A final
@@ -3861,6 +3914,10 @@ fn emit_tir_stmt_with_collection_proof(
             match step {
                 Some(step) => {
                     let st = emit_expr_with_cleanups(step, cx, active_deferred_closes);
+                    let loop_var = mangle(var);
+                    let range_pad = "    ".repeat(indent + 1);
+                    let loop_pad = "    ".repeat(indent + 2);
+                    let body_indent = indent + 3;
                     out.push_str(&jet_format!(
                         "{}{{ let {jet_prefix}loop_start = {};\n",
                         pad,
@@ -3876,13 +3933,46 @@ fn emit_tir_stmt_with_collection_proof(
                         pad,
                         st
                     ));
-                    out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, jet_loop_stride_message()); }}\n", pad, cx.root_prefix, cx.file));
                     out.push_str(&jet_format!(
-                        "{}{}for {} in ({jet_prefix}loop_start{range_op}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n",
+                        "{}    if {jet_prefix}loop_stride == 0 {{ {}jet_panic({:?}, 0, jet_loop_stride_message()); }}\n",
                         pad,
-                        lbl,
-                        mangle(var)
+                        cx.root_prefix,
+                        cx.file
                     ));
+                    out.push_str(&jet_format!(
+                        "{}if {jet_prefix}loop_stride > 0 {{\n",
+                        range_pad
+                    ));
+                    out.push_str(&jet_format!(
+                        "{}{}for {} in ({jet_prefix}loop_start{}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n",
+                        loop_pad,
+                        lbl,
+                        loop_var,
+                        range_op
+                    ));
+                    emit_scalar_loop_barrier(cx, out, body_indent, Some(&loop_var));
+                    emit_tir_stmts_nested(body, cx, out, body_indent, active_deferred_closes);
+                    out.push_str(&format!("{}}}\n", loop_pad));
+                    out.push_str(&format!("{}}} else {{\n", range_pad));
+                    let negative_iter = if *exclusive {
+                        jet_format!(
+                            "({jet_prefix}loop_end..={jet_prefix}loop_start).rev().step_by({jet_prefix}loop_stride.unsigned_abs() as usize).take_while(|i| *i > {jet_prefix}loop_end)"
+                        )
+                    } else {
+                        jet_format!(
+                            "({jet_prefix}loop_end..={jet_prefix}loop_start).rev().step_by({jet_prefix}loop_stride.unsigned_abs() as usize)"
+                        )
+                    };
+                    out.push_str(&format!(
+                        "{}{}for {} in {} {{\n",
+                        loop_pad, lbl, loop_var, negative_iter
+                    ));
+                    emit_scalar_loop_barrier(cx, out, body_indent, Some(&loop_var));
+                    emit_tir_stmts_nested(body, cx, out, body_indent, active_deferred_closes);
+                    out.push_str(&format!("{}}}\n", loop_pad));
+                    out.push_str(&format!("{}}}\n", range_pad));
+                    out.push_str(&format!("{}}}\n", pad));
+                    return;
                 }
                 None => {
                     out.push_str(&format!(
@@ -4116,7 +4206,7 @@ fn emit_tir_stmt_with_collection_proof(
             }
         }
         TStmt::IndexFieldAssign(assign) => {
-            let b = emit_expr_with_cleanups(&assign.base, cx, active_deferred_closes);
+            let b = emit_mut_collection_place(&assign.base, cx, active_deferred_closes);
             let i = emit_expr_with_cleanups(&assign.index, cx, active_deferred_closes);
             let mut v = emit_expr_with_cleanups(&assign.value, cx, active_deferred_closes);
             if assign.clone_value {
@@ -4534,6 +4624,8 @@ fn emit_tir_stmt_with_collection_proof(
                         // D-SOA1: a columnar list iterates `iter_aos()` (owned records
                         // pulled out of the shared column store, no `.cloned()`); a plain
                         // list iterates `iter().cloned()`.
+                        // Trait-object elements are borrowed: `Box<dyn Trait>` is not
+                        // Clone, and consuming the list would also invalidate later reads.
                         // D-ONCE-WORD1 / D-CONC-STREAM1: a `Stream<T>` iterates BY
                         // VALUE directly; its shared Prelude owns task cancellation.
                         let iter_form = if *by_value {
@@ -4543,6 +4635,16 @@ fn emit_tir_stmt_with_collection_proof(
                             format!("({}).into_iter()", collection_str)
                         } else if *columnar {
                             format!("({}).iter_aos()", collection_str)
+                        } else if matches!(
+                            &collection.ty,
+                            Type::List(inner) | Type::FixedList { elem: inner, .. }
+                                if matches!(inner.as_ref(), Type::TraitObject(_))
+                                    || matches!(
+                                        inner.as_ref(),
+                                        Type::Named(name) if cx.trait_names.contains(name)
+                                    )
+                        ) {
+                            format!("({}).iter()", collection_str)
                         } else if matches!(
                             &collection.ty,
                             Type::List(inner) | Type::FixedList { elem: inner, .. }

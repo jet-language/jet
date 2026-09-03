@@ -71,6 +71,8 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "utc",
                 "zoned",
                 "zoned_local",
+                "days_in_month",
+                "is_leap_year",
             ],
         ))
         || (same_text(module, "core.math.random") && same_text(method, "rng"))

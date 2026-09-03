@@ -1624,3 +1624,55 @@ fn run() {
         "indexed field compound assignment reached codegen instead of E0362: {diags:#?}"
     );
 }
+
+#[test]
+fn card_2843_computed_struct_field_tier_parity() {
+    let src = r#"
+struct Stats {
+    strength: Int
+    gear_mod: Int
+    attack: Int -> strength * 2 + gear_mod
+    threat: Int -> attack + gear_mod
+}
+
+fn run() {
+    stats :: Stats{strength: 10, gear_mod: 3}
+    print(stats.attack)
+    print(stats.threat)
+}
+"#;
+    assert_tiers_agree("tir_card_2843_computed_struct_field", src, "23\n26\n");
+}
+
+#[test]
+fn card_2839_generic_trait_dispatch_tier_parity() {
+    let src = r#"
+
+trait Shape {
+    fn area(self) Float
+}
+
+struct Circle {
+    radius: Float
+
+    impl Shape {
+        fn area(self) Float -> self.radius * self.radius
+    }
+}
+
+struct Square {
+    side: Float
+}
+
+impl Square.Shape {
+    fn area(self) Float -> self.side * self.side
+}
+
+fn run() {
+    shapes :: [Shape]{Circle{radius: 2.0}, Square{side: 3.0}}
+    loop shape in shapes -> print(shape.area())
+    print(shapes.len())
+}
+"#;
+    assert_tiers_agree("tir_card_2839_generic_trait_dispatch", src, "4.0\n9.0\n2\n");
+}

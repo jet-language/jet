@@ -1841,6 +1841,10 @@
                 return small;
             }
         }
+        // A tagged carrier is about to exist. The shared fixed runtime renders
+        // Int through `jet_int_to_string`; hand it this kernel's decoder now so
+        // no tagged value can reach a display before the decoder is installed.
+        crate::jet_install_int_decoder(jet_int_to_string);
         let mut values = jet_int_big_values()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());

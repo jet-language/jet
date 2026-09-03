@@ -500,6 +500,60 @@ fn run() {
     assert_eq!(stdout, "10\n");
 }
 
+#[test]
+fn card_2819_nested_index_field_assignment_tier_parity() {
+    let src = "\
+struct Parcel { score: Int }
+fn run() {
+    rows := [[Parcel{score: 1}]]
+    rows[0][0].score = 17
+    print(rows[0][0].score)
+}
+";
+    assert_tiers_agree("card_2819_nested_index_field_assignment", src, "17\n");
+}
+
+#[test]
+fn card_2820_captured_nested_index_assignment_tier_parity() {
+    let src = "\
+fn run() {
+    rows := [[1]]
+    bump :: () Int -> {
+        rows[0][0] = rows[0][0] + 4
+        rows[0][0]
+    }
+    print(bump())
+    print(rows[0][0])
+}
+";
+    assert_tiers_agree("card_2820_captured_nested_index_assignment", src, "5\n5\n");
+}
+
+#[test]
+fn card_2824_map_index_field_assignment_tier_parity() {
+    let src = "\
+struct Parcel { score: Int }
+fn run() {
+    parcels := [String:Parcel]{\"x\": Parcel{score: 2}}
+    parcels[\"x\"].score = 12
+    print(parcels[\"x\"].score)
+}
+";
+    assert_tiers_agree("card_2824_map_index_field_assignment", src, "12\n");
+}
+
+#[test]
+fn card_2825_nested_range_view_source_tier_parity() {
+    let src = "\
+fn run() {
+    rows := [[1, 2, 3]]
+    window :: rows[0][0..1]
+    print(window[1])
+}
+";
+    assert_tiers_agree("card_2825_nested_range_view_source", src, "2\n");
+}
+
 /// `sort_by` with a key lambda (a list mutated in place). Routes through the
 /// `SortBy` op (`{ jet_list_sort_by(&mut recv, f); }`).
 #[test]
@@ -990,4 +1044,47 @@ fn run() {{
     assert_eq!(code, 0);
     // write_file returns 1 (success); the file contains the written line + newline.
     assert_eq!(stdout, "1\nhello handle\n\n");
+}
+
+#[test]
+fn card_2837_captured_closure_call_tier_parity() {
+    let src = r#"
+fn run() {
+    count := 0
+    next :: () -> {
+        count += 1
+        count
+    }
+    print(next())
+    print(count)
+}
+"#;
+    assert_tiers_agree("tir_card_2837_captured_closure_call", src, "1\n1\n");
+}
+
+#[test]
+fn card_2837_escaping_closure_keeps_capture_copy() {
+    let src = r#"
+fn run() {
+    count := 1
+    get :: () Int -> count
+    items :: [get]
+    count = 7
+    print(items[0].call())
+    print(count)
+}
+"#;
+    assert_tiers_agree("tir_card_2837_escaping_closure_copy", src, "1\n7\n");
+}
+
+#[test]
+fn card_2842_function_value_call_tier_parity() {
+    let src = r#"
+fn run() {
+    double :: (x: Int) Int -> x * 2
+    result :: double.call(21)
+    print(result)
+}
+"#;
+    assert_tiers_agree("tir_card_2842_function_value_call", src, "42\n");
 }

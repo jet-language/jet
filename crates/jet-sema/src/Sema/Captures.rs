@@ -948,9 +948,12 @@ pub(crate) fn stmt_collect_captures(
             } else if let LValue::Index { base, index, .. } = target {
                 expr_collect_captures(base, bound, read, mut_cap, called);
                 expr_collect_captures(index, bound, read, mut_cap, called);
-                if let Expr::Ident(n, _) = base.as_ref() {
-                    if !bound.contains(n) {
-                        mut_cap.insert(n.clone());
+                // A nested index is still a write to the root collection.
+                // Capture the root place, not only the direct `rows[i]` form,
+                // so mutable closures retain write-through capture semantics.
+                if let Some(root) = expr_root_ident(base) {
+                    if !bound.contains(root) {
+                        mut_cap.insert(root.to_string());
                     }
                 }
             } else if let LValue::Field { base, .. } = target {

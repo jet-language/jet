@@ -870,6 +870,26 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             }
                             return Ok(Flow::Normal);
                         }
+                        // D-MEM1: a mutable place binding aliases its owner. A
+                        // local assignment must update the place, not replace the
+                        // handle in the local scope.
+                        if let Some(handle) = scope.get(&key).cloned() {
+                            if super::place_mut_target(&handle).is_some() {
+                                let mut assigned = std::mem::replace(&mut rhs, CtValue::Unit);
+                                if let Some(binop) = op {
+                                    assigned = self.eval_runtime_binop(
+                                        *binop,
+                                        self.read_place_mut(&handle, scope, self.span())
+                                            .expect("place handle has a readable target")?,
+                                        assigned,
+                                        self.span(),
+                                    )?;
+                                }
+                                self.write_place_mut(&handle, assigned, scope, self.span())
+                                    .expect("place handle has a writable target")?;
+                                return Ok(Flow::Normal);
+                            }
+                        }
                         if local.deref {
                             if let Some(view) = scope.get(&key).cloned() {
                                 if Self::allocator_view_parts(&view).is_some() {
@@ -2198,18 +2218,23 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 Ok(Flow::Normal)
             }
             TStmt::IndexFieldAssign(assign) => {
-                if assign.is_map {
-                    return Err(unsupported("index field assign on map", self.span()));
-                }
-                let idx = as_int(&self.eval_expr(&assign.index, scope)?, self.span())?;
-                if idx < 0 {
+                let idx_v = self.eval_expr(&assign.index, scope)?;
+                // Map keys retain their declared key type; only list/view
+                // projections use the integer offset.
+                let idx = if assign.is_map {
+                    0
+                } else {
+                    as_int(&idx_v, self.span())?
+                };
+                if !assign.is_map && idx < 0 {
                     return Err(unsupported("negative index field assign", self.span()));
                 }
                 let mut rhs = self.eval_expr(&assign.value, scope)?;
                 if assign.clone_value {
                     rhs = self.clone_structural_value(rhs, &assign.value.ty)?;
                 }
-                let base_value = self.eval_expr(&assign.base, scope)?;
+                let (root, steps, parents, base_value) =
+                    self.eval_index_base_path(&assign.base, scope)?;
                 if let CtValue::Struct { type_name, fields } = &base_value {
                     if type_name == "__JetViewMut" {
                         let owner = self.view_mut_owner_value(fields, scope, self.span())?;
@@ -2224,28 +2249,32 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         if absolute < 0 || absolute as usize >= items.len() {
                             return Err(unsupported("view-mut OOB", self.span()));
                         }
-                        let element = &mut items[absolute as usize];
                         let CtValue::Struct {
-                            type_name: _,
-                            fields: element_fields,
-                        } = element
+                            type_name,
+                            fields: mut element_fields,
+                        } = items[absolute as usize].clone()
                         else {
                             return Err(unsupported("view-mut field element", self.span()));
                         };
-                        let slot = element_fields.iter_mut().find(|(name, _)| {
-                            super::field_name_matches(name, &assign.field)
-                        });
-                        let Some((_, slot)) = slot else {
+                        let Some((_, slot)) = element_fields
+                            .iter_mut()
+                            .find(|(name, _)| super::field_name_matches(name, &assign.field))
+                        else {
                             return Err(unsupported(
                                 &format!("field `{}`", assign.field),
                                 self.span(),
                             ));
                         };
-                        if let Some(op) = assign.op {
-                            *slot = self.eval_runtime_binop(op, slot.clone(), rhs, self.span())?;
+                        let replacement = if let Some(op) = assign.op {
+                            self.eval_runtime_binop(op, slot.clone(), rhs, self.span())?
                         } else {
-                            *slot = rhs;
-                        }
+                            rhs
+                        };
+                        *slot = replacement;
+                        items[absolute as usize] = CtValue::Struct {
+                            type_name,
+                            fields: element_fields,
+                        };
                         return self
                             .store_view_mut_owner_value(
                                 fields,
@@ -2256,40 +2285,63 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             .map(|()| Flow::Normal);
                     }
                 }
-                let CtValue::List(mut items) = base_value else {
-                    return Err(unsupported("index field assign list", self.span()));
-                };
-                let i = idx as usize;
-                if i >= items.len() {
-                    return Err(unsupported("index field assign OOB", self.span()));
-                }
-                let CtValue::Struct {
-                    type_name,
-                    mut fields,
-                } = items[i].clone()
-                else {
-                    return Err(unsupported("index field assign elem", self.span()));
-                };
-                let mut found = false;
-                for (name, val) in &mut fields {
-                    if super::field_name_matches(name, &assign.field) {
-                        if let Some(op) = assign.op {
-                            *val = self.eval_runtime_binop(op, val.clone(), rhs, self.span())?;
+                let span = self.span();
+                let replacement = {
+                    let mut update_field = |element: &mut CtValue| -> Result<(), Diagnostic> {
+                        let CtValue::Struct { fields, .. } = element else {
+                            return Err(unsupported("index field assign elem", span));
+                        };
+                        let Some((_, slot)) = fields
+                            .iter_mut()
+                            .find(|(name, _)| super::field_name_matches(name, &assign.field))
+                        else {
+                            return Err(unsupported(
+                                &format!("field `{}`", assign.field),
+                                span,
+                            ));
+                        };
+                        *slot = if let Some(op) = assign.op {
+                            self.eval_runtime_binop(op, slot.clone(), rhs.clone(), span)?
                         } else {
-                            *val = rhs;
+                            rhs.clone()
+                        };
+                        Ok(())
+                    };
+                    if assign.is_map {
+                        let CtValue::Map(mut entries) = base_value else {
+                            return Err(unsupported("index field assign map", span));
+                        };
+                        let key = crate::AST::CtKey::from_value(idx_v)
+                            .ok_or_else(|| unsupported("index field assign map key", span))?;
+                        let Some(element) = entries.get_mut(&key) else {
+                            return Err(unsupported("index field assign missing key", span));
+                        };
+                        update_field(element)?;
+                        CtValue::Map(entries)
+                    } else {
+                        let CtValue::List(mut items) = base_value else {
+                            return Err(unsupported("index field assign list", span));
+                        };
+                        let i = idx as usize;
+                        if i >= items.len() {
+                            return Err(unsupported("index field assign OOB", span));
                         }
-                        found = true;
-                        break;
+                        update_field(&mut items[i])?;
+                        CtValue::List(items)
                     }
+                };
+                let mut replacement = replacement;
+                for (step_index, (step_is_map, step_index_value)) in steps.iter().enumerate().rev()
+                {
+                    replacement = self.replace_indexed_value(
+                        parents[step_index].clone(),
+                        step_index_value.clone(),
+                        *step_is_map,
+                        replacement,
+                        false,
+                    )?;
                 }
-                if !found {
-                    return Err(unsupported(
-                        &format!("field `{}`", assign.field),
-                        self.span(),
-                    ));
-                }
-                items[i] = CtValue::Struct { type_name, fields };
-                self.write_back_place(&assign.base, CtValue::List(items), scope)?;
+                self.write_back_place(root, replacement, scope)?;
                 Ok(Flow::Normal)
             }
             TStmt::IndexHookAssign {
@@ -2398,8 +2450,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 line: _,
             } => {
                 // D-SHAPE-PLACE1=A: mirror AOT `split_at_mut` planning with absolute
-                // region handles. Mutable user windows stay as `__JetViewMut` so
-                // IndexAssign / field writes reach the owner (AOT emits real slices).
+                // region handles. Multi-element mutable windows stay as `__JetViewMut`;
+                // single-element bindings use `__JetPlaceMut` for the selected place.
                 // Read-only windows still materialize.
                 let owner_path = if let Some(owner_expr) = owner {
                     let (base_name, path) = owner_list_place(owner_expr, self.span())?
@@ -2482,9 +2534,21 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     );
                 }
                 if *write {
-                    // Write-through handle — including single-element `&xs[i]` so
-                    // `view.field = v` / `view = v` match AOT `&mut` semantics.
-                    scope.insert(name.clone(), place_region(&base_name, &path, *start, *end));
+                    // A single-element write view aliases the selected place
+                    // itself. Keep its value shape (scalar or nested list) instead
+                    // of exposing a one-element `__JetViewMut` range.
+                    if *single {
+                        let mut place_path = path.clone();
+                        place_path.push(ViewMutPathStep::Index(*start));
+                        scope.insert(
+                            name.clone(),
+                            super::place_mut_handle(&base_name, &place_path),
+                        );
+                    } else {
+                        // Multi-element windows remain range handles so indexed
+                        // and field writes update the owner's window.
+                        scope.insert(name.clone(), place_region(&base_name, &path, *start, *end));
+                    }
                 } else {
                     let items = {
                         let probe = place_region(&base_name, &path, *start, *end);

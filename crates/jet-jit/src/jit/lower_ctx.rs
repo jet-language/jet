@@ -3475,6 +3475,9 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(trace, &[file_v, line_v, fn_v]);
         }
         let return_handle = match convert {
+            TIR::TTryConvert::ProtocolExit => {
+                return Err("JIT deopt: raw protocol computed getter error exit".to_string())
+            }
             TIR::TTryConvert::None => handle,
             TIR::TTryConvert::Never => unreachable!("Never try conversion handled above"),
             TIR::TTryConvert::DefaultErr => {
