@@ -202,16 +202,17 @@ const domainRank = (domain) => {
   return index < 0 ? DOMAIN_ORDER.length : index;
 };
 
+// Language rails are the matrix columns; axis comparisons (live reload versus
+// vite, nodemon, …) compare tools, so they carry their own column set and sit
+// in a labelled band under the cells.
 export function projectGauntletMatrix(status) {
   const source = object(status);
   const cells = array(source.cells).map(cellRow).sort((left, right) =>
     domainRank(left.domain) - domainRank(right.domain) || String(left.id).localeCompare(String(right.id)));
   const axisRows = Object.entries(object(source.axes)).map(([id, axis]) => axisRow(id, axis));
-  const columns = sortPeers([
-    ...cells.flatMap((row) => row.peerNames),
-    ...axisRows.flatMap((row) => row.peerNames),
-  ]);
-  return { columns, rows: [...cells, ...axisRows], cellRows: cells, axisRows };
+  const columns = sortPeers(cells.flatMap((row) => row.peerNames));
+  const axisColumns = sortPeers(axisRows.flatMap((row) => row.peerNames));
+  return { columns, axisColumns, rows: [...cells, ...axisRows], cellRows: cells, axisRows };
 }
 
 // ---- formatting -------------------------------------------------------------

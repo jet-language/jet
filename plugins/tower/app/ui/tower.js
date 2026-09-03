@@ -1858,12 +1858,18 @@ function gauntletCell(row, peerName, details) {
     </button></td>`;
 }
 
-function gauntletRow(row, columns, details) {
+function gauntletRow(row, columns, width, details) {
   const secondary = row.kind === 'axis' ? `${row.primary_metric ? row.primary_metric.replaceAll('_', ' ') : ''}` : (row.entry || 'no entry');
+  const filler = width > columns.length ? `<td class="gauntlet__blank" colspan="${width - columns.length}"></td>` : '';
   return `<tr class="gauntlet__row gauntlet__row--${gauntletVerdict(row.verdict)}${row.kind === 'axis' ? ' gauntlet__row--axis' : ''}">
     <th scope="row"><div><strong>${esc(gauntletRowLabel(row))}</strong><small>${esc(secondary)}</small></div></th>
-    ${columns.map((peer) => gauntletCell(row, peer, details)).join('')}
+    ${columns.map((peer) => gauntletCell(row, peer, details)).join('')}${filler}
   </tr>`;
+}
+
+function gauntletHeader(label, columns, width) {
+  const filler = width > columns.length ? `<th class="gauntlet__blank" colspan="${width - columns.length}"></th>` : '';
+  return `<tr><th scope="col">${esc(label)}</th>${columns.map((peer) => `<th scope="col">${esc(peer)}</th>`).join('')}${filler}</tr>`;
 }
 
 function gauntletMeasuredRange(matrix) {
@@ -1967,10 +1973,15 @@ async function viewGauntlet() {
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
       <span class="viewhead__sub">${esc(gauntletMeasuredRange(matrix))} · ratio is Jet / peer, worst required tier</span>
       <div class="gauntlet__summary" aria-label="Gauntlet summary">${summaryPills}</div>
-    </div>
-    <div class="gauntlet__matrix" aria-label="Gauntlet status matrix">${matrix.rows.length ? `<table class="gauntlet__table">
-      <thead><tr><th scope="col">cell</th>${matrix.columns.map((peer) => `<th scope="col">${esc(peer)}</th>`).join('')}</tr></thead>
-      <tbody>${matrix.rows.map((row) => gauntletRow(row, matrix.columns, details)).join('')}</tbody>
+    </div>`;
+  const width = Math.max(matrix.columns.length, matrix.axisColumns.length);
+  const axisBand = matrix.axisRows.length ? `<tbody class="gauntlet__axes">
+      ${gauntletHeader('axis', matrix.axisColumns, width)}
+      ${matrix.axisRows.map((row) => gauntletRow(row, matrix.axisColumns, width, details)).join('')}
+    </tbody>` : '';
+  v.innerHTML += `<div class="gauntlet__matrix" aria-label="Gauntlet status matrix">${matrix.rows.length ? `<table class="gauntlet__table">
+      <thead>${gauntletHeader('cell', matrix.columns, width)}</thead>
+      <tbody>${matrix.cellRows.map((row) => gauntletRow(row, matrix.columns, width, details)).join('')}</tbody>${axisBand}
     </table>` : '<div class="empty">No Gauntlet cells.</div>'}</div>`;
   const root = $('.gauntlet__matrix', v);
   if (root) gauntletTips(root, details);

@@ -34,7 +34,8 @@ function fixture() {
 
 test('projects cells and axes into one fixed matrix in domain order', () => {
   const matrix = projectGauntletMatrix(fixture());
-  assert.deepEqual(matrix.columns, ['rust', 'python', 'vite']);
+  assert.deepEqual(matrix.columns, ['rust', 'python']);
+  assert.deepEqual(matrix.axisColumns, ['vite']);
   assert.deepEqual(matrix.rows.map((row) => row.id), ['text.kernel', 'empty.cell', 'axis:live_reload']);
   const text = matrix.rows.find((row) => row.id === 'text.kernel');
   assert.equal(text.peers.rust.verdict, 'parity');
