@@ -12,10 +12,8 @@ const SUMMARY_KEYS = Object.freeze([
   "metric_win", "metric_parity", "metric_loss", "metric_unmeasured", "metric_not_applicable",
 ]);
 const RATIO_TIERS = Object.freeze(["aot", "run"]);
-const DETAIL_KEYS = Object.freeze([
-  "reason", "unit", "applicability", "evidence", "samples", "median", "p99", "rss",
-  "peak_rss_kb", "sample_count",
-]);
+const DETAIL_KEYS = Object.freeze(["reason", "unit", "applicability", "evidence", "stats"]);
+const STAMP_KEYS = Object.freeze(["measured_at", "measured_iso", "run_id", "source_file"]);
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const asObject = (value) => isObject(value) ? value : {};
@@ -36,7 +34,7 @@ function normalizeReportPath(value) {
 function reportStamp(report, reportPath = null) {
   const sourceFile = normalizeReportPath(reportPath);
   const generated = typeof report?.generated === "string" ? report.generated : null;
-  const pathDate = String(sourceFile ?? "").match(/(?:^|\/)(\d{4}-\d{2}-\d{2})(?:\.json)?$/)?.[1] ?? null;
+  const pathDate = String(sourceFile ?? "").match(/(?:^|\/)(\d{4}-\d{2}-\d{2})(?:-[^/]*)?\.json$/)?.[1] ?? null;
   const date = generated?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? pathDate;
   const runId = report?.run_id == null ? "" : String(report.run_id);
   return {
@@ -64,7 +62,7 @@ function metricSourceFor(tier, metric) {
 }
 
 function copyDetails(record, target) {
-  for (const key of DETAIL_KEYS) {
+  for (const key of [...DETAIL_KEYS, ...STAMP_KEYS]) {
     if (Object.hasOwn(record, key)) target[key] = record[key];
   }
   return target;
@@ -82,38 +80,56 @@ function projectTier(tier, fallbackVerdict = null, metadata = null) {
   };
   copyDetails(record, output);
   if (metadata) {
-    for (const key of ["measured_at", "run_id", "source_file"]) {
+    for (const key of STAMP_KEYS) {
       if (metadata[key] != null) output[key] = metadata[key];
     }
   }
   return output;
 }
 
-function rowDetails(row) {
-  const record = asObject(row);
-  const runtime = asObject(record.runtime);
-  const metrics = asObject(record.metrics);
-  const details = {};
-  for (const key of ["samples", "median", "p99"]) {
-    if (Object.hasOwn(runtime, key)) details[key] = runtime[key];
+// Sample field behind each runtime metric; other metrics are single values.
+const SAMPLE_FIELDS = Object.freeze({
+  runtime_wall_seconds: "wall_seconds",
+  runtime_peak_rss_kb: "peak_rss_kb",
+  runtime_first_stdout_seconds: "time_to_first_stdout_seconds",
+});
+
+function sampleStats(runtime, field) {
+  const record = asObject(runtime);
+  const values = asArray(record.samples)
+    .map((sample) => finiteNumber(asObject(sample)[field]))
+    .filter((value) => value != null)
+    .sort((left, right) => left - right);
+  const median = finiteNumber(asObject(record.median)[field]);
+  const rss = finiteNumber(asObject(record.median).peak_rss_kb)
+    ?? (values.length && field === "peak_rss_kb" ? values[values.length >> 1] : null);
+  if (!values.length) {
+    if (median == null) return null;
+    return { samples: null, best: median, median, mean: median, rss };
   }
-  const rss = finiteNumber(metrics.runtime_peak_rss_kb ?? metrics.peak_rss_bytes)
-    ?? finiteNumber(runtime.median?.peak_rss_kb);
-  if (rss != null) details.rss = rss;
-  return details;
+  const middle = values.length >> 1;
+  return {
+    samples: values.length,
+    best: values[0],
+    median: median ?? (values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2),
+    mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+    rss,
+  };
 }
 
-function decorateMetricValue(value, result, language, jetLanguage = "jet") {
+// Best / median / mean per side for one tier of one metric. The AOT tier is
+// the `rows.jet` measurement; run and dev tiers live under `jet_tiers`. Legacy
+// reports (no `tiers` block) measured `rows.jet` as their single tier.
+function decorateMetricValue(value, result, language, jetLanguage, metric, tier, structured = true) {
   const output = { ...asObject(value) };
-  const peerDetails = rowDetails(result?.rows?.[language]);
-  const jetDetails = rowDetails(result?.rows?.[jetLanguage]);
-  for (const key of ["samples", "median", "p99", "rss"]) {
-    if (Object.hasOwn(output, key)) continue;
-    const peer = peerDetails[key];
-    const jet = jetDetails[key];
-    if (peer === undefined && jet === undefined) continue;
-    output[key] = { jet: jet ?? null, peer: peer ?? null };
-  }
+  const field = SAMPLE_FIELDS[metric];
+  if (!field || Object.hasOwn(output, "stats")) return output;
+  const jetRuntime = !structured || tier === "aot"
+    ? result?.rows?.[jetLanguage]?.runtime
+    : result?.jet_tiers?.[tier]?.runtime;
+  const jet = sampleStats(jetRuntime, field);
+  const peer = sampleStats(result?.rows?.[language]?.runtime, field);
+  if (jet || peer) output.stats = { jet, peer };
   return output;
 }
 
@@ -142,7 +158,7 @@ function normalizeRawPeer(language, comparison, result) {
       const source = structured
         ? (tierRecord.metrics?.[metric] ?? (tier === "aot" ? top : null))
         : top;
-      return [tier, decorateMetricValue(source, result, language, jetLanguage)];
+      return [tier, decorateMetricValue(source, result, language, jetLanguage, metric, tier, structured)];
     }));
     const fallback = top.verdict ?? null;
     return [metric, { ...top, tiers, verdict: recognizedVerdict(fallback) ? fallback : null }];
@@ -366,6 +382,7 @@ function metricVerdict(peer, metric, mode, policyByMode) {
 function addCellMetadata(cell, stamp) {
   if (!stamp) return;
   cell.measured_at = stamp.date;
+  cell.measured_iso = stamp.generated;
   cell.run_id = stamp.runId;
   cell.source_file = stamp.sourceFile;
 }
@@ -686,6 +703,7 @@ function mergeCellParts(parts, cellId, primaryMetricByMode, tierPolicyByMode) {
         return [tier, selected
           ? projectTier(selected.value, null, {
             measured_at: selected.stamp.date,
+            measured_iso: selected.stamp.generated,
             run_id: selected.stamp.runId,
             source_file: selected.stamp.sourceFile,
           })
@@ -732,6 +750,7 @@ function mergeCellParts(parts, cellId, primaryMetricByMode, tierPolicyByMode) {
   };
   if (measuredStamp) {
     cell.measured_at = measuredStamp.date;
+    cell.measured_iso = measuredStamp.generated;
     cell.run_id = measuredStamp.runId;
     cell.source_file = measuredStamp.sourceFile;
   }

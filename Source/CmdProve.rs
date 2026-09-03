@@ -1775,6 +1775,14 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                                 highest_exit = ExitCodes::RUNTIME_PANIC;
                             }
                             for record in records {
+                                if record.kind == 2
+                                    && (record.name == "E3005"
+                                        || record.message.starts_with("Stop ["))
+                                    || record.kind == 0
+                                        && record.message.starts_with("Stop [")
+                                {
+                                    continue;
+                                }
                                 let claim =
                                     format!("{}:{}:{}", record.kind, record.name, record.message);
                                 items.push(TestItem {

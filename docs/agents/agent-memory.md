@@ -1108,6 +1108,19 @@ pure-Claude fan-outs, never as a codex nursery.
 - **Stale scratch fixtures poison authority discovery.** A leftover hostile symlink
   fixture under a shared scratch root produced `E1334 authority path is a symlink` for
   an unrelated build; use a fresh directory per repro.
+- **Gauntlet results clobbered by filename (fixed 2026-09-02).** `run.mjs` wrote every
+  report to `gauntlet/results/<date>.json`, so the day's full-matrix run was overwritten
+  by the next `--entry`/`--axis` run and Tower showed 22 of 25 cells unmeasured after a
+  complete run. Partial runs now write `<date>-<entry>.json` / `<date>-axis-<axis>.json`;
+  `status.mjs --merge gauntlet/results` folds every file. Never "clean up" that
+  directory by date.
+- **Gauntlet measured the debug compiler.** The harness defaulted to `target/debug/jet`;
+  `jet run`/`jet dev` execute inside the compiler process, so the run tier timed
+  unoptimized Cranelift hosts and interpreter ambient (embedded-data: 24.9 s debug vs
+  5.0 s release vs 0.11 s AOT). The harness now requires `target/release/jet` (build with
+  `scripts/agent/jet-env cargo build --release --bin jet`). The remaining 44× run/AOT gap
+  is real: JIT'd loops over byte collections call Prelude hosts per element and box values
+  (585 MB RSS for a 12 MB input).
 
 ### agent-durability-plan
 

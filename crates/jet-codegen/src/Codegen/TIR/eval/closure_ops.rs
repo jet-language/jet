@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 
 use crate::Codegen::TIR::{TClosureOp, TExpr, TExprKind, TLambda, TLambdaBody, TStmt};
+use crate::AST::Type;
 use crate::Comptime::Builtins::{as_bool, cmp};
 use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -34,6 +35,36 @@ fn ordering_cmp(value: &CtValue, span: Span) -> Result<std::cmp::Ordering, Diagn
         _ => Err(unsupported("sort_by comparator must return Ordering", span)),
     }
 }
+/// Project a named function's executable carrier onto the success type in the
+/// callback slot. Non-Try collection adapters receive the source callback
+/// shape; Try adapters keep the carrier so their own failure path can consume it.
+fn project_named_callback_result(callback: &TExpr, value: CtValue) -> CtValue {
+    fn source_return(expr: &TExpr) -> Option<&Type> {
+        match &expr.kind {
+            TExprKind::HostBorrowCallback { callable, .. } => source_return(callable),
+            TExprKind::FnValue {
+                kind:
+                    crate::Codegen::TIR::TFnValueKind::NamedFn {
+                        name: Some(_), ..
+                    },
+            } => match &expr.ty {
+                Type::Fn { ret: Some(ret), .. } => Some(ret),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    let Some(ret) = source_return(callback) else {
+        return value;
+    };
+    let success = match ret {
+        Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
+        _ => ret,
+    };
+    EvalCtx::normalize_eval_value(value, success)
+}
+
 
 fn progress_parts(
     value: &CtValue,
@@ -452,11 +483,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             .get(callback_index)
             .ok_or_else(|| unsupported("closure method arg", self.span()))?;
         let callback_value = self.eval_expr(callback, scope)?;
+        let callback_uses_effective_carrier = matches!(
+            op,
+            TClosureOp::TryMap
+                | TClosureOp::TryFilter
+                | TClosureOp::TrySortBy
+                | TClosureOp::TrySortByDesc
+                | TClosureOp::FilterMap
+        );
         let scope_ptr = scope as *mut HashMap<String, CtValue>;
         let calln = |this: &mut Self, argv: Vec<CtValue>| {
             // SAFETY: the collection operation invokes this closure
             // synchronously; no other scope access overlaps the call.
-            unsafe { this.call_callable_in_scope(&callback_value, argv, &mut *scope_ptr) }
+            let value =
+                unsafe { this.call_callable_in_scope(&callback_value, argv, &mut *scope_ptr) }?;
+            Ok(if callback_uses_effective_carrier {
+                value
+            } else {
+                project_named_callback_result(callback, value)
+            })
         };
         let mut progress_cursor = 0usize;
         let mut progress_count = 0usize;

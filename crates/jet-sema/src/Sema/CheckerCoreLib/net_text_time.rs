@@ -1,4 +1,4 @@
-use super::alloc_ptrs::result_ty;
+use super::alloc_ptrs::{io_error_ty, result_ty};
 use super::core_types::{u8_ty, unit_ty};
 use super::serde_diags::wrong_core_arity;
 use crate::Diagnostics::{Diagnostic, Span};
@@ -1362,7 +1362,10 @@ pub fn path_method_return(
         "normalize" => Some(Some(path())),
         "is_within" if n_args == 1 => Some(Some(Type::Bool)),
         "to_string" => Some(Some(Type::String)),
-        "write_atomic" => Some(Some(result_ty(unit_ty(), Type::String))),
+        // D-FAIL-CONV2: Path.write_atomic uses the same typed IOError family
+        // as the core.files filesystem calls, so every tier selects the
+        // canonical IOError -> Err conversion.
+        "write_atomic" => Some(Some(result_ty(unit_ty(), io_error_ty()))),
         "walk" => Some(Some(Type::List(Box::new(path())))),
         _ => None,
     }

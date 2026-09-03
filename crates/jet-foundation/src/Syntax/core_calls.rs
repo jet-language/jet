@@ -651,6 +651,7 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.net", "udp_packet_bytes"),
     ("core.net", "udp_packet_original_len"),
     ("core.net", "udp_packet_truncated"),
+    ("core.data", "inner_join"),
 ];
 
 pub fn core_call_ambient_routes() -> &'static [(&'static str, &'static str)] {
@@ -4903,6 +4904,17 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     )
     .with_max_arity(3)
     .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
+    .without_direct_aot()
+    .without_direct_jit(),
+    // D-DATA-SURFACE1: inner joins use the same ambient typed-row adapter as
+    // left joins; the evaluator marshals both into the Prelude kernel.
+    CoreCallRecord::new(
+        "core.data",
+        "inner_join",
+        "jet_data_inner_join",
+        true,
+        &[true, true, false, false],
+    )
     .without_direct_aot()
     .without_direct_jit(),
 ];

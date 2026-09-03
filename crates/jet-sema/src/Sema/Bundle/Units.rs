@@ -338,6 +338,39 @@ pub(super) fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnos
                 bundle.name_ledger.record_alias_use(declaration.module, span);
             }
         }
+        let mut unqualified_names = HashSet::new();
+        dimension_unqualified_names(expression, &mut unqualified_names);
+        for name in unqualified_names {
+            if declarations
+                .iter()
+                .any(|candidate| candidate.module == declaration.module && candidate.family == name)
+            {
+                continue;
+            }
+            let imported_targets = imported_modules[declaration.module]
+                .iter()
+                .copied()
+                .filter(|target| {
+                    declarations.iter().any(|candidate| {
+                        candidate.module == *target
+                            && candidate.is_pub
+                            && candidate.family == name
+                    })
+                })
+                .collect::<HashSet<_>>();
+            for (alias, target) in &import_aliases[declaration.module] {
+                if !imported_targets.contains(target) {
+                    continue;
+                }
+                let span = bundle
+                    .name_ledger
+                    .alias(declaration.module, alias)
+                    .map(|binding| binding.span);
+                if let Some(span) = span {
+                    bundle.name_ledger.record_alias_use(declaration.module, span);
+                }
+            }
+        }
     }
     let mut known = HashMap::<(usize, String), crate::AST::Dimension>::new();
     for declaration in &declarations {
@@ -525,6 +558,20 @@ fn dimension_aliases(expression: &crate::AST::Expr, aliases: &mut HashSet<String
             dimension_aliases(left, aliases);
             dimension_aliases(right, aliases);
         }
+        _ => {}
+    }
+}
+
+fn dimension_unqualified_names(expression: &crate::AST::Expr, names: &mut HashSet<String>) {
+    match expression {
+        crate::AST::Expr::Ident(name, _) => {
+            names.insert(name.clone());
+        }
+        crate::AST::Expr::Binary(_, left, right, _) => {
+            dimension_unqualified_names(left, names);
+            dimension_unqualified_names(right, names);
+        }
+        crate::AST::Expr::Field(_, _, _) => {}
         _ => {}
     }
 }

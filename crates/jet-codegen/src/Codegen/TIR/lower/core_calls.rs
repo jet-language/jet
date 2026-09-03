@@ -1,6 +1,7 @@
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::core_closure_call_return_ty;
+use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda;
@@ -178,18 +179,18 @@ pub(crate) fn lower_core_closure_call(
     };
     if module == "core.tasks" && method == "spawn" {
         let lam = lam_at(0)?;
-        let body_ty = spawn_body_result_ty(lam, cx, env);
-        // D-CONC-SPAWN1: lower both closure views under the same task carrier.
-        // A bare `return` in `task { … ?? return }` belongs to the task, not
-        // the enclosing function; propagation uses the normalized carrier.
+        let _source_ty = spawn_body_result_ty(lam, cx, env);
+        let carrier_ty = spawn_body_carrier_ty(lam, cx, env);
+        // Sema keeps Task<T> as source metadata; the TIR handle retains the
+        // closure carrier so its join adapter can propagate the inner E.
         let mut spawn_env = clone_env(env);
-        spawn_env.ret_ty = Some(body_ty.clone());
+        spawn_env.ret_ty = Some(carrier_ty.clone());
         let site = jit_spawn_site(lam, cx, env);
         let label = spawn_label(lam, cx, env);
         let spawn_closure = render_spawn_lambda(lam, cx, &spawn_env);
         let executable = Box::new(lower_lambda(lam, cx, &spawn_env));
         return Some(TExpr {
-            ty: core_closure_call_return_ty(module, method, body_ty),
+            ty: core_closure_call_return_ty(module, method, carrier_ty),
             kind: TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Spawn {
                     group: None,

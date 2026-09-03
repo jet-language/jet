@@ -2326,20 +2326,21 @@ impl<'a> Checker<'a> {
         value: &mut Expr,
         span: Span,
     ) {
-        let mut actual = actual.clone();
-        if expected != &actual && self.implicitly_convert_unit(value, expected, &actual) {
+        let expected = self.resolve_type(expected.clone());
+        let mut actual = self.resolve_type(actual.clone());
+        if expected != actual && self.implicitly_convert_unit(value, &expected, &actual) {
             actual = expected.clone();
         }
-        let reported = self.check_type_assignable(expected, &actual, span);
+        let reported = self.check_type_assignable(&expected, &actual, span);
         if !reported {
-            let fix = if *expected == Type::Int
+            let fix = if expected == Type::Int
                 && matches!(value, Expr::Binary(BinOp::Div, _, _, _))
                 && matches!(&actual, Type::Named(name) if name == Syntax::TYPE_FRACTION)
             {
                 "use `/%` to divide and round down (`/%=` in place), or make the field a Float"
                     .to_string()
             } else {
-                type_fix_hint(expected, &actual)
+                type_fix_hint(&expected, &actual)
             };
             self.diags.push(Diagnostic::error(
                 "E0108",

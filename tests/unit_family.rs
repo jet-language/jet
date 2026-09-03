@@ -6,6 +6,9 @@
 //! machinery: convert with `Usd.from_float(value)`, scalar scaling stays in the
 //! unit, `.raw()` strips it, and nominal cross-unit/unit×unit mixing is E0127
 //! (the distinct same-type arithmetic rule). The family erases in codegen (I3).
+//! D-TYPE2-DEFAULT1=A (docs/spec/syntax-decisions.md:768): bare decimal
+//! literals are exact; these fixtures use the registered `Float{...}` literal
+//! when `from_float` needs an approximate input.
 
 mod common;
 
@@ -80,7 +83,7 @@ fn omitted_base_defaults_to_first_member() {
     );
     let codes = codes_of(
         "#UnitFamily(Length) { meter millimeter(scale: 1/1000) }\n\
-         fn run() { m :: Millimeter.from_float(1000.0); print(\"{(m.raw())}\") }\n",
+         fn run() { m :: Millimeter.from_float(Float{1000.0}); print(\"{(m.raw())}\") }\n",
     );
     assert!(codes.is_empty(), "expected clean compile, got {codes:?}");
 }
@@ -482,8 +485,8 @@ fn affine_point_delta_algebra_and_conversion_compile() {
     celsius(scale: 1, offset: 27315/100)
 }
 fn run() {
-    freezing :: CelsiusPoint.from_float(0.0)
-    step :: CelsiusDelta.from_float(5.0)
+    freezing :: CelsiusPoint.from_float(Float{0.0})
+    step :: CelsiusDelta.from_float(Float{5.0})
     warmer :: freezing + step
     drift :: warmer - freezing
     total :: drift + step
@@ -555,7 +558,7 @@ fn takes_meter(value: Meter) { print(value.raw()) }
 "#;
     for value in ["0.25", "1.7976931348623157e308"] {
         let src = format!(
-            "{family}\nfn relay(value: Double) {{ takes_meter(value) }}\nfn run() {{ relay(Double.from_float({value})) }}\n"
+            "{family}\nfn relay(value: Double) {{ takes_meter(value) }}\nfn run() {{ relay(Double.from_float(Float{{{value}}})) }}\n"
         );
         assert_eq!(
             check_codes_of(&src),
@@ -565,21 +568,21 @@ fn takes_meter(value: Meter) { print(value.raw()) }
     }
 
     let direct_negative =
-        format!("{family}\nfn run() {{ takes_meter(Double.from_float(-1.0)) }}\n");
+        format!("{family}\nfn run() {{ takes_meter(Double.from_float(Float{{-1.0}})) }}\n");
     assert!(
         check_codes_of(&direct_negative).is_empty(),
         "direct negative literal has an exact scale-2 conversion"
     );
 
     let bound_negative =
-        format!("{family}\nfn run() {{ value :: Double.from_float(-2.0)\n takes_meter(value) }}\n");
+        format!("{family}\nfn run() {{ value :: Double.from_float(Float{{-2.0}})\n takes_meter(value) }}\n");
     assert!(
         check_codes_of(&bound_negative).is_empty(),
         "immutable negative literal binding preserves its exact value"
     );
 
     let inexact_negative =
-        format!("{family}\nfn run() {{ takes_meter(Double.from_float(-0.25)) }}\n");
+        format!("{family}\nfn run() {{ takes_meter(Double.from_float(Float{{-0.25}})) }}\n");
     assert_eq!(
         check_codes_of(&inexact_negative),
         vec!["E0127"],
@@ -593,7 +596,7 @@ fn takes_meter(value: Meter) { print(value.raw()) }
 }
 fn takes_meter(value: Meter) { print(value.raw()) }
 fn relay(value: Alias) { takes_meter(value) }
-fn run() { relay(Alias.from_float(0.25)) }
+fn run() { relay(Alias.from_float(Float{0.25})) }
 "#;
     assert!(
         check_codes_of(identity).is_empty(),
@@ -615,13 +618,13 @@ fn exactness_uses_rational_math_beyond_f64_integer_precision() {
     assert_eq!(codes_of(&implicit), vec!["E0127"]);
 
     let unrepresentable_implicit = format!(
-        "{family}\nfn takes_meter(value: Meter) {{ print(value.raw()) }}\nfn run() {{ takes_meter(Almost.from_float(9007199254740992.0)) }}\n"
+        "{family}\nfn takes_meter(value: Meter) {{ print(value.raw()) }}\nfn run() {{ takes_meter(Almost.from_float(Float{{9007199254740992.0}})) }}\n"
     );
     assert_eq!(codes_of(&unrepresentable_implicit), vec!["E0127"]);
 
     if tir_support::have_rustc() {
         let explicit = format!(
-            "{family}\nfn run() {{ value :: Meter.from_almost(1almost) ?? Meter.from_float(-1.0); print(value.raw()) }}\n"
+            "{family}\nfn run() {{ value :: Meter.from_almost(1almost) ?? Meter.from_float(Float{{-1.0}}); print(value.raw()) }}\n"
         );
         let (code, stdout) = tir_support::build_and_run("quantity_exact_rational_edge", &explicit);
         assert_eq!(code, 0);
@@ -642,13 +645,13 @@ fn exactness_uses_rational_math_beyond_f64_integer_precision() {
     below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
 }
 fn run() {
-    exact :: Meter.from_almost(Almost.from_float(9007199254740992.0)) ?? Meter.from_float(-1.0)
-    tie :: Meter.from_half_rounded(Half.from_float(1.0), .NearestEven, digits: 0) ?? panic("tie")
-    above :: Meter.from_above_half_rounded(AboveHalf.from_float(1.0), .NearestEven, digits: 0) ?? panic("above")
-    negative :: Meter.from_three_halves_rounded(ThreeHalves.from_float(-1.0), .NearestEven, digits: 0) ?? panic("negative")
-    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(TieOffsetPoint.from_float(0.0), .NearestEven, digits: 0) ?? panic("affine tie")
-    affine_above :: KelvinPoint.from_above_offset_point_rounded(AboveOffsetPoint.from_float(0.0), .NearestEven, digits: 0) ?? panic("affine above")
-    affine_below :: KelvinPoint.from_below_offset_point_rounded(BelowOffsetPoint.from_float(0.0), .NearestEven, digits: 0) ?? panic("affine below")
+    exact :: Meter.from_almost(Almost.from_float(Float{9007199254740992.0})) ?? Meter.from_float(Float{-1.0})
+    tie :: Meter.from_half_rounded(Half.from_float(Float{1.0}), .NearestEven, digits: 0) ?? panic("tie")
+    above :: Meter.from_above_half_rounded(AboveHalf.from_float(Float{1.0}), .NearestEven, digits: 0) ?? panic("above")
+    negative :: Meter.from_three_halves_rounded(ThreeHalves.from_float(Float{-1.0}), .NearestEven, digits: 0) ?? panic("negative")
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(TieOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine tie")
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(AboveOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine above")
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(BelowOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine below")
     print("{(exact.raw())} {(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
 }
 "#;
@@ -660,8 +663,8 @@ fn run() {
         let overflow = r#"
 #UnitFamily(Length, dimension, base: meter) { meter double(scale: 2) }
 fn run() {
-    source :: Double.from_float(1.7976931348623157e308)
-    value :: Meter.from_double_rounded(source, .NearestEven, digits: 0) ?? Meter.from_float(-1.0)
+    source :: Double.from_float(Float{1.7976931348623157e308})
+    value :: Meter.from_double_rounded(source, .NearestEven, digits: 0) ?? Meter.from_float(Float{-1.0})
     print(value.raw())
 }
 "#;
@@ -720,10 +723,10 @@ fn rounded_conversion_honors_mode_digits_affinity_and_fallibility() {
     shifted(scale: 1, offset: 249/1000)
 }
 fn run() {
-    positive :: Half.from_float(5.0)
-    negative :: Half.from_float(-5.0)
-    positive_odd_tie :: Half.from_float(7.0)
-    negative_odd_tie :: Half.from_float(-7.0)
+    positive :: Half.from_float(Float{5.0})
+    negative :: Half.from_float(Float{-5.0})
+    positive_odd_tie :: Half.from_float(Float{7.0})
+    negative_odd_tie :: Half.from_float(Float{-7.0})
     toward_zero_positive :: Meter.from_half_rounded(positive, .TowardZero, digits: 0) ?? panic("toward zero positive")
     floor_positive :: Meter.from_half_rounded(positive, .Floor, digits: 0) ?? panic("floor positive")
     ceiling_positive :: Meter.from_half_rounded(positive, .Ceiling, digits: 0) ?? panic("ceiling positive")
@@ -736,10 +739,10 @@ fn run() {
     nearest_negative_odd :: Meter.from_half_rounded(negative_odd_tie, .NearestEven, digits: 0) ?? panic("nearest negative odd")
     nearest_quarter :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2) ?? panic("nearest quarter")
     nearest_three_quarters :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2) ?? panic("nearest three quarters")
-    unrepresentable_decimal :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2) ?? Meter.from_float(-2.0)
-    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(0.0), .Ceiling, digits: 2) ?? panic("point")
-    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(0.0), .Ceiling, digits: 2) ?? panic("delta")
-    overflow :: Meter.from_double_rounded(Double.from_float(1.7976931348623157e308), .NearestEven, digits: 0) ?? Meter.from_float(-1.0)
+    unrepresentable_decimal :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2) ?? Meter.from_float(Float{-2.0})
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2) ?? panic("point")
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2) ?? panic("delta")
+    overflow :: Meter.from_double_rounded(Double.from_float(Float{1.7976931348623157e308}), .NearestEven, digits: 0) ?? Meter.from_float(Float{-1.0})
     print("{(toward_zero_positive.raw())} {(floor_positive.raw())} {(ceiling_positive.raw())} {(nearest_positive.raw())} {(toward_zero_negative.raw())} {(floor_negative.raw())} {(ceiling_negative.raw())} {(nearest_negative.raw())} {(nearest_positive_odd.raw())} {(nearest_negative_odd.raw())} {(nearest_quarter.raw())} {(nearest_three_quarters.raw())} {(unrepresentable_decimal.raw())} {(point.raw())} {(delta.raw())} {(overflow.raw())}")
 }
 "#;
@@ -906,7 +909,7 @@ fn run() { source :: 3s; keep(^source) }
     let wrong_kind = r#"
 #UnitFamily(Temperature, dimension, base: kelvin) { kelvin celsius(offset: 27315/100) }
 fn keep<Q: Quantity<Temperature, .Delta>>(value: ^Q) Q -> { return value }
-fn run() { source :: CelsiusPoint.from_float(3.0); keep(^source) }
+fn run() { source :: CelsiusPoint.from_float(Float{3.0}); keep(^source) }
 "#;
     assert_eq!(codes_of(wrong_kind), vec!["E0905"]);
 
@@ -1112,7 +1115,7 @@ fn explicit_unit_conversion_is_fallible_and_rounded_spelling_is_real() {
 }
 fn run() {
     exact :: Meter.from_millimeter(3000millimeter) ?? panic("exact conversion failed")
-    inexact :: Meter.from_thirdish(1thirdish) ?? Meter.from_float(-1.0)
+    inexact :: Meter.from_thirdish(1thirdish) ?? Meter.from_float(Float{-1.0})
     rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0) ?? panic("rounded conversion failed")
     print("{(exact.raw())} {(inexact.raw())} {(rounded.raw())}")
 }
@@ -1121,7 +1124,8 @@ fn run() {
         .expect("explicit unit conversions should compile")
         .rust;
     assert!(
-        !generated.contains("fn __jet_from_"),
+        !generated.contains("fn __jet_from_millimeter")
+            && !generated.contains("fn __jet_from_thirdish"),
         "unit conversion behavior belongs to TIR, not generated destination methods"
     );
     let (code, stdout) = tir_support::build_and_run("quantity_explicit_exact_rounded", src);
@@ -1133,10 +1137,11 @@ fn run() {
     meter
     thirdish(scale: 2/3)
 }
-fn run() {
+fn unchecked() !Never {
     converted :: Meter.from_thirdish(1thirdish)
     print(converted.raw())
 }
+fn run() { unchecked() }
 "#;
     assert!(
         !codes_of(unchecked).is_empty(),

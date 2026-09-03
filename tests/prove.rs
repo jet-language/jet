@@ -27,7 +27,7 @@ fn budget_workspace(name: &str) -> PathBuf {
     name: "app"
 }
 
-module perf.app {
+module perf.package {
     budgets: [Budget{
         name: "public-api",
         scope: .Package,
@@ -985,7 +985,7 @@ fn unknown_lens_is_exact_e2941_in_human_and_json_modes() {
     assert!(human.stdout.is_empty());
     assert_eq!(
         String::from_utf8(human.stderr).unwrap(),
-        "Error [E2941]: unknown proof lens `test`\n Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver\n Fix: try `jet prove plain.jet --lens tests`\nMore: jet-lang.dev/e/E2941\n"
+        "Error [E2941]: Unknown proof lens `test`\n Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver\n Fix: Try `jet prove plain.jet --lens tests`\nMore: jet-lang.dev/e/E2941\n"
     );
 
     let machine = Command::new(jet())

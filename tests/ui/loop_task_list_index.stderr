@@ -1,10 +1,10 @@
-Error [E0120]: this loop can't take handles out of a field or index
+Error [E0120]: This loop can't take handles out of a field or index
   --> tests/ui/loop_task_list_index.jet:4:21
     |
   4 |     loop h in groups[0] -> total += h.join() ?? 0
     |                     ^^^
- Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
- Fix: bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs { … }`
+ Why: Each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
+ Fix: Bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs { … }`
 More: jet-lang.dev/e/E0120
 
 Error [E0140]: `groups` still owes `consume`
@@ -12,6 +12,6 @@ Error [E0140]: `groups` still owes `consume`
     |
   2 |     groups :: [[task 1, task 2]]
     |     ^^^^^^
- Why: this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(groups) }` to discard it deliberately
+ Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+ Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(groups) }` to discard it deliberately
 More: jet-lang.dev/e/E0140

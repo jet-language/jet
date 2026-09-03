@@ -47,7 +47,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod Producer;
 pub use Producer::*;
 pub(crate) use Producer::{
-    bind_adapter_hook_identity, cache_action_identity, canonical_producer, refresh_nix_lock_digest,
+    bind_adapter_hook_identity, cache_action_identity, canonical_producer, refresh_lock_digest,
     validate_cached_adapter_hook,
 };
 mod Cache;
@@ -1376,10 +1376,16 @@ fn record_realized_mode_unlocked(
             .facts
             .insert("nix.projection.mode".into(), "canonical-hangar".into());
     }
+    let mut cache_identity = realized.cache_identity.clone();
+    if producer.provider == "nix" {
+        if let Some(cache_key) = producer.facts.get("nix.cache.key") {
+            cache_identity.policy_fingerprint = cache_key.clone();
+        }
+    }
     producer.bind_cache_provenance(
         &realized.reference,
         &realized.envelope.output_hash,
-        &realized.cache_identity,
+        &cache_identity,
         &realized.references,
     );
     super::Provider::refresh_provider_facts(&mut producer, &realized.reference)
@@ -1393,7 +1399,7 @@ fn record_realized_mode_unlocked(
         bin,
         rlib,
         envelope: realized.envelope.clone(),
-        cache_identity: realized.cache_identity.clone(),
+        cache_identity,
         references: realized.references.clone(),
         named_outputs,
         platform_artifact_kind: String::new(),

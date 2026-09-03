@@ -3391,10 +3391,16 @@ function publicationState({ fullScope, loaded, skipped, matrix, manifest, source
   };
 }
 
+// The run and dev tiers execute inside the compiler process (Cranelift hosts,
+// interpreter ambient), so a debug-profile compiler measures unoptimized
+// Prelude hosts rather than Jet. The default binary is therefore the release
+// build; a missing one is an error, never a silent fallback to target/debug.
 async function copyJetBinary(options, runDir) {
   if (options.jetBin) return path.resolve(process.cwd(), options.jetBin);
-  const source = path.join(repoDir, "target/debug/jet");
-  if (!(await exists(source))) throw new Error(`missing default Jet binary: ${source}`);
+  const source = path.join(repoDir, "target/release/jet");
+  if (!(await exists(source))) {
+    throw new Error(`missing default Jet binary: ${source} (build it with \`scripts/agent/jet-env cargo build --release --bin jet\` or pass --jet-bin)`);
+  }
   const destination = path.join(runDir, "jet-bin", "jet");
   await fs.mkdir(path.dirname(destination), { recursive: true });
   await fs.copyFile(source, destination);
@@ -3550,9 +3556,15 @@ async function main() {
     },
     entries: results,
   };
+  // One file per run. Full-matrix runs own the bare <date>.json; partial and
+  // axis runs carry their scope so a later partial run never overwrites the
+  // day's full report (status.mjs merges every file in this directory).
   const resultDir = path.join(repoDir, "gauntlet/results");
   await fs.mkdir(resultDir, { recursive: true });
-  const resultPath = path.join(resultDir, `${dateStamp()}.json`);
+  const resultName = axisOnly
+    ? `${dateStamp()}-axis-${options.axis}.json`
+    : (fullScope ? `${dateStamp()}.json` : `${dateStamp()}-${options.entry}.json`);
+  const resultPath = path.join(resultDir, resultName);
   await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`);
   const statusPath = path.join(repoDir, "gauntlet/status.json");
   if (fullScope || axisOnly) {

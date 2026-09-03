@@ -93,6 +93,45 @@ impl EnvReadyStats {
         realized
     }
 }
+/// Seal every provider record against the final project lock after all package
+/// publications. Per-package publication sees an intermediate lock; only this
+/// post-pass may write the digest that future online and offline replays use.
+fn seal_project_producer_records(
+    roots: &Roots,
+    project_root: &std::path::Path,
+    ready_stats: &EnvReadyStats,
+) -> Result<(), String> {
+    let lock_digest = Provider::project_lock_digest(Some(project_root))
+        .map_err(|error| format!("{error:?}"))?;
+    if lock_digest.is_empty() {
+        return Ok(());
+    }
+    let mut references = ready_stats
+        .realized
+        .iter()
+        .map(|selection| selection.0.clone())
+        .collect::<Vec<_>>();
+    references.sort_unstable();
+    references.dedup();
+    for reference in references {
+        let Some(entry) = Store::find_by_reference_read_only(roots, &reference) else {
+            continue;
+        };
+        let producer = Store::ProducerRecord::decode(&entry.producer_record)
+            .map_err(|error| format!("could not decode `{reference}` producer record: {error}"))?;
+        if !matches!(producer.provider.as_str(), "nix" | "jetpackage") {
+            continue;
+        }
+        Store::refresh_lock_digest(roots, &entry, &lock_digest)
+            .map_err(|error| format!("could not seal `{reference}` producer record: {error}"))?;
+    }
+    // Checked listing completes any closure migration/compaction before the
+    // caller records the environment-entry stamp for warm reuse.
+    Store::list_checked(roots)
+        .map_err(|error| format!("could not finalize sealed closure state: {error}"))?;
+    Ok(())
+}
+
 
 fn index_warm_realizations(
     warm: Vec<Store::VerifiedRealization>,
@@ -883,6 +922,19 @@ pub(super) fn compose_env_scoped_with_warm(
     // Tier 1 (D-FE-CLI1): the per-package `✓` rows above remain the realization
     // report — callers may append a measured env-entry banner, but this shared
     // composer does not print a second package summary before shell handoff.
+    if scope == RealizeScope::Project && !warm_path {
+        if let Err(error) = seal_project_producer_records(roots, &plan.project_root, &ready_stats)
+        {
+            live.clear();
+            theme.error_coded(
+                "E1335",
+                "the project lock could not seal provider records",
+                &error,
+                "retry the environment entry so every producer uses the final project lock",
+            );
+            return Err(1);
+        }
+    }
     ready_stats.canonicalize(roots);
     Ok((
         Env {

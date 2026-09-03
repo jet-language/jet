@@ -614,6 +614,24 @@ pub(super) fn lower_or_fallback(
             kind,
         }
     }
+    fn fit_fallback_value(value: TExpr, result_ty: &Type, cx: &Cx) -> TExpr {
+        let value = preserve_typed_list_shape(value, result_ty, cx);
+        match result_ty {
+            // A nested fallible/optional value is the successful payload of
+            // the outer `??`. Lift a bare fallback once so both match arms
+            // produce the same carrier.
+            Type::Result { .. } if !matches!(&value.ty, Type::Result { .. }) => TExpr {
+                ty: result_ty.clone(),
+                kind: TExprKind::Ok(Box::new(value)),
+            },
+            Type::Option(_) if !matches!(&value.ty, Type::Option(_)) => TExpr {
+                ty: result_ty.clone(),
+                kind: TExprKind::Present(Box::new(value)),
+            },
+            _ => value,
+        }
+    }
+
 
     fn lower_fallback(
         fallback: &OrFallback,
@@ -625,14 +643,14 @@ pub(super) fn lower_or_fallback(
         match fallback {
             OrFallback::Value(e) => {
                 let value = lower_expr(e, cx, fallback_env);
-                let value = preserve_typed_list_shape(value, result_ty, cx);
+                let value = fit_fallback_value(value, result_ty, cx);
                 TOrFallback::Value(Box::new(value))
             }
             OrFallback::Block { body, value, .. } => {
                 let mut stmts = lower_stmts(body, cx, fallback_env);
                 if let Some(value) = value {
                     let value = lower_expr(value, cx, fallback_env);
-                    let value = preserve_typed_list_shape(value, result_ty, cx);
+                    let value = fit_fallback_value(value, result_ty, cx);
                     stmts.push(TStmt::ExprStmt(value));
                 }
                 TOrFallback::Value(Box::new(TExpr {

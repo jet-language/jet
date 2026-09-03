@@ -72,7 +72,17 @@ fn pack_spawn_return(b: &mut FunctionBuilder, val: Value, ret_ty: &Type) -> Resu
             val,
         )),
         Some(ty) if ty == types::I8 || ty == types::I32 => Ok(b.ins().uextend(types::I64, val)),
-        Some(ty) if ty == types::I64 => Ok(val),
+        Some(ty) if ty == types::I64 => match b.func.dfg.value_type(val) {
+            got if got == types::F64 => Ok(b.ins().bitcast(
+                types::I64,
+                MemFlags::new().with_endianness(Endianness::Little),
+                val,
+            )),
+            got if got == types::I8 || got == types::I32 => {
+                Ok(b.ins().uextend(types::I64, val))
+            }
+            _ => Ok(val),
+        },
         None => Ok(val),
         other => Err(format!(
             "jit spawn return unsupported: {ret_ty:?} ({other:?})"

@@ -2221,6 +2221,72 @@ fn jet_jit_http_nominal_show(handle: i64) -> i64 {
     .unwrap_or_default();
     alloc_string(shown)
 }
+/// Render the packed `HTTPError` carrier through the Prelude's `Display`
+/// implementation. The JIT stores only the enum ordinal and one payload word;
+/// rebuilding that Rust value here is marshalling, not a second error renderer.
+fn jet_jit_http_error_show(bits: i64) -> i64 {
+    let ordinal = (bits & 0xff) as u8;
+    let payload = bits >> 8;
+    let error = match ordinal {
+        0 => Some(JetHTTPError::InvalidMethod),
+        1 => Some(JetHTTPError::InvalidUrl),
+        2 => Some(JetHTTPError::InvalidHeader),
+        3 => Some(JetHTTPError::InvalidStatus),
+        4 => Some(JetHTTPError::BodyConsumed),
+        5 => Some(JetHTTPError::InvalidFraming),
+        6 => Some(JetHTTPError::UnsupportedEncoding),
+        7 => Some(JetHTTPError::Cancelled),
+        8 => Some(JetHTTPError::BodyTooLarge { limit: payload }),
+        9 => Some(JetHTTPError::Resolve {
+            host: clone_string(payload),
+        }),
+        10 => Some(JetHTTPError::Connect {
+            address: clone_string(payload),
+        }),
+        11 => Some(JetHTTPError::TLS {
+            stage: clone_string(payload),
+        }),
+        12 => Some(JetHTTPError::Timeout {
+            phase: clone_string(payload),
+        }),
+        13 => Some(JetHTTPError::Proxy {
+            stage: clone_string(payload),
+        }),
+        14 => Some(JetHTTPError::Redirect {
+            reason: clone_string(payload),
+        }),
+        15 => Some(JetHTTPError::Protocol {
+            version: clone_string(payload),
+        }),
+        16 => Some(JetHTTPError::IO {
+            operation: clone_string(payload),
+        }),
+        17 => Some(JetHTTPError::Policy {
+            reason: clone_string(payload),
+        }),
+        18 => Some(JetHTTPError::ResourceUnavailable {
+            resource: clone_string(payload),
+        }),
+        19 => Some(JetHTTPError::Internal {
+            incident_id: clone_string(payload),
+        }),
+        20 => match payload {
+            0 => Some(JetHTTPError::UnsupportedTarget {
+                operation: JetHTTPOperation::ClientConnect,
+            }),
+            1 => Some(JetHTTPError::UnsupportedTarget {
+                operation: JetHTTPOperation::ServerBind,
+            }),
+            2 => Some(JetHTTPError::UnsupportedTarget {
+                operation: JetHTTPOperation::ServeListener,
+            }),
+            _ => None,
+        },
+        _ => None,
+    };
+    alloc_string(error.map(|error| error.to_string()).unwrap_or_default())
+}
+
 
 /// D-HTTP-JSON1=A: `server.json(status, body)` — body is already JSON text.
 fn jet_jit_http_json_response(status: i64, body: i64) -> i64 {
@@ -3198,6 +3264,7 @@ host_fns! {
     http_body_copy_to: "jet_jit_http_body_copy_to" => jet_jit_http_body_copy_to: sig3;
     http_nominal_static: "jet_jit_http_nominal_static" => jet_jit_http_nominal_static: sig7;
     http_nominal_show: "jet_jit_http_nominal_show" => jet_jit_http_nominal_show: sig1;
+    http_error_show: "jet_jit_http_error_show" => jet_jit_http_error_show: sig1;
     http_json_response: "jet_jit_http_json_response" => jet_jit_http_json_response: sig2;
     http_static_files: "jet_jit_http_static_files" => jet_jit_http_static_files: sig6;
     http_cors_policy: "jet_jit_http_cors_policy" => jet_jit_http_cors_policy: sig7;

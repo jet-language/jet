@@ -1732,6 +1732,10 @@ fn normalize_for_parity(stem: &str, mut out: ProgramOutput) -> ProgramOutput {
             out.stderr.push('\n');
         }
     }
+    // E3001 local values are explicitly debug-build-only. They are diagnostic
+    // context, not program semantics, so optimized AOT and resident/interpreter
+    // outputs compare without this build-profile-dependent line.
+    out.stderr = strip_panic_locals(&out.stderr);
     out
 }
 

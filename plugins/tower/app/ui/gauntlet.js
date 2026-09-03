@@ -5,6 +5,7 @@ const PEER_ORDER = [
   'typescript', 'javascript', 'ruby', 'php', 'lua', 'jet-expert',
 ];
 const UNMEASURED = 'unmeasured';
+const GAUNTLET_STATES = new Set(['win', 'parity', 'loss', 'unmeasured', 'n/a']);
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const object = (value) => isObject(value) ? value : {};
@@ -19,16 +20,34 @@ function peerName(peer) {
   return peer?.peer ?? peer?.language ?? peer?.name ?? null;
 }
 
+function tierStatus(item, peer) {
+  if (!item) return UNMEASURED;
+  if (item.status === 'not_applicable') return 'n/a';
+  if (finite(item.ratio)) return ratioVerdict(item.ratio, peer);
+  return verdict(item.verdict) ?? UNMEASURED;
+}
+
+function selectTier(tiers, names, peer, includeMissing = false) {
+  const rank = { unmeasured: 0, loss: 1, parity: 2, win: 3, 'n/a': 4 };
+  const candidates = names.map((name, index) => {
+    const item = isObject(tiers[name]) ? tiers[name] : null;
+    if (!item && !includeMissing) return null;
+    return { name, index, item: item ?? {}, state: tierStatus(item, peer) };
+  }).filter(Boolean);
+  candidates.sort((left, right) => (rank[left.state] ?? 0) - (rank[right.state] ?? 0) || left.index - right.index);
+  return candidates[0] ?? null;
+}
+
 function metricValue(peer, metric) {
   const comparison = object(peer?.metric_comparisons?.[metric] ?? peer?.metrics?.[metric]);
   const tiers = object(comparison.tiers);
-  const names = [...new Set([
-    ...TIERS,
-    ...Object.keys(tiers),
-  ])];
-  const tier = names.find((name) => isObject(tiers[name]) && (
-    finite(tiers[name].ratio) || tiers[name].status === 'measured' || verdict(tiers[name].verdict)));
-  if (tier) return { tier, values: tiers[tier], comparison };
+  const declared = Object.keys(tiers);
+  const required = array(peer?.required_tiers);
+  const names = required.length
+    ? [...new Set(required)]
+    : [...TIERS.filter((name) => declared.includes(name)), ...declared.filter((name) => !TIERS.includes(name))];
+  const selected = selectTier(tiers, names, peerName(peer), required.length > 0);
+  if (selected) return { tier: selected.name, values: selected.item, comparison };
   if (finite(comparison.ratio) || comparison.status === 'measured') {
     return { tier: null, values: comparison, comparison };
   }
@@ -64,13 +83,13 @@ function peerMetricVerdict(peer, metric) {
   const names = required.length ? required : (selected.tier ? [selected.tier] : []);
   if (!names.length) {
     if (comparison.status === 'not_applicable' || comparison.applicability === 'not_applicable') return 'n/a';
-    return verdict(comparison.verdict) ?? UNMEASURED;
+    return verdict(comparison.verdict) ?? verdict(peer?.metric_verdicts?.[metric]) ?? verdict(peer?.verdict) ?? UNMEASURED;
   }
   const values = names.map((tier) => {
     const item = object(tiers[tier]);
     if (item.status === 'not_applicable') return 'n/a';
-    if (verdict(item.verdict)) return item.verdict;
-    return ratioVerdict(item.ratio, peerName(peer));
+    if (finite(item.ratio)) return ratioVerdict(item.ratio, peerName(peer));
+    return verdict(item.verdict) ?? UNMEASURED;
   });
   return reduce(values);
 }
@@ -89,50 +108,52 @@ function sortPeers(names) {
 
 function rowPeer(cell, peerNameValue, hasPeers) {
   const peer = array(cell?.peers).find((item) => peerName(item) === peerNameValue) ?? null;
-  if (!peer) return {
-    peer: peerNameValue,
-    verdict: hasPeers ? 'n/a' : UNMEASURED,
-    ratio: null,
-    tier: null,
-    values: {},
-    detail: { cell, peer: null, metric: cell?.primary_metric ?? null, values: {} },
-  };
   const metric = cell?.primary_metric ?? null;
+  if (!peer) {
+    const state = hasPeers ? 'n/a' : UNMEASURED;
+    return {
+      peer: peerNameValue, verdict: state, ratio: null, tier: null, values: {},
+      detail: { cell, peer: { peer: peerNameValue }, metric, values: {}, verdict: state },
+    };
+  }
   const selected = metricValue(peer, metric);
   const values = selected.values ?? {};
+  const state = peerMetricVerdict(peer, metric);
   return {
     peer: peerNameValue,
-    verdict: peerMetricVerdict(peer, metric),
+    verdict: state,
     ratio: finite(values.ratio) ? values.ratio : null,
     tier: selected.tier,
     values,
-    detail: { cell, peer, metric, tier: selected.tier, values },
+    detail: { cell, peer, metric, tier: selected.tier, values, verdict: state },
   };
 }
 
 function axisPeer(axis, peerNameValue) {
   const peer = object(axis?.comparisons?.[peerNameValue]);
   const phases = ['cold', 'warm'].map((phase) => ({ phase, value: object(peer[phase]) }));
-  const selected = phases.find(({ value }) => finite(value.ratio) || value.status === 'measured') ?? phases[0];
+  const phaseValues = Object.fromEntries(phases.map(({ phase, value }) => [phase, value]));
+  const selectedTier = selectTier(phaseValues, ['cold', 'warm'], peerNameValue, true);
+  const selected = selectedTier
+    ? { phase: selectedTier.name, value: selectedTier.item }
+    : phases[0];
   const values = selected.value;
-  const phaseVerdicts = phases.map(({ value }) => {
-    if (value.status === 'not_applicable') return 'n/a';
-    if (verdict(value.verdict)) return value.verdict;
-    return ratioVerdict(value.ratio, peerNameValue);
-  });
+  const phaseVerdicts = phases.map(({ value }) => tierStatus(value, peerNameValue));
   const hasComparison = Object.keys(peer).length > 0;
+  const state = hasComparison ? reduce(phaseVerdicts) : 'n/a';
   return {
     peer: peerNameValue,
-    verdict: hasComparison ? reduce(phaseVerdicts) : 'n/a',
+    verdict: state,
     ratio: finite(values.ratio) ? values.ratio : null,
     tier: selected.phase,
     values,
     detail: {
       axis,
-      peer: hasComparison ? { ...peer, peer: peerNameValue } : null,
+      peer: { ...peer, peer: peerNameValue },
       metric: axis?.metric ?? null,
       tier: selected.phase,
       values,
+      verdict: state,
     },
   };
 }
@@ -171,130 +192,173 @@ function axisRow(id, axis) {
   };
 }
 
+// Matrix order from gauntlet/matrix.json: the table is one fixed grid, so
+// rows keep their domain order instead of sorting by verdict or id.
+const DOMAIN_ORDER = [
+  'text', 'formats', 'numerics', 'files', 'time', 'concurrency', 'cli', 'webfront', 'netserv', 'embedded',
+];
+const domainRank = (domain) => {
+  const index = DOMAIN_ORDER.indexOf(String(domain ?? '').toLowerCase());
+  return index < 0 ? DOMAIN_ORDER.length : index;
+};
+
 export function projectGauntletMatrix(status) {
   const source = object(status);
-  const cells = array(source.cells).map(cellRow);
+  const cells = array(source.cells).map(cellRow).sort((left, right) =>
+    domainRank(left.domain) - domainRank(right.domain) || String(left.id).localeCompare(String(right.id)));
   const axisRows = Object.entries(object(source.axes)).map(([id, axis]) => axisRow(id, axis));
   const columns = sortPeers([
     ...cells.flatMap((row) => row.peerNames),
     ...axisRows.flatMap((row) => row.peerNames),
   ]);
-  const groups = [];
-  const grouped = new Map();
-  for (const row of cells) {
-    const id = row.domain || 'Other';
-    if (!grouped.has(id)) {
-      const group = { id, label: id, kind: 'cells', rows: [] };
-      grouped.set(id, group);
-      groups.push(group);
-    }
-    grouped.get(id).rows.push(row);
-  }
-  groups.sort((left, right) => left.label.localeCompare(right.label));
-  if (axisRows.length) groups.push({ id: 'axes', label: 'Axes', kind: 'axes', rows: axisRows });
-  return {
-    columns,
-    groups,
-    rows: [...cells, ...axisRows],
-    axisRows,
-  };
+  return { columns, rows: [...cells, ...axisRows], cellRows: cells, axisRows };
 }
 
-const METRIC_UNITS = Object.freeze({
+// ---- formatting -------------------------------------------------------------
+// Every number is three significant figures in a plain unit: no exponents,
+// and both sides of a comparison share one unit so they read directly.
+const SCALES = Object.freeze({
+  seconds: [['s', 1], ['ms', 1e-3], ['µs', 1e-6]],
+  ms: [['s', 1e3], ['ms', 1]],
+  kb: [['GB', 1e6], ['MB', 1e3], ['kB', 1]],
+  bytes: [['GB', 1e9], ['MB', 1e6], ['kB', 1e3], ['B', 1]],
+  count: [['', 1]],
+});
+const METRIC_SCALE = Object.freeze({
   runtime_wall_seconds: 'seconds',
-  runtime_peak_rss_kb: 'kB',
   runtime_first_stdout_seconds: 'seconds',
   cold_build_seconds: 'seconds',
   warm_build_seconds: 'seconds',
+  runtime_peak_rss_kb: 'kb',
   binary_bytes: 'bytes',
   source_bytes: 'bytes',
   reload_latency_ms: 'ms',
   cold_reload_latency_ms: 'ms',
   warm_reload_latency_ms: 'ms',
+  service_latency_ms_p50: 'ms',
+  service_latency_ms_p99: 'ms',
+  service_startup_seconds: 'seconds',
+});
+const METRIC_NAMES = Object.freeze({
+  runtime_wall_seconds: 'wall time',
+  runtime_first_stdout_seconds: 'first output',
+  runtime_peak_rss_kb: 'peak memory',
+  cold_build_seconds: 'cold build',
+  warm_build_seconds: 'warm build',
+  binary_bytes: 'binary size',
+  source_bytes: 'source size',
+  reload_latency_ms: 'reload latency',
+  service_latency_ms_p50: 'latency p50',
+  service_latency_ms_p99: 'latency p99',
+  memory_safety_findings: 'safety findings',
 });
 
+const sig3 = (value) => Number(value.toPrecision(3)).toLocaleString('en-US', { maximumFractionDigits: 12 });
+
+// Pick one unit so the smallest non-zero value shows as at least 1.
+function unitFor(kind, values) {
+  const scale = SCALES[kind] ?? SCALES.count;
+  const floor = Math.min(...values.filter((value) => finite(value) && value > 0).map(Math.abs));
+  if (!Number.isFinite(floor)) return scale[scale.length - 1];
+  return scale.find(([, factor]) => floor / factor >= 1) ?? scale[scale.length - 1];
+}
+
+function formatIn(value, [suffix, factor]) {
+  if (!finite(value)) return '—';
+  return `${sig3(value / factor)}${suffix ? ` ${suffix}` : ''}`;
+}
+
+// Format both sides of a comparison in one shared unit.
+export function formatPair(metric, jet, peer) {
+  const unit = unitFor(METRIC_SCALE[metric] ?? 'count', [jet, peer]);
+  return { jet: formatIn(jet, unit), peer: formatIn(peer, unit), unit: unit[0] };
+}
+
+export function formatRatio(value) {
+  return finite(value) ? `${sig3(value)}×` : '—';
+}
+
 function metricLabel(metric) {
-  return metric ? String(metric).replaceAll('_', ' ') : 'n/a';
+  return METRIC_NAMES[metric] ?? (metric ? String(metric).replaceAll('_', ' ') : 'n/a');
 }
 
-function formatNumber(value) {
-  if (!finite(value)) return 'n/a';
-  if (Math.abs(value) >= 1000 || (Math.abs(value) > 0 && Math.abs(value) < 0.01)) return value.toExponential(3);
-  return value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+const DATE_FORMAT = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const TIME_FORMAT = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+export function formatStamp(iso, date) {
+  const parsed = iso ? new Date(iso) : null;
+  if (parsed && !Number.isNaN(parsed.getTime())) return `${DATE_FORMAT.format(parsed)} · ${TIME_FORMAT.format(parsed)}`;
+  const day = date ? new Date(`${date}T00:00:00`) : null;
+  if (day && !Number.isNaN(day.getTime())) return DATE_FORMAT.format(day);
+  return 'not measured';
 }
-function compactValue(value) {
-  if (value == null) return 'n/a';
-  if (Array.isArray(value)) return `${value.length} sample${value.length === 1 ? '' : 's'}`;
-  if (isObject(value)) {
-    const entries = Object.entries(value).map(([key, item]) => `${key}: ${compactValue(item)}`);
-    return entries.length ? entries.join(', ') : 'n/a';
+
+// ---- detail card ------------------------------------------------------------
+const TIER_ORDER = ['aot', 'run', 'dev', 'cold', 'warm'];
+const tierState = (item, peer) => {
+  if (!item || !Object.keys(item).length) return UNMEASURED;
+  if (item.status === 'not_applicable') return 'n/a';
+  if (finite(item.ratio)) return ratioVerdict(item.ratio, peer);
+  return verdict(item.verdict) ?? UNMEASURED;
+};
+
+function tierRows(detail, peerLabel) {
+  const tiers = detail.axis
+    ? Object.fromEntries(['cold', 'warm'].map((phase) => [phase, object(detail.peer?.[phase])]))
+    : object(object(detail.peer?.metric_comparisons?.[detail.metric] ?? detail.peer?.metrics?.[detail.metric]).tiers);
+  const names = [...TIER_ORDER.filter((name) => name in tiers), ...Object.keys(tiers).filter((name) => !TIER_ORDER.includes(name))];
+  return names.map((name) => {
+    const item = object(tiers[name]);
+    const pair = formatPair(detail.metric, item.jet, item.peer);
+    return { name, state: tierState(item, peerLabel), pair, ratio: formatRatio(item.ratio), selected: name === detail.tier };
+  });
+}
+
+function statRows(detail) {
+  const stats = object(detail.values?.stats);
+  const jet = object(stats.jet);
+  const peer = object(stats.peer);
+  if (!Object.keys(jet).length && !Object.keys(peer).length) return [];
+  const rows = [['best', 'best'], ['median', 'median'], ['mean', 'mean']]
+    .filter(([key]) => finite(jet[key]) || finite(peer[key]))
+    .map(([key, label]) => ({ label, ...formatPair(detail.metric, jet[key], peer[key]) }));
+  if (finite(jet.rss) || finite(peer.rss)) rows.push({ label: 'peak memory', ...formatPair('runtime_peak_rss_kb', jet.rss, peer.rss) });
+  if (finite(jet.samples) || finite(peer.samples)) {
+    rows.push({ label: 'samples', jet: finite(jet.samples) ? String(jet.samples) : '—', peer: finite(peer.samples) ? String(peer.samples) : '—' });
   }
-  return String(value);
-}
-
-function safeJson(value) {
-  if (value == null) return 'n/a';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
-  try {
-    return JSON.stringify(value, (_key, item) => item === undefined ? null : item);
-  } catch {
-    return 'n/a';
-  }
-}
-
-function issueText(value) {
-  if (!isObject(value)) return safeJson(value);
-  const card = value.card ?? value.card_number ?? value.card_id;
-  const fields = ['entry', 'peer', 'metric', 'category', 'status', 'reason']
-    .filter((key) => value[key] != null)
-    .map((key) => `${key}=${value[key]}`);
-  const body = fields.join(', ');
-  return `${card == null ? '' : `#${card} `}${body || 'issue'}`;
-}
-function cardLinks(value) {
-  const text = Array.isArray(value) ? (value.length ? value.map(issueText).join('; ') : 'n/a') : safeJson(value);
-  return esc(text)
-    .replace(/#(\d+)/g, '<a href="#card-$1" data-card="$1" class="gauntlet__card-link">#$1</a>')
-    .replace(/((?:&quot;)?(?:card|card_number|card_id)(?:&quot;)?\s*:\s*)(\d+)/gi,
-      '$1<a href="#card-$2" data-card="$2" class="gauntlet__card-link">#$2</a>');
-}
-
-function detailValue(value) {
-  return cardLinks(compactValue(value));
+  return rows;
 }
 
 export function buildGauntletTooltip(detail = {}) {
   const cell = object(detail.cell);
   const axis = object(detail.axis);
-  const peer = object(detail.peer);
   const values = object(detail.values);
-  const peerLabel = peerName(detail.peer) ?? detail.peer_name ?? 'n/a';
+  const peerLabel = peerName(detail.peer) ?? detail.peer_name ?? 'peer';
   const metric = detail.metric ?? axis.metric ?? cell.primary_metric ?? null;
-  const ratio = finite(values.ratio) ? `${formatNumber(values.ratio)}x` : 'n/a';
-  const rustRule = String(peerLabel).replace(/-expert$/, '') === 'rust'
-    ? 'Jet / Rust < 1.00 wins; up to 1.05 is parity.'
-    : `Jet / ${peerLabel} < 1.00 wins; 1.00 or more loses.`;
-  const runId = cell.run_id ?? values.run_id ?? axis.run_id;
-  const measuredAt = cell.measured_at ?? values.measured_at ?? axis.measured_at;
-  const lines = [
-    ['Metric', `${metricLabel(metric)}${METRIC_UNITS[metric] ? ` (${METRIC_UNITS[metric]})` : ''}`],
-    ['Jet', finite(values.jet) ? formatNumber(values.jet) : 'n/a'],
-    ['Peer', finite(values.peer) ? formatNumber(values.peer) : peerLabel],
-    ['Ratio', ratio],
-    ['Rule', esc(rustRule)],
-    ['Tier', detail.tier ?? 'n/a'],
-    ['Mode', cell.mode ?? detail.mode ?? 'n/a'],
-    ['Samples', detailValue(values.samples)],
-    ['Median', detailValue(values.median)],
-    ['p99', detailValue(values.p99)],
-    ['RSS', detailValue(values.rss ?? values.peak_rss_kb)],
-    ['Run', runId ?? 'n/a'],
-    ['Date', measuredAt ?? 'n/a'],
-    ['Failures', cardLinks(cell.failures)],
-    ['Loss owners', cardLinks(cell.loss_owners)],
-  ];
-  return `<div class="gauntlet__tooltip" role="tooltip"><strong>${esc(cell.id ?? axis.id ?? 'Gauntlet detail')}</strong><dl>${lines
-    .map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${value}</dd></div>`).join('')}</dl></div>`;
+  const state = GAUNTLET_STATES.has(detail.verdict) ? detail.verdict : tierState(values, peerLabel);
+  const title = cell.id ?? (axis.id ? `axis · ${String(axis.id).replaceAll('_', ' ')}` : 'Gauntlet detail');
+  const subtitle = [cell.entry, `Jet vs ${peerLabel}`, metricLabel(metric)].filter(Boolean).join(' · ');
+  const tiers = tierRows({ ...detail, metric }, peerLabel);
+  const stats = statRows({ ...detail, metric });
+  const stamp = formatStamp(values.measured_iso ?? cell.measured_iso ?? axis.measured_iso, values.measured_at ?? cell.measured_at ?? axis.measured_at);
+  const runId = values.run_id ?? cell.run_id ?? axis.run_id;
+  const tierTable = tiers.length ? `<table class="gtip__table">
+      <thead><tr><th>tier</th><th>Jet</th><th>${esc(peerLabel)}</th><th>ratio</th></tr></thead>
+      <tbody>${tiers.map((row) => `<tr class="gtip__tier gtip__tier--${row.state === 'n/a' ? 'na' : row.state}${row.selected ? ' gtip__tier--selected' : ''}">
+        <th>${esc(row.name)}</th><td>${esc(row.pair.jet)}</td><td>${esc(row.pair.peer)}</td><td class="gtip__ratio">${esc(row.ratio)}</td></tr>`).join('')}</tbody>
+    </table>` : '';
+  const statTable = stats.length ? `<table class="gtip__table gtip__table--stats">
+      <thead><tr><th>${esc(detail.tier ?? 'samples')} tier</th><th>Jet</th><th>${esc(peerLabel)}</th></tr></thead>
+      <tbody>${stats.map((row) => `<tr><th>${esc(row.label)}</th><td>${esc(row.jet)}</td><td>${esc(row.peer)}</td></tr>`).join('')}</tbody>
+    </table>` : '';
+  return `<div class="gtip" role="tooltip">
+    <div class="gtip__head">
+      <div><strong>${esc(title)}</strong><small>${esc(subtitle)}</small></div>
+      <span class="gtip__state gtip__state--${state === 'n/a' ? 'na' : state}">${esc(state)}</span>
+    </div>
+    ${tierTable}${statTable}
+    <div class="gtip__foot"><span>${esc(stamp)}</span>${runId ? `<span>run ${esc(runId)}</span>` : ''}</div>
+  </div>`;
 }
 
 export { metricLabel, metricValue, ratioVerdict };

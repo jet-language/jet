@@ -1214,10 +1214,19 @@ pub(super) fn eval_handle_with_type_and_sink(
                 }
                 _ => return Err(unsupported("Path.write_atomic expects bytes", span)),
             };
-            match std::fs::write(&path, bytes) {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.to_string())))),
+            if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+                "core.files",
+                "write_atomic",
+                vec![CtValue::Str(path), CtValue::Bytes(bytes)],
+                span,
+                resolved_ret.cloned(),
+            ) {
+                return result;
             }
+            Err(unsupported(
+                "Path.write_atomic needs the ambient filesystem adapter",
+                span,
+            ))
         }
         THandleOp::DBValueInt => db_value_result(recv, "int", span),
         THandleOp::DBValueFloat => db_value_result(recv, "float", span),

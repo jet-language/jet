@@ -1550,6 +1550,8 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "jet_watch_process_probe");
     s = strip_vetted_module(&s, "jet_atomic_windows");
     s = strip_vetted_module(&s, "jet_ws_upgrade");
+    s = strip_vetted_module(&s, "jet_devserver_unix_output");
+    s = strip_vetted_module(&s, "jet_devserver_windows_output");
     // D-TASKBORROW1=A: canonical task-group lifetime erasure (mirrors golden.rs).
     s = strip_vetted_module(&s, "jet_taskgroup_borrowed_spawn");
     s = strip_vetted_module(&s, "jet_compute");

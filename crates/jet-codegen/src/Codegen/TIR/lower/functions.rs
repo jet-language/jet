@@ -6,6 +6,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::lower::lower_value_block;
 use crate::Codegen::TIR::lower::prepare_interrupt_callback_locals;
+use crate::Codegen::TIR::lower::note_stack_sentry_in_tir;
 use crate::Codegen::TIR::lower::return_type_has_value;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_stmts;
@@ -159,6 +160,7 @@ fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFu
     );
     prepare_interrupt_callback_locals(&conversion.body, cx, &mut env);
     let body = lower_stmts(&conversion.body, cx, &mut env);
+    note_stack_sentry_in_tir(&body, &env);
     TFunc {
         name,
         source_span: conversion.from_span,
@@ -320,6 +322,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         &env.stack_sentry_needed,
         cx,
     );
+    note_stack_sentry_in_tir(&body, &env);
     let uses_stack_sentry = env.stack_sentry_needed();
     TFunc {
         name: f.name.clone(),
@@ -960,6 +963,7 @@ fn lower_method_for_owner_inner(
         .memo_fields
         .get(type_name)
         .and_then(|fields| fields.contains_key(&f.name).then(|| f.name.clone()));
+    note_stack_sentry_in_tir(&body, &env);
     let uses_stack_sentry = env.stack_sentry_needed();
     TFunc {
         name: f.name.clone(),
@@ -1188,6 +1192,7 @@ fn lower_trait_method_inner(
     }
     collect_signature_clone_types(&return_type, cx, &mut clone_types);
     let generics = render_generics(&f.type_params, &clone_types);
+    note_stack_sentry_in_tir(&body, &env);
     let uses_stack_sentry = env.stack_sentry_needed();
     TFunc {
         name: f.name.clone(),

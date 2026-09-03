@@ -1,5 +1,7 @@
 Runtime fault [R0802]: use of storage after its lifetime ended in `pointer is used only after arena reset to prove quarantine`
- --> examples/features/memory/unsafe_sentries.jet:7, in #Unsafe gate examples/features/memory/unsafe_sentries.jet:7
- Why: the storage was released or its owning Jet frame expired before this read (the address belongs to quarantined storage)
- Fix: do not use the pointer after release or frame exit — obligation `valid_ptr` was not met on this run
+  --> unsafe_sentries.jet:7, in #Unsafe gate "pointer is used only after arena reset to prove quarantine"
+ Why: The storage was released or its owning Jet frame expired before this raw `read`; the gate's lifetime obligation was not met.
+ Fix: Do not use the pointer after release or frame exit — obligation `valid_ptr` was not met on this run.
+obligation: valid_ptr = false
+exit: 1
 More: jet-lang.dev/e/R0802

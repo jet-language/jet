@@ -1,10 +1,10 @@
-Error [E0106]: the name `Cache` is built in and can't be redefined
+Error [E0106]: The name `Cache` is built in and can't be redefined
   --> tests/ui/local_cell_crossing.jet:12:8
     |
  12 | struct Cache {
     |        ^^^^^
  Why: `Cache` is provided by the language itself
- Fix: choose a different name for this struct
+ Fix: Choose a different name for this struct
 More: jet-lang.dev/e/E0106
 
 Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
@@ -13,7 +13,7 @@ Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
   2 |     worker :: task {
     |                    ^
  Why: `Cell` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
- Fix: create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state
+ Fix: Create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state
 More: jet-lang.dev/e/E1102
 
 Error [E0120]: `cell` was not moved here, so it cannot be taken with the move marker `^`
@@ -21,8 +21,8 @@ Error [E0120]: `cell` was not moved here, so it cannot be taken with the move ma
     |
   3 |         _ :: cell
     |              ^^^^
- Why: this function has read access only and does not own the value
- Fix: copy it instead: `_ :: ~cell`
+ Why: This function has read access only and does not own the value
+ Fix: Copy it instead: `_ :: ~cell`
 More: jet-lang.dev/e/E0120
 
 Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
@@ -30,15 +30,15 @@ Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
     |
   9 |     _ :: shared cell
     |                 ^^^^
- Why: a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
- Fix: store the value itself in `Shared<T>`, then read and write its fields directly
+ Why: A Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
+ Fix: Store the value itself in `Shared<T>`, then read and write its fields directly
 More: jet-lang.dev/e/E1102
 
-Error [E0119]: there's no type called `Cache`
+Error [E0119]: There's no type called `Cache`
   --> tests/ui/local_cell_crossing.jet:16:31
     |
  16 | fn cross_shared_nested(cache: Cache) {
     |                               ^^^^^
- Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: check the spelling, or define the struct or enum first
+ Why: The types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: Check the spelling, or define the struct or enum first
 More: jet-lang.dev/e/E0119

@@ -134,6 +134,7 @@ use crate::Codegen::TIR::lower_lambda_expecting;
 use crate::Codegen::TIR::lower_lambda_expecting_host_borrow;
 use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lower_method_args;
+use crate::Codegen::TIR::lower_named_collection_callback;
 use crate::Codegen::TIR::lower_module_args;
 use crate::Codegen::TIR::lower_one_call_arg;
 use crate::Codegen::TIR::lower_owned_expr;
@@ -151,6 +152,7 @@ use crate::Codegen::TIR::resolve_numeric_op;
 use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::source_arg_order;
+use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::spawn_body_result_ty;
 use crate::Codegen::TIR::spawn_label;
 use crate::Codegen::TIR::tir_recv_jet_ty;
@@ -2171,11 +2173,13 @@ fn lower_method_call_impl(
         if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
             if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
                 return in_own_frame(|| {
-                    let body_ty = spawn_body_result_ty(lam, cx, env);
-                    // D-CONC-SPAWN1: use one normalized carrier for the
-                    // rendered and executable task closures.
+                    let _source_ty = spawn_body_result_ty(lam, cx, env);
+                    let carrier_ty = spawn_body_carrier_ty(lam, cx, env);
+                    // Sema's Task<T> is the source metadata; TIR retains the
+                    // closure carrier so join lowering can flatten its own E
+                    // into the enclosing function's carrier.
                     let mut spawn_env = clone_env(env);
-                    spawn_env.ret_ty = Some(body_ty.clone());
+                    spawn_env.ret_ty = Some(carrier_ty.clone());
                     let site = jit_spawn_site(lam, cx, env);
                     let label = spawn_label(lam, cx, env);
                     let spawn_closure = render_spawn_lambda(lam, cx, &spawn_env);
@@ -2183,7 +2187,7 @@ fn lower_method_call_impl(
                     return TExpr {
                         ty: Type::Apply {
                             name: "Task".to_string(),
-                            args: vec![body_ty],
+                            args: vec![carrier_ty],
                         },
                         kind: TExprKind::CoreClosureCall {
                             kind: TCoreClosureKind::Spawn {
@@ -2248,11 +2252,12 @@ fn lower_method_call_impl(
     {
         if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
             return in_own_frame(|| {
-                let body_ty = spawn_body_result_ty(lam, cx, env);
-                // D-CONC-SPAWN1: group and detached spawns share the
-                // closure carrier and return context.
+                let _source_ty = spawn_body_result_ty(lam, cx, env);
+                let carrier_ty = spawn_body_carrier_ty(lam, cx, env);
+                // Group handles expose source Task<T> metadata through sema;
+                // TIR retains the closure carrier for join's flatten adapter.
                 let mut spawn_env = clone_env(env);
-                spawn_env.ret_ty = Some(body_ty.clone());
+                spawn_env.ret_ty = Some(carrier_ty.clone());
                 let site = jit_spawn_site(lam, cx, env);
                 let label = spawn_label(lam, cx, env);
                 let spawn_closure = render_spawn_lambda(lam, cx, &spawn_env);
@@ -2261,7 +2266,7 @@ fn lower_method_call_impl(
                 return TExpr {
                     ty: Type::Apply {
                         name: "Task".to_string(),
-                        args: vec![body_ty],
+                        args: vec![carrier_ty],
                     },
                     kind: TExprKind::CoreClosureCall {
                         kind: TCoreClosureKind::Spawn {
@@ -5377,7 +5382,7 @@ fn lower_method_call_impl(
                 } else {
                     None
                 };
-                let targs: Vec<TExpr> = args
+                let mut targs: Vec<TExpr> = args
                     .iter()
                     .enumerate()
                     .map(|(index, a)| {
@@ -5385,6 +5390,17 @@ fn lower_method_call_impl(
                             .as_ref()
                             .and_then(|all| all.get(index))
                             .or(callback_params.as_ref());
+                        if params.is_some() {
+                            if let Some(callback) = lower_named_collection_callback(
+                                &a.expr,
+                                cx,
+                                env,
+                                false,
+                                params.map(|types| types.as_slice()),
+                            ) {
+                                return callback;
+                            }
+                        }
                         if let (Expr::Lambda(lam), Some(params)) = (&a.expr, params) {
                             let mut tl = if method == "edit_disjoint" {
                                 crate::Codegen::TIR::lower_lambda_expecting_value(
@@ -5473,8 +5489,30 @@ fn lower_method_call_impl(
                             ret: Some(ret), ..
                         } if matches!(ret.as_ref(), Type::Result { .. })
                     )
-                });
+                }) || (matches!(method, "map" | "filter")
+                    && matches!(result_ty, Type::Result { .. }));
                 let op = resolve_closure_op(&recv_ty, method, args, cx, fallible_callback);
+                let callback_uses_effective_carrier = matches!(
+                    &op,
+                    TClosureOp::TryMap
+                        | TClosureOp::TryFilter
+                        | TClosureOp::TrySortBy
+                        | TClosureOp::TrySortByDesc
+                        | TClosureOp::FilterMap
+                );
+                if callback_uses_effective_carrier {
+                    if let Some(callback) = lower_named_collection_callback(
+                        &args[0].expr,
+                        cx,
+                        env,
+                        true,
+                        callback_params.as_deref(),
+                    ) {
+                        if let Some(first) = targs.first_mut() {
+                            *first = callback;
+                        }
+                    }
+                }
                 let lazy_or_view_receiver = matches!(
                     &recv_ty,
                     Type::Apply { name, .. }
@@ -6500,6 +6538,21 @@ fn lower_method_call_impl(
                     if args.len() == 1 {
                         return in_own_frame(|| {
                             let input = lower_expr(&arg.expr, cx, env);
+                            // Exact carriers are opaque Prelude values, not Rust
+                            // primitives. Cross to Float through their shared
+                            // `to_float` operation instead of emitting `as f64`.
+                            if target == Type::Float
+                                && matches!(source_name, "Fraction" | "Decimal")
+                            {
+                                return TExpr {
+                                    ty: resolved_ret.cloned().unwrap_or(Type::Float),
+                                    kind: TExprKind::PreciseBuiltin {
+                                        type_name: source_name.to_string(),
+                                        func: "to_float".to_string(),
+                                        args: vec![input],
+                                    },
+                                };
+                            }
                             let op = resolve_numeric_conversion_op(&type_name, source_name)
                                 .expect("sema admitted a numeric destination conversion");
                             let ty =

@@ -31,8 +31,8 @@ use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TCallArg;
-use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TFnValueKind;
@@ -47,6 +47,9 @@ use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TUnsafeGate;
 use crate::Codegen::TIR::TirWorklist;
+use crate::Codegen::TIR::TIfCond;
+use crate::Codegen::TIR::TContract;
+ 
 #[cfg(test)]
 use crate::Diagnostics::Span;
 use crate::Syntax;
@@ -59,6 +62,375 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+/// Recover the stack-address fact from completed TIR, including deferred
+/// branches and expression-cache continuations.
+pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
+    fn walk_expr(node: &TExpr) -> bool {
+        match &node.kind {
+            TExprKind::CoreCall {
+                module,
+                method,
+                args,
+                ..
+            } => {
+                (module == "core.mem"
+                    && method == "address_of"
+                    && args.first().is_some_and(|arg| {
+                        matches!(
+                            tir_address_lifetime(arg),
+                            crate::Codegen::TIR::TAddressLifetime::Stack
+                                | crate::Codegen::TIR::TAddressLifetime::Unknown
+                        )
+                    }))
+                    || args.iter().any(walk_expr)
+            }
+            TExprKind::RawOf(inner) => {
+                matches!(
+                    tir_address_lifetime(inner),
+                    crate::Codegen::TIR::TAddressLifetime::Stack
+                ) || walk_expr(inner)
+            }
+            TExprKind::InlineBlock(body) => walk_stmts(body),
+            TExprKind::Call { args, .. }
+            | TExprKind::StaticCall { args, .. }
+            | TExprKind::ModuleCall { args, .. } => args.iter().any(|arg| walk_expr(&arg.value)),
+            TExprKind::ExternCall { args, .. } => args.iter().any(|arg| walk_expr(&arg.value)),
+            TExprKind::PtrFromAddr { addr, .. } => walk_expr(addr),
+            TExprKind::DistinctCtor { arg, .. }
+            | TExprKind::RangeCheckedCtor { arg, .. }
+            | TExprKind::DistinctConvert { arg, .. }
+            | TExprKind::Print(arg)
+            | TExprKind::Drop(arg)
+            | TExprKind::Close(arg)
+            | TExprKind::ResourceNew(arg)
+            | TExprKind::Deref(arg)
+            | TExprKind::Clone(arg)
+            | TExprKind::ExplicitCopy(arg)
+            | TExprKind::MaterializeView(arg)
+            | TExprKind::DistinctRaw(arg)
+            | TExprKind::Present(arg)
+            | TExprKind::Ok(arg)
+            | TExprKind::Err(arg)
+            | TExprKind::OptField { base: arg, .. }
+            | TExprKind::PatternMatches { subj: arg, .. }
+            | TExprKind::NumericMethod { recv: arg, .. } => walk_expr(arg),
+            TExprKind::AmbientInput { prompt } => prompt.as_deref().is_some_and(walk_expr),
+            TExprKind::Binary { lhs, rhs, .. }
+            | TExprKind::LayoutCompare { lhs, rhs, .. }
+            | TExprKind::OverflowOpt { lhs, rhs, .. }
+            | TExprKind::NumericBinaryMethod {
+                recv: lhs,
+                arg: rhs,
+                ..
+            } => walk_expr(lhs) || walk_expr(rhs),
+            TExprKind::Unary { operand, .. }
+            | TExprKind::LayoutLit { inner: operand }
+            | TExprKind::Borrow {
+                place: operand, ..
+            } => walk_expr(operand),
+            TExprKind::CompareChain { operands, .. } => operands.iter().any(walk_expr),
+            TExprKind::UnitConvert { arg, rounding, .. } => {
+                walk_expr(arg)
+                    || rounding
+                        .as_ref()
+                        .is_some_and(|(_, value)| walk_expr(value))
+            }
+            TExprKind::MathBuiltin { args, .. } | TExprKind::PreciseBuiltin { args, .. } => {
+                args.iter().any(walk_expr)
+            }
+            TExprKind::StructLit { fields, .. } => {
+                fields.iter().any(|(_, value, _)| walk_expr(value))
+            }
+            TExprKind::Field { recv, .. }
+            | TExprKind::SharedGuardValue { guard: recv, .. }
+            | TExprKind::SharedGuardMap { guard: recv, .. }
+            | TExprKind::SharedGuardSplit { guard: recv, .. }
+            | TExprKind::MathSwizzleRead { recv, .. }
+            | TExprKind::TaskGroupAll { tasks: recv }
+            | TExprKind::TaskGroupRace { tasks: recv }
+            | TExprKind::TaskGroupAny { tasks: recv } => walk_expr(recv),
+            TExprKind::SharedGuardWait {
+                guard,
+                condition,
+                ..
+            } => walk_expr(guard) || walk_expr(condition),
+            TExprKind::ConditionNotify { condition, .. } => walk_expr(condition),
+            TExprKind::ListLit(values) | TExprKind::ColumnarListLit { elems: values, .. } => {
+                values.iter().any(walk_expr)
+            }
+            TExprKind::ListSpread { parts } => parts.iter().any(|part| match part {
+                crate::Codegen::TIR::ListSpreadPart::Elem(value)
+                | crate::Codegen::TIR::ListSpreadPart::Spread(value) => walk_expr(value),
+            }),
+            TExprKind::ColumnarGather { base, index, .. }
+            | TExprKind::ColumnarColumnRead { base, index, .. }
+            | TExprKind::Index { base, index, .. }
+            | TExprKind::IndexHook { base, index, .. }
+            | TExprKind::MathLaneIndex { base, index, .. } => {
+                walk_expr(base) || walk_expr(index)
+            }
+            TExprKind::PoolSlot { pool, id, .. } => walk_expr(pool) || walk_expr(id),
+            TExprKind::Slice {
+                base,
+                start,
+                end,
+                range,
+                ..
+            } => {
+                walk_expr(base)
+                    || walk_expr(start)
+                    || walk_expr(end)
+                    || range.as_deref().is_some_and(walk_expr)
+            }
+            TExprKind::MethodCall { recv, args, .. }
+            | TExprKind::FnFieldCall { recv, args, .. } => {
+                walk_expr(recv) || args.iter().any(|arg| walk_expr(&arg.value))
+            }
+            TExprKind::DecodeUnder { segment, inner } => {
+                walk_expr(segment) || walk_expr(inner)
+            }
+            TExprKind::BuiltinMethod { recv, args, .. }
+            | TExprKind::ClosureMethod { recv, args, .. }
+            | TExprKind::HandleMethod { recv, args, .. } => {
+                walk_expr(recv) || args.iter().any(walk_expr)
+            }
+            TExprKind::IfExpr {
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+            } => {
+                walk_cond(cond)
+                    || walk_stmts(then_body)
+                    || walk_expr(then_value)
+                    || walk_stmts(else_body)
+                    || walk_expr(else_value)
+            }
+            TExprKind::Try { inner, note, .. } => {
+                walk_expr(inner) || note.as_deref().is_some_and(walk_expr)
+            }
+            TExprKind::OrFallback { value, fallback } => {
+                walk_expr(value)
+                    || match fallback {
+                        crate::Codegen::TIR::TOrFallback::Value(value)
+                        | crate::Codegen::TIR::TOrFallback::Return(Some(value)) => walk_expr(value),
+                        crate::Codegen::TIR::TOrFallback::Panic { msg, .. } => walk_expr(msg),
+                        _ => false,
+                    }
+            }
+            TExprKind::OptionLift2 { f, a, b } => {
+                walk_expr(f) || walk_expr(a) || walk_expr(b)
+            }
+            TExprKind::HostBorrowCallback { callable, .. } => walk_expr(callable),
+            TExprKind::SelectRecv { builder, channel } => {
+                walk_expr(builder) || walk_expr(channel)
+            }
+            TExprKind::SelectAfter {
+                builder,
+                duration,
+                value,
+            } => {
+                walk_expr(builder)
+                    || walk_expr(duration)
+                    || value.as_deref().is_some_and(walk_expr)
+            }
+            TExprKind::SelectWait { builder, .. } => walk_expr(builder),
+            TExprKind::TupleLit { fields, .. } => {
+                fields.iter().any(|(_, value)| walk_expr(value))
+            }
+            TExprKind::MapLit(fields) => fields
+                .iter()
+                .any(|(left, right)| walk_expr(left) || walk_expr(right)),
+            TExprKind::JSONLit { arg, .. } | TExprKind::DBValueLit { arg, .. } => {
+                arg.as_ref().is_some_and(|arg| walk_expr(&arg.0))
+            }
+            _ => false,
+        }
+    }
+
+    fn walk_cond(condition: &TIfCond) -> bool {
+        match condition {
+            TIfCond::Plain(value)
+            | TIfCond::IfLet { subj: value, .. }
+            | TIfCond::IsNone { subj: value }
+            | TIfCond::Matches { subj: value, .. } => walk_expr(value),
+            TIfCond::And { left, right } => walk_cond(left) || walk_cond(right),
+            TIfCond::WithPrelude { prelude, cond } => {
+                walk_stmts(prelude) || walk_cond(cond)
+            }
+        }
+    }
+
+    fn walk_contract(contract: &TContract) -> bool {
+        walk_expr(&contract.condition) || walk_expr(&contract.message)
+    }
+
+    fn walk_place(place: &TPlace) -> bool {
+        match place {
+            TPlace::Local(_) => false,
+            TPlace::Expr(value) => walk_expr(value),
+        }
+    }
+
+    fn walk_stmts(items: &[TStmt]) -> bool {
+        items.iter().any(|stmt| match stmt {
+            TStmt::Contract { contract } => walk_contract(contract),
+            TStmt::ContractScope {
+                pre, body, post, ..
+            } => pre.iter().any(walk_contract) || walk_stmts(body) || post.iter().any(walk_contract),
+            TStmt::Let { init, .. }
+            | TStmt::TupleDestructure { init, .. }
+            | TStmt::StructDestructure { init, .. }
+            | TStmt::ListDestructure { init, .. } => walk_expr(init),
+            TStmt::RefutableBind { init, fallback, .. } => {
+                walk_expr(init) || walk_stmts(fallback)
+            }
+            TStmt::GcEdit {
+                index_temp, stmt, ..
+            } => {
+                index_temp
+                    .as_ref()
+                    .is_some_and(|(_, index)| walk_expr(index))
+                    || walk_stmts(std::slice::from_ref(stmt.as_ref()))
+            },
+            TStmt::SplitViews { owner, .. } => owner.as_ref().is_some_and(walk_expr),
+            TStmt::Assign { place, value, .. } => walk_place(place) || walk_expr(value),
+            TStmt::Return(value) => value.as_ref().is_some_and(walk_expr),
+            TStmt::ExprStmt(value) => walk_expr(value),
+            TStmt::TaskGroup { limit, body, .. } => {
+                limit.as_ref().is_some_and(walk_expr) || walk_stmts(body)
+            }
+            TStmt::DeferClose { close, .. } => walk_expr(close),
+            TStmt::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                walk_cond(cond)
+                    || walk_stmts(then_body)
+                    || else_body.as_ref().is_some_and(|body| walk_stmts(body))
+            },
+            TStmt::Loop { body, .. }
+            | TStmt::Inline(body)
+            | TStmt::DebugOnly(body)
+            | TStmt::Unsafe { body, .. }
+            | TStmt::SentryPolicy { body, .. }
+            | TStmt::Impure(body)
+            | TStmt::Region(body)
+            | TStmt::Live { body }
+            | TStmt::Shield { body }
+            | TStmt::ScopeMember { body, .. }
+            | TStmt::Transact { body, .. }
+            | TStmt::Layout { body, .. } => walk_stmts(body),
+            TStmt::While { cond, body, .. } => walk_expr(cond) || walk_stmts(body),
+            TStmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                ..
+            } => {
+                walk_stmts(std::slice::from_ref(init.as_ref()))
+                    || walk_expr(cond)
+                    || step
+                        .as_deref()
+                        .is_some_and(|step| walk_stmts(std::slice::from_ref(step)))
+                    || walk_stmts(body)
+            },
+            TStmt::Range {
+                source,
+                start,
+                end,
+                step,
+                body,
+                ..
+            } => {
+                source.as_ref().is_some_and(walk_expr)
+                    || walk_expr(start)
+                    || walk_expr(end)
+                    || step.as_ref().is_some_and(walk_expr)
+                    || walk_stmts(body)
+            },
+            TStmt::BreakValue { value, .. } => walk_expr(value),
+            TStmt::EnumMatch {
+                scrutinee,
+                arms,
+                else_body,
+                ..
+            } => {
+                walk_expr(scrutinee)
+                    || arms.iter().any(|arm| walk_stmts(&arm.body))
+                    || else_body.as_ref().is_some_and(|body| walk_stmts(body))
+            },
+            TStmt::RangeSwitch {
+                subject,
+                arms,
+                else_body,
+            } => {
+                walk_expr(subject)
+                    || arms.iter().any(|(_, _, body)| walk_stmts(body))
+                    || walk_stmts(else_body)
+            },
+            TStmt::IndexAssign {
+                base,
+                index,
+                value,
+                ..
+            }
+            | TStmt::IndexHookAssign {
+                base,
+                index,
+                value,
+                ..
+            } => walk_expr(base) || walk_expr(index) || walk_expr(value),
+            TStmt::IndexFieldAssign(assign) => {
+                walk_expr(&assign.base) || walk_expr(&assign.index) || walk_expr(&assign.value)
+            }
+            TStmt::MathSwizzleAssign { base, value, .. } => {
+                walk_expr(base) || walk_expr(value)
+            }
+            TStmt::ForIn {
+                source,
+                collection,
+                step,
+                body,
+                ..
+            } => {
+                walk_expr(source)
+                    || walk_expr(collection)
+                    || step.as_ref().is_some_and(walk_expr)
+                    || walk_stmts(body)
+            },
+            TStmt::MixedSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
+                walk_expr(subject)
+                    || arms
+                        .iter()
+                        .any(|(condition, body)| walk_expr(condition) || walk_stmts(body))
+                    || else_body.as_ref().is_some_and(|body| walk_stmts(body))
+            },
+            TStmt::ContextBlock { guards, body } => {
+                guards.iter().any(|(_, value)| walk_expr(value)) || walk_stmts(body)
+            },
+            TStmt::Reactive { .. }
+            | TStmt::Break(_)
+            | TStmt::Continue(_)
+            | TStmt::LineMarker(_)
+            | TStmt::SourceSpan(_) => false,
+        })
+    }
+
+    let found = walk_stmts(nodes);
+    if found {
+        env.note_stack_address();
+    }
+}
 /// Preserve contextual union typing when a sema-resolved comptime value stays
 /// as a `CtLit`. The literal must remain a single fact for JIT/interpreter, but
 /// its serialized AOT form still needs the generated union enum wrapper.
@@ -1445,6 +1817,17 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
             };
             value = preserve_typed_list_shape(value, payload, cx);
             value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+            // `??` consumes its input carrier and leaves a bare success value.
+            // Restore the enclosing callable's Result carrier exactly once,
+            // matching sema's implicit `Ok` for ordinary source returns.
+            if matches!(want, Type::Result { .. })
+                && !matches!(value.ty, Type::Result { .. })
+            {
+                value = TExpr {
+                    ty: want.clone(),
+                    kind: TExprKind::Ok(Box::new(value)),
+                };
+            }
         }
         TStmt::Return(Some(value))
     })
@@ -2712,12 +3095,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // binds the same reference, rather than materializing a copy.
                         let allocator_carrier =
                             init.ty.is_allocator_view() || init.ty.is_allocator_result();
-                        // D-CONC-SPAWN1: a fallible task body's closure returns the
-                        // internal carrier `Task<T !E>` (`spawn_body_result_ty`),
-                        // while sema's surface binding type stays `Task<T>`. Keep
-                        // the carrier through TIR — bind and annotate with the
-                        // lowered spawn type so the Rust `let` matches its init —
-                        // exactly the allocator-carrier precedent above.
+                        // The source binding remains `Task<T>` in sema, while the
+                        // lowered closure stores its effective `Result`/`Option`
+                        // carrier in `Task<carrier>`. Inferred Rust bindings must
+                        // follow the initializer so the join adapter can flatten it.
                         let spawn_carrier = matches!(
                             &init.kind,
                             TExprKind::CoreClosureCall {
@@ -2949,14 +3330,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         let let_ty = if allocator_carrier {
                             crate::Codegen::TIR::TLetTy::plain(ty.clone())
                         } else if spawn_carrier || ty.is_compute_view_mut() {
-                            // D-CONC-SPAWN1: the fallible spawn carrier binds
-                            // UNANNOTATED. The closure fully pins the type
-                            // (`Ok::<_, E>(…)` tail + widened `?` sites), and
-                            // spelling the lowered type here would name tuple
-                            // typedefs (`__jet_JetTup_<hash>`) derived from
-                            // lowering-side spellings that the AST-walk tuple
-                            // collector (Tuples.rs) never registered — rustc
-                            // E0425 on a tuple-tail task body (I2).
+                            // The effective spawn carrier binds unannotated;
+                            // its Rust type is fixed by the closure initializer.
                             TLetTy::Inferred
                         } else if send_fn {
                             TLetTy::SendFn(ty.clone())

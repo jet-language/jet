@@ -11754,6 +11754,7 @@ impl LowerCtx<'_, '_> {
             "ServiceRestart" => Some(self.host.service_restart_show),
             "ServiceRuntime" | "ServiceStateStore" | "SyncCounter" | "SyncList" | "SyncMap"
             | "SyncText" => Some(self.host.service_show),
+            "HTTPError" => Some(self.host.net_http.http_error_show),
             _ => None,
         }
     }

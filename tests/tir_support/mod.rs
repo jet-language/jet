@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -11,11 +11,21 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 // application manifest. Give every scratch project one explicit test
 // authority decision so an authority-floor change cannot turn unrelated
 // tests into per-test allowlists.
-const TIR_TEST_PACKAGE: &str = "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n";
+pub(crate) const TIR_TEST_PACKAGE: &str = "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n";
 
 fn unique_tmp(prefix: &str) -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), n))
+}
+
+pub(crate) fn write_test_package(dir: &Path, source: &str) {
+    let temp = std::env::temp_dir();
+    assert!(
+        dir.parent() == Some(temp.as_path()),
+        "TIR test package must live in its own strict TMPDIR child: {}",
+        dir.display()
+    );
+    fs::write(dir.join("package.jet"), source).unwrap();
 }
 
 pub fn have_rustc() -> bool {
@@ -97,11 +107,7 @@ fn jit_run_with_package(
     let jet_name = format!("{name}.jet");
     let jet_path = dir.join(&jet_name);
     fs::write(&jet_path, src).unwrap();
-    fs::write(
-        dir.join("package.jet"),
-        package_source.unwrap_or(TIR_TEST_PACKAGE),
-    )
-    .unwrap();
+    write_test_package(&dir, package_source.unwrap_or(TIR_TEST_PACKAGE));
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command
         .arg("run")
@@ -126,7 +132,7 @@ pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
     fs::create_dir_all(&dir).unwrap();
     let jet_path = dir.join(format!("{name}.jet"));
     fs::write(&jet_path, src).unwrap();
-    fs::write(dir.join("package.jet"), TIR_TEST_PACKAGE).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", jet_path.to_str().unwrap(), "--trace-tiers"])
         .current_dir(&dir)
@@ -164,7 +170,7 @@ pub fn jit_run_with_env_args(
     let jet_name = format!("{name}.jet");
     let jet_path = dir.join(&jet_name);
     fs::write(&jet_path, src).unwrap();
-    fs::write(dir.join("package.jet"), TIR_TEST_PACKAGE).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command
         .arg("run")
@@ -205,11 +211,7 @@ fn interpreter_run_with_package(
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{name}.jet"));
     fs::write(&path, src).unwrap();
-    fs::write(
-        dir.join("package.jet"),
-        package_source.unwrap_or(TIR_TEST_PACKAGE),
-    )
-    .unwrap();
+    write_test_package(&dir, package_source.unwrap_or(TIR_TEST_PACKAGE));
     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
         .arg("run")
         .arg("--interpret")
@@ -344,7 +346,7 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
         fs::create_dir_all(&scratch).unwrap();
         let run_source = scratch.join(source.file_name().expect("example source has a filename"));
         fs::copy(&source, &run_source).unwrap();
-        fs::write(scratch.join("package.jet"), package_source).unwrap();
+        write_test_package(&scratch, package_source);
         (Some(scratch), run_source)
     } else {
         (None, source.clone())
@@ -549,8 +551,9 @@ fn build_and_run_full_inner(
 /// Build and run a multi-file program from a fresh temporary directory.
 #[allow(dead_code)]
 pub fn build_and_run_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String) {
-    let dir = std::env::temp_dir().join(format!("jet_tir_multi_{}_{}", name, std::process::id()));
+    let dir = unique_tmp(&format!("jet_tir_multi_{name}"));
     fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     for (rel, src) in files {
         let path = dir.join(rel);
         if let Some(parent) = path.parent() {
@@ -701,10 +704,7 @@ pub fn run_default_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i3
         }
         fs::write(&path, src).unwrap();
     }
-    let package = dir.join("package.jet");
-    if !package.exists() {
-        fs::write(&package, TIR_TEST_PACKAGE).unwrap();
-    }
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", entry, "--trace-tiers"])
         .current_dir(&dir)
@@ -741,10 +741,7 @@ pub fn run_interpret_multi(
         }
         fs::write(&path, src).unwrap();
     }
-    let package = dir.join("package.jet");
-    if !package.exists() {
-        fs::write(&package, TIR_TEST_PACKAGE).unwrap();
-    }
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "--interpret", entry, "--trace-tiers"])
         .current_dir(&dir)

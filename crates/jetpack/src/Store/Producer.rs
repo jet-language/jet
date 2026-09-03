@@ -33,11 +33,12 @@ pub(crate) fn canonical_producer(
     .map_err(std::io::Error::other)
 }
 
-/// Refresh the immutable producer facts after the Nix provider publishes the
+/// Refresh the immutable producer facts after its provider publishes the
 /// realization it just recorded in the project lock. The lock digest is part
-/// of the Nix action key, so leaving the pre-publication digest in the closure
-/// record would let a later replay accept stale provenance.
-pub(crate) fn refresh_nix_lock_digest(
+/// of the action key, so leaving the pre-publication digest in the closure
+/// record would let a later replay accept stale provenance. Once both the
+/// facts and replay plan carry the sealed digest, the post-pass is complete.
+pub(crate) fn refresh_lock_digest(
     roots: &Roots,
     entry: &StoreEntry,
     lock_digest: &str,
@@ -45,18 +46,28 @@ pub(crate) fn refresh_nix_lock_digest(
     if lock_digest.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "cannot refresh a Nix producer with an empty project lock digest",
+            "cannot refresh a producer with an empty project lock digest",
         ));
     }
     let mut producer =
         ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
-    if producer.provider != "nix" {
+    if !matches!(producer.provider.as_str(), "nix" | "jetpackage") {
+        return Ok(entry.clone());
+    }
+    if producer.facts.get("nix.lock.digest").is_some_and(|digest| digest == lock_digest)
+        && producer
+            .plan
+            .facts()
+            .get("nix.lock.digest")
+            .is_some_and(|digest| digest == lock_digest)
+    {
         return Ok(entry.clone());
     }
     producer
         .facts
         .insert("nix.lock.digest".to_string(), lock_digest.to_string());
-    let mut replay_facts = producer.facts.clone();
+    let mut replay_facts = producer.plan.facts().clone();
+    replay_facts.retain(|key, _| !key.starts_with("cache."));
     replay_facts.insert("nix.lock.digest".to_string(), lock_digest.to_string());
     replay_facts.remove("provider-facts");
     replay_facts.remove("provider-facts-digest");
@@ -81,11 +92,16 @@ pub(crate) fn refresh_nix_lock_digest(
         refreshed.receipt.clear();
         super::AdmissionTransaction::recover_unlocked(roots)?;
         let mut transaction = super::AdmissionTransaction::new(roots)?;
+        let mode = if producer.provider == "nix" {
+            Closure::RegistrationMode::AdmittedNix
+        } else {
+            Closure::RegistrationMode::Native
+        };
         transaction.commit(
             std::slice::from_mut(&mut refreshed),
             &[],
             None,
-            Closure::RegistrationMode::AdmittedNix,
+            mode,
             None,
         )?;
         Ok(refreshed)

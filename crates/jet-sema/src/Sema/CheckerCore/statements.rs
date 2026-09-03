@@ -194,6 +194,9 @@ impl<'a> Checker<'a> {
             while path.depth > depth {
                 path.leave_scope();
             }
+            // A recorded break is a loop-local exit. The body's terminal
+            // reachability must not erase the path that leaves this loop.
+            path.reachable = true;
         }
         if may_skip {
             self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop_with_breaks(
@@ -202,7 +205,6 @@ impl<'a> Checker<'a> {
                 &break_paths,
             );
         } else {
-            break_paths.retain(|path| path.reachable);
             self.flow = if break_paths.is_empty() {
                 let mut exited = before_loop.clone();
                 exited.reachable = false;
@@ -211,8 +213,8 @@ impl<'a> Checker<'a> {
                 crate::Sema::FlowFacts::FlowFacts::merge_paths(before_loop, &break_paths)
             };
         }
-    }
 
+    }
     fn check_break_value(
         &mut self,
         target: Option<(&str, crate::Diagnostics::Span)>,

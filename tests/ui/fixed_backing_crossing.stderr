@@ -3,8 +3,8 @@ Error [E1102]: `task_fixed` cannot be shared into a task — it is a view that d
     |
   7 |     worker :: task {
     |                    ^
- Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
+ Why: A view is a borrow, not an owned value; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
 
 Error [E1102]: `parallel_fixed` cannot cross a parallel worker boundary — it is a view that does not live long enough
@@ -12,6 +12,6 @@ Error [E1102]: `parallel_fixed` cannot cross a parallel worker boundary — it i
     |
  13 |     _ :: values.para_map((n: Int) -> {
     |                          ^^^^^^^^^^^^^
- Why: a view is a borrow, not an owned value; this concurrent boundary moves owned values between workers
- Fix: copy plain owned data into the worker, or keep this operation sequential
+ Why: A view is a borrow, not an owned value; this concurrent boundary moves owned values between workers
+ Fix: Copy plain owned data into the worker, or keep this operation sequential
 More: jet-lang.dev/e/E1102

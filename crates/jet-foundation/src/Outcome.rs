@@ -1854,6 +1854,7 @@ fn diagnostic_token_keeps_case(token: &str) -> bool {
                 | "Decimal"
                 | "Display"
                 | "Float"
+                | "fn"
                 | "Hangar"
                 | "Int"
                 | "Jet"

@@ -163,6 +163,7 @@ pub(crate) fn realize_catalog_recipe(
                 "build.sandbox_policy".into(),
                 "declared URL with pinned SHA-256".into(),
             ),
+            ("nix.lock.digest".into(), lock_digest.clone()),
         ]);
         let facts = BTreeMap::from([
             ("source.kind".into(), "local-unofficial-catalog".into()),

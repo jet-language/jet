@@ -710,12 +710,18 @@ fn capture_receipts(roots: &Store::Roots, expected_packages: &[String]) -> Vec<R
                 .iter()
                 .find(|entry| entry.name == *name)
                 .unwrap_or_else(|| panic!("receipt for {name} missing"));
+            let out = Path::new(&entry.out)
+                .strip_prefix(roots.hangar_dir())
+                .map_or_else(
+                    |_| entry.out.clone(),
+                    |relative| relative.to_string_lossy().into_owned(),
+                );
             ReceiptIdentity {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
                 version: entry.version.clone(),
                 reference: entry.reference.clone(),
-                out: entry.out.clone(),
+                out,
                 output_hash: entry.envelope.output_hash.clone(),
                 references: entry.references.clone(),
                 named_outputs: entry.named_outputs.clone(),

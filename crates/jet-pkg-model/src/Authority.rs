@@ -1043,6 +1043,25 @@ impl AuthorityResolver {
         })
     }
 
+    fn has_nested_project_boundary(&self, relative: &Path) -> Result<bool, AuthorityError> {
+        for candidate in [
+            Syntax::PACKAGE_FILE,
+            Syntax::PAYLOAD_FILE,
+            Syntax::WORKSPACE_FILE,
+            Syntax::UNIFIED_LOCK_FILE,
+        ] {
+            match self.probe_file(&relative.join(candidate)) {
+                Ok(Some(_)) => return Ok(true),
+                Ok(None) => {}
+                // A symlinked marker still identifies a nested project. Do
+                // not follow it or let its contents poison the parent scan.
+                Err(AuthorityError::Symlink(_)) => return Ok(true),
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(false)
+    }
+
     fn discover_source_files_from(
         &self,
         path: &Path,
@@ -1070,6 +1089,20 @@ impl AuthorityResolver {
             })?;
             let relative = scan.relative.join(&name);
             if file_type.is_symlink() {
+                let target_is_directory = match fs::metadata(entry.path()) {
+                    Ok(metadata) => metadata.is_dir(),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                    Err(error) => {
+                        return Err(AuthorityError::Io {
+                            path: entry.path(),
+                            operation: "inspect",
+                            detail: error.to_string(),
+                        });
+                    }
+                };
+                if target_is_directory {
+                    continue;
+                }
                 return Err(AuthorityError::Symlink(self.root.join(relative)));
             }
             let name_text = name.to_string_lossy();
@@ -1082,6 +1115,9 @@ impl AuthorityResolver {
                 continue;
             }
             if file_type.is_dir() {
+                if self.has_nested_project_boundary(&relative)? {
+                    continue;
+                }
                 if depth >= crate::SHA256::MAX_TREE_DEPTH {
                     return Err(authority_limit_error(
                         &self.root.join(&relative),
@@ -1619,6 +1655,50 @@ mod authority_walk_tests {
             .is_none());
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_walk_prunes_nested_projects_before_hostile_entries() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_root("nested-project");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("main.jet"), "fn run() {}\n").unwrap();
+
+        let sibling = root.join("sibling-scratch");
+        fs::create_dir_all(sibling.join(".jet")).unwrap();
+        fs::write(
+            sibling.join("package.jet"),
+            "name: \"nested\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(sibling.join(".jet/lock"), "hostile lock fixture\n").unwrap();
+        let outside = root
+            .parent()
+            .unwrap()
+            .join("jet-authority-walk-nested-project-outside.jet");
+        let _ = fs::remove_file(&outside);
+        fs::write(&outside, "not part of the parent project\n").unwrap();
+        symlink(&outside, sibling.join("config.jet")).unwrap();
+
+        let linked = root.join("linked-scratch");
+        symlink(&sibling, &linked).unwrap();
+
+        let resolver = AuthorityResolver::open(&root).unwrap();
+        let files = resolver
+            .discover_source_files()
+            .expect("nested projects and linked directories are pruned");
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.relative.clone())
+                .collect::<Vec<_>>(),
+            vec![Path::new("main.jet").to_path_buf()]
+        );
+        fs::remove_dir_all(&root).unwrap();
+        fs::remove_file(outside).unwrap();
     }
 
     #[test]

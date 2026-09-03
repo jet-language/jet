@@ -4700,15 +4700,23 @@ pub fn ambient_core_call(
         let Some(CtValue::List(rows)) = args.first() else {
             return Some(Err(unsupported("core.data.query rows", span)));
         };
-        let Some(CtValue::Str(sql)) = args.get(1) else {
-            return Some(Err(unsupported("core.data.query SQL", span)));
+        let sql = match args.get(1) {
+            Some(value) => match ct_sql_value(value, span) {
+                Ok(sql) => sql,
+                Err(error) => return Some(Err(error)),
+            },
+            None => return Some(Err(unsupported("core.data.query SQL", span))),
         };
+        // Keep the checked `(template, DBValue[])` carrier intact at the
+        // boundary. The shared Prelude query kernel consumes the template,
+        // exactly as `jet_data_query_rows` does in generated AOT.
+        let sql = sql.0;
         let trees = match rows.iter().map(query_tree).collect::<Result<Vec<_>, _>>() {
             Ok(trees) => trees,
             Err(error) => return Some(Err(unsupported(&error, span))),
         };
         return Some(Ok(match crate::Encoding::data_query_rt::jet_data_query_indices(
-            &trees, sql,
+            &trees, &sql,
         ) {
             Ok(indices) => CtValue::Present(Box::new(CtValue::List(
                 indices

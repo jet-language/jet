@@ -8,11 +8,11 @@
 
 ## Why
 
-the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet
+The web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet
 
 ## Fix
 
-move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers
+Move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers
 
 ## Example
 

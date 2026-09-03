@@ -70,6 +70,56 @@ fn callback_fn_type(ty: &Type) -> Option<&Type> {
         _ => None,
     }
 }
+/// Lower a named function for a collection adapter's callback ABI.
+///
+/// Ordinary function values carry their effective failure result. Collection
+/// adapters choose either that carrier or the source-success callback shape;
+/// this helper selects the requested view and emits the one boundary wrapper.
+pub(crate) fn lower_named_collection_callback(
+    expr: &Expr,
+    cx: &Cx,
+    env: &LowerEnv,
+    effective: bool,
+    params: Option<&[Type]>,
+) -> Option<TExpr> {
+    let Expr::Ident(name, _) = expr else {
+        return None;
+    };
+    if env.locals.contains_key(name) || cx.consts.contains_key(name) {
+        return None;
+    }
+    let ty = if effective {
+        cx.fn_types.get(name)
+    } else {
+        cx.fn_source_types.get(name)
+    }?;
+    if !matches!(ty, Type::Fn { .. }) {
+        return None;
+    }
+    let callable = TExpr {
+        ty: ty.clone(),
+        kind: TExprKind::FnValue {
+            kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
+                wrapper: emit_named_fn_value(cx, name, ty),
+                name: Some(name.clone()),
+                lambda: None,
+            },
+        },
+    };
+    // Collection Prelude callbacks borrow their inputs. Keep the named
+    // function value behind one direct closure so the adapter receives
+    // `Fn(&T, ...)`, not an Rc whose ABI is incompatible with `Fn`.
+    if let Some(params) = params {
+        return Some(TExpr {
+            ty: callable.ty.clone(),
+            kind: TExprKind::HostBorrowCallback {
+                callable: Box::new(callable),
+                params: params.to_vec(),
+            },
+        });
+    }
+    Some(callable)
+}
 
 /// Compare element types at the fixed-list to growable-list boundary.
 ///
@@ -97,17 +147,18 @@ pub(crate) fn lambda_body_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
     lambda_body_ty_expecting(lam, cx, env, None)
 }
 
-/// D-CONC-SPAWN1: a spawned task's element type. Mirrors sema's
-/// `infer_task_spawn`: a body that propagates with `?` (sema fact
-/// `LambdaMeta::fallible_propagation`) early-returns the enclosing function's
-/// error out of the closure, so the element is the fallible carrier
-/// `Result<tail, E>` (`Option<tail>` for optional propagation) — the same
-/// type the rendered Rust closure returns. Task-group normalization can attach
-/// the shared carrier to an otherwise infallible sibling through
-/// `LambdaMeta::fallible_carrier`; that fact takes precedence over the
-/// enclosing environment here.
+/// D-CONC-SPAWN1: the source-level element type of a spawned task. The
+/// callable's effective failure carrier is an execution detail; `Task<T>`
+/// exposes the body's successful value `T` to `join()` and task combinators.
 pub(crate) fn spawn_body_result_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
-    let t = lambda_body_ty(lam, cx, env);
+    lambda_body_ty(lam, cx, env)
+}
+
+/// D-CONC-FAIL1=A: the private carrier returned by a spawned closure. Keep
+/// this separate from [`spawn_body_result_ty`]: the worker closure may use a
+/// `Result`/`Option` carrier while the source-level task remains `Task<T>`.
+pub(crate) fn spawn_body_carrier_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
+    let t = spawn_body_result_ty(lam, cx, env);
     if let Some(Type::Result { err, .. }) = lam.meta.fallible_carrier.as_ref() {
         return Type::Result {
             ok: Box::new(t),

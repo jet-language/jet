@@ -124,8 +124,8 @@ pub(crate) fn emit_harness_carrier_report(cx: &Cx, err_ty: Option<&Type>) -> Str
 }
 
 /// A chain rooted at `#Todo` diverges before any adapter can run. Emit that
-/// carrier directly so Rust does not try to type-check collection wrappers
-/// around its never value.
+/// carrier directly so callers that already know the result type can preserve
+/// its control-flow shape without wrapping a never value in another operation.
 pub(crate) fn emit_tir_stopping_receiver(recv: &TExpr, cx: &Cx) -> Option<String> {
     if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_NEVER) {
         return Some(emit_tir_expr(recv, cx));
@@ -141,6 +141,17 @@ pub(crate) fn emit_tir_stopping_receiver(recv: &TExpr, cx: &Cx) -> Option<String
         }),
         _ => None,
     }
+}
+
+/// Adapt a diverging value to the String carrier required by the display rail.
+/// The binding is explicitly typed so a borrowed display argument is `&String`,
+/// not an inferred unsized `&str` produced from a bare `!` expression.
+pub(crate) fn emit_tir_stopping_display(recv: &TExpr, cx: &Cx) -> Option<String> {
+    let stop = emit_tir_stopping_receiver(recv, cx)?;
+    let stopped = mangle_generated("stopped_display");
+    Some(format!(
+        "{{ let {stopped}: String = {{ {stop}; unreachable!(\"jet: stopping display value\") }}; {stopped} }}"
+    ))
 }
 
 /// The Rust pattern a `TPattern` spells. The position decides which of codegen's

@@ -94,7 +94,7 @@ fn refresh_stale_project_nix_entry(
         let Some(hit) = Store::find_verified_by_reference(roots, &spec.raw, &expectation)? else {
             return Ok(());
         };
-        Store::refresh_nix_lock_digest(roots, &hit.entry, &current)?;
+        Store::refresh_lock_digest(roots, &hit.entry, &current)?;
         Ok(())
     })
     .map_err(Store::RealizeError::Store);

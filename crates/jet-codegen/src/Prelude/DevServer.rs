@@ -1456,6 +1456,7 @@ mod jet_devserver_impl {
         Ok(())
     }
 
+    // JET_VETTED_UNSAFE_BEGIN: jet_devserver_windows_output
     #[cfg(windows)]
     mod jet_devserver_windows_output {
         use super::*;
@@ -2350,6 +2351,7 @@ mod jet_devserver_impl {
             Ok(Some(guard))
         }
     }
+    // JET_VETTED_UNSAFE_END: jet_devserver_windows_output
 
     // I1: these helpers are the only platform boundary in the generated
     // server. Raw descriptors/handles stay inside them; callers receive only

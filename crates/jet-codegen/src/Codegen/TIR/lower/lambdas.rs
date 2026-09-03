@@ -7,7 +7,7 @@ use crate::Codegen::TIR::emit_tir_lambda_block;
 use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::lambda_body_ty_expecting;
-use crate::Codegen::TIR::spawn_body_result_ty;
+use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::lower::lambda_block_tail;
 use crate::Codegen::TIR::lower::{
     lower_value_block, prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
@@ -829,7 +829,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
                 body_ty
             }
         })
-        .unwrap_or_else(|| spawn_body_result_ty(lam, cx, env));
+        .unwrap_or_else(|| spawn_body_carrier_ty(lam, cx, env));
     if shared_body.is_none() {
         match &lam.body {
             LambdaBody::Expr(expr) => prepare_interrupt_callback_local_expr(expr, cx, &mut lam_env),

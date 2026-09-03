@@ -14,6 +14,7 @@ use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
 use crate::Codegen::TIR::emit::emit_require_stop;
 use crate::Codegen::TIR::emit::helpers::emit_harness_carrier_report;
+use crate::Codegen::TIR::emit::helpers::emit_tir_stopping_display;
 use crate::Codegen::TIR::emit::helpers::is_test_harness_fn;
 use crate::Codegen::TIR::emit::helpers::root_path;
 use crate::Codegen::TIR::emit::helpers::try_carrier_error_type;
@@ -480,7 +481,7 @@ fn emit_tir_standalone_outcome(e: &TExpr, cx: &Cx) -> Option<String> {
 /// Keep exact `Int` on its packed fast path, matching `emit_tir_str`, rather
 /// than asking the trait bridge to allocate a second representation.
 pub(crate) fn emit_tir_display_value(value: &TExpr, cx: &Cx) -> String {
-    if let Some(stop) = emit_tir_stopping_receiver(value, cx) {
+    if let Some(stop) = emit_tir_stopping_display(value, cx) {
         return stop;
     }
     let rendered =
@@ -6377,10 +6378,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReflectValueFields => format!("({}).fields()", recv),
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
-                THandleOp::TaskJoin if task_result_carrier(&recv_ty_for_stream) => format!(
-                    "{}jet_std::jet_task_join_result({})",
-                    cx.root_prefix, recv
-                ),
+                // D-CONC-FAIL1=A: `join()` returns the task element `T` on
+                // its success branch and `TaskFailure` on its own failure
+                // rail. A fallible task stores its private `Result<T, E>`
+                // inside the handle, so keep that nested carrier here;
+                // `jet_task_join_result` would erase the task body's E.
                 THandleOp::TaskJoin => format!("({}).join()", recv),
                 THandleOp::TaskDetach => format!("({}).detach()", recv),
                 THandleOp::TaskPause => {

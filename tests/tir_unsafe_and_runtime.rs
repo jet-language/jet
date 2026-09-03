@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use tir_support::{
     assert_tiers_agree_with_application_policy, build_and_run, build_and_run_full, have_rustc,
+    write_test_package, TIR_TEST_PACKAGE,
 };
 const FROM_ADDR_SOURCE: &str = r###"
 use core.mem as _mem
@@ -358,17 +359,32 @@ fn sentry_kernel_is_shared_by_aot_and_runtime_adapters() {
     );
 }
 
-/// D-MEM-SENTRY1: source policy-off keeps the same safe raw operation across
-/// default JIT, forced interpreter, and AOT. Only the witness is disabled.
+/// D-MEM-SENTRY1: source policy-off keeps the same safe raw operation for
+/// default JIT and AOT; forced interpretation reports E2201 at the honest
+/// low-level boundary.
 #[test]
 fn sentry_source_policy_off_is_tier_parity() {
     let source = include_str!("../examples/features/memory/unsafe_sentries_source_off.jet")
         .replace("use core.mem", "use core.mem as _mem");
-    tir_support::assert_tiers_agree(
-        "unsafe_sentries_source_off",
-        &source,
-        "41\n",
+    let (jit_code, jit_out, jit_err) =
+        tir_support::jit_run("unsafe_sentries_source_off", &source);
+    assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
+    assert_eq!(jit_out, "41\n", "default JIT output drifted:\n{jit_err}");
+    let (interpreter_code, interpreter_out, interpreter_err) =
+        tir_support::interpreter_run("unsafe_sentries_source_off", &source);
+    assert_eq!(interpreter_code, 1, "forced interpreter must report E2201");
+    assert!(interpreter_out.is_empty(), "forced interpreter leaked stdout");
+    assert!(
+        interpreter_err.contains("Error [E2201]"),
+        "forced interpreter lost the canonical low-level boundary:\n{interpreter_err}"
     );
+    if have_rustc() {
+        let (aot_code, aot_out, aot_err) =
+            build_and_run_full("jet_tir_sentry", "unsafe_sentries_source_off", &source);
+        assert_eq!(aot_code, jit_code, "AOT/default JIT exit codes disagree:\n{aot_err}");
+        assert_eq!(aot_out, jit_out, "AOT/default JIT stdout disagrees:\n{aot_err}");
+        assert_eq!(aot_err, jit_err, "AOT/default JIT stderr disagrees");
+    }
 }
 
 /// D-MEM-SENTRY1: `from_addr` uses the canonical evaluator's stack sentry.
@@ -448,7 +464,7 @@ fn run() {
             "unsafe_sentries_provenance",
             include_str!("../examples/features/memory/unsafe_sentries_provenance.jet"),
             "R0801",
-            "the pointer is outside the allocation provenance",
+            "The pointer is outside the allocation provenance",
         ),
         (
             "unsafe_sentries_quarantine",
@@ -502,7 +518,7 @@ fn run() {
             ] {
                 assert!(
                     stderr.contains(&marker),
-                    "{tier} missing `{marker}` for {code}: {stderr}"
+                    "D-CASE-PROSE1=A: {tier} missing `{marker}` for {code}: {stderr}"
                 );
             }
         }
@@ -1161,6 +1177,7 @@ fn run() {
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();
@@ -1283,6 +1300,7 @@ fn run() {
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();

@@ -1,6 +1,6 @@
 //! D-INTDIV1=A / D-TYPE2-DEFAULT1=A — `/` answers an exact quotient: whole
-//! numbers produce a `Fraction`, finite results print as decimals, and repeating
-//! results print as fractions. `/%` is the whole-number path.
+//! numbers produce a `Fraction`; finite non-whole results print as decimals,
+//! and repeating results print as fractions. `/%` is the whole-number path.
 
 mod common;
 
@@ -29,7 +29,7 @@ fn run() {{
     );
     let (code, out) = build_and_run("intdiv_quotient", &src);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(out, "3.5\n3.0\n-3.5\n0.25\n", "{out}");
+    assert_eq!(out, "3.5\n3\n-3.5\n0.25\n", "{out}");
 }
 
 /// D-TYPE2-DEFAULT1=A: exact division prints its exact result, while a Float
@@ -53,9 +53,7 @@ fn run() {{
 }}
 "
     );
-    let (code, out) = build_and_run("intdiv_exact", &src);
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(out, "3.5\n1/3\n3.5\n", "{out}");
+    assert_tiers_agree("intdiv_exact", &src, "3.5\n7/3\n3.5\n");
 }
 
 /// D-INTDIV1=A: storing that exact quotient back into a whole number is a
@@ -83,7 +81,7 @@ fn storing_a_quotient_in_a_whole_number_points_at_floor_division() {
             "expected a type error for a quotient stored in a whole number:\n{rendered}"
         );
         assert!(
-            rendered.contains("use `/%` to divide and round down"),
+            rendered.contains("Use `/%` to divide and round down"),
             "the fix must name floor division:\n{rendered}"
         );
     }
@@ -132,7 +130,7 @@ fn run() {{
 }}
 "
     );
-    assert_tiers_agree("intdiv_tiers", &src, "3.5\n3.0\n-3.5\n0.25\n8.5\n8\n");
+    assert_tiers_agree("intdiv_tiers", &src, "3.5\n3\n-3.5\n0.25\n8.5\n8\n");
 }
 
 /// #1484: fixed-width `/` by zero must use the Prelude wording and exit 70 —

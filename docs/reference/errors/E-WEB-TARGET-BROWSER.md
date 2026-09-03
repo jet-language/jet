@@ -8,11 +8,11 @@
 
 ## Why
 
-the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly
+The web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly
 
 ## Fix
 
-remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls
+Remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls
 
 ## Example
 

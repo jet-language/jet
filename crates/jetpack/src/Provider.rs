@@ -1146,7 +1146,7 @@ pub(crate) fn record_nix_lock_after_store(
     // replay reconstructs from the portable closure.
     let mut lock_entry = entry.clone();
     lock_entry.cache_identity.policy_fingerprint = nix_closure.cache_key.clone();
-    let refreshed = super::RuntimePolicy::with_project_lock(
+    super::RuntimePolicy::with_project_lock(
         project,
         "nix-lock-publication",
         || {
@@ -1177,19 +1177,11 @@ pub(crate) fn record_nix_lock_after_store(
                 },
             )
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-            let lock_digest = project_lock_digest(Some(project))
-                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-            super::Store::refresh_nix_lock_digest(roots, &lock_entry, &lock_digest).map_err(
-                |error| {
-                    std::io::Error::other(format!(
-                        "could not refresh the Nix Store producer after lock publication: {error}"
-                    ))
-                },
-            )
+            Ok(())
         },
     )
     .map_err(|error| ProviderError::BadOutput(error.to_string()))?;
-    Ok(refreshed)
+    Ok(lock_entry)
 }
 
 /// How a dependency was realized, for the `jet build` per-package report

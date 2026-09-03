@@ -2651,6 +2651,7 @@ fn find_top_level_inline_package(bytes: &[u8], from: usize) -> Option<(usize, us
     let mut braces = 0usize;
     let mut brackets = 0usize;
     let mut parens = 0usize;
+    let mut item_position = true;
     while i < bytes.len() {
         if bytes[i] == b'"' || bytes[i] == b'\'' {
             i = skip_inline_string(bytes, i);
@@ -2667,17 +2668,43 @@ fn find_top_level_inline_package(bytes: &[u8], from: usize) -> Option<(usize, us
         if braces == 0
             && brackets == 0
             && parens == 0
+            && item_position
             && inline_package_start(bytes, i).is_some()
         {
             return inline_package_start(bytes, i);
         }
         match bytes[i] {
-            b'{' => braces += 1,
-            b'}' => braces = braces.saturating_sub(1),
-            b'[' => brackets += 1,
+            b'{' => {
+                braces += 1;
+                item_position = false;
+            }
+            b'}' => {
+                braces = braces.saturating_sub(1);
+                if braces == 0 && brackets == 0 && parens == 0 {
+                    item_position = true;
+                }
+            }
+            b'[' => {
+                brackets += 1;
+                item_position = false;
+            }
             b']' => brackets = brackets.saturating_sub(1),
-            b'(' => parens += 1,
+            b'(' => {
+                parens += 1;
+                item_position = false;
+            }
             b')' => parens = parens.saturating_sub(1),
+            b';' if braces == 0 && brackets == 0 && parens == 0 => {
+                item_position = true;
+            }
+            byte
+                if braces == 0
+                    && brackets == 0
+                    && parens == 0
+                    && !byte.is_ascii_whitespace() =>
+            {
+                item_position = false;
+            }
             _ => {}
         }
         i += 1;
@@ -2780,6 +2807,11 @@ mod security_tests {
             .unwrap()
             .expect("triple-quoted Package values stay inside the carrier");
         assert!(block.body(source).contains("still text"));
+    }
+    #[test]
+    fn inline_package_scanner_ignores_module_path_segments() {
+        let source = "module perf.package {\n}\nfn run() {}\n";
+        assert!(super::extract_inline_package(source).unwrap().is_none());
     }
     #[test]
     fn inline_package_allows_byte_zero_shebang_header() {

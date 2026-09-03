@@ -15,6 +15,16 @@ fn cell_inner(ty: &Type) -> Type {
         _ => Type::Int,
     }
 }
+/// Return the value a callback promises before its executable failure carrier.
+/// Built-in adapters use this source-success projection for element and
+/// accumulator inference; the `Result`/`Option` carrier belongs to the call
+/// boundary, not the adapter's collection shape.
+fn callable_success_type(ty: &Type) -> Type {
+    match ty {
+        Type::Result { ok, .. } | Type::Option(ok) => (**ok).clone(),
+        _ => ty.clone(),
+    }
+}
 
 /// Project an open collection callback's carrier through the adapter. The
 /// callback owns the failure row; `map`/`filter` lift the collection result
@@ -878,7 +888,7 @@ impl<'a> Checker<'a> {
                 }
                 if method == "para_fold" && i == 0 {
                     if let Some(Type::Fn { ret: Some(acc), .. }) = &got {
-                        let acc = (**acc).clone();
+                        let acc = callable_success_type(acc);
                         if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(1) {
                             params[0] = acc.clone();
                             *ret = Some(Box::new(acc.clone()));
@@ -930,28 +940,29 @@ impl<'a> Checker<'a> {
                             ret: Some(ref r), ..
                         } = gt
                         {
+                            let success = callable_success_type(r);
                             if let Some(result) = fallible_collection_return(recv_ty, method, r) {
                                 refined_ret = Some(result);
                             } else {
                                 match recv_ty {
                                     Type::List(inner) | Type::FixedList { elem: inner, .. } => {
                                         // D-LOOPMAP1=B: List.map returns [R]; Iter.map stays lazy.
-                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                        refined_ret = Some(Type::List(Box::new(success.clone())));
                                         let _ = inner;
                                     }
                                     Type::Apply { name, .. } if name == Syntax::TYPE_ITER => {
-                                        refined_ret = Some(Collections::iter_ty((**r).clone()));
+                                        refined_ret = Some(Collections::iter_ty(success.clone()));
                                     }
                                     // D-HOLE1: `opt.map(f: T -> R) -> R?`.
                                     Type::Option(_) => {
-                                        refined_ret = Some(Type::Option(Box::new((**r).clone())));
+                                        refined_ret = Some(Type::Option(Box::new(success.clone())));
                                     }
                                     // D-DYNARRAY1: `view.map(f: T -> R) -> [R]` — map-to-owned;
                                     // the result is a fresh owned list, never another View.
                                     Type::Apply { name, .. }
                                         if matches!(name.as_str(), "View" | "ViewMut") =>
                                     {
-                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                        refined_ret = Some(Type::List(Box::new(success.clone())));
                                     }
                                     // #1478: `Set.map(f: T -> R) -> [R]` — same shape as
                                     // `List.map`; a Set's uniqueness doesn't carry through
@@ -959,7 +970,7 @@ impl<'a> Checker<'a> {
                                     Type::Apply { name, .. }
                                         if name == "Set" || name == Syntax::TYPE_RANK =>
                                     {
-                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                        refined_ret = Some(Type::List(Box::new(success.clone())));
                                     }
                                     _ => {}
                                 }
@@ -971,6 +982,7 @@ impl<'a> Checker<'a> {
                             ret: Some(ref r), ..
                         } = gt
                         {
+                            let success = callable_success_type(r);
                             if let Some(result) = fallible_collection_return(recv_ty, method, r) {
                                 refined_ret = Some(result);
                             } else if matches!(r.as_ref(), Type::Result { .. }) {
@@ -978,7 +990,7 @@ impl<'a> Checker<'a> {
                                     "E0108",
                                     format!(
                                         "argument 1 to `.filter()` should return Bool or Result<Bool, E>, not {}",
-                                        r.show()
+                                        success.show()
                                     ),
                                     "a filter callback decides whether each item stays in the collection"
                                         .to_string(),
@@ -995,9 +1007,8 @@ impl<'a> Checker<'a> {
                             ret: Some(ref r), ..
                         } = gt
                         {
-                            if let Type::Result { ok, .. } = r.as_ref() {
-                                refined_ret = Some(Collections::iter_ty(*ok.clone()));
-                            }
+                            let success = callable_success_type(r);
+                            refined_ret = Some(Collections::iter_ty(success));
                         }
                     }
                     if Collections::is_closure_method(method) && i == 0 && method == "flat_map" {
@@ -1005,8 +1016,9 @@ impl<'a> Checker<'a> {
                             ret: Some(ref r), ..
                         } = gt
                         {
+                            let success = callable_success_type(r);
                             if let Type::List(inner) | Type::FixedList { elem: inner, .. } =
-                                r.as_ref()
+                                &success
                             {
                                 let mapped_inner = (**inner).clone();
                                 match recv_ty {
@@ -1029,7 +1041,8 @@ impl<'a> Checker<'a> {
                             ret: Some(ref r), ..
                         } = gt
                         {
-                            refined_ret = Some(Type::List(Box::new((**r).clone())));
+                            let success = callable_success_type(r);
+                            refined_ret = Some(Type::List(Box::new(success)));
                         }
                     }
                     if method == "reduce" && i == 1 {
@@ -1037,7 +1050,7 @@ impl<'a> Checker<'a> {
                             ret: Some(ref r), ..
                         } = gt
                         {
-                            refined_ret = Some((**r).clone());
+                            refined_ret = Some(callable_success_type(r));
                         }
                     }
                     if Collections::is_closure_method(method)
@@ -1059,7 +1072,7 @@ impl<'a> Checker<'a> {
                                 Type::Int
                             };
                             refined_ret = Some(Type::Map {
-                                key: Box::new((**r).clone()),
+                                key: Box::new(callable_success_type(r)),
                                 key_span: None,
                                 value: Box::new(value),
                             });

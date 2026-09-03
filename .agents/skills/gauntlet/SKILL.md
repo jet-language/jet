@@ -85,7 +85,12 @@ cold and warm compile against the competitor's own toolchain; `jet run` and
 `jet dev` first-result latency; binary size; readability proxies (LOC,
 tokens, distinct concepts, ceremony ratio); RLI5 rubric scores (advisory);
 Luna authoring cost. All comparisons are same-run ratios; raw times are
-machine-local. A run emits one `gauntlet/results/<date>.json` (gitignored).
+machine-local. A full run emits `gauntlet/results/<date>.json`; `--entry` and
+`--axis` runs emit `<date>-<entry>.json` / `<date>-axis-<axis>.json` so they
+never overwrite the day's full report (all are gitignored, and
+`gauntlet/harness/status.mjs --merge` folds every file into `status.json`).
+The harness measures `target/release/jet`: the run and dev tiers execute inside
+the compiler process, so a debug compiler would measure itself, not Jet.
 Snapshot-only by owner decision: no trend history.
 
 **Seed scope.** First build lands ~12–15 entries across all three tiers:

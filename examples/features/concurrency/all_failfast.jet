@@ -17,19 +17,17 @@ fn boom() Int -> {
     return 0
 }
 
-fn failure_text(error: TaskFailure) String -> {
-    if error == {
-        .Panicked(reason) -> { return reason }
-        .DeadlineBlown -> { return "deadline" }
-        .Cancelled -> { return "cancelled" }
-    }
-}
 
 fn run() {
     task.group g {
-        results :: task.all {slow_one(), boom()}
-        if results == {
-            .Err(error) -> { panic(failure_text(error)) }
+        if (task.all { slow_one(), boom() }) == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { panic(reason) }
+                    .DeadlineBlown -> { panic("deadline") }
+                    .Cancelled -> { panic("cancelled") }
+                }
+            }
             .Ok(_) -> { print("unexpected success") }
         }
     }
