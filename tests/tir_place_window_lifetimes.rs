@@ -131,11 +131,13 @@ fn heap_element_window_stays_allocator_owned() {
     assert_tiers_agree("tir_place_window_heap_runtime", HEAP_SOURCE, "31\n31\n");
 }
 
+/// Hardening finding lane-1/nested-write-window-jit-tier-gap (card #2822): tier-parity regression fixture.
 #[test]
 fn card_2822_nested_write_view() {
     assert_tiers_agree("tir_card_2822_nested_write_view", CARD_2822_SOURCE, "9\n9\n");
 }
 
+/// Hardening finding lane-1/indexed-field-write-window-detaches (card #2823): tier-parity regression fixture.
 #[test]
 fn card_2823_scalar_field_write_view() {
     assert_tiers_agree(
@@ -145,6 +147,7 @@ fn card_2823_scalar_field_write_view() {
     );
 }
 
+/// Hardening finding lane-1/nested-scalar-window-shape-drift (card #2826): tier-parity regression fixture.
 #[test]
 fn card_2826_nested_scalar_write_view() {
     assert_tiers_agree(

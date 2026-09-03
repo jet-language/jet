@@ -500,6 +500,7 @@ fn run() {
     assert_eq!(stdout, "10\n");
 }
 
+/// Hardening finding lane-1/nested-list-struct-aot-write (card #2819): tier-parity regression fixture.
 #[test]
 fn card_2819_nested_index_field_assignment_tier_parity() {
     let src = "\
@@ -513,6 +514,7 @@ fn run() {
     assert_tiers_agree("card_2819_nested_index_field_assignment", src, "17\n");
 }
 
+/// Hardening finding lane-1/captured-nested-place-aot-ice (card #2820): tier-parity regression fixture.
 #[test]
 fn card_2820_captured_nested_index_assignment_tier_parity() {
     let src = "\
@@ -529,6 +531,7 @@ fn run() {
     assert_tiers_agree("card_2820_captured_nested_index_assignment", src, "5\n5\n");
 }
 
+/// Hardening finding lane-1/map-index-field-write-tier-gap (card #2824): tier-parity regression fixture.
 #[test]
 fn card_2824_map_index_field_assignment_tier_parity() {
     let src = "\
@@ -542,6 +545,7 @@ fn run() {
     assert_tiers_agree("card_2824_map_index_field_assignment", src, "12\n");
 }
 
+/// Hardening finding lane-1/nested-range-view-aot-ice (card #2825): tier-parity regression fixture.
 #[test]
 fn card_2825_nested_range_view_source_tier_parity() {
     let src = "\
@@ -1046,6 +1050,7 @@ fn run() {{
     assert_eq!(stdout, "1\nhello handle\n\n");
 }
 
+/// Hardening finding lane-3/closure-aot-ice (card #2837): tier-parity regression fixture.
 #[test]
 fn card_2837_captured_closure_call_tier_parity() {
     let src = r#"
@@ -1077,6 +1082,7 @@ fn run() {
     assert_tiers_agree("tir_card_2837_escaping_closure_copy", src, "1\n7\n");
 }
 
+/// Hardening finding lane-7/lambda-call-aot-ice (card #2842): tier-parity regression fixture.
 #[test]
 fn card_2842_function_value_call_tier_parity() {
     let src = r#"

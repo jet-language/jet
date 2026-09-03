@@ -1625,6 +1625,7 @@ fn run() {
     );
 }
 
+/// Hardening finding lane-7/computed-field-aot-ice (card #2843): tier-parity regression fixture.
 #[test]
 fn card_2843_computed_struct_field_tier_parity() {
     let src = r#"
@@ -1644,6 +1645,7 @@ fn run() {
     assert_tiers_agree("tir_card_2843_computed_struct_field", src, "23\n26\n");
 }
 
+/// Hardening finding lane-3/trait-dispatch-aot-ice (card #2839): tier-parity regression fixture.
 #[test]
 fn card_2839_generic_trait_dispatch_tier_parity() {
     let src = r#"

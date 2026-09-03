@@ -2508,6 +2508,7 @@ fn run() {
     assert_tiers_agree("tir_user_arithmetic_hooks", src, "10 6 16 4 10\n");
 }
 
+/// Hardening finding lane-7/labeled-break-aot-ice (card #2841): tier-parity regression fixture.
 #[test]
 fn card_2841_labeled_loop_value_tier_parity() {
     let src = r#"
@@ -2524,6 +2525,7 @@ fn run() {
     assert_tiers_agree("tir_card_2841_labeled_loop_value", src, "7\n");
 }
 
+/// Hardening finding lane-7/negative-range-stride-aot-drift (card #2834): tier-parity regression fixture.
 #[test]
 fn card_2834_negative_stride_tier_parity() {
     let src = r#"

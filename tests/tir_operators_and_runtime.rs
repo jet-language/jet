@@ -486,6 +486,7 @@ fn run() {
     );
 }
 
+/// Hardening finding lane-5/core-int-checked-add-aot-wrap (card #2832): tier-parity regression fixture.
 #[test]
 fn checked_add_exact_int_matches_every_tier_card_2832() {
     let src = r#"
@@ -502,6 +503,7 @@ fn run() {
     );
 }
 
+/// Hardening finding lane-2/interpreter-u64-to-int-large (card #2827): tier-parity regression fixture.
 #[test]
 fn interpreter_u64_card_2827() {
     let src = r#"
@@ -516,6 +518,7 @@ fn run() {
     );
 }
 
+/// Hardening finding lane-2/interpreter-u64-high-bit-shift-signs (card #2828): tier-parity regression fixture.
 #[test]
 fn interpreter_u64_card_2828() {
     let src = r#"
@@ -530,6 +533,7 @@ fn run() {
     );
 }
 
+/// Hardening finding lane-2/interpreter-u64-bit-count-unsupported (card #2829): tier-parity regression fixture.
 #[test]
 fn interpreter_u64_card_2829() {
     let src = r#"
@@ -540,6 +544,7 @@ fn run() {
     assert_tiers_agree("tir_interpreter_u64_card_2829", src, "1\n");
 }
 
+/// Hardening finding lane-3/float-nan-aot-ice (card #2838): tier-parity regression fixture.
 #[test]
 fn card_2838_float_nan_predicate_tier_parity() {
     let src = r#"

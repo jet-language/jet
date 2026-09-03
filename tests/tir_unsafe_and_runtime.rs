@@ -1644,6 +1644,7 @@ fn run() {
     );
 }
 
+/// Hardening finding lane-6/aot-owned-join-helper-ice (card #2840): tier-parity regression fixture.
 #[test]
 fn card_2840_owned_task_join_helper_tier_parity() {
     let src = r#"

@@ -1725,6 +1725,7 @@ fn run() {
     );
 }
 
+/// Hardening finding lane-3/float-sum-interpreter-gap (card #2830): tier-parity regression fixture.
 #[test]
 fn card_2830_float_sum_tier_parity() {
     let src = r#"
@@ -1737,6 +1738,7 @@ fn run() {
     assert_tiers_agree("tir_card_2830_float_sum", src, "3.0\n");
 }
 
+/// Hardening finding lane-8/map-key-set-aot-ice (card #2844): tier-parity regression fixture.
 #[test]
 fn card_2844_struct_key_set_from_tier_parity() {
     let src = r#"
