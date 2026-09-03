@@ -33,6 +33,11 @@ pub(crate) struct LowerEnv {
     /// D-UNIONTYPE1=A: enclosing function return type, for member→union inject
     /// at `return` / `Ok` / `Err` / `?` boundaries.
     pub(super) ret_ty: Option<Type>,
+    /// True while lowering the value consumed by `??`. Closure adapters whose
+    /// source result is void retain their effective `Result` carrier in this
+    /// context so the fallback can consume it as a value rather than inherit
+    /// an implicit `?`.
+    pub(super) fallback_subject: bool,
     /// D-FIELDPOL1: the owning struct name when lowering an inherent/trait
     /// method (`None` for a free function). `self`'s own env type is
     /// deliberately `None` (see `bind` above), so a `self.field` read can't
@@ -96,6 +101,7 @@ impl LowerEnv {
             locals: HashMap::new(),
             fn_name,
             ret_ty: None,
+            fallback_subject: false,
             self_owner: None,
             string_view_locals: HashSet::new(),
             borrowed_locals: HashSet::new(),

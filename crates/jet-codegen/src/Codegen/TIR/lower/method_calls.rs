@@ -5332,7 +5332,7 @@ fn lower_method_call_impl(
         }
         if !skip_closure {
             return in_own_frame(|| {
-                let result_ty = resolved_ret
+                let source_result_ty = resolved_ret
                     .cloned()
                     .unwrap_or_else(|| builtin_result_ty(method, args.len(), Some(&recv_ty)));
                 // Collection helpers lend callback inputs (`&T`, or `&U, &T` for
@@ -5500,7 +5500,7 @@ fn lower_method_call_impl(
                         } if matches!(ret.as_ref(), Type::Result { .. })
                     )
                 }) || (matches!(method, "map" | "filter")
-                    && matches!(result_ty, Type::Result { .. }));
+                    && matches!(&source_result_ty, Type::Result { .. }));
                 let op = resolve_closure_op(&recv_ty, method, args, cx, fallible_callback);
                 let callback_uses_effective_carrier = matches!(
                     &op,
@@ -5508,7 +5508,7 @@ fn lower_method_call_impl(
                         | TClosureOp::TryFilter
                         | TClosureOp::TrySortBy
                         | TClosureOp::TrySortByDesc
-                        | TClosureOp::FilterMap
+                        | TClosureOp::EachRef
                 );
                 if callback_uses_effective_carrier {
                     if let Some(callback) = lower_named_collection_callback(
@@ -5523,6 +5523,35 @@ fn lower_method_call_impl(
                         }
                     }
                 }
+                let result_ty = if env.fallback_subject
+                    && !matches!(&source_result_ty, Type::Result { .. })
+                    && matches!(
+                        &op,
+                        TClosureOp::TryMap
+                            | TClosureOp::TryFilter
+                            | TClosureOp::TrySortBy
+                            | TClosureOp::TrySortByDesc
+                            | TClosureOp::EachRef
+                    )
+                {
+                    let callback_error = targs.first().and_then(|callback| match &callback.ty {
+                        Type::Fn {
+                            ret: Some(ret), ..
+                        } => match ret.as_ref() {
+                            Type::Result { err, .. } => Some((**err).clone()),
+                            _ => None,
+                        },
+                        _ => None,
+                    });
+                    callback_error
+                        .map(|err| Type::Result {
+                            ok: Box::new(source_result_ty.clone()),
+                            err: Box::new(err),
+                        })
+                        .unwrap_or(source_result_ty)
+                } else {
+                    source_result_ty
+                };
                 let lazy_or_view_receiver = matches!(
                     &recv_ty,
                     Type::Apply { name, .. }

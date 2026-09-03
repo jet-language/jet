@@ -5,6 +5,7 @@ use crate::Codegen::TIR::spawn_body_carrier_ty;
 use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda;
+use crate::Codegen::TIR::lower_lambda_expecting_callable;
 use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::render_lambda_str_expecting_value;
@@ -249,7 +250,15 @@ pub(crate) fn lower_core_closure_call(
             // Rc-wraps an escaping closure for reusable `Fn` call sites — `Rc<F>`
             // does not implement `FnOnce`) — mirrors `on_commit`/`on_rollback`'s
             // identical FnOnce hook rendering above (#1592).
-            let tl = lower_lambda(lam, cx, env);
+            let guard_fn = Type::Fn {
+                params: Vec::new(),
+                ret: Some(Box::new(unit_type())),
+                effect_bound: None,
+                param_contract: None,
+                call_metadata: None,
+                return_view_provenance: None,
+            };
+            let tl = lower_lambda_expecting_callable(lam, cx, env, &guard_fn);
             let inner = format!(
                 "move |{}| {}",
                 tl.params.join(", "),

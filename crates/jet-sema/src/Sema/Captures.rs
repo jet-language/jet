@@ -715,12 +715,26 @@ pub(crate) fn expr_collect_captures(
             }
             for a in &c.args {
                 expr_collect_captures(&a.expr, bound, read, mut_cap, called);
+                if a.convention == crate::AST::AccessConvention::Write {
+                    if let Some(root) = expr_root_ident(&a.expr) {
+                        if !bound.contains(root) {
+                            mut_cap.insert(root.to_string());
+                        }
+                    }
+                }
             }
         }
         Expr::CallValue { callee, args, .. } => {
             expr_collect_captures(callee, bound, read, mut_cap, called);
             for a in args {
                 expr_collect_captures(&a.expr, bound, read, mut_cap, called);
+                if a.convention == crate::AST::AccessConvention::Write {
+                    if let Some(root) = expr_root_ident(&a.expr) {
+                        if !bound.contains(root) {
+                            mut_cap.insert(root.to_string());
+                        }
+                    }
+                }
             }
         }
         Expr::Field(inner, _, _)
@@ -730,8 +744,20 @@ pub(crate) fn expr_collect_captures(
         | Expr::Err(inner, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
-        | Expr::Copy(inner, _)
-        | Expr::Place(inner, _, _) => expr_collect_captures(inner, bound, read, mut_cap, called),
+        | Expr::Copy(inner, _) => expr_collect_captures(inner, bound, read, mut_cap, called),
+        Expr::Place(inner, access, _) => {
+            expr_collect_captures(inner, bound, read, mut_cap, called);
+            // D-MEM1: an exclusive-for-the-call view lends the place; it does
+            // not consume the captured binding. Mark the capture mutable so
+            // ownership analysis keeps the enclosing place available.
+            if matches!(access, crate::AST::PlaceAccess::Write) {
+                if let Some(root) = expr_root_ident(inner) {
+                    if !bound.contains(root) {
+                        mut_cap.insert(root.to_string());
+                    }
+                }
+            }
+        }
         Expr::Try(inner, _, _, note) => {
             expr_collect_captures(inner, bound, read, mut_cap, called);
             if let Some(note) = note {
@@ -759,6 +785,13 @@ pub(crate) fn expr_collect_captures(
             }
             for a in args {
                 expr_collect_captures(&a.expr, bound, read, mut_cap, called);
+                if a.convention == crate::AST::AccessConvention::Write {
+                    if let Some(root) = expr_root_ident(&a.expr) {
+                        if !bound.contains(root) {
+                            mut_cap.insert(root.to_string());
+                        }
+                    }
+                }
             }
         }
         Expr::Index { base, index, .. } => {

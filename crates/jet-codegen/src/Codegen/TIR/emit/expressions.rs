@@ -5296,6 +5296,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // reproducing `emit_builtin_method`'s closure arms byte-for-byte. Args (the
         // lambda + any seed) are emitted PLAINLY (raw `arg(i)`).
         TExprKind::ClosureMethod { recv, op, args } => {
+            // The TIR type is the sole authority for whether this helper's
+            // Result is consumed by an enclosing fallback or propagated.
+            let closure_result_is_carrier = matches!(&e.ty, Type::Result { .. });
             if let Some(stop) = emit_tir_stopping_receiver(recv, cx) {
                 return stop;
             }
@@ -5476,6 +5479,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 "{{ match {call} {{ Ok(()) => (), Err(never) => match never {{}} }} }}"
                             )
                         }
+                        Some(_) if closure_result_is_carrier => format!("{call}"),
                         Some(_) => format!("{call}?"),
                         None => jet_name_format!(
                             "{{ let mut {name_prefix}each_callback = {callback}; match {root}jet_list_each_ref(&({recv}), move |{name_prefix}each_item| {{ ({name_prefix}each_callback)({name_prefix}each_item); Ok::<(), std::convert::Infallible>(()) }}) {{ Ok(()) => (), Err(never) => match never {{}} }} }}"
@@ -5523,6 +5527,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!(
                             "{{ match {call} {{ Ok(()) => (), Err(never) => match never {{}} }} }}"
                         )
+                    } else if closure_result_is_carrier {
+                        format!("{call}")
                     } else {
                         format!("{{ {call}?; }}")
                     }

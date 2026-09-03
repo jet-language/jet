@@ -656,6 +656,10 @@ pub(super) fn lower_or_fallback(
         env: &LowerEnv,
         fallback_env: &mut LowerEnv,
     ) -> TOrFallback {
+        // Fallback identifiers are resolved against the carrier-specific
+        // environment below. Do not replay an expression lowered under the
+        // enclosing environment, where the ambient `err` slot is absent.
+        let _fallback_cache_scope = ExprCacheScope::enter();
         match fallback {
             OrFallback::Value(e) => {
                 let value = lower_expr(e, cx, fallback_env);
@@ -730,10 +734,16 @@ pub(super) fn lower_or_fallback(
         }
     }
 
-    // `??` stores the successful payload in a new owning slot. Reuse the
-    // ordinary ownership boundary so a borrowed `?T` parameter is cloned
-    // before the outcome match (otherwise rustc reports E0507).
-    let value_t = lower_owned_expr(value, cx, env);
+    // The subject may already have a cache entry from a type probe under a
+    // different carrier context. Re-lower it in a private memo.
+    let value_t = {
+        let _fallback_subject_cache_scope = ExprCacheScope::enter();
+        let fallback_subject = env.fallback_subject;
+        env.fallback_subject = true;
+        let value_t = lower_owned_expr(value, cx, env);
+        env.fallback_subject = fallback_subject;
+        value_t
+    };
     // D-FAILURE-FOUNDATION1=A / D-FAIL-BIND1=A: a mixed `?T !E` carrier has
     // three routes. First consume its Result route, making an `Err(e)` fallback
     // carry `Present(fallback)`; then consume the remaining Option route. The

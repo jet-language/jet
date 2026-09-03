@@ -1050,6 +1050,18 @@ impl<'a> Checker<'a> {
                 if mode == AccessWalkMode::CaptureRequirements {
                     for arg in &call.args {
                         self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
+                        // D-MEM1: the call marker is carried by CallArg, not
+                        // by the expression node. A write-marked argument
+                        // lends its place for this call; it never moves the
+                        // lambda's captured owner.
+                        if arg.convention == AccessConvention::Write {
+                            self.push_evaluated_access(
+                                &arg.expr,
+                                ViewAccess::Write,
+                                bound,
+                                out,
+                            );
+                        }
                     }
                 }
             }
@@ -1064,6 +1076,14 @@ impl<'a> Checker<'a> {
                     self.push_evaluated_access(receiver, access, bound, out);
                     for arg in args {
                         self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
+                        if arg.convention == AccessConvention::Write {
+                            self.push_evaluated_access(
+                                &arg.expr,
+                                ViewAccess::Write,
+                                bound,
+                                out,
+                            );
+                        }
                     }
                 }
             }
@@ -1088,6 +1108,14 @@ impl<'a> Checker<'a> {
                 }
                 for arg in args {
                     self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
+                    if arg.convention == AccessConvention::Write {
+                        self.push_evaluated_access(
+                            &arg.expr,
+                            ViewAccess::Write,
+                            bound,
+                            out,
+                        );
+                    }
                 }
             }
             Expr::CallValue { callee, args, .. } => {
@@ -1095,6 +1123,14 @@ impl<'a> Checker<'a> {
                     self.collect_evaluated_expr_accesses(callee, mode, bound, out);
                     for arg in args {
                         self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
+                        if arg.convention == AccessConvention::Write {
+                            self.push_evaluated_access(
+                                &arg.expr,
+                                ViewAccess::Write,
+                                bound,
+                                out,
+                            );
+                        }
                     }
                 }
             }

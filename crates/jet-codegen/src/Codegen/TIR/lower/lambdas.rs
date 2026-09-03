@@ -136,6 +136,10 @@ pub(crate) fn lower_lambda_expecting_callable(
     else {
         return lower_lambda_expecting(lam, cx, env, None);
     };
+    // A fn slot with no written return type is still a Unit-returning Rust
+    // callable. Preserve that slot fact so inferred callback carriers cannot
+    // widen an infallible callback behind the adapter's back.
+    let slot_return = ret.as_deref().cloned().unwrap_or_else(unit_type);
     lower_lambda_expecting_with_host_borrow(
         lam,
         cx,
@@ -144,7 +148,7 @@ pub(crate) fn lower_lambda_expecting_callable(
         None,
         false,
         None,
-        ret.as_deref(),
+        Some(&slot_return),
     )
 }
 
@@ -237,7 +241,12 @@ fn lower_lambda_expecting_with_host_borrow(
     // to `Unit`.
     let lambda_ret_ty = expected_return
         .or(lam.meta.fallible_carrier.as_ref())
-        .or_else(|| env.ret_ty.as_ref())
+        .or_else(|| {
+            lam.meta
+                .fallible_propagation
+                .then(|| env.ret_ty.as_ref())
+                .flatten()
+        })
         .map(|ret| match ret {
             Type::Result { err, .. } => Type::Result {
                 ok: Box::new(body_ty.clone()),
@@ -258,6 +267,9 @@ fn lower_lambda_expecting_with_host_borrow(
         && !by_value
         && host_borrow.is_none();
     let mut lam_env = fork_panic(env);
+    // A fallback marker belongs to the enclosing subject, never to a deferred
+    // callback body or its type probe.
+    lam_env.fallback_subject = false;
     lam_env.ret_ty = Some(lambda_ret_ty.clone());
     // Sema suspends transaction checks inside deferred lambdas. Do not attach a
     // foreign call in a closure to the outer transaction at codegen time.
@@ -527,8 +539,16 @@ fn fallible_lambda_value(
 ) -> TExpr {
     let carrier = expected_return
         .or(lam.meta.fallible_carrier.as_ref())
-        .or(env.ret_ty.as_ref());
-    if expected_return.is_none() && !lam.meta.fallible_propagation {
+        .or_else(|| {
+            lam.meta
+                .fallible_propagation
+                .then(|| env.ret_ty.as_ref())
+                .flatten()
+        });
+    if expected_return.is_none()
+        && lam.meta.fallible_carrier.is_none()
+        && !lam.meta.fallible_propagation
+    {
         return value;
     }
     match carrier {

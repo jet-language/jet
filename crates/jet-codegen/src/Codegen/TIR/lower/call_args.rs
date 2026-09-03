@@ -190,6 +190,7 @@ pub(crate) fn lambda_body_ty_expecting(
 ) -> Type {
     fn bind_params(lam: &Lambda, env: &LowerEnv, expected_params: Option<&[Type]>) -> LowerEnv {
         let mut lam_env = clone_env(env);
+        lam_env.fallback_subject = false;
         for (i, p) in lam.params.iter().enumerate() {
             let ty =
                 p.ty.clone()
