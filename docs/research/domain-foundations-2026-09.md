@@ -6,9 +6,9 @@
 |---|---|
 | State | Probe wave complete: 22 probes, 99 gaps, 23 root-cause defects, 11 ballots on the board, 55 cards homed in e15 |
 | Epoch | e15 "Foundations for every domain" |
-| Ballots | 11 open, all recommending A: D-FOUND-REALTIME1, HANDLE1, SANDBOX1, LIFECYCLE1, OPMIX1, LITERAL1, VIEW1, RECEIPT1, PLATFORM1, BOARD1, COREAPI1 (cards #2784-#2794) |
+| Ballots | 11, all ratified A by the owner on 2026-09-03: D-FOUND-REALTIME1, HANDLE1, SANDBOX1, LIFECYCLE1, OPMIX1, LITERAL1, VIEW1, RECEIPT1, PLATFORM1, BOARD1, COREAPI1 (cards #2784-#2794) |
 | Cards | 22 defect cards (#2762-#2783, e15-m13), 8 battery cards (#2795-#2801, #2815), 13 example cards (#2802-#2814), 11 primitive cards (#2784-#2794) |
-| Owner gates | The eleven ballots. Nothing else waits on the owner. |
+| Owner gates | None open: all eleven ballots ratified A (2026-09-03); the eleven COREAPI1 items are carded (#2847-#2857). |
 | Reading path | `docs/proposals/domain-foundations.html` (the story), then the ballots in Tower Focus Mode |
 
 ## The one idea
@@ -222,9 +222,9 @@ Each critical area's probe named the parts a first-party battery needs to get a 
 
 ## What has to be decided
 
-Eleven ballots, all short, each with its reading surface (one question, one lesson, the current and in-the-wild code, one proposed block per option, real gains and losses, why the others lose, and what the recommendation still costs). Every recommendation is A. Two ballots amend a ratified ruling and say so: D-FOUND-OPMIX1 amends D-OPDEF1 (same-type operators); D-FOUND-SANDBOX1 fills the open D-PLUGIN1/D-DEP-WASM1 records. Suggested reading order: COREAPI1 (one batch, eleven names), then the four that unblock the most areas (VIEW1, HANDLE1, LIFECYCLE1, REALTIME1), then OPMIX1 and LITERAL1 (the language), then SANDBOX1, RECEIPT1, PLATFORM1, BOARD1.
+Eleven ballots, all short and now all ratified A (owner, 2026-09-03), each with its reading surface (one question, one lesson, the current and in-the-wild code, one proposed block per option, real gains and losses, why the others lose, and what the recommendation still costs). Every recommendation is A. Two ballots amend a ratified ruling and say so: D-FOUND-OPMIX1 amends D-OPDEF1 (same-type operators); D-FOUND-SANDBOX1 fills the open D-PLUGIN1/D-DEP-WASM1 records. Suggested reading order: COREAPI1 (one batch, eleven names), then the four that unblock the most areas (VIEW1, HANDLE1, LIFECYCLE1, REALTIME1), then OPMIX1 and LITERAL1 (the language), then SANDBOX1, RECEIPT1, PLATFORM1, BOARD1.
 
-Nothing else waits on the owner. Defect cards are ready for the implementing orchestrator; battery and example cards are planned with their gates named; the probe wave card (#2761) is closed with its evidence.
+Nothing waits on the owner. Defect cards are ready for the implementing orchestrator; battery and example cards are planned with their gates named; the probe wave card (#2761) is closed with its evidence.
 
 ## Evidence index
 
@@ -240,4 +240,4 @@ Nothing else waits on the owner. Defect cards are ready for the implementing orc
 | `docs/research/domain-foundations/law/` | the ratified-law map per ballot area (what is ratified, shipped, undecided, in conflict) |
 | `docs/research/domain-foundations/slate/` | the ballot source (ballots.mjs) and the e15 milestones |
 | `docs/proposals/domain-foundations.html` | the owner-facing story |
-| Tower e15 | milestones e15-m01..m10 and m13; cards #2761-#2815; ballots D-FOUND-* on #2784-#2794 |
+| Tower e15 | milestones e15-m01..m10 and m13; cards #2761-#2815 and #2847-#2857; ballots D-FOUND-* (all ratified A) on #2784-#2794 |

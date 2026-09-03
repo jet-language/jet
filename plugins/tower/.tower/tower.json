@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2847,
-    "rev": 50026,
+    "nextNum": 2858,
+    "rev": 50044,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26,12 +26,12 @@
         "radar:e10",
         "radar:e5",
         "radar:e11",
-        "board-ideas",
         "radar:e12",
-        "radar:e15"
+        "radar:e15",
+        "radar-sq"
       ]
     },
-    "completionCursor": "2026-09-03T10:07:39.216Z"
+    "completionCursor": "2026-09-03T10:14:56.451Z"
   },
   "epochs": [
     {
@@ -180276,13 +180276,23 @@
       "track": "epoch",
       "epoch": "e15",
       "milestoneId": "e15-m09-primitives",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "After ratification: each accepted item is one small card in its area milestone (created by the implementing orchestrator), implemented through the same Prelude functions on every tier, with a registered diagnostic and snapshot where a new error exists, an example with goldens, and the reference docs updated. Item 6 lands under e14 #2472; item 9 shares its bundler with e14 #2490. blockedBy: none (the ballot on this card is the gate).",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable",
+          "text": "Closed: this card's work was the ruling and the carding; the eleven items carry the implementation."
+        },
+        {
+          "at": "2026-09-03",
+          "by": "fable",
+          "text": "Owner ratified A on 2026-09-03; the eleven items are carded (#2847, #2848, #2849, #2850, #2851, #2852, #2853, #2854, #2855, #2856, #2857) in their area milestones and ready. Nothing rejected."
+        },
         {
           "at": "2026-09-03",
           "text": "All decisions ratified; advanced out of deciding."
@@ -180292,20 +180302,20 @@
         {
           "n": 1,
           "text": "Every accepted item has its own card in its area milestone with an example and goldens on every execution tier. Proof: the card list.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-03T00:41:52.671Z"
+          "evidence": "Eleven item cards created in their area milestones: #2847, #2848, #2849, #2850, #2851, #2852, #2853, #2854, #2855, #2856, #2857",
+          "at": "2026-09-03T10:33:26.611Z"
         },
         {
           "n": 2,
           "text": "Rejected items are logged here with the reason so the next probe wave does not re-raise them. Proof: the card log.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-03T00:41:52.671Z"
+          "evidence": "No item rejected: the owner ratified A (all eleven); logged on the card.",
+          "at": "2026-09-03T10:33:39.666Z"
         }
       ],
       "refs": [],
@@ -180328,8 +180338,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T00:41:52.671Z",
-      "updated": "2026-09-03T01:27:31.791Z",
-      "updatedBy": "owner"
+      "updated": "2026-09-03T10:33:53.740Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-09-03T10:33:53.740Z"
     },
     {
       "id": "c0gn02wt",
@@ -184257,6 +184268,488 @@
       "created": "2026-09-03T10:13:40.705Z",
       "updated": "2026-09-03T10:13:40.705Z",
       "updatedBy": "fable-orchestrator"
+    },
+    {
+      "id": "c0y8ytaf",
+      "num": 2847,
+      "title": "ProcessStdin.close(): EOF to a child process",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (area-cli-G1): jet check stdin_close.jet -> Error [E0102]: `ProcessStdin` has no method `close`; a producer feeding `cat` timed out after 60 s (pkg/run.jet:75-85). Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add close() on the stdin writer (Prelude process part), sending EOF and making later writes a registered error; the same function on every tier. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A producer writes rows to an arbitrary child, closes stdin, and the child completes on default jet run, --release, and jet build. Proof: CLI example golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:16.363Z"
+        },
+        {
+          "n": 2,
+          "text": "A write after close is a registered diagnostic with a UI snapshot. Proof: snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:16.363Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "cli"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:16.363Z",
+      "updated": "2026-09-03T10:33:16.363Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c09sxg9c",
+      "num": 2848,
+      "title": "files.walk(root, ignore: .gitignore): ignore-aware traversal",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (area-cli-G2): core.files exposes walk and walk_files only (core-library.md:437-438); the probe's hand-written matcher missed a negation rule and leaked private.secret. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add an ignore: option to walk with nested .gitignore semantics (negation, anchoring, directory rules, precedence) implemented once in the Prelude; expose the matcher for library reuse. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A fixture with nested rules, negation, anchoring, and directory patterns yields exactly the ripgrep result set on every tier. Proof: golden compared against `rg --files`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:17.062Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "cli"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:17.062Z",
+      "updated": "2026-09-03T10:33:17.062Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0o7jlw5",
+      "num": 2849,
+      "title": "game.run(scene, replay:, frames:): a frame budget for headless replay",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (area-games-G1): jet check gap_replay_frames.jet -> Error [E0764]: `run` has no parameter labelled `frames`; the headless runner is fixed at three frames. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add frames: to game.run; the headless backend consumes the replay for that many frames and the transcript hash covers all of them; on every tier. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A 600-frame replay with injected input produces the same transcript hash on default jet run, --release, and jet build. Proof: golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:17.933Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "games"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:17.933Z",
+      "updated": "2026-09-03T10:33:17.933Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c06h94yj",
+      "num": 2850,
+      "title": "core.game.raylib: gamepad buttons and axes, texture atlas decode, draw_sprite",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (area-games-G2, area-games-G3): jet check gap_gamepad.jet and gap_atlas.jet -> Error [E1004] for gamepad_down, load_texture_atlas, draw_sprite; the fix list has only window, drawing, key_down, set_target_fps, color, load_sound. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add gamepad_down/gamepad_axis and load_texture_atlas/draw_sprite to the raylib surface through the existing bridge; headless backend returns typed no-input and records draw calls; on every tier. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Keyboard and gamepad input and atlas sprite drawing are exercised headless with a transcript golden on every tier, and on a real window in the games example. Proof: goldens plus a screenshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:19.038Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "games"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:19.038Z",
+      "updated": "2026-09-03T10:33:19.038Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0lcartk",
+      "num": 2851,
+      "title": "core.db.pool(url, max:): bounded connection pool with health, reset, readiness, drain",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (area-backend-G1): jet check pool_probe.jet -> Error [E1004]: `core.db` has no item `pool`; the diagnostic lists only open/open_memory/policy/transaction/migrate. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add pool over the Driver trait (D-DBDRIVER1): bounded acquisition with a deadline, health check and reset, readiness, and drain on shutdown; contention is a registered typed error; on every tier. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "1000 concurrent requests share a pool of 10 with p99 acquisition under the deadline and zero leaked connections at drain. Proof: backend example golden with the receipt.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:19.936Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "backend"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:19.936Z",
+      "updated": "2026-09-03T10:33:19.936Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0u00n82",
+      "num": 2852,
+      "title": "web.openapi(router): OpenAPI export from Router facts",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (area-backend-G2): jet check openapi_probe.jet -> Error [E1001]: There is no core module `core.openapi`; the probe hand-wrote JSON and checked three substrings. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Export the typed route graph (D-DX-SUITE1 Router, e14 #2472) as OpenAPI 3.1 with operation identity, request and response schemas from #Codable types, auth, and status responses; validate a request against it; on every tier. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The backend example exports OpenAPI that passes an external validator and a contract test replays it against the running server. Proof: golden and validator output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:20.460Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "backend"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:20.460Z",
+      "updated": "2026-09-03T10:33:20.460Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c05qecip",
+      "num": 2853,
+      "title": "Stream.key_by / window / watermark: event-time operators with late-event disposition",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (prim-distributed-G1): jet check window_api_attempt.jet -> Error [E0102]: `Stream` has no method `key_by`; the probe kept keyed state and watermarks in user maps. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add key_by, window(duration, watermark:), and a late-event policy to Stream in the Prelude; state stays in the stream value; on every tier. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The distributed example produces the same 5 windows and watermark 26 through the operators as the hand-written version, on every tier. Proof: golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:21.169Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "backend"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:21.169Z",
+      "updated": "2026-09-03T10:33:21.169Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0225ivv",
+      "num": 2854,
+      "title": "DateTime leap-second label: 23:59:60 on UTC instants",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (prim-time-G1): api_probe.jet -> Error: time out of range: 23:59:60 (E3002); the probe kept a package-owned split carrier outside core DateTime. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Accept and round-trip the :60 label on UTC instants with the ratified nanosecond carrier (D-TIMERES1) unchanged; formatting and parsing keep the label; comparison orders it after 23:59:59; on every tier. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "2016-12-31T23:59:60Z parses, formats identically, and orders correctly on every tier; E3002 stays for :61. Proof: time goldens and a snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:23.124Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "data"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:23.124Z",
+      "updated": "2026-09-03T10:33:23.124Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0elhqy9",
+      "num": 2855,
+      "title": "jet package: desktop bundle, installer, signing metadata, updater artifact",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (area-gui-G7): jet package --help -> Error [E2101]: `package` isn't a jet command; jet build emits only a native executable. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add jet package producing the platform bundle (AppImage/.app/.msix) with metadata, icons, signing hooks, and an updater manifest, sharing its bundler with e14 #2490 (game packaging); receipt-carried; documented in the reference. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet package produces an installable bundle on Linux with a receipt; the GUI example bundles and launches. Proof: receipt and a launch screenshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:23.882Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "gui"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:23.882Z",
+      "updated": "2026-09-03T10:33:23.882Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0tx1q4p",
+      "num": 2856,
+      "title": "jet flash --target board.<name>: program a device and record a typed receipt",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (area-embedded-G6): jet flash --help -> Error [E2101]: `flash` isn't a jet command; the probe invoked probe-rs by hand. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add jet flash driving probe-rs or OpenOCD from the board profile, capturing programmer output into a typed receipt section (D-FOUND-RECEIPT1) with image digest, target, and result; documented in the reference. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet flash programs an emulator or board and the receipt carries the image digest and result; a failed flash is a registered diagnostic. Proof: receipt golden and snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:24.808Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "embedded"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:24.808Z",
+      "updated": "2026-09-03T10:33:24.808Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c09sgxs6",
+      "num": 2857,
+      "title": "build.graph() and receipt diff: a typed in-process query for tools",
+      "body": "Ratified by D-FOUND-COREAPI1 = A (owner, 2026-09-03): one of the eleven core additions the probes surfaced. Probe evidence (prim-tooling-hooks-G2): jet inspect graph and explain-build print text; a changed action is not diffable without reverse-engineering private .jet receipt objects. Full context: docs/research/domain-foundations/all-gaps.json and card #2794.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Expose the checked BuildPlan graph (D-BUILDQUERY1) and receipt diff as typed values in core.build for fn build and tool packages, mirrored by jet inspect graph --json; read-only; on every tier. Land with an executable example and goldens on every applicable execution tier (I9), registered diagnostics with snapshots where a new error exists (I4), and the reference docs updated. blockedBy: none (the gate ratified).",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A tool lists affected files, cache hits, and key deltas between two builds through the typed API with the same output as the CLI. Proof: golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T10:33:25.768Z"
+        }
+      ],
+      "refs": [
+        "#2794"
+      ],
+      "tags": [
+        "foundations",
+        "core-api",
+        "probe-wave",
+        "e15",
+        "tooling"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T10:33:25.768Z",
+      "updated": "2026-09-03T10:33:25.768Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -253131,6 +253624,118 @@
   ],
   "events": [
     {
+      "at": "2026-09-03T10:33:53.740Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0yuxnpn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-09-03T10:33:39.666Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0yuxnpn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-03T10:33:28.942Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0yuxnpn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-09-03T10:33:26.612Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0yuxnpn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T10:33:25.768Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c09sgxs6",
+      "note": "build.graph() and receipt diff: a typed in-process query for tools"
+    },
+    {
+      "at": "2026-09-03T10:33:24.808Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0tx1q4p",
+      "note": "jet flash --target board.<name>: program a device and record a typed receipt"
+    },
+    {
+      "at": "2026-09-03T10:33:23.882Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0elhqy9",
+      "note": "jet package: desktop bundle, installer, signing metadata, updater artifact"
+    },
+    {
+      "at": "2026-09-03T10:33:23.124Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0225ivv",
+      "note": "DateTime leap-second label: 23:59:60 on UTC instants"
+    },
+    {
+      "at": "2026-09-03T10:33:21.169Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c05qecip",
+      "note": "Stream.key_by / window / watermark: event-time operators with late-event disposition"
+    },
+    {
+      "at": "2026-09-03T10:33:20.460Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0u00n82",
+      "note": "web.openapi(router): OpenAPI export from Router facts"
+    },
+    {
+      "at": "2026-09-03T10:33:19.936Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0lcartk",
+      "note": "core.db.pool(url, max:): bounded connection pool with health, reset, readiness, drain"
+    },
+    {
+      "at": "2026-09-03T10:33:19.038Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c06h94yj",
+      "note": "core.game.raylib: gamepad buttons and axes, texture atlas decode, draw_sprite"
+    },
+    {
+      "at": "2026-09-03T10:33:17.933Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0o7jlw5",
+      "note": "game.run(scene, replay:, frames:): a frame budget for headless replay"
+    },
+    {
+      "at": "2026-09-03T10:33:17.062Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c09sxg9c",
+      "note": "files.walk(root, ignore: .gitignore): ignore-aware traversal"
+    },
+    {
+      "at": "2026-09-03T10:33:16.363Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0y8ytaf",
+      "note": "ProcessStdin.close(): EOF to a child process"
+    },
+    {
+      "at": "2026-09-03T10:14:56.451Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-09-03T10:14:56.451Z"
+    },
+    {
       "at": "2026-09-03T10:13:40.705Z",
       "by": "fable-orchestrator",
       "action": "card.add",
@@ -256517,118 +257122,6 @@
       "action": "milestone.add",
       "ref": "e15-m04-data",
       "note": "Data analysis: battery and example"
-    },
-    {
-      "at": "2026-09-03T00:31:47.051Z",
-      "by": "fable",
-      "action": "milestone.add",
-      "ref": "e15-m03-cli",
-      "note": "CLI and scripts: battery and example"
-    },
-    {
-      "at": "2026-09-03T00:31:46.627Z",
-      "by": "fable",
-      "action": "milestone.add",
-      "ref": "e15-m02-games",
-      "note": "Games: battery and example"
-    },
-    {
-      "at": "2026-09-03T00:31:46.198Z",
-      "by": "fable",
-      "action": "milestone.add",
-      "ref": "e15-m01-web",
-      "note": "Web: battery and example"
-    },
-    {
-      "at": "2026-09-03T00:30:13.761Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0256ap3",
-      "note": "phase"
-    },
-    {
-      "at": "2026-09-03T00:30:12.497Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0256ap3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-09-03T00:30:11.563Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0256ap3",
-      "note": "#2"
-    },
-    {
-      "at": "2026-09-03T00:30:10.521Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0256ap3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-09-03T00:19:42.623Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0wbpoo0",
-      "note": "phase"
-    },
-    {
-      "at": "2026-09-03T00:19:41.593Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0wbpoo0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-09-02T23:53:44.278Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-09-02T23:53:44.278Z"
-    },
-    {
-      "at": "2026-09-02T23:52:00.938Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c0jz99ts",
-      "note": "phase"
-    },
-    {
-      "at": "2026-09-02T23:51:59.614Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jz99ts",
-      "note": "#3"
-    },
-    {
-      "at": "2026-09-02T23:51:57.157Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jz99ts",
-      "note": "#2"
-    },
-    {
-      "at": "2026-09-02T23:51:53.762Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0jz99ts",
-      "note": "#1"
-    },
-    {
-      "at": "2026-09-02T23:40:51.921Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c01tvbjj",
-      "note": "phase"
-    },
-    {
-      "at": "2026-09-02T23:40:50.568Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01tvbjj",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
