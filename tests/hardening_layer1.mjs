@@ -12,6 +12,7 @@ import {
   compareTierObservations,
   discoverCorpusSeeds,
   executeCase,
+  executeCommand,
   makeResultBundle,
   mutateValueSource,
   readDifferentialManifest,
@@ -195,8 +196,8 @@ test("mutations preserve typed source shape and observable sink", () => {
 
 test("the differential corpus has explicit source/output pairing", () => {
   const rows = readDifferentialManifest();
-  assert.equal(rows.length, 65);
-  assert.equal(rows.filter((row) => row.output).length, 64);
+  assert.equal(rows.length, 66);
+  assert.equal(rows.filter((row) => row.output).length, 65);
   assert.deepEqual(rows.filter((row) => !row.output), [{
     source: "ex_basics_loop_values.jet",
     output: null,
@@ -398,4 +399,17 @@ test("executed cases require the carried reference value", async () => {
     }),
     /reference oracle expected value is missing/,
   );
+});
+
+test("executeCommand delivers stdin bytes and closes the pipe", async () => {
+  const result = await executeCommand({
+    program: "cat",
+    args: [],
+    stdin: "alpha\nbeta\n",
+    timeout_ms: 5000,
+    label: "stdin-fixture",
+  });
+  assert.equal(result.timeout, false);
+  assert.equal(result.exit, 0);
+  assert.equal(result.stdout.toString("utf8"), "alpha\nbeta\n");
 });

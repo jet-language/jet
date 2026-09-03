@@ -1568,6 +1568,11 @@ export async function executeCommand({
   };
   child.stdout?.on("data", (chunk) => { record.stdout = appendCapture(record.stdout, chunk, limit); });
   child.stderr?.on("data", (chunk) => { record.stderr = appendCapture(record.stderr, chunk, limit); });
+  // Deliver the fixture bytes and close the pipe; a child that reads stdin to
+  // EOF (the receipt runner, stdin-driven witnesses) otherwise waits until the
+  // timeout fires. EPIPE from a child that never reads is not an error.
+  child.stdin?.on("error", () => {});
+  child.stdin?.end(input);
   let forceTimer = null;
   const timer = setTimeout(() => {
     record.timeout = true;
