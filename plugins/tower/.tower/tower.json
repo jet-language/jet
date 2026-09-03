@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2816,
-    "rev": 49852,
+    "nextNum": 2817,
+    "rev": 49854,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -158985,6 +158985,11 @@
       "assignee": "fable",
       "log": [
         {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "2026-09-03 01:55: 17 previously failing stems re-censused after the w6 wave: net/dns_aaaa_at, dns_txt_at, dns_srv*, set_ttl, set_write_timeout, tcp_accept, tcp_close, tcp_local, tcp_reply, tcp_shutdown, udp_packet, unix_close, tls (11 rows), http/server/bind, serve_once, db/row_value, term/binwrite. All green on both legs except the net/dns_* forced-interpreter task stall, carded separately (interpreter spawned responder blocks until the parent's DNS wait wakes it). Full unfiltered strict gate running (conformance-full) at 06534ce1c for criterion 2."
+        },
+        {
           "at": "2026-08-31",
           "by": "omp-sol",
           "text": "Criterion 1 is now met: denominator check exits 0 at 946 public / 942 programs / 4 carve-outs / 0 uncovered, and both hostile analyzers pass. Compute VJP's prior nonsecurity I9 blocker is fixed: final default jet run and forced interpreter both print [6.0], with prior AOT proof also [6.0]; gradient/value_and_gradient/JVP default+interpreter smokes are green. Criterion 2 remains blocked outside this lane: concurrent strict shard 0 fails resident admission for core.crypto.expert.signing_key_bytes; shard 1 fails forced interpreter support for core.crypto.sha224. Security/crypto implementation is explicitly out of this task's scope."
@@ -159070,8 +159075,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T18:12:41.984Z",
-      "updated": "2026-08-31T13:51:24.875Z",
-      "updatedBy": "omp-sol",
+      "updated": "2026-09-03T04:50:35.189Z",
+      "updatedBy": "fable-orchestrator",
       "claimedAt": "2026-08-31T12:10:33.667Z"
     },
     {
@@ -181526,6 +181531,64 @@
       "created": "2026-09-03T00:43:57.691Z",
       "updated": "2026-09-03T00:49:30.925Z",
       "updatedBy": "fable"
+    },
+    {
+      "id": "c0p32wqo",
+      "num": 2816,
+      "title": "Forced interpreter stalls a spawned UDP responder task until the root DNS wait wakes it",
+      "body": "Observed on the strict three-tier conformance gate at 06534ce1c for `net/dns_aaaa_at` (same shape expected for `net/dns_txt_at` and the `net/dns_srv*` rows): AOT and default `jet run` print `true`; forced `--interpret` stops with `Stop [E3001]: panic: DNS AAAA`. Direct strace of the interpreter run shows the spawned responder task prints its first line immediately, then blocks on a futex until the root DNS thread wakes it about one second later; only then does `recvfrom(fd 3)` receive the query and send the response, after the client already gave up. The DNS bytes are correct on every tier (JitNet admitted the ListLit response in resident safety; the JIT leg passes). The defect is task/host synchronization in the interpreter ambient: a spawned task that blocks in a Core net receive does not run concurrently with the root task's Core wait, so request/response witnesses deadlock into their timeouts. Invariant: I9 - the interpreter must preserve the same scheduling meaning as the Prelude task runtime AOT and the JIT use; a spawned task blocked in a Core receive must make progress while the parent waits.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "1. Reproduce with `JET_CORE_CONFORMANCE_FILTER=net/dns_aaaa_at JET_CORE_CONFORMANCE_CENSUS=1 timeout 900 scripts/agent/jet-env cargo test --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --test-threads=2` and `timeout 60 scripts/agent/jet-env jet run --interpret tests/conformance/corpus/core/net/dns_aaaa_at.jet`. 2. Trace the interpreter task spawn path (crates/jet-jit/src/ambient_interp.rs task arms and the TIR evaluator task scheduler) to find the lock the responder waits on while the root task sits in the DNS wait host. 3. Route the interpreter's spawned tasks through the same Prelude task runtime AOT uses (marshalling only), so a task blocked in a Core receive runs on its own thread or is polled while the parent waits. 4. Prove the single-stem census for net/dns_aaaa_at, net/dns_txt_at, net/dns_srv, net/dns_srv_port, net/dns_srv_priority, net/dns_srv_target, net/dns_srv_weight, then the full strict gate.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Single-stem strict three-tier census passes for net/dns_aaaa_at, net/dns_txt_at, and every net/dns_srv* row with byte-identical stdout on AOT, default jet run, and forced --interpret.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T04:50:33.923Z"
+        },
+        {
+          "n": 2,
+          "text": "A regression test in tests/run_interpret.rs spawns a task that blocks in a Core UDP receive while the parent waits in a Core DNS/UDP call and asserts the exchange completes within the deadline on the forced interpreter.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T04:50:33.923Z"
+        },
+        {
+          "n": 3,
+          "text": "No scheduling policy is re-encoded in the interpreter: the fix calls the shared Prelude task runtime and the change is confined to marshalling in crates/jet-jit/src/ambient_interp.rs or crates/jet-codegen/src/Codegen/TIR/eval.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T04:50:33.923Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "conformance",
+        "interpreter",
+        "I9",
+        "net"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T04:50:33.923Z",
+      "updated": "2026-09-03T04:50:33.923Z",
+      "updatedBy": "fable-orchestrator"
     }
   ],
   "decisions": [
@@ -250400,6 +250463,20 @@
   ],
   "events": [
     {
+      "at": "2026-09-03T04:50:35.189Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0r0vc6w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-09-03T04:50:33.923Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0p32wqo",
+      "note": "Forced interpreter stalls a spawned UDP responder task until the root DNS wait wakes it"
+    },
+    {
       "at": "2026-09-03T02:26:46.247Z",
       "by": "fable-orchestrator",
       "action": "card.update",
@@ -253884,20 +253961,6 @@
       "action": "card.delete",
       "ref": "c0h85s6a",
       "note": "M-VALIDATION-RECEIPTS: Cross-tier validation, reproducibility, and evidence receipts"
-    },
-    {
-      "at": "2026-09-02T21:28:52.541Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0ulucno",
-      "note": "M-CONNECTION-POOL: Bounded connection and instance pools"
-    },
-    {
-      "at": "2026-09-02T21:28:48.893Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0krhupr",
-      "note": "M-AUDIO-GRAPH: Sample-accurate audio graphs and realtime callback contracts"
     }
   ],
   "nextNum": 368,
