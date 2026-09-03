@@ -1,0 +1,51 @@
+use core.compute as compute
+
+fn resize(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String), new_width: Int, new_height: Int) (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String) -> {
+    out :: compute.zeros([new_height, new_width, image.channels]) ?? panic("resize allocation")
+    y := 0
+    loop y < new_height {
+        x := 0
+        loop x < new_width {
+            source_y := y * image.height /% new_height
+            source_x := x * image.width /% new_width
+            channel := 0
+            loop channel < image.channels {
+                value :: compute.get(image.pixels, [source_y, source_x, channel]) ?? panic("resize read")
+                compute.set(&out, [y, x, channel], value) ?? panic("resize write")
+                channel += 1
+            }
+            x += 1
+        }
+        y += 1
+    }
+    return (pixels: out, width: new_width, height: new_height, channels: image.channels, dtype: image.dtype)
+}
+
+fn grayscale(image: (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String)) (pixels: Tensor, width: Int, height: Int, channels: Int, dtype: String) -> {
+    if image.channels < 3 -> panic("RGB image required")
+    out :: compute.zeros([image.height, image.width, 1]) ?? panic("grayscale allocation")
+    y := 0
+    loop y < image.height {
+        x := 0
+        loop x < image.width {
+            red :: compute.get(image.pixels, [y, x, 0]) ?? panic("red read")
+            green :: compute.get(image.pixels, [y, x, 1]) ?? panic("green read")
+            blue :: compute.get(image.pixels, [y, x, 2]) ?? panic("blue read")
+            gray := red * 0.3 + green * 0.59 + blue * 0.11
+            compute.set(&out, [y, x, 0], gray) ?? panic("gray write")
+            x += 1
+        }
+        y += 1
+    }
+    return (pixels: out, width: image.width, height: image.height, channels: 1, dtype: image.dtype)
+}
+
+fn run() {
+    pixels :: compute.from_list([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]) ?? panic("image")
+    rgb :: compute.reshape(pixels, [2, 2, 3]) ?? panic("image reshape")
+    image := (pixels: rgb, width: 2, height: 2, channels: 3, dtype: "f64")
+    enlarged :: resize(image, 4, 4)
+    gray :: grayscale(image)
+    print("image:{enlarged.width}x{enlarged.height}x{enlarged.channels} dtype:{enlarged.dtype} values:{compute.to_list(enlarged.pixels)}")
+    print("gray:{gray.width}x{gray.height}x{gray.channels} values:{compute.to_list(gray.pixels)}")
+}

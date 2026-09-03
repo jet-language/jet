@@ -1,0 +1,24 @@
+use core.compute as compute
+use core.data as data
+use core.files as files
+
+#Codable
+struct Observation { team: String segment: String x: Float y: Float value: Float }
+#Codable
+struct Summary { team: String mean: Float }
+
+fn run() {
+    raw :: files.read("/home/nate/.cache/jet-luna/dx3/area-data/fixture-100k.csv") ?? panic("read")
+    rows :: data.csv<Observation>(raw) ?? panic("csv")
+    filtered :: data.filter(rows, row -> row.value >= Float{50.0})
+    groups :: data.group_mean(filtered, row -> row.team, row -> row.value) ?? panic("group")
+    print("pre tensor")
+    source_tensor :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("tensor")
+    tensor :: compute.reshape(source_tensor, [2, 3]) ?? panic("reshape")
+    tensor_shape :: compute.shape(tensor)
+    tensor_cell :: compute.get(tensor, [1, 2]) ?? panic("tensor cell")
+    print("tensor {tensor_shape} {tensor_cell}")
+    svg :: data.bar_svg(groups) ?? panic("bar svg")
+    files.write("/home/nate/.cache/jet-luna/dx3/area-data/combo.svg", svg) ?? panic("write svg")
+    print("post plot {svg.len()}")
+}

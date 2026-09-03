@@ -1,0 +1,19 @@
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    body := reactive.signal("old")
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        ui.mount(render_backend, ui.box([
+            ui.text(body.get()),
+            ui.button("Save", on_click: () -> { print("save") }),
+            ui.button("Undo", on_click: () -> { print("undo") }),
+            ui.button("Redo", on_click: () -> { print("redo") }),
+            ui.button("Toggle theme", on_click: () -> { print("theme") })
+        ]))
+    })
+    body.set("new")
+    print("renders: {backend.render_count()}")
+}

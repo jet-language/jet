@@ -1,0 +1,15 @@
+use core.files as fs
+
+fn run() {
+    path :: Path.from("/home/nate/.cache/jet-luna/dx3/prim-storage/crash-runtime/events.log")
+    reader :: fs.open(path) ?? panic("open recovery log")
+    records := [String]{}
+    discarded := false
+    loop line in reader.lines() {
+        fields :: line.split("|").to_list()
+        if fields.len() >= 3 && fields[2].len() > 0 -> records.push(line)
+        else -> discarded = true
+    }
+    print("recovered_records={records.len()}")
+    print("discarded_tail={discarded}")
+}

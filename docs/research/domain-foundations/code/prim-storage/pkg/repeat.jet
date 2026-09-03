@@ -1,0 +1,14 @@
+use core.files as fs
+
+fn append_ok(path: Path, text: String) Bool -> {
+    fs.append_all(path, text) ?? return false
+    fs.fsync(path) ?? return false
+    return true
+}
+
+fn run() {
+    p :: Path.from("/home/nate/.cache/jet-luna/dx3/prim-storage/repeat.txt")
+    a :: append_ok(~p, "a") ?? false
+    b :: append_ok(~p, "b") ?? false
+    print("{a} {b}")
+}

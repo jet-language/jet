@@ -1,0 +1,12 @@
+use core.process as process
+
+fn run() {
+    producer :: process.cmd(["printf", "keep-one\nskip\nkeep-two\n"]).stdout(.Stream).spawn() ?? panic("producer")
+    consumer :: process.cmd(["head", "-n", "2"]).stdin(.Stream).stdout(.Capture).spawn() ?? panic("consumer")
+    loop line in producer.stdout.lines() {
+        if line.contains("keep") -> consumer.stdin.write("{line}\n") ?? panic("write")
+    }
+    producer.wait() ?? panic("producer wait")
+    receipt :: consumer.wait() ?? panic("consumer wait")
+    print("exit={receipt.code} output={receipt.output.trim()}")
+}

@@ -1,0 +1,16 @@
+use core.files as fs
+use "log" as log
+use "kv" as kv
+use "pool" as pool
+use "queue" as queue
+use "cache" as cache
+
+fn run() {
+    root :: "/home/nate/.cache/jet-luna/dx3/prim-storage"
+    if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup")
+    fs.create_dir_all(root) ?? panic("create")
+    p :: Path.from(root).join("imports2.txt")
+    _a :: log.append_record(~p, "a") ?? false
+    fs.append_all(~p, "b") ?? panic("b")
+    print("ok")
+}

@@ -1,0 +1,15 @@
+use core.ui as ui
+use c.gtk4 as gtk4
+
+fn run() {
+    @if @build.os == {
+        .Linux -> {
+            backend :: ui.gtk_backend()
+            ui.mount(backend, ui.box([ui.text("Jet Notes native window")]))
+            print("native backend: gtk4")
+            backend.present("Jet Notes")
+        }
+        .MacOS -> { print("native backend unavailable: macOS") }
+        .Windows -> { print("native backend unavailable: Windows") }
+    }
+}

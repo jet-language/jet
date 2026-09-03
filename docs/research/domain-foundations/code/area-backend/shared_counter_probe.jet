@@ -1,0 +1,22 @@
+struct Counter {
+    value: Int
+}
+
+fn increment(counter: Shared<Counter>) {
+    counter.guard_edit().value.value += 1
+}
+
+fn run() {
+    counter :: shared Counter{value: 0}
+    workers := [Task<()>]{}
+    loop _ in 1..1000 {
+        workers.push(task {
+            increment(counter)
+        })
+    }
+    loop workers.len() > 0 {
+        worker :: workers.pop() ?? panic("missing worker")
+        worker.join() ?? panic("worker failed")
+    }
+    print("count:{counter.guard_read().value.value}")
+}

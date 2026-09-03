@@ -1,0 +1,161 @@
+use core.files as files
+use core.process as process
+use core.regex as re
+use core.text as text
+use core.time as time
+
+struct BpeModel {
+    merges: [String]
+    words: Int
+    tokens: Int
+}
+
+struct ScanResult {
+    bytes: Int
+    lines: Int
+    matches: Int
+    millis: Int
+}
+
+fn pair_key(left: String, right: String) String -> "{left}|{right}"
+
+fn merge_sequence(sequence: [String], key: String) [String] -> {
+    pieces :: key.split("|").to_list()
+    left :: pieces.get(0) ?? ""
+    right :: pieces.get(1) ?? ""
+    merged :: "{left}{right}"
+    result := [String]{}
+    index := 0
+    loop index < sequence.len() {
+        current :: sequence.get(index) ?? ""
+        if index + 1 < sequence.len() {
+            next :: sequence.get(index + 1) ?? ""
+            if pair_key(current, next) == key {
+                result.push(merged)
+                index += 2
+            } else {
+                result.push(current)
+                index += 1
+            }
+        } else {
+            result.push(current)
+            index += 1
+        }
+    }
+    return result
+}
+
+fn train_bpe(corpus: String) BpeModel -> {
+    words :: text.words(corpus)
+    sequences := [[String]]{}
+    loop word in words {
+        sequences.push(text.graphemes(word))
+    }
+    merges := [String]{}
+    loop _round in 0..<12 {
+        counts := [String:Int]{}
+        loop sequence in sequences {
+            if sequence.len() > 1 {
+                loop index in 0..<(sequence.len() - 1) {
+                    left :: sequence.get(index) ?? ""
+                    right :: sequence.get(index + 1) ?? ""
+                    key :: pair_key(left, right)
+                    counts[key] = (counts.get(key) ?? 0) + 1
+                }
+            }
+        }
+        best := ""
+        best_count := 0
+        loop (key, count) in counts {
+            if count > best_count {
+                best = key
+                best_count = count
+            }
+        }
+        if best_count == 0 {
+            break
+        }
+        merges.push(best)
+        next_sequences := [[String]]{}
+        loop sequence in sequences {
+            next_sequences.push(merge_sequence(sequence, best))
+        }
+        sequences = next_sequences
+    }
+    token_count := 0
+    loop sequence in sequences {
+        token_count += sequence.len()
+    }
+    return BpeModel{merges: merges, words: words.len(), tokens: token_count}
+}
+
+fn encode_text(source: String, model: BpeModel) [String] -> {
+    encoded := [String]{}
+    loop word in text.words(source) {
+        sequence := text.graphemes(word)
+        loop merge in model.merges {
+            sequence = merge_sequence(sequence, merge)
+        }
+        loop token in sequence {
+            encoded.push(token)
+        }
+    }
+    return encoded
+}
+
+fn scan_logs(path: String) ScanResult -> {
+    source :: files.read(path) ?? panic("read log")
+    pattern :: re.compile("ERROR .* user_id=\\d+") ?? panic("compile log pattern")
+    started :: time.instant()
+    line_count := 0
+    match_count := 0
+    loop line in source.lines() {
+        line_count += 1
+        if pattern.is_match(line) {
+            match_count += 1
+        }
+    }
+    return ScanResult{
+        bytes: text.byte_count(source),
+        lines: line_count,
+        matches: match_count,
+        millis: started.elapsed_millis()
+    }
+}
+
+fn shape_with_harfbuzz(font: String, sample: String) String -> {
+    hb :: "/nix/store/i6ds3pnzsk05yms568mc9jm5c5ly46b5-harfbuzz-13.2.1-dev/bin/hb-shape"
+    result :: process.cmd([hb, "--output-format=json", font, sample])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .run() ?? return "process-failed"
+    return result.output.trim()
+}
+
+fn run() {
+    corpus_path :: "/home/nate/.cache/jet-luna/dx3/prim-text/fixtures/corpus_1m.txt"
+    log_path :: "/home/nate/.cache/jet-luna/dx3/prim-text/fixtures/logs_100m.txt"
+    corpus :: files.read(corpus_path) ?? panic("read corpus")
+    corpus_bytes :: text.byte_count(corpus)
+    bpe_started :: time.instant()
+    model :: train_bpe(corpus)
+    bpe_millis :: bpe_started.elapsed_millis()
+    sample_tokens :: encode_text("Hello café नमस्ते سلام", model)
+    print("bpe bytes={corpus_bytes} words={model.words} merges={model.merges.len()} tokens={model.tokens} sample_tokens={sample_tokens.len()} elapsed_ms={bpe_millis}")
+
+    segmented :: "Café 👨‍👩‍👦. Привет κόσμε नमस्ते سلام! One. Two?"
+    print("segments bytes={text.byte_count(segmented)} scalars={text.scalar_count(segmented)} graphemes={text.graphemes(segmented).len()} words={text.words(segmented).len()} sentences={text.sentences(segmented).len()}")
+    normalized :: text.nfc("Café")
+    print("normalized={normalized}")
+    caseless :: text.caseless_eq("Straße", "STRASSE")
+    print("casefold_equal={caseless}")
+
+    scan :: scan_logs(log_path)
+    print("scan bytes={scan.bytes} lines={scan.lines} matches={scan.matches} elapsed_ms={scan.millis}")
+
+    font :: "/nix/store/z8636pzn6xlbazz1m7jmwgp44fib7svz-home-manager-path/share/fonts/truetype/DejaVuSans.ttf"
+    arabic_shape :: shape_with_harfbuzz(font, "سلام")
+    dev_shape :: shape_with_harfbuzz(font, "नमस्ते")
+    print("shape_arabic={arabic_shape}")
+    print("shape_devanagari={dev_shape}")
+}

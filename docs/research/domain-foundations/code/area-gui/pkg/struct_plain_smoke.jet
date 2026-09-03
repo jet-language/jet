@@ -1,0 +1,18 @@
+use core.ui as ui
+
+struct Note {
+    title: String
+    body: String
+}
+
+fn view(note: Note) UiNode -> ui.box([
+    ui.text(note.title),
+    ui.node_role(note.body, 30.0, 3.0, ui.aria_role_text_input())
+])
+
+fn run() {
+    note :: Note{title: "Meeting", body: "old"}
+    backend := ui.tui_backend()
+    backend.mount(view(note))
+    print("mounted")
+}

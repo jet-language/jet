@@ -1,0 +1,22 @@
+use core.compute as compute
+use core.time as time
+
+fn run() {
+    n :: 1024
+    values := [Float]{}
+    loop i in 0..<n {
+        if i == 0 {
+            values.push(Float{1.0})
+        } else {
+            values.push(Float{0.0})
+        }
+    }
+    signal :: compute.from_list(values) ?? panic("from_list")
+    started :: time.instant()
+    spectrum :: compute.fft(signal) ?? panic("fft")
+    finished :: time.instant()
+    duration :: finished - started
+    elapsed :: duration.in(.Nanoseconds)
+    output :: compute.to_list(spectrum)
+    print("compute_fft_n:{n} ns:{elapsed} numel:{compute.numel(spectrum)} first:{output[0]}")
+}

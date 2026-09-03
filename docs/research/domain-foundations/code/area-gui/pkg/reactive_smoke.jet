@@ -1,0 +1,14 @@
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    n := reactive.signal(1)
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        ui.mount(render_backend, ui.text("n={n.get()}"))
+    })
+    print("renders: {backend.render_count()}")
+    n.set(2)
+    print("renders after set: {backend.render_count()}")
+}

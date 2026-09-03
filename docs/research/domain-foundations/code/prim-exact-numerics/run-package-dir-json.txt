@@ -1,0 +1,24 @@
+rational 5/6 1/6 1/6 3/2
+rational checks true true
+rational generic 5/6 3/2
+scaled decimal 12940e-3 74040e-4 true
+scaled json {"coefficient":12940,"scale":3}
+scaled roundtrip true
+money 10007 cents 1751 cents 1752 cents 1751 cents
+money json {"cents":10007} true
+built-in exact 0/1 0
+runtime exact 1/3 1
+decimal literal 0.3 true
+built-in json 12.340 123456789012345678901234567890 {"amount":"12.340","whole":123456789012345678901234567890}
+million money 49500000 cents
+Warning [L0520] (display_migration): `Decimal` has no `Display` impl — bare `{}` will require one soon
+  --> /home/nate/.cache/jet-luna/dx3/prim-exact-numerics/pkg/run.jet:278:29
+    |
+278 |     print("decimal literal {builtin_decimal} {builtin_decimal == 0.3}")
+    |                             ^^^^^^^^^^^^^^^
+ Why: Display is the user-facing interpolation hook; Debug is for `{value:Debug}`
+ Fix: Add `impl Decimal.Display { fn display(self) String -> { … } }`
+More: jet-lang.dev/e/L0520
+
+1 problem found
+run `jet explain L0520` to learn more

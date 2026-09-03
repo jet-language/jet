@@ -1,0 +1,31 @@
+use core.http as http
+use core.net as net
+
+fn run() {
+    (sender, ch) :: channel<String>()
+    requests :: 4
+    server :: task {
+        listener :: net.tcp_listen("127.0.0.1:0")
+        sender.send(listener.local_addr())
+        server_i := 0
+        loop server_i < requests {
+            stream :: listener.accept()
+            _request :: stream.read_text(8192)
+            net.tcp_reply(^stream, "200 OK", "ok")
+            server_i += 1
+        }
+    }
+    address :: ch.receive() ?? panic("listener did not start")
+    passed := 0
+    client_i := 0
+    loop client_i < requests {
+        response :: http.get("http://{address}/")
+        if response.status() == 200 && response.body().text(8192) == "ok" {
+            passed += 1
+        }
+        client_i += 1
+    }
+    server.join() ?? panic("server task failed")
+    print("threshold={passed}/{requests}")
+    if passed != requests -> panic("load threshold failed")
+}

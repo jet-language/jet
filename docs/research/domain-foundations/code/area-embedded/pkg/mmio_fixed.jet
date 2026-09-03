@@ -1,0 +1,13 @@
+use core.mem as mem
+
+fn gpio_register_write(value: Int) Int -> {
+    #Unsafe("board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word") {
+        pointer :: mem.Ptr<Int>.from_addr(0x40000100)
+        mem.volatile_write(pointer, value)
+        return mem.volatile_read(pointer)
+    }
+}
+
+fn run() {
+    print("fixed MMIO function admitted")
+}

@@ -1,0 +1,15 @@
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    selected := reactive.signal(0)
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        marker :: if selected.get() == 0 -> "* " else -> "  "
+        ui.mount(render_backend, ui.text("{marker}Meeting"))
+    })
+    print("initial: {backend.render_count()}")
+    selected.set(1)
+    print("updated: {backend.render_count()}")
+}

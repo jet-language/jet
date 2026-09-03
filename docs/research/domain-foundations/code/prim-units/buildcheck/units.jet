@@ -1,0 +1,44 @@
+pub struct Meter {
+    value: Float
+}
+
+pub struct Centimeter {
+    value: Float
+}
+
+pub struct Second {
+    value: Float
+}
+
+pub struct Hertz {
+    value: Float
+}
+
+pub struct Speed {
+    value: Float
+}
+
+pub struct Acceleration {
+    value: Float
+}
+
+pub fn meter(value: Float) Meter -> Meter{ value: value }
+pub fn centimeter(value: Float) Centimeter -> Centimeter{ value: value }
+pub fn second(value: Float) Second -> Second{ value: value }
+pub fn hertz(value: Float) Hertz -> Hertz{ value: value }
+
+pub fn checked_meters_add(left: Meter, right: Meter) Meter !Err -> {
+    sum :: left.value + right.value
+    if !sum.is_finite() -> return Err("meter sum is not finite")
+    return Ok(Meter{ value: sum })
+}
+pub fn meter_to_centimeter(value: Meter) Centimeter -> Centimeter{ value: value.value * 100.0 }
+pub fn centimeters_to_meter(value: Centimeter) Meter -> Meter{ value: value.value / 100.0 }
+pub fn meters_per_second(distance: Meter, elapsed: Second) Speed -> Speed{ value: distance.value / elapsed.value }
+pub fn speed_per_second(speed: Speed, elapsed: Second) Meter -> Meter{ value: speed.value * elapsed.value }
+pub fn meters_per_second_squared(distance: Meter, elapsed: Second) Acceleration -> Acceleration{ value: distance.value / (elapsed.value * elapsed.value) }
+pub fn acceleration_step(acceleration: Acceleration, elapsed: Second) Speed -> Speed{ value: acceleration.value * elapsed.value }
+pub fn format_meter(value: Meter) String -> "{value.value} m"
+pub fn format_centimeter(value: Centimeter) String -> "{value.value} cm"
+pub fn format_speed(value: Speed) String -> "{value.value} m/s"
+pub fn format_hertz(value: Hertz) String -> "{value.value} Hz"

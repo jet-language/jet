@@ -1,0 +1,12 @@
+use core.crypto as crypto
+
+pub fn verify_image(image: [U8#8]) Bool -> {
+    key :: crypto.SigningKey.new_random() ?? return false
+    signature :: crypto.sign(key, image) ?? return false
+    return crypto.verify(key.public_key(), image, signature) ?? false
+}
+
+fn run() {
+    image :: [U8#8]{69, 77, 66, 68, 49, 0, 0, 1}
+    print("verified {verify_image(image)}")
+}

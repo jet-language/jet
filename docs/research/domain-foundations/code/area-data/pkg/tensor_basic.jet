@@ -1,0 +1,13 @@
+use core.compute as compute
+
+fn run() {
+    zeros :: compute.zeros([2, 3]) ?? panic("zeros")
+    print("rank:{compute.rank(zeros)}")
+    print("shape:{compute.shape(zeros)}")
+    print("device:{compute.device(zeros)}")
+    ones :: compute.ones([2, 3]) ?? panic("ones")
+    sum := compute.add(zeros, ones) ?? panic("add")
+    compute.set(&sum, [0, 1], 4.0) ?? panic("set")
+    cell :: compute.get(sum, [0, 1]) ?? panic("get")
+    print("cell:{cell}")
+}

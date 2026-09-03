@@ -1,0 +1,20 @@
+use core.compiler as compiler
+
+fn build(b: BuildContext) BuildPlan -> {
+    @source :: "fn old_name() Int -> 41\nfn run() {{ return old_name() }}\n"
+    @lexed :: compiler.lex(@source) ?? panic("lex failed")
+    @parsed :: compiler.parse(@source) ?? panic("parse failed")
+    @checked :: compiler.check(@parsed) ?? panic("check failed")
+    @tokens :: @lexed.tokens().len()
+    @items :: @parsed.items().len()
+    @functions :: @checked.functions().len()
+    b.generate("facts") {
+        pub fn tooling_facts() String -> "tokens={@tokens}; items={@items}; functions={@functions}"
+    }
+    app :: b.add_executable("prim_tooling_hooks", ["run.jet", ".jet/generated/prim_tooling_hooks/facts.jet"], [])
+    return b.plan(app)
+}
+
+fn run() {
+    print("tooling probe")
+}

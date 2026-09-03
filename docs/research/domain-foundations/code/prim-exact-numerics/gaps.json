@@ -1,0 +1,56 @@
+[
+  {
+    "id": "prim-exact-numerics-G1",
+    "tags": ["defect"],
+    "primitive": "Comptime arithmetic must preserve exact Fraction and Decimal semantics across AOT, interpreter, and runtime evaluation.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-exact-numerics/store scripts/agent/jet-env jet run fixtures/comptime_exact.jet => comptime 0/1 0; runtime 10/3 10. The same command with --interpret => comptime 10/3 10; runtime 10/3 10.",
+    "areas": ["data analysis", "backend services", "science"],
+    "severity": "blocks",
+    "workaround": "Keep exact division at runtime or use the interpreter; no safe AOT comptime workaround was found."
+  },
+  {
+    "id": "prim-exact-numerics-G2",
+    "tags": ["defect", "boilerplate"],
+    "primitive": "Non-fallible library helpers must be callable from user-defined Add, Sub, Mul, Div, Equatable, and Comparable implementations.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-exact-numerics/store scripts/agent/jet-env jet check fixtures/struct_impl.jet => Error [E0403] at pair :: align(self, rhs): the non-fallible helper call is diagnosed as fallible inside impl D.Add.",
+    "areas": ["data analysis", "backend services", "science"],
+    "severity": "hurts",
+    "workaround": "Inline the helper body in each operator implementation; the working package repeats scale-factor loops eight times."
+  },
+  {
+    "id": "prim-exact-numerics-G3",
+    "tags": ["call-site", "boilerplate"],
+    "primitive": "Expose one coherent Numeric capability that covers core Int, Decimal, Fraction, and generic arithmetic operators.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-exact-numerics/store scripts/agent/jet-env jet check fixtures/generic_numeric.jet => E0109 (`+` cannot combine T and T) and E0905 (`Int` isn't Numeric). A separate T:Add fixture runs and prints 3.",
+    "areas": ["data analysis", "backend services", "science"],
+    "severity": "hurts",
+    "workaround": "Use separate operation bounds such as T:Add and T:Comparable; this works but does not provide a reusable numeric contract."
+  },
+  {
+    "id": "prim-exact-numerics-G4",
+    "tags": ["call-site"],
+    "primitive": "Allow library-defined exact scalar literal and suffix hooks so users can write Rational and scaled Decimal values directly.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-exact-numerics/store scripts/agent/jet-env jet check fixtures/custom_literal.jet => E0112: accept wants Rational but literal 1 is Int. The 1rat suffix fixture => E0134: `rat` isn't a unit in scope.",
+    "areas": ["data analysis", "backend services", "science"],
+    "severity": "hurts",
+    "workaround": "Use verbose Rational{numerator: ..., denominator: ...} or factory calls; suffixes are limited to declared UnitFamily members."
+  },
+  {
+    "id": "prim-exact-numerics-G5",
+    "tags": ["call-site"],
+    "primitive": "Ship a canonical Display implementation for built-in Decimal so exact values interpolate without a migration warning.",
+    "evidence": "Package run prints `decimal literal 0.3 true` but also emits Warning [L0520]: `Decimal` has no `Display` impl; the diagnostic points to run.jet:281 and suggests adding impl Decimal.Display.",
+    "areas": ["data analysis", "backend services", "science"],
+    "severity": "annoys",
+    "workaround": "Call Decimal.to_string() at interpolation sites; the package's custom types use explicit Display implementations."
+  },
+  {
+    "id": "prim-exact-numerics-G6",
+    "tags": ["slow"],
+    "primitive": "Provide compiler/runtime help for arbitrary-precision Int loops to approach incumbent bigint speed from library code.",
+    "evidence": "Same 20,000-iteration, 30-digit seed: cached Jet `jet run bench/bigint.jet` prints 2469135780246913578024691557790000 in real 0m10.329s (first run 13.435s); Python 3.13 via `nix shell nixpkgs#python3` prints the same value in real 0m0.697s. Jet emits L2510 for the loop.",
+    "areas": ["data analysis", "backend services", "science"],
+    "severity": "hurts",
+    "workaround": "Use a fixed-width I64 when bounds permit; exact 30-digit arithmetic has no library-level speed workaround."
+  }
+]

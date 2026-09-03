@@ -1,0 +1,17 @@
+use core.ui as ui
+use core.reactive as reactive
+
+#[Target(Web), HTML("index.html")]
+fn run() {
+    count :: reactive.signal(0)
+    ui.reactive_render(() -> {
+        n := count.get()
+        tree :: ui.box([
+            ui.text("Orders island count: {n}"),
+            ui.button("Refresh", on_click: () -> {
+                count.set(count.get() + 1)
+            })
+        ])
+        ui.mount(ui.null_backend(), tree, ui.constraint(0.0, 0.0, 360.0, 120.0))
+    })
+}

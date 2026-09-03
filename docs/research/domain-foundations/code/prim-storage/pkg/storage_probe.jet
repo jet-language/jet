@@ -1,0 +1,36 @@
+use core.files as fs
+use core.crypto as crypto
+
+fn run() {
+    root :: "/home/nate/.cache/jet-luna/dx3/prim-storage/runtime"
+    if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup root")
+    fs.create_dir_all(root) ?? panic("create root")
+
+    log :: Path.from(root).join("append.log")
+    fs.write(log, "first\n") ?? panic("seed log")
+    fs.append_all(log, "second\n") ?? panic("append log")
+    fs.fsync(log) ?? panic("fsync log")
+    log_text :: fs.read(log) ?? panic("read log")
+    print("log={log_text}")
+
+    atom :: Path.from(root).join("atomic.bin")
+    bytes :: [U8]{79, 75, 1, 0, 255}
+    fs.write_atomic(atom, bytes) ?? panic("atomic write")
+    got :: fs.read_bytes(atom) ?? panic("atomic read")
+    print("atomic_ok={got == bytes}")
+    print("hash={crypto.sha256(got).hex()}")
+
+    lock_path :: Path.from(root).join("store.lock")
+    held :: fs.lock(lock_path) ?? panic("lock")
+    print("lock_exists={fs.exists(held.path)}")
+
+    data :: fs.open(log) ?? panic("open")
+    n := 0
+    loop line in data.lines() {
+        n += 1
+    }
+    print("stream_lines={n}")
+
+    fs.remove_all(root) ?? panic("final cleanup")
+    print("done")
+}

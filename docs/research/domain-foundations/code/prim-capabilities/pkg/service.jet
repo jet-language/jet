@@ -1,0 +1,25 @@
+use core.process as process
+
+pub fn lifecycle() {
+    policy :: Authority.from_rights(["Exec:/nix/store/xgqww6fdbdpkmh1gffhxjhd5bwwnf0hz-coreutils-full-9.11/bin/coreutils"])
+    spec :: process.cmd(["/run/current-system/sw/bin/sleep", "5"]).stdout(.Capture).stderr(.Capture).under(policy)
+    child :: spec.spawn() ?? {
+        print("service:start-error")
+        return
+    }
+    print("service:started")
+    exited_before :: child.exited() ?? true
+    print("service:exited-before={exited_before}")
+    child.terminate() ?? {
+        print("service:stop-error")
+        return
+    }
+    waited :: child.wait() ?? {
+        print("service:wait-error")
+        return
+    }
+    print("service:stopped")
+    exited_after :: child.exited() ?? false
+    print("service:exited-after={exited_after}")
+    print("service:exit-success={waited.success}")
+}

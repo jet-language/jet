@@ -1,0 +1,65 @@
+[
+  {
+    "id": "prim-arrays-G1",
+    "tags": ["defect", "impossible"],
+    "primitive": "AOT code generation must support user-defined records containing Tensor fields without an ICE.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-arrays/store scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/tensor_wrapper_ice.jet -> exit 101: `codegen reached a construct the typed IR does not cover: the expression BoxedTensor{tensor: values}` at tensor_wrapper_ice.jet:9:14 (compiler bug I2/R7, Items.rs:3409:5).",
+    "areas": ["data", "ai-ml", "science"],
+    "severity": "blocks",
+    "workaround": "Use an anonymous named tuple (values: Tensor, dims: ..., coords: ...) and keep metadata parallel; nominal Tensor-bearing records and methods are not viable in AOT."
+  },
+  {
+    "id": "prim-arrays-G2",
+    "tags": ["defect"],
+    "primitive": "AOT code generation must support checked writes through compute.set on a Tensor.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-arrays/store scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/set_ice.jet -> exit 101: `internal compiler error: the generated Rust did not compile` (generated build/set_ice.rs). The same two-line set path succeeds under jet run: values:[0.0, 3.0, 0.0, 0.0].",
+    "areas": ["data", "ai-ml", "science"],
+    "severity": "blocks",
+    "workaround": "Use eager Tensor constructors and pure elementwise operations; no safe AOT workaround for a new indexed output without compute.set."
+  },
+  {
+    "id": "prim-arrays-G3",
+    "tags": ["impossible"],
+    "primitive": "Tensor must carry checked named dimensions, coordinate labels, attributes, and masks with label-aware lookup and alignment.",
+    "evidence": "/home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/labeled_tuple.jet:17-29 implements find_text plus numeric compute.get over a named tuple; jet run prints lookup:3.0 and missing:null. Archived climate-weather/report.md:47-63 and D-M-LABELED-ARRAYS1 state current Tensor exposes shape/strides only and has no labeled N-D or coordinate-aware alignment path.",
+    "areas": ["data", "ai-ml", "science"],
+    "severity": "hurts",
+    "workaround": "Keep dimensions, coordinate lists, and Tensor in an anonymous named tuple and manually compare labels before numeric operations."
+  },
+  {
+    "id": "prim-arrays-G4",
+    "tags": ["impossible"],
+    "primitive": "Provide a deferred chunk-plan primitive with bounded reads, overlap-aware scheduling, and map/collect execution.",
+    "evidence": "/home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/chunked.jet:3-31 manually constructs one Tensor per chunk; jet run prints chunks:8 reads_before:0, then reads_after_one:1, mapped_len:64 reads_after_all:8, and AOT build succeeds. Archived climate-weather/report.md:47-51 and oceanography-hydrology/report.md:81-86 record Tensor eager storage and no lazy scientific graph or chunk scheduler.",
+    "areas": ["data", "ai-ml", "science"],
+    "severity": "blocks",
+    "workaround": "Write a bespoke mutable plan, read function, counter, loop, and materialization list; this does not provide overlap, fusion, cancellation, or bounded scheduler guarantees."
+  },
+  {
+    "id": "prim-arrays-G5",
+    "tags": ["impossible"],
+    "primitive": "Provide a first-class raster/image value with channel axis, dtype, intensity range, color space, resize, and conversion operations.",
+    "evidence": "Archived medical-imaging/probes/missing_image_check.out:1-4 reports E1001: there is no core module core.image. /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/image_inline.jet can manually resize nearest-neighbor and grayscale in jet run (image:4x4x3 dtype:f64 corner:1.0; gray:2x2x1 first:0.3), while archived image-processing/report.md:50-61 records no image value, codec, colorspace, or resampler.",
+    "areas": ["data", "ai-ml", "science"],
+    "severity": "blocks",
+    "workaround": "Represent pixels and image facts as a named tuple and hand-write indexed loops; file codecs, color/range semantics, and quality resampling remain unavailable."
+  },
+  {
+    "id": "prim-arrays-G6",
+    "tags": ["impossible"],
+    "primitive": "Make Tensor storage dtype a semantic generic parameter with checked conversions instead of always materializing f64 data.",
+    "evidence": "/home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/dtype_fixed.jet accepts U8 inputs but jet run prints values:[1.0, 2.0]. D-M-RASTER1.json:12-13 records JetTensor.data: Arc<Vec<f64>> and no dtype field. An explicit fn accept<T>(value:^Tensor<T>) Tensor<T> builds for Float, but jet check dtype_generic.jet reports E2104: type-parameterized callable has no complete TIR specialization.",
+    "areas": ["data", "ai-ml", "science"],
+    "severity": "hurts",
+    "workaround": "Keep all compute values as Float/f64 and carry requested dtype as unenforced metadata; convert at external boundaries."
+  },
+  {
+    "id": "prim-arrays-G7",
+    "tags": ["slow"],
+    "primitive": "Provide optimized parallel dense Tensor elementwise kernels that scale to large N-D maps.",
+    "evidence": "Release build of /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/map_4k.jet succeeded, but `time -p /home/nate/Projects/Github/jet/build/map_4k` timed out at 300s (real 300.25, user 2000.91, sys 287.53) before printing. Same 4096x4096 Float64 two-array add under Nix NumPy/xarray printed corner:3.0 in 0.036179 sec/0.017504 sec.",
+    "areas": ["data", "ai-ml", "science"],
+    "severity": "hurts",
+    "workaround": "Use smaller arrays or an external backend; no successful 4K Jet timing was obtained."
+  }
+]

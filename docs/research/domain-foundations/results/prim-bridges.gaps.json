@@ -1,0 +1,77 @@
+[
+ {
+  "id": "prim-bridges-G1",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Typed foreign-handle adapters for opaque C APIs with ownership and cleanup",
+  "evidence": "From /home/nate/.cache/jet-luna/dx3/prim-bridges/pkg: `jet inspect bind zlib_probe.h --pkg zlib` returned E3208, `No bindable C function prototypes found for zlib`; the header's gzFile declaration is opaque. A working zlib probe required zreader.c (34 lines), a custom archive, explicit null/allocation/close logic, and zreader.h scalar handles. The resulting native binary printed 22, 1.3.2, 22 after `jet build zlib_run.jet --verbose`.",
+  "areas": [
+   "games",
+   "ai-ml",
+   "data",
+   "gui",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Write one C/C++ adapter per library, expose integer handles and scalar operations, and manually free every foreign resource.",
+  "origId": "bridges-c-opaque-handle-adapter"
+ },
+ {
+  "id": "prim-bridges-G2",
+  "tags": [
+   "boilerplate",
+   "call-site"
+  ],
+  "primitive": "Transitive native dependency closure for foreign bridge archives",
+  "evidence": "The zreader archive calls gzopen/gzgets/gzclose, but the first Jet native link emitted only -lzreader; direct rustc then reported undefined references to all three zlib symbols. Adding `use c.z` with `z: c@system` returned E3210 because Jet tried nixpkgs#z. The working package required `z: c@nixpkgs:zlib`, a direct C import, and `RUSTFLAGS=-L native=/home/nate/.cache/jet-luna/dx3/prim-bridges/pkg`.",
+  "areas": [
+   "games",
+   "ai-ml",
+   "data",
+   "gui",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Declare and import every transitive native library manually, select the correct nixpkgs attribute, and add local archive search paths.",
+  "origId": "bridges-native-link-closure"
+ },
+ {
+  "id": "prim-bridges-G3",
+  "tags": [
+   "call-site",
+   "boilerplate"
+  ],
+  "primitive": "A complete Rust-crate bridge preparation path that carries authority and build prerequisites",
+  "evidence": "`jet check rust_run.jet` passed for `extern rust \"base64@0.22\"`, but `jet build rust_run.jet --verbose` stopped before bridge preparation with E1803: `Application authority is undecided for FFI`; the fix requires `allow: [FFI]` in package.jet. No native Rust-crate run was reachable after this gate.",
+  "areas": [
+   "games",
+   "ai-ml",
+   "data",
+   "gui",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Add an explicit FFI authority grant, then rely on Jet's hidden Cargo bridge cache; this probe could not validate the latter.",
+  "origId": "bridges-rust-authority-preparation"
+ },
+ {
+  "id": "prim-bridges-G4",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Reliable C++ bind generation and archive-symbol validation",
+  "evidence": "`jet inspect bind cpp reader.hpp --target x86_64-unknown-linux-gnu --clang /nix/store/xy32w323i90dlgscl5zbac0dyvgk7lig-clang-wrapper-21.1.8/bin/clang++ --ar /nix/store/3d1c302vw7kc8a5vknhmn34c0pd7zm6m-gcc-wrapper-15.3.0/bin/ar --pkg reader --namespace bridge -I . -L . -l reader_impl` bound 2 members. Importing the generated reader.jet then returned E0320 because it emitted `Reader.{ value: value }`. A low-level overlay passed check, but native build returned E3208 for missing `TLS_MODULE_BASE_`; nm showed `_TLS_MODULE_BASE_` undefined in the generated shim, while CFFI.rs ignorable_cpp_symbol does not cover it.",
+  "areas": [
+   "games",
+   "ai-ml",
+   "data",
+   "gui",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Hand-edit generated bindings and avoid the generated C++ archive path; neither workaround is acceptable for a library author.",
+  "origId": "bridges-cpp-generated-shim-finalization"
+ }
+]

@@ -1,0 +1,68 @@
+
+use core.files as fs
+use "log" as log
+use "kv" as kv
+use "pool" as pool
+use "queue" as queue
+use "cache" as cache
+fn require(ok: Bool, message: String) {
+    if !ok -> panic(message)
+}
+
+fn run() {
+    root :: "/home/nate/.cache/jet-luna/dx3/prim-storage/runtime"
+    if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup root")
+    fs.create_dir_all(root) ?? panic("create root")
+
+    log_path :: Path.from(root).join("events.log")
+    _first_append :: log.append_record(~log_path, "event|1|opened") ?? false
+    fs.append_all(~log_path, "event|2|closed\n") ?? panic("append 2")
+    fs.fsync(~log_path) ?? panic("fsync 2")
+    log_records :: log.read_records(~log_path) ?? []
+    print("append_log_records={log_records.len()}")
+
+    kv_path :: Path.from(root).join("kv.log")
+    require(kv.kv_put(kv_path, "alpha", "one") ?? false, "put alpha")
+    require(kv.kv_put(kv_path, "beta", "two") ?? false, "put beta")
+    require(kv.kv_put(kv_path, "alpha", "updated") ?? false, "update alpha")
+    require(kv.kv_delete(kv_path, "beta") ?? false, "delete beta")
+    alpha :: kv.kv_get(kv_path, "alpha") ?? "missing"
+    beta :: kv.kv_get(kv_path, "beta") ?? "missing"
+    print("kv_alpha={alpha}")
+    print("kv_beta={beta}")
+    before :: (fs.stat(kv_path) ?? panic("kv stat")).size
+    require(kv.kv_compact(kv_path) ?? false, "compact")
+    after :: (fs.stat(kv_path) ?? panic("compact stat")).size
+    print("kv_compacted={before > after}")
+    replayed :: kv.kv_get(kv_path, "alpha") ?? "missing"
+    print("kv_replayed={replayed}")
+
+    leases :: pool.pool_demo()
+    print("pool_health=true permits={leases.len()} leases={leases}")
+
+    queue_path :: Path.from(root).join("queue.log")
+    ack_path :: Path.from(root).join("queue.acks")
+    require(queue.queue_publish(queue_path, "m1", "first") ?? false, "publish m1")
+    require(queue.queue_publish(queue_path, "m2", "second") ?? false, "publish m2")
+    group_a_first :: queue.queue_pending(queue_path, ack_path, "workers")
+    print("queue_first={group_a_first}")
+    require(queue.queue_ack(ack_path, "workers", group_a_first[0]) ?? false, "ack m1")
+    group_a_redelivery :: queue.queue_pending(queue_path, ack_path, "workers")
+    group_b_first :: queue.queue_pending(queue_path, ack_path, "other")
+    print("queue_redelivery={group_a_redelivery}")
+    print("queue_other_group={group_b_first}")
+    require(queue.queue_ack(ack_path, "workers", group_a_redelivery[0]) ?? false, "ack m2")
+    drained :: queue.queue_pending(queue_path, ack_path, "workers").len() == 0
+    print("queue_drained={drained}")
+
+    cache_root :: Path.from(root).join("cache")
+    payload :: "content addressed payload"
+    first_key :: cache.cache_store(cache_root, payload)
+    second_key :: cache.cache_store(cache_root, payload)
+    loaded :: cache.cache_load(cache_root, first_key) ?? "missing"
+    print("cache_same_key={first_key == second_key}")
+    print("cache_roundtrip={loaded == payload}")
+
+    fs.remove_all(root) ?? panic("final cleanup")
+    print("storage_probe_complete")
+}

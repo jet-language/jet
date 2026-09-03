@@ -1,0 +1,13 @@
+fn callback(&buffer: [Float#4], tx: Sender<Int>) -[!Mem.Alloc, !Time]> {
+    loop i in 0..<buffer.len() {
+        buffer[i] = 0.5
+    }
+    tx.send(1)
+}
+
+fn run() {
+    buffer := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    (tx, rx) :: channel<Int>(capacity: 1)
+    callback(&buffer, tx)
+    print(rx.receive() ?? 0)
+}

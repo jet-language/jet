@@ -1,0 +1,47 @@
+[
+  {
+    "id": "prim-numerics-perf-G1",
+    "tags": ["defect"],
+    "primitive": "Every documented math constant must lower in default evaluation and release codegen inside ordinary user functions.",
+    "evidence": "scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/pi_probe.jet exits 101: internal compiler error, typed IR does not cover expression `pi` at pi_probe.jet:2:35, crates/jet-codegen/src/Codegen/Items.rs:3409:5. Default run reports E0956 at pi_probe.jet:3:12. Replacing math.pi with Float{3.141592653589793} prints -1.5707963267948966 in both tiers.",
+    "areas": ["data", "ai-ml", "games", "science"],
+    "severity": "blocks",
+    "workaround": "Inline a decimal Float literal instead of core.math.pi."
+  },
+  {
+    "id": "prim-numerics-perf-G2",
+    "tags": ["slow"],
+    "primitive": "A planner-backed O(n log n) FFT primitive with complex, inverse, rank, and stride/layout support.",
+    "evidence": "scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/compute_fft.jet reports compute_fft_n:4096 ns:487254548 checksum:4096.0. The hand-written radix-2 source /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/fft.jet, built with `scripts/agent/jet-env jet build --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/fft.jet && ./build/fft`, reports 4096 ns:105010/105271/105992 and 65536 ns:10476357/12638383/12707954; native Rust target-cpu=native reports 4096 ns:117474 and 65536 ns:11284470. Research and source evidence: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7603-7647 uses nested DFT loops.",
+    "areas": ["data", "ai-ml", "games", "science"],
+    "severity": "hurts",
+    "workaround": "Write a radix-2 kernel over parallel real/imaginary arrays; this still requires manual complex bookkeeping."
+  },
+  {
+    "id": "prim-numerics-perf-G3",
+    "tags": ["slow"],
+    "primitive": "A safe contiguous numeric-buffer view with compiler-visible shape and stride proofs for zero-overhead indexed kernels.",
+    "evidence": "scripts/agent/jet-env jet build --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/stencil.jet && ./build/stencil gives five stable 1024x1024 one-sweep results 4425824, 4372903, 4506879, 4430443, 4471060 ns (median 4430443), versus native Rust target-cpu=native 1894134 ns. jet check stencil.jet emits L2510 `Using a generic collection representation repeats inside a loop` at stencil.jet:17-21. The same CSR kernel is 1931866 ns (median) versus native Rust 1464754 ns for 1,000,000 nonzeros.",
+    "areas": ["data", "ai-ml", "games", "science"],
+    "severity": "hurts",
+    "workaround": "Use the shipped compute.matmul_f32_tile path where applicable; stencil and sparse traversal remain hand-written list-index loops."
+  },
+  {
+    "id": "prim-numerics-perf-G4",
+    "tags": ["boilerplate"],
+    "primitive": "A checked sparse-CSR storage primitive that accepts data, indices, and row offsets without dense staging.",
+    "evidence": "sparse.jet:33-48 manually constructs data, indices, and indptr with one million pushes before csr_matvec; `jet run --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/sparse.jet` reports csr_rows:100000 cols:1000 nnz:1000000 ns:1933286 checksum:1000000.0. docs/reference/core-library.md:4022-4023 lists only to_sparse, sparse_mv, sparse_nnz over the shipped Tensor family; dx2/numerical-computing/census.json:198-210 records direct CSR/CSC/COO construction and sparse solves as a real gap.",
+    "areas": ["data", "ai-ml", "science"],
+    "severity": "hurts",
+    "workaround": "Maintain parallel dynamic arrays and row offsets by hand, as in sparse.jet."
+  },
+  {
+    "id": "prim-numerics-perf-G5",
+    "tags": ["boilerplate"],
+    "primitive": "A first-class complex numeric buffer or tensor with elementwise arithmetic and layout-preserving views.",
+    "evidence": "fft.jet:4-7 defines FFTBuffers as separate re and im lists; fft.jet:9-11 takes two owned arrays and fft.jet:54-63 performs manual complex butterflies. dx2/numerical-computing/census.json:95-99 says Jet has scalar JetComplex arithmetic but no public complex Tensor family; docs/reference/core-library.md:4022-4023 exposes fft as dense DFT with interleaved output, not a complex Tensor. The hand-written workaround passes the 4096 and 65536 impulse checksums exactly.",
+    "areas": ["data", "ai-ml", "games", "science"],
+    "severity": "hurts",
+    "workaround": "Carry separate real and imaginary Float arrays and write all complex arithmetic manually."
+  }
+]

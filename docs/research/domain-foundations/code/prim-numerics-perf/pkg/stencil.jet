@@ -1,0 +1,48 @@
+use core.time as time
+
+fn five_point(grid: [Float], n: Int) [Float] -> {
+    next := [Float]{}
+    count :: n * n
+    loop _i in 0..<count -> next.push(Float{0.0})
+
+    row := 1
+    loop row < n - 1 {
+        col := 1
+        loop col < n - 1 {
+            center_index :: row * n + col
+            up_index :: center_index - n
+            down_index :: center_index + n
+            left_index :: center_index - 1
+            right_index :: center_index + 1
+            center :: ~grid[center_index]
+            up :: ~grid[up_index]
+            down :: ~grid[down_index]
+            left :: ~grid[left_index]
+            right :: ~grid[right_index]
+            next[center_index] = (center + up + down + left + right) / Float{5.0}
+            col += 1
+        }
+        row += 1
+    }
+    return next
+}
+
+fn sum_values(values: [Float]) Float -> {
+    total := Float{0.0}
+    loop value in values -> total += value
+    return total
+}
+
+fn run() {
+    n :: 1024
+    count :: n * n
+    grid := [Float]{}
+    loop _i in 0..<count -> grid.push(Float{1.0})
+    started :: time.instant()
+    output :: five_point(grid, n)
+    finished :: time.instant()
+    duration :: finished - started
+    elapsed :: duration.in(.Nanoseconds)
+    total :: sum_values(output)
+    print("stencil_n:{n} ns:{elapsed} checksum:{total} first:{output[0]} center:{output[n * (n /% 2) + (n /% 2)]} last:{output[count - 1]}")
+}

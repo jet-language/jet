@@ -1,0 +1,296 @@
+// Area-embedded foundations probe: one host-replayable firmware package.
+// The board and register records are library code. The missing interrupt, DMA,
+// flash, and debug provider surfaces are called out in the report.
+use core.mem as mem
+
+struct BoardDescription {
+    name: String
+    triple: String
+    flash_origin: Int
+    flash_bytes: Int
+    ram_origin: Int
+    ram_bytes: Int
+    gpio_base: Int
+    timer_base: Int
+    uart_base: Int
+    dma_base: Int
+}
+
+#Layout(c) struct GpioRegisters {
+    mode: U32
+    output: U32
+    input: U32
+}
+
+#Layout(c) struct TimerRegisters {
+    counter: U32
+    compare: U32
+    status: U32
+}
+
+#Layout(c) struct UartRegisters {
+    status: U32
+    data: U32
+}
+
+#Layout(c) struct DmaRegisters {
+    source: U32
+    destination: U32
+    length: U32
+    status: U32
+}
+
+struct RegisterBlock {
+    gpio: GpioRegisters
+    timer: TimerRegisters
+    uart: UartRegisters
+    dma: DmaRegisters
+    mmio_echo: Int
+}
+
+struct InterruptQueue {
+    slots: [Int#4]
+    head: Int
+    tail: Int
+    count: Int
+    dropped: Int
+}
+
+struct UartRing {
+    bytes: [U8#8]
+    head: Int
+    tail: Int
+    count: Int
+    dropped: Int
+}
+
+struct DmaBuffer {
+    words: [Int#4]
+    owner: Int
+    submitted: Bool
+    completed: Bool
+}
+
+enum SlotState {
+    Empty
+    Pending(Int)
+    Confirmed(Int)
+    Rejected(Int)
+}
+
+struct FlashSlots {
+    active: Int
+    trial: SlotState
+    rollback_count: Int
+}
+
+struct ControlState {
+    integrator: Int
+    actuator: Int
+    ticks: Int
+    deadline_misses: Int
+    wcet_estimate_us: Int
+    deadline_us: Int
+}
+
+fn board() BoardDescription -> BoardDescription{
+    name: "sensor_v1",
+    triple: "thumbv7em-none-eabihf",
+    flash_origin: 0x08000000,
+    flash_bytes: 512 * 1024,
+    ram_origin: 0x20000000,
+    ram_bytes: 64 * 1024,
+    gpio_base: 0x40000000,
+    timer_base: 0x40000100,
+    uart_base: 0x40001000,
+    dma_base: 0x40002000,
+}
+
+fn mmio_replay(value: Int) Int -> {
+    cell := 0
+    #Unsafe("host replay uses a stack cell as a stand-in for the board register") {
+        pointer :: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+        mem.volatile_write(pointer, value)
+        return mem.volatile_read(pointer)
+    }
+}
+
+fn gpio_init(registers: &RegisterBlock) {
+    registers.gpio.mode = U32{1}
+    registers.gpio.output = U32{0}
+    registers.gpio.input = U32{0}
+}
+
+fn gpio_write(registers: &RegisterBlock, high: Bool) {
+    if high {
+        registers.gpio.output = U32{1}
+    } else {
+        registers.gpio.output = U32{0}
+    }
+    registers.mmio_echo = mmio_replay(registers.gpio.output)
+}
+
+fn timer_init(registers: &RegisterBlock, period: Int) {
+    registers.timer.counter = U32{0}
+    registers.timer.compare = U32{period}
+    registers.timer.status = U32{0}
+}
+
+fn timer_advance(registers: &RegisterBlock) Bool -> {
+    counter := registers.timer.counter
+    counter += U32{1}
+    registers.timer.counter = counter
+    if registers.timer.counter >= registers.timer.compare {
+        registers.timer.counter = U32{0}
+        registers.timer.status = U32{1}
+        return true
+    }
+    return false
+}
+
+fn uart_init(registers: &RegisterBlock) {
+    registers.uart.status = U32{1}
+    registers.uart.data = U32{0}
+}
+
+fn dma_init(registers: &RegisterBlock) {
+    registers.dma.source = U32{0}
+    registers.dma.destination = U32{0}
+    registers.dma.length = U32{0}
+    registers.dma.status = U32{0}
+}
+
+// A bounded ISR-shaped library function. It records an event without doing
+// long work; a task drains the queue later. There is no hardware vector API.
+fn interrupt_handler(queue: &InterruptQueue, event: Int) {
+    if queue.count == queue.slots.len() {
+        queue.dropped += 1
+        return
+    }
+    queue.slots[queue.tail] = event
+    queue.tail = (queue.tail + 1) % queue.slots.len()
+    queue.count += 1
+}
+
+fn task_handoff(queue: &InterruptQueue) Int -> {
+    if queue.count == 0 -> return -1
+    event :: queue.slots[queue.head]
+    queue.head = (queue.head + 1) % queue.slots.len()
+    queue.count -= 1
+    return event
+}
+
+fn uart_push(ring: &UartRing, byte: U8) {
+    if ring.count == ring.bytes.len() {
+        ring.dropped += 1
+        return
+    }
+    ring.bytes[ring.tail] = byte
+    ring.tail = (ring.tail + 1) % ring.bytes.len()
+    ring.count += 1
+}
+
+fn uart_pop(ring: &UartRing) U8 -> {
+    if ring.count == 0 -> return U8{0}
+    byte :: ring.bytes[ring.head]
+    ring.head = (ring.head + 1) % ring.bytes.len()
+    ring.count -= 1
+    return byte
+}
+
+// Pinning is a real address-stability guarantee, but owner transfer to a DMA
+// device is not a language/runtime operation. This function only replays it.
+fn dma_checksum(buffer: &DmaBuffer) Int -> {
+    pinned :: mem.pin(&buffer)
+    return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
+}
+fn dma_replay(buffer: &DmaBuffer, registers: &RegisterBlock) Int -> {
+    checksum :: dma_checksum(buffer)
+    registers.dma.source = U32{1}
+    registers.dma.destination = U32{2}
+    registers.dma.length = U32{4}
+    buffer.owner = 1
+    buffer.submitted = true
+    registers.dma.status = U32{1}
+    buffer.completed = true
+    buffer.owner = 0
+    return checksum
+}
+
+fn control_tick(state: &ControlState, sample: Int) Int -> {
+    error :: 2048 - sample
+    state.integrator += error
+    if state.integrator > 8192 -> state.integrator = 8192
+    if state.integrator < -8192 -> state.integrator = -8192
+    state.actuator = error * 4 + state.integrator /% 8
+    if state.actuator > 4095 -> state.actuator = 4095
+    if state.actuator < -4095 -> state.actuator = -4095
+    state.ticks += 1
+    // This is a library estimate in abstract work units, not a compiler WCET.
+    return 12
+}
+
+
+fn stage_and_boot(slots: &FlashSlots, image_digest: Int, signature_ok: Bool) {
+    if signature_ok {
+        slots.trial = SlotState.Pending(image_digest)
+    } else {
+        slots.trial = SlotState.Rejected(image_digest)
+    }
+    if slots.trial == {
+        .Pending(_) -> slots.trial = SlotState.Confirmed(image_digest)
+        else -> slots.rollback_count += 1
+    }
+    if slots.trial == .Confirmed(value) -> slots.active = value
+}
+
+fn run() {
+    board :: board()
+    registers := RegisterBlock{
+        gpio: GpioRegisters{mode: U32{0}, output: U32{0}, input: U32{0}},
+        timer: TimerRegisters{counter: U32{0}, compare: U32{0}, status: U32{0}},
+        uart: UartRegisters{status: U32{0}, data: U32{0}},
+        dma: DmaRegisters{source: U32{0}, destination: U32{0}, length: U32{0}, status: U32{0}},
+        mmio_echo: 0,
+    }
+    gpio_init(&registers)
+    timer_init(&registers, 4)
+    uart_init(&registers)
+    dma_init(&registers)
+
+    queue := InterruptQueue{slots: [Int#4]{0, 0, 0, 0}, head: 0, tail: 0, count: 0, dropped: 0}
+    uart := UartRing{bytes: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0}, head: 0, tail: 0, count: 0, dropped: 0}
+    dma := DmaBuffer{words: [Int#4]{10, 20, 30, 40}, owner: 0, submitted: false, completed: false}
+    state := ControlState{integrator: 0, actuator: 0, ticks: 0, deadline_misses: 0, wcet_estimate_us: 12, deadline_us: 100}
+    slots := FlashSlots{active: 1, trial: SlotState.Empty, rollback_count: 0}
+
+    loop tick in 0..<16 {
+        if timer_advance(&registers) -> interrupt_handler(&queue, tick)
+        event :: task_handoff(&queue)
+        if event >= 0 {
+            sample :: (event * 73 + 19) % 4096
+            work :: control_tick(&state, sample)
+            if work > state.deadline_us -> state.deadline_misses += 1
+            gpio_write(&registers, state.actuator > 0)
+            uart_push(&uart, U8{65})
+        }
+    }
+
+    dma_checksum :: dma_replay(&dma, &registers)
+    image :: [U8#8]{69, 77, 66, 68, 49, 0, 0, 1}
+    // The cryptographic signing API is separately checked and replayed in
+    // signature_crypto.jet; this package exercises the slot policy and rollback.
+    signature_ok :: image[0] == U8{69}
+    stage_and_boot(&slots, dma_checksum, signature_ok)
+    rollback_image :: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0}
+    stage_and_boot(&slots, dma_checksum, rollback_image[0] == U8{69})
+    serial_byte :: uart_pop(&uart)
+
+    print("board {board.name} {board.triple}")
+    print("gpio mode {registers.gpio.mode} output {registers.gpio.output} mmio {registers.mmio_echo}")
+    print("timer status {registers.timer.status} interrupts {state.ticks} dropped {queue.dropped}")
+    print("uart first {serial_byte} queued {uart.count} dropped {uart.dropped}")
+    print("dma submitted {dma.submitted} completed {dma.completed} owner {dma.owner} checksum {dma_checksum}")
+    print("control wcet_estimate_us {state.wcet_estimate_us} deadline_us {state.deadline_us} misses {state.deadline_misses}")
+    print("flash signature {signature_ok} active {slots.active} rollback {slots.rollback_count}")
+}

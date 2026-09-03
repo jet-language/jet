@@ -1,0 +1,32 @@
+use core.time as time
+
+fn pool_health(token: Int) Bool -> token > 0
+
+fn pool_worker(token: Int, returned: Sender<Int>) Int -> {
+    if !pool_health(token) -> panic("unhealthy connection")
+    time.sleep(1ms)
+    returned.send(token)
+    return token
+}
+pub fn pool_demo() [Int] -> {
+    (returned, available) :: channel<Int>(capacity: 2)
+    returned.send(1)
+    returned.send(2)
+
+    first_token :: available.receive() ?? panic("pool closed")
+    first :: task pool_worker(first_token, returned)
+    second_token :: available.receive() ?? panic("pool closed")
+    second_returned :: ~returned
+    second :: task pool_worker(second_token, second_returned)
+    third_token :: available.receive() ?? panic("pool closed")
+    third_returned :: ~returned
+    third :: task pool_worker(third_token, third_returned)
+
+    leases := [
+        first.join() ?? panic("first worker failed"),
+        second.join() ?? panic("second worker failed"),
+        third.join() ?? panic("third worker failed")
+    ]
+    leases.sort()
+    return leases
+}

@@ -1,0 +1,10 @@
+use core.compute as compute
+
+fn run() {
+    shape := [4096, 4096]
+    left :: compute.full(shape, 1.0) ?? panic("left")
+    right :: compute.full(shape, 2.0) ?? panic("right")
+    mapped :: compute.add(left, right) ?? panic("map")
+    corner :: compute.get(mapped, [4095, 4095]) ?? panic("corner")
+    print("shape:{compute.shape(mapped)} numel:{compute.numel(mapped)} corner:{corner}")
+}

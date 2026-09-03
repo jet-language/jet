@@ -1,0 +1,58 @@
+// prim-distributed: event-time keyed tumbling windows over an in-memory source.
+// The checkpoint is an owned map copy; it demonstrates recovery, not durable storage.
+struct Event {
+    key: String
+    timestamp: Int
+    value: Int
+}
+
+fn source() Stream<Event> -> {
+    yield Event{key: "a", timestamp: 12, value: 3}
+    yield Event{key: "b", timestamp: 8, value: 4}
+    yield Event{key: "a", timestamp: 7, value: 2}
+    yield Event{key: "b", timestamp: 21, value: 5}
+    yield Event{key: "a", timestamp: 19, value: 6}
+    yield Event{key: "a", timestamp: 31, value: 7}
+}
+
+fn run() {
+    events :: [Event]{
+        Event{key: "a", timestamp: 12, value: 3},
+        Event{key: "b", timestamp: 8, value: 4},
+        Event{key: "a", timestamp: 7, value: 2},
+        Event{key: "b", timestamp: 21, value: 5},
+        Event{key: "a", timestamp: 19, value: 6},
+        Event{key: "a", timestamp: 31, value: 7}
+    }
+    state := [String:Int]{}
+    max_seen := 0
+    checkpoint := [String:Int]{}
+    processed := 0
+
+    loop event in source() {
+        if event.timestamp > max_seen -> max_seen = event.timestamp
+        watermark := max_seen - 5
+        window_start := event.timestamp - (event.timestamp % 10)
+        window_key := "{event.key}:{window_start.to_string()}"
+        state[window_key] = (state.get(window_key) ?? 0) + event.value
+        processed += 1
+        if processed == 3 -> checkpoint = state.copy()
+        print("event key={event.key} ts={event.timestamp} watermark={watermark}")
+    }
+
+    // Simulate a restart: restore the owned snapshot, then replay the suffix.
+    recovered := checkpoint.copy()
+    recovery_max_seen := 12
+    recovery_watermark := 0
+    recovery_events :: [Event]{events[3], events[4], events[5]}
+    loop event in recovery_events {
+        if event.timestamp > recovery_max_seen -> recovery_max_seen = event.timestamp
+        recovery_watermark = recovery_max_seen - 5
+        window_start := event.timestamp - (event.timestamp % 10)
+        window_key := "{event.key}:{window_start.to_string()}"
+        recovered[window_key] = (recovered.get(window_key) ?? 0) + event.value
+    }
+
+    loop (key, total) in recovered -> print("recovered {key}={total}")
+    print("window_keys={recovered.len()} recovery=in-memory replayed=3 watermark={recovery_watermark}")
+}

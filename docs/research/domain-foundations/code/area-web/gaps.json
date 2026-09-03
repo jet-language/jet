@@ -1,0 +1,29 @@
+[
+  {
+    "id": "area-web-G1",
+    "tags": ["defect"],
+    "primitive": "Native code generation must compile a valid DB plus HTTP plus task server package into a deployable executable.",
+    "evidence": "`jet build run.jet --verbose` checked the source, generated 5,719,119 bytes of Rust, then ended: `internal compiler error: the generated Rust did not compile. This is a bug in jet`; generated `/home/nate/.cache/jet-luna/dx3/area-web/pkg/build/run.rs`.",
+    "areas": ["web", "backend", "data"],
+    "severity": "blocks",
+    "workaround": "`jet run` and `jet dev --watch=off` execute the flow, but there is no native deployment artifact."
+  },
+  {
+    "id": "area-web-G2",
+    "tags": ["impossible"],
+    "primitive": "HTTPRequest needs a typed query-parameter accessor that returns a checked value.",
+    "evidence": "`jet check /home/nate/.cache/jet-luna/dx3/area-web/query_probe.jet` reports `Error [E0102]: HTTPRequest has no method query` at `req.query(\"limit\")`.",
+    "areas": ["web"],
+    "severity": "hurts",
+    "workaround": "Read the whole request target with `req.path()` and write a library parser for the query string."
+  },
+  {
+    "id": "area-web-G3",
+    "tags": ["call-site", "defect"],
+    "primitive": "The server needs a typed form decoder and field-validation result for a request body.",
+    "evidence": "The same probe's `req.form(\"item\")` attempt reports `Error [E0405]: ?? only works on a fallible value, not HTTPRequest`; the valid app therefore uses `req.text()` plus a manual split-and-validate parser in `run.jet`.",
+    "areas": ["web", "backend"],
+    "severity": "hurts",
+    "workaround": "Parse URL-encoded text with `split(\"&\")`, split each pair, and validate every field in the application."
+  }
+]

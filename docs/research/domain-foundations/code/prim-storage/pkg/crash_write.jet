@@ -1,0 +1,17 @@
+use core.files as fs
+use core.time as time
+
+fn run() {
+    root :: "/home/nate/.cache/jet-luna/dx3/prim-storage/crash-runtime"
+    if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup")
+    fs.create_dir_all(root) ?? panic("create")
+    path :: Path.from(root).join("events.log")
+    fs.append_all(~path, "event|1|committed\n") ?? panic("commit")
+    fs.fsync(~path) ?? panic("sync commit")
+    fs.append_all(~path, "event|2|") ?? panic("partial")
+    fs.fsync(~path) ?? panic("sync partial")
+    print("mid_write_ready")
+    time.sleep(30s)
+    fs.append_all(~path, "tail\n") ?? panic("tail")
+    fs.fsync(~path) ?? panic("sync tail")
+}

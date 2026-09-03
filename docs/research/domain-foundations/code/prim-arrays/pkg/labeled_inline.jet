@@ -1,0 +1,52 @@
+use core.compute as compute
+
+struct Coordinate {
+    name: String
+    labels: [String]
+}
+
+struct LabeledArray {
+    values: Tensor
+    dims: [String]
+    coords: [Coordinate]
+}
+
+fn find_text(xs: [String], needle: String) ?Int -> {
+    i := 0
+    loop i < xs.len() {
+        if xs[i] == needle -> return Val(i)
+        i += 1
+    }
+    return None
+}
+
+fn lookup(array: LabeledArray, dim: String, label: String) ?Float -> {
+    dim_index :: find_text(array.dims, dim)
+    if dim_index == None -> return None
+    axis :: dim_index ?? 0
+    if axis >= array.coords.len() -> return None
+    coordinate :: array.coords[axis]
+    label_index :: find_text(coordinate.labels, label)
+    if label_index == None -> return None
+    indexes := [Int]{}
+    loop _i in 0..<array.dims.len() -> indexes.push(0)
+    indexes[axis] = label_index ?? 0
+    cell :: compute.get(array.values, indexes) ?? panic("labeled lookup")
+    return Val(cell)
+}
+
+fn run() {
+    values :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("values")
+    tensor :: compute.reshape(values, [2, 3]) ?? panic("reshape")
+    coords :: [Coordinate]{
+        Coordinate{name: "row", labels: ["r0", "r1"]},
+        Coordinate{name: "col", labels: ["c0", "c1", "c2"]}
+    }
+    array :: LabeledArray{
+        values: tensor,
+        dims: ["row", "col"],
+        coords: coords
+    }
+    print("lookup:{lookup(array, "col", "c2")}")
+    print("missing:{lookup(array, "col", "c9")}")
+}

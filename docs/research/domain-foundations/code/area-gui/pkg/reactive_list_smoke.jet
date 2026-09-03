@@ -1,0 +1,27 @@
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    body := reactive.signal("old")
+    mode := reactive.signal("dark")
+    settings := reactive.signal("closed")
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        rows := [UiNode]{
+            ui.text("JET NOTES"),
+            ui.text("Meeting"),
+            ui.node_role(body.get(), 30.0, 3.0, ui.aria_role_text_input()),
+            ui.button("Save", on_click: () -> { print("save") }),
+            ui.text("Mode: {mode.get()}"),
+            ui.text("Settings: {settings.get()}")
+        }
+        rows.push(ui.text("Shortcuts: Ctrl+S Ctrl+Z"))
+        ui.mount(render_backend, ui.box(rows))
+    })
+    print("initial: {backend.render_count()}")
+    mode.set("light")
+    settings.set("open")
+    body.set("new")
+    print("updated: {backend.render_count()}")
+}

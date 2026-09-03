@@ -1,0 +1,10 @@
+use core.http.server as server
+
+fn run() {
+    version := Cell.new(0)
+    mux :: server.mux()
+    mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
+        _value :: version.get()
+        return Ok(server.response(200, "ok"))
+    })
+}

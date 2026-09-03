@@ -1,0 +1,29 @@
+[
+  {
+    "id": "area-ai-G1",
+    "tags": ["defect", "impossible"],
+    "primitive": "A cross-tier executable Tensor autodiff path must evaluate named gradient calls and lower them in native code without an internal compiler error.",
+    "evidence": "scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-ai/evidence/mini.jet -> Error [E0956]: `Tensor` isn't supported by the current evaluator yet at mini.jet:6; scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-ai/evidence/mini.jet --verbose -> exit 101: internal compiler error: the generated Rust did not compile (generated /home/nate/Projects/Github/jet/build/mini.rs). The shipped higher-order example also returns E0112 at compute_autodiff.jet:18, then E0102 at :19.",
+    "areas": ["ai-ml"],
+    "severity": "blocks",
+    "workaround": "Use explicit manual chain-rule Tensor functions as in pkg/run.jet:48-64; this trains the toy model but is not composable autodiff."
+  },
+  {
+    "id": "area-ai-G2",
+    "tags": ["boilerplate"],
+    "primitive": "A typed Dataset/Loader primitive should own bounded batching, shuffle order, and collate instead of repeated application loops and batch constructors.",
+    "evidence": "pkg/run.jet:16-46 duplicates batch_inputs and batch_targets; pkg/run.jet:66-85 manually shuffles an Int order, loops epochs and fixed-size batches, and prints a loader receipt. scripts/agent/jet-env jet run pkg/run.jet succeeds and prints loader epoch=0..3 batch_count=2. The ml-training report and D-M-ML-LIFECYCLE1 identify Dataset/Loader as absent or proposed.",
+    "areas": ["ai-ml", "data"],
+    "severity": "hurts",
+    "workaround": "Use [Int].shuffle().to_list() plus explicit batch and collate helpers, as this package does."
+  },
+  {
+    "id": "area-ai-G3",
+    "tags": ["slow"],
+    "primitive": "The compiler/runtime must check and build an ordinary 10,000-entry embedding index and cosine scan within a bounded application build budget.",
+    "evidence": "scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-ai/pkg/embedding.jet --verbose timed out after 360.08 seconds while still at `Checking program and build plan`, before generated Rust or a binary. The source constructs and scans 10,000 vectors at pkg/embedding.jet:25-49; the earlier integrated interpreter run timed out after 300 seconds after the same scan was added.",
+    "areas": ["ai-ml", "data"],
+    "severity": "blocks",
+    "workaround": "Use a native external index provider or a smaller corpus while compiler/runtime support is missing; no Jet-native 10,000-entry receipt was reachable."
+  }
+]

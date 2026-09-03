@@ -1,0 +1,31 @@
+package {
+    name: "prim-realtime"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Time, Mem.Alloc] } }
+}
+
+use core.time as time
+
+struct Stats {
+    count: Int
+    missed: Int
+    min_jitter_us: Int
+    max_jitter_us: Int
+    sum_jitter_us: Int
+}
+
+fn audio_callback(&buffer: [Float#4], expected: Float) -[!Mem.Alloc]> {
+    loop i in 0..<buffer.len() {
+        buffer[i] = expected
+    }
+}
+
+fn run() {
+    buffer := [Float#4]{0.0, 0.0, 0.0, 0.0}
+    audio_callback(&buffer, 0.25)
+    print("buffer={buffer[0]},{buffer[1]},{buffer[2]},{buffer[3]}")
+    started :: time.instant()
+    time.sleep(2ms)
+    elapsed :: started.elapsed().in(.Microseconds)
+    print("slept_us={elapsed}")
+}

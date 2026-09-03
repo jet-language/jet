@@ -1,0 +1,1756 @@
+[
+ {
+  "probe": "area-web",
+  "kind": "area",
+  "id": "area-web-G1",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Native code generation must compile a valid DB plus HTTP plus task server package into a deployable executable.",
+  "evidence": "`jet build run.jet --verbose` checked the source, generated 5,719,119 bytes of Rust, then ended: `internal compiler error: the generated Rust did not compile. This is a bug in jet`; generated `/home/nate/.cache/jet-luna/dx3/area-web/pkg/build/run.rs`.",
+  "areas": [
+   "web",
+   "backend",
+   "data"
+  ],
+  "severity": "blocks",
+  "workaround": "`jet run` and `jet dev --watch=off` execute the flow, but there is no native deployment artifact."
+ },
+ {
+  "probe": "area-web",
+  "kind": "area",
+  "id": "area-web-G2",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "HTTPRequest needs a typed query-parameter accessor that returns a checked value.",
+  "evidence": "`jet check /home/nate/.cache/jet-luna/dx3/area-web/query_probe.jet` reports `Error [E0102]: HTTPRequest has no method query` at `req.query(\"limit\")`.",
+  "areas": [
+   "web"
+  ],
+  "severity": "hurts",
+  "workaround": "Read the whole request target with `req.path()` and write a library parser for the query string."
+ },
+ {
+  "probe": "area-web",
+  "kind": "area",
+  "id": "area-web-G3",
+  "tags": [
+   "call-site",
+   "defect"
+  ],
+  "primitive": "The server needs a typed form decoder and field-validation result for a request body.",
+  "evidence": "The same probe's `req.form(\"item\")` attempt reports `Error [E0405]: ?? only works on a fallible value, not HTTPRequest`; the valid app therefore uses `req.text()` plus a manual split-and-validate parser in `run.jet`.",
+  "areas": [
+   "web",
+   "backend"
+  ],
+  "severity": "hurts",
+  "workaround": "Parse URL-encoded text with `split(\"&\")`, split each pair, and validate every field in the application."
+ },
+ {
+  "probe": "area-games",
+  "kind": "area",
+  "id": "area-games-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "A headless game runner must accept a declared frame budget and consume a replay for that many frames.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_replay_frames.jet => Error [E0764]: `run` has no parameter labelled `frames`; Fix: `run` accepts `replay`, `backend`. The working game.run transcript in jet run main.jet contains only frame:0, frame:1, frame:2; the separate pure Jet 600-loop hash passes.",
+  "areas": [
+   "games",
+   "embedded",
+   "data"
+  ],
+  "severity": "blocks",
+  "workaround": "Write a separate pure-Jet frame loop and test its hash; it cannot drive the core.game scene runner for 600 frames."
+ },
+ {
+  "probe": "area-games",
+  "kind": "area",
+  "id": "area-games-G2",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "A typed game input contract must expose gamepad buttons and axes alongside keyboard actions.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_gamepad.jet => Error [E1004]: `core.game.raylib` has no item `gamepad_down`; Fix lists only window, drawing, key_down, set_target_fps, color, load_sound, and play_sound.",
+  "areas": [
+   "games",
+   "embedded",
+   "gui"
+  ],
+  "severity": "blocks",
+  "workaround": "Use scene.input.bind or rl.key_down for keyboard-only controls, or supply a separate native controller bridge."
+ },
+ {
+  "probe": "area-games",
+  "kind": "area",
+  "id": "area-games-G3",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "The graphics contract must decode a texture atlas, resolve a named region, and draw that region as a sprite.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_atlas.jet => Error [E1004] for `load_texture_atlas` and `draw_sprite`; Fix lists no texture, atlas, or sprite operation. scene.assets.image accepts the path and rl.draw_rectangle works, but the real atlas file cannot be decoded or drawn.",
+  "areas": [
+   "games",
+   "gui",
+   "web"
+  ],
+  "severity": "blocks",
+  "workaround": "Keep the atlas as an opaque scene asset and draw rectangles, or add a native texture/atlas bridge."
+ },
+ {
+  "probe": "area-games",
+  "kind": "area",
+  "id": "area-games-G4",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "The audio runtime must provide a sample-accurate callback deadline and a music-stream lifecycle, not only one-shot sound handles.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_audio.jet => Error [E1001]: There is no core module `core.audio`. scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_music.jet => Error [E1004] for `load_music`, `play_music_stream`, and `update_music_stream`; the fixed public list ends at `load_sound`, `play_sound`.",
+  "areas": [
+   "games",
+   "embedded"
+  ],
+  "severity": "blocks",
+  "workaround": "Process a finite audio block as ordinary Jet code and use rl.load_sound/play_sound for effects; neither provides a deadline-bound callback or music stream."
+ },
+ {
+  "probe": "area-games",
+  "kind": "area",
+  "id": "area-games-G5",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "A package-level native bridge should link a generated C binding and prepare its runtime adapter in one declared step.",
+  "evidence": "jet inspect bind /home/nate/.cache/jet-luna/dx3/area-games/pkg/include/game_probe.h --pkg game_probe => bound 3 functions ... to .jet/bindings/c/game_probe.jet. The 5-line header and 6-line generated cache type-check (`jet check bridge_check.jet` diagnostics=0), but `jet run bridge_check.jet` => Error [E0956]: Extern call `jet_ffi_game_probe_add` has no prepared bridge. The scratch probe had no native archive/compiler, so this is setup friction, not a defect claim.",
+  "areas": [
+   "games",
+   "embedded",
+   "backend",
+   "gui",
+   "ai"
+  ],
+  "severity": "annoys",
+  "workaround": "Use the shipped raylib surface, or provide the header, generated cache, package link dependency, native archive, and prepared bridge for every custom C library."
+ },
+ {
+  "probe": "area-cli",
+  "kind": "area",
+  "id": "area-cli-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "A spawned child needs a closable ProcessStdin so a library can send filtered data and then deliver EOF to an arbitrary consumer.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-cli/stdin_close.jet reports E0102: `ProcessStdin` has no method `close` at stdin_close.jet:5. The matching producer-to-cat code in pkg/run.jet:75-85 timed out after 60 seconds at consumer.wait because cat never received EOF. pipe_head.jet:4-11 exits 0 only because head stops after two lines.",
+  "areas": [
+   "cli"
+  ],
+  "severity": "blocks",
+  "workaround": "Use a fixed-count consumer such as head, or use all-native process.pipeline; neither supports an arbitrary in-process filter followed by EOF."
+ },
+ {
+  "probe": "area-cli",
+  "kind": "area",
+  "id": "area-cli-G2",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "core.files needs an ignore-aware recursive walk with .gitignore matching for nested rules, negation, anchoring, and directory semantics.",
+  "evidence": "core-library.md:437-438 exposes only walk and walk_files, with no ignore API. pkg/run.jet:45-60 reads one root file and ignored() at lines 15-21 handles only trailing slash, *.suffix, and exact paths. With data/.gitignore containing ignored/, *.secret, and !private.secret, `scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-cli/pkg -- search jet /home/nate/.cache/jet-luna/dx3/area-cli/pkg/data` prints matches=2 and omits private.secret, so the hand-written matcher is not git-compatible.",
+  "areas": [
+   "cli"
+  ],
+  "severity": "hurts",
+  "workaround": "Write a full .gitignore parser and thread its state through traversal; the probe's small matcher is only a subset."
+ },
+ {
+  "probe": "area-cli",
+  "kind": "area",
+  "id": "area-cli-G3",
+  "tags": [
+   "call-site",
+   "boilerplate"
+  ],
+  "primitive": "A typed object-pipeline edge should decode native output and bind record properties to the next stage without a per-command text adapter.",
+  "evidence": "`scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-cli/pkg -- objects work` succeeds with alpha and gamma records, but pkg/run.jet:99-107 must capture ProcessReceipt.output as String, declare #Codable NoteRow, call data.csv<NoteRow>, then write filter/sort closures. shell-sysadmin/report.md:49-51 records PowerShell property binding and native structured filtering as real gaps; core-library.md:1743-1745 types ProcessReceipt.output as String.",
+  "areas": [
+   "cli"
+  ],
+  "severity": "hurts",
+  "workaround": "Manually declare each row schema, decode CSV or JSON, and call data.filter/sort_by; ordinary typed rows work, but shell-style binding does not."
+ },
+ {
+  "probe": "area-data",
+  "kind": "area",
+  "id": "area-data-G01",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Typed Parquet/Arrow columnar reader into core table or stream",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-data/pkg/parquet_attempt.jet exits 1: E1004, core.data has no item parquet; fix list has csv/json/csv_reader but no Parquet reader.",
+  "areas": [
+   "data-analysis",
+   "backend-services",
+   "ai-ml-apps"
+  ],
+  "severity": "blocks",
+  "workaround": "Convert input to CSV/JSON outside Jet, or implement a columnar codec in library code."
+ },
+ {
+  "probe": "area-data",
+  "kind": "area",
+  "id": "area-data-G02",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Direct PNG raster chart export from core data plots",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-data/pkg/png_attempt.jet exits 1: E1004, core.data has no item bar_png; only bar_svg is suggested.",
+  "areas": [
+   "data-analysis",
+   "gui-apps",
+   "web-apps",
+   "reporting"
+  ],
+  "severity": "blocks",
+  "workaround": "Use working data.bar_svg and write SVG; provide or implement a PNG encoder for raster output."
+ },
+ {
+  "probe": "area-data",
+  "kind": "area",
+  "id": "area-data-G03",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Default evaluator support for documented typed core.data.inner_join",
+  "evidence": "scripts/agent/jet-env jet run examples/features/tooling/data_pipeline.jet exits 1: E0956, core.data.inner_join() is not supported by the current evaluator; diagnostic suggests jet build.",
+  "areas": [
+   "data-analysis",
+   "backend-services",
+   "web-apps",
+   "ai-ml-apps"
+  ],
+  "severity": "blocks",
+  "workaround": "Write a user-level nested-loop join; pkg/manual_join_probe.jet succeeds, but the fallback is quadratic and not a general table primitive."
+ },
+ {
+  "probe": "area-data",
+  "kind": "area",
+  "id": "area-data-G04",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Store core.compute.Tensor handles in user-defined structs",
+  "evidence": "scripts/agent/jet run pkg/tensor_struct_probe.jet exits 101 with whole-program TIR lowering compiler bug; jet build on the same file exits 101 at TensorBox{values: values} with compiler bug (I2/R7).",
+  "areas": [
+   "data-analysis",
+   "numerical-computing",
+   "ai-ml-apps",
+   "gui-apps"
+  ],
+  "severity": "hurts",
+  "workaround": "Keep labels and Tensor in separate bindings, or represent the labeled matrix as nested [[Float]] with user-written coordinate lookup."
+ },
+ {
+  "probe": "area-backend",
+  "kind": "area",
+  "id": "area-backend-G1",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Provide a bounded database connection pool with acquisition limits, health/reset, and shutdown lifecycle.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-backend/pool_probe.jet -> Error [E1004]: `core.db` has no item `pool`; the diagnostic lists only open/open_memory/policy/transaction/migrate. The real package uses one db.open(path) at pkg/run.jet:140.",
+  "areas": [
+   "backend",
+   "data",
+   "web",
+   "cli"
+  ],
+  "severity": "blocks",
+  "workaround": "Use one SQLite connection or write an application pool around separately opened connections; neither gives a checked reset/readiness contract."
+ },
+ {
+  "probe": "area-backend",
+  "kind": "area",
+  "id": "area-backend-G2",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Expose typed route contract metadata and a standard OpenAPI/schema validator-exporter tied to HTTP methods, inputs, responses, auth, and operation identity.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-backend/openapi_probe.jet -> Error [E1001]: There is no core module `core.openapi`. pkg/run.jet:72-87 hand-writes JSON and checks only three substrings; jq accepts the resulting file, but no schema or route consistency is checked.",
+  "areas": [
+   "backend",
+   "web",
+   "cli",
+   "ai"
+  ],
+  "severity": "hurts",
+  "workaround": "Hand-maintain an OpenAPI string and ad-hoc assertions, as this probe does, or build a package-owned route table that duplicates mux declarations."
+ },
+ {
+  "probe": "area-backend",
+  "kind": "area",
+  "id": "area-backend-G3",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Provide request-scoped server deadline and cancellation middleware that propagates cancellation into route tasks.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-backend/timeout_probe.jet -> Error [E1004]: `core.http.server` has no item `timeout`; the available list contains bind/mux/serve/shutdown-adjacent serving helpers but no timeout wrapper. The HTTP reference also marks server timeout middleware open at docs/reference/core-library.md:753.",
+  "areas": [
+   "backend",
+   "web",
+   "games",
+   "gui",
+   "embedded"
+  ],
+  "severity": "hurts",
+  "workaround": "Use client-side phase timeouts and manual time checks; graceful server shutdown works, but an in-flight handler cannot be cancelled by a server policy."
+ },
+ {
+  "probe": "area-backend",
+  "kind": "area",
+  "id": "area-backend-G4",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Provide typed process-signal subscription that forwards SIGTERM-style shutdown into the service cancellation lifecycle.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-backend/signal_probe.jet -> Error [E1004]: `core.process` has no item `signal`; the diagnostic lists only exit/run/cmd/pipeline/argv/args.",
+  "areas": [
+   "backend",
+   "cli",
+   "embedded",
+   "gui"
+  ],
+  "severity": "hurts",
+  "workaround": "Have an external supervisor call an application shutdown endpoint, or add an explicit unsafe/native signal bridge."
+ },
+ {
+  "probe": "area-backend",
+  "kind": "area",
+  "id": "area-backend-G5",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Make the default evaluator lower the documented core.log.set_trace_id operation.",
+  "evidence": "scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-backend/pkg -> Error [E0956]: `core.log.set_trace_id()` isn't supported by the current evaluator yet at pkg/run.jet:136. The same package succeeds under jet run --release and jet build --release.",
+  "areas": [
+   "backend",
+   "web",
+   "cli",
+   "data",
+   "ai",
+   "games",
+   "gui",
+   "embedded"
+  ],
+  "severity": "hurts",
+  "workaround": "Use the release/native evaluator or remove set_trace_id from the default-tier development run."
+ },
+ {
+  "probe": "area-ai",
+  "kind": "area",
+  "id": "area-ai-G1",
+  "tags": [
+   "defect",
+   "impossible"
+  ],
+  "primitive": "A cross-tier executable Tensor autodiff path must evaluate named gradient calls and lower them in native code without an internal compiler error.",
+  "evidence": "scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-ai/evidence/mini.jet -> Error [E0956]: `Tensor` isn't supported by the current evaluator yet at mini.jet:6; scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-ai/evidence/mini.jet --verbose -> exit 101: internal compiler error: the generated Rust did not compile (generated /home/nate/Projects/Github/jet/build/mini.rs). The shipped higher-order example also returns E0112 at compute_autodiff.jet:18, then E0102 at :19.",
+  "areas": [
+   "ai-ml"
+  ],
+  "severity": "blocks",
+  "workaround": "Use explicit manual chain-rule Tensor functions as in pkg/run.jet:48-64; this trains the toy model but is not composable autodiff."
+ },
+ {
+  "probe": "area-ai",
+  "kind": "area",
+  "id": "area-ai-G2",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "A typed Dataset/Loader primitive should own bounded batching, shuffle order, and collate instead of repeated application loops and batch constructors.",
+  "evidence": "pkg/run.jet:16-46 duplicates batch_inputs and batch_targets; pkg/run.jet:66-85 manually shuffles an Int order, loops epochs and fixed-size batches, and prints a loader receipt. scripts/agent/jet-env jet run pkg/run.jet succeeds and prints loader epoch=0..3 batch_count=2. The ml-training report and D-M-ML-LIFECYCLE1 identify Dataset/Loader as absent or proposed.",
+  "areas": [
+   "ai-ml",
+   "data"
+  ],
+  "severity": "hurts",
+  "workaround": "Use [Int].shuffle().to_list() plus explicit batch and collate helpers, as this package does."
+ },
+ {
+  "probe": "area-ai",
+  "kind": "area",
+  "id": "area-ai-G3",
+  "tags": [
+   "slow"
+  ],
+  "primitive": "The compiler/runtime must check and build an ordinary 10,000-entry embedding index and cosine scan within a bounded application build budget.",
+  "evidence": "scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-ai/pkg/embedding.jet --verbose timed out after 360.08 seconds while still at `Checking program and build plan`, before generated Rust or a binary. The source constructs and scans 10,000 vectors at pkg/embedding.jet:25-49; the earlier integrated interpreter run timed out after 300 seconds after the same scan was added.",
+  "areas": [
+   "ai-ml",
+   "data"
+  ],
+  "severity": "blocks",
+  "workaround": "Use a native external index provider or a smaller corpus while compiler/runtime support is missing; no Jet-native 10,000-entry receipt was reachable."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Android and iOS GUI target artifacts and host-toolchain admission.",
+  "evidence": "env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store scripts/agent/jet-env jet build --release --target android /home/nate/.cache/jet-luna/dx3/area-gui/pkg/note_app.jet -> Error [E3302]: Target `android` is not available (3.97 s); the corresponding --target ios command -> Error [E3302]: Target `ios` is not available (1.79 s).",
+  "areas": [
+   "gui",
+   "embedded"
+  ],
+  "severity": "blocks",
+  "workaround": "Install the target standard libraries and supply Android/iOS host and packaging toolchains outside Jet; this probe did not install them."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G2",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Typed native open/save file-dialog results with filters, cancellation, and authority checks.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_dialog_api.jet -> Error [E1004]: `core.ui` has no item `file_open_dialog`; the diagnostic lists only the fixed UI items ending in `button` (2.94 s).",
+  "areas": [
+   "gui",
+   "office-document-automation",
+   "education-teaching"
+  ],
+  "severity": "blocks",
+  "workaround": "Call GTK, Qt, or an OS dialog through FFI and hand-write path, cancellation, filter, and authority conversion."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G3",
+  "tags": [
+   "impossible",
+   "call-site"
+  ],
+  "primitive": "Typed native text-editing input services for clipboard, selection, IME composition, and drag-and-drop.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_gui_api.jet -> Error [E1004]: `core.ui` has no item `clipboard_read`; the fixed public list exposes only `key_event` and `resize_event` as input constructors (1.95 s).",
+  "areas": [
+   "gui",
+   "data",
+   "education-teaching",
+   "office-document-automation"
+  ],
+  "severity": "blocks",
+  "workaround": "Use host FFI events and maintain selection, composition, clipboard, and transfer state manually around the TextInput node."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G4",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Font discovery and fallback plus OpenType script, Bidi, glyph-run, and shaping operations.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_font_api.jet -> Error [E1001]: There is no core module `core.font` (2.03 s); the successful app handles Unicode as scalar strings only.",
+  "areas": [
+   "gui",
+   "typography-publishing",
+   "office-document-automation",
+   "education-teaching"
+  ],
+  "severity": "blocks",
+  "workaround": "Bind fontconfig/FreeType/HarfBuzz through C FFI and hand-write font handles, fallback, glyph clusters, and positioned-run conversion."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G5",
+  "tags": [
+   "impossible",
+   "call-site"
+  ],
+  "primitive": "Typed shortcut registration and host action dispatch for commands such as Ctrl+S and Ctrl+Z.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_shortcut_api.jet -> Error [E1004]: `core.ui` has no item `shortcut`; the fixed public list contains no shortcut registry (1.89 s).",
+  "areas": [
+   "gui",
+   "education-teaching",
+   "office-document-automation"
+  ],
+  "severity": "hurts",
+  "workaround": "Decode host key strings manually and maintain an application action table outside core.ui."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G6",
+  "tags": [
+   "impossible",
+   "call-site"
+  ],
+  "primitive": "Accessible names, descriptions, and control states attached to UI nodes beyond a role enum.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_a11y_api.jet -> Error [E1004]: `core.ui` has no item `aria_label`; the list has role constructors but no naming API (1.95 s).",
+  "areas": [
+   "gui",
+   "education-teaching",
+   "office-document-automation"
+  ],
+  "severity": "hurts",
+  "workaround": "Repeat visible labels and bridge every control to native accessibility APIs through an external host binding."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G7",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Jet desktop bundle, installer, signing, metadata, and updater artifact command.",
+  "evidence": "scripts/agent/jet-env jet package --help -> Error [E2101]: `package` isn't a jet command (1.84 s); jet build emits only a native executable.",
+  "areas": [
+   "gui"
+  ],
+  "severity": "blocks",
+  "workaround": "Invoke platform bundlers and signing/updater tools separately and carry their metadata outside Jet."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G8",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Reactive render closure capture that preserves signal ownership when a conditional reads it and later code updates it.",
+  "evidence": "env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/area-gui/pkg/reactive_conditional_smoke.jet -> internal compiler error, generated Rust did not compile (9.65 s); matching rustc output is `error[E0382]: borrow of moved value: __jet_selected` at `.set(1)`.",
+  "areas": [
+   "gui",
+   "web",
+   "data",
+   "ai-ml"
+  ],
+  "severity": "hurts",
+  "workaround": "Avoid conditional logic in the render closure or precompute the marker before rendering."
+ },
+ {
+  "probe": "area-gui",
+  "kind": "area",
+  "id": "area-gui-G9",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Reactive render lowering that supports calling a user view helper without emitting an invalid Result-returning closure.",
+  "evidence": "env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/area-gui/pkg/reactive_view_smoke.jet -> internal compiler error, generated Rust did not compile (9.03 s); matching rustc output is `error[E0277]` for `?` in a `()` closure and `error[E0308]` for `expected (), found Result`.",
+  "areas": [
+   "gui",
+   "web",
+   "data",
+   "ai-ml"
+  ],
+  "severity": "hurts",
+  "workaround": "Inline the UI tree inside the render closure until helper lowering returns the correct closure result type."
+ },
+ {
+  "probe": "area-embedded",
+  "kind": "area",
+  "id": "area-embedded-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "A usable freestanding Cortex-M target backend and toolchain path for board.sensor_v1.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet build --target=board.sensor_v1 /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/run.jet -> Error [E3302]: Target `thumbv7em-none-eabihf` is not available; jet self doctor --target=thumbv7em-none-eabihf reports the target-specific standard-library component is missing.",
+  "areas": [
+   "embedded"
+  ],
+  "severity": "blocks",
+  "workaround": "Install the missing rustc target component outside Jet, then rebuild; this probe did not install it."
+ },
+ {
+  "probe": "area-embedded",
+  "kind": "area",
+  "id": "area-embedded-G2",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Compiler/runtime binding from a Cortex-M vector table to a bounded ISR and task handoff.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_interrupt.jet -> Error [E1004]: `core` has no item `interrupt`.",
+  "areas": [
+   "embedded",
+   "hardware-drivers",
+   "real-time-safety-critical",
+   "automotive-embedded",
+   "robotics",
+   "plc-industrial"
+  ],
+  "severity": "blocks",
+  "workaround": "Provide a target-specific startup/vector-table and callback ABI through external FFI and an audited unsafe boundary."
+ },
+ {
+  "probe": "area-embedded",
+  "kind": "area",
+  "id": "area-embedded-G3",
+  "tags": [
+   "unsafe",
+   "boilerplate"
+  ],
+  "primitive": "DMA mapping and ownership transfer that validates buffer lifetime, addressability, and completion.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_dma.jet -> Error [E1004]: `core` has no item `dma`; run.jet:67-72 and 207-217 hand-code owner/submitted/completed flags and DMA register writes.",
+  "areas": [
+   "embedded",
+   "hardware-drivers",
+   "real-time-safety-critical",
+   "robotics",
+   "automotive-embedded"
+  ],
+  "severity": "hurts",
+  "workaround": "Use mem.pin(&buffer), raw target registers, and a hand-written ownership protocol inside #Unsafe; the replay does not prove hardware completion."
+ },
+ {
+  "probe": "area-embedded",
+  "kind": "area",
+  "id": "area-embedded-G4",
+  "tags": [
+   "impossible",
+   "call-site"
+  ],
+  "primitive": "Compiler-enforced target-aware WCET and hard-deadline contracts for control loops.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_wcet.jet -> Error [E1004]: `core` has no item `wcet`; jet inspect facts lists Target.Memory, Target.MMIO, Target.Startup, Time.Monotonic, Time.Sleep, and Target.Scheduler but no WCET fact; check run.jet emits L2510 hidden-cost-in-loop warnings.",
+  "areas": [
+   "embedded",
+   "real-time-safety-critical",
+   "automotive-embedded",
+   "robotics",
+   "plc-industrial"
+  ],
+  "severity": "blocks",
+  "workaround": "Carry a manual integer estimate and runtime comparison as this probe does, then obtain an external qualified WCET/schedulability analysis."
+ },
+ {
+  "probe": "area-embedded",
+  "kind": "area",
+  "id": "area-embedded-G5",
+  "tags": [
+   "impossible",
+   "unsafe"
+  ],
+  "primitive": "Target-backed flash storage and authenticated A/B update state with persistent rollback.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_flash.jet -> Error [E1004]: `core` has no item `flash`; JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_ota.jet -> Error [E1004]: `core` has no item `ota`; JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet flash --help -> Error [E2101]: `flash` isn't a jet command. The run.jet slot state is only an in-memory policy replay.",
+  "areas": [
+   "embedded",
+   "automotive-embedded",
+   "hardware-drivers",
+   "real-time-safety-critical"
+  ],
+  "severity": "blocks",
+  "workaround": "Call a board bootloader/flash implementation through target FFI or an external updater and persist a separately audited slot journal."
+ },
+ {
+  "probe": "area-embedded",
+  "kind": "area",
+  "id": "area-embedded-G6",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Hardware debug/programming transport that flashes a target and emits a device receipt.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet flash --help -> Error [E2101]: `flash` isn't a jet command; JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet debug --help exposes source debugging, --raw-frames, --dap, and --replay; native JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/run.jet emits `Built build/run` but no device operation or hardware receipt.",
+  "areas": [
+   "embedded",
+   "hardware-drivers",
+   "automotive-embedded",
+   "robotics",
+   "plc-industrial"
+  ],
+  "severity": "blocks",
+  "workaround": "Invoke probe-rs, OpenOCD, or a board vendor tool outside Jet and manually carry its result into a release receipt."
+ },
+ {
+  "probe": "area-embedded",
+  "kind": "area",
+  "id": "area-embedded-G7",
+  "tags": [
+   "unsafe",
+   "boilerplate"
+  ],
+  "primitive": "Target-profile-backed typed MMIO bindings for named register blocks, widths, and access modes.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet inspect unsafe /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/mmio_fixed.jet reports `unsafe gates: 1`, with pointer_from_address and volatile read/write discharged only inside the #Unsafe gate; run.jet:19-41 manually declares four #Layout(c) register records and run.jet:96-106 manually records peripheral base addresses.",
+  "areas": [
+   "embedded",
+   "hardware-drivers",
+   "real-time-safety-critical",
+   "robotics",
+   "automotive-embedded",
+   "plc-industrial"
+  ],
+  "severity": "hurts",
+  "workaround": "Define each board's #Layout(c) records and address constants, then wrap every raw access in #Unsafe with the required memory obligations."
+ },
+ {
+  "probe": "prim-numerics-perf",
+  "kind": "prim",
+  "id": "prim-numerics-perf-G1",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Every documented math constant must lower in default evaluation and release codegen inside ordinary user functions.",
+  "evidence": "scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/pi_probe.jet exits 101: internal compiler error, typed IR does not cover expression `pi` at pi_probe.jet:2:35, crates/jet-codegen/src/Codegen/Items.rs:3409:5. Default run reports E0956 at pi_probe.jet:3:12. Replacing math.pi with Float{3.141592653589793} prints -1.5707963267948966 in both tiers.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "games",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Inline a decimal Float literal instead of core.math.pi."
+ },
+ {
+  "probe": "prim-numerics-perf",
+  "kind": "prim",
+  "id": "prim-numerics-perf-G2",
+  "tags": [
+   "slow"
+  ],
+  "primitive": "A planner-backed O(n log n) FFT primitive with complex, inverse, rank, and stride/layout support.",
+  "evidence": "scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/compute_fft.jet reports compute_fft_n:4096 ns:487254548 checksum:4096.0. The hand-written radix-2 source /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/fft.jet, built with `scripts/agent/jet-env jet build --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/fft.jet && ./build/fft`, reports 4096 ns:105010/105271/105992 and 65536 ns:10476357/12638383/12707954; native Rust target-cpu=native reports 4096 ns:117474 and 65536 ns:11284470. Research and source evidence: crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:7603-7647 uses nested DFT loops.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "games",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Write a radix-2 kernel over parallel real/imaginary arrays; this still requires manual complex bookkeeping."
+ },
+ {
+  "probe": "prim-numerics-perf",
+  "kind": "prim",
+  "id": "prim-numerics-perf-G3",
+  "tags": [
+   "slow"
+  ],
+  "primitive": "A safe contiguous numeric-buffer view with compiler-visible shape and stride proofs for zero-overhead indexed kernels.",
+  "evidence": "scripts/agent/jet-env jet build --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/stencil.jet && ./build/stencil gives five stable 1024x1024 one-sweep results 4425824, 4372903, 4506879, 4430443, 4471060 ns (median 4430443), versus native Rust target-cpu=native 1894134 ns. jet check stencil.jet emits L2510 `Using a generic collection representation repeats inside a loop` at stencil.jet:17-21. The same CSR kernel is 1931866 ns (median) versus native Rust 1464754 ns for 1,000,000 nonzeros.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "games",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Use the shipped compute.matmul_f32_tile path where applicable; stencil and sparse traversal remain hand-written list-index loops."
+ },
+ {
+  "probe": "prim-numerics-perf",
+  "kind": "prim",
+  "id": "prim-numerics-perf-G4",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "A checked sparse-CSR storage primitive that accepts data, indices, and row offsets without dense staging.",
+  "evidence": "sparse.jet:33-48 manually constructs data, indices, and indptr with one million pushes before csr_matvec; `jet run --release /home/nate/.cache/jet-luna/dx3/prim-numerics-perf/pkg/sparse.jet` reports csr_rows:100000 cols:1000 nnz:1000000 ns:1933286 checksum:1000000.0. docs/reference/core-library.md:4022-4023 lists only to_sparse, sparse_mv, sparse_nnz over the shipped Tensor family; dx2/numerical-computing/census.json:198-210 records direct CSR/CSC/COO construction and sparse solves as a real gap.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Maintain parallel dynamic arrays and row offsets by hand, as in sparse.jet."
+ },
+ {
+  "probe": "prim-numerics-perf",
+  "kind": "prim",
+  "id": "prim-numerics-perf-G5",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "A first-class complex numeric buffer or tensor with elementwise arithmetic and layout-preserving views.",
+  "evidence": "fft.jet:4-7 defines FFTBuffers as separate re and im lists; fft.jet:9-11 takes two owned arrays and fft.jet:54-63 performs manual complex butterflies. dx2/numerical-computing/census.json:95-99 says Jet has scalar JetComplex arithmetic but no public complex Tensor family; docs/reference/core-library.md:4022-4023 exposes fft as dense DFT with interleaved output, not a complex Tensor. The hand-written workaround passes the 4096 and 65536 impulse checksums exactly.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "games",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Carry separate real and imaginary Float arrays and write all complex arithmetic manually."
+ },
+ {
+  "probe": "prim-exact-numerics",
+  "kind": "prim",
+  "id": "prim-exact-numerics-G1",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Comptime arithmetic must preserve exact Fraction and Decimal semantics across AOT, interpreter, and runtime evaluation.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-exact-numerics/store scripts/agent/jet-env jet run fixtures/comptime_exact.jet => comptime 0/1 0; runtime 10/3 10. The same command with --interpret => comptime 10/3 10; runtime 10/3 10.",
+  "areas": [
+   "data analysis",
+   "backend services",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Keep exact division at runtime or use the interpreter; no safe AOT comptime workaround was found."
+ },
+ {
+  "probe": "prim-exact-numerics",
+  "kind": "prim",
+  "id": "prim-exact-numerics-G2",
+  "tags": [
+   "defect",
+   "boilerplate"
+  ],
+  "primitive": "Non-fallible library helpers must be callable from user-defined Add, Sub, Mul, Div, Equatable, and Comparable implementations.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-exact-numerics/store scripts/agent/jet-env jet check fixtures/struct_impl.jet => Error [E0403] at pair :: align(self, rhs): the non-fallible helper call is diagnosed as fallible inside impl D.Add.",
+  "areas": [
+   "data analysis",
+   "backend services",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Inline the helper body in each operator implementation; the working package repeats scale-factor loops eight times."
+ },
+ {
+  "probe": "prim-exact-numerics",
+  "kind": "prim",
+  "id": "prim-exact-numerics-G3",
+  "tags": [
+   "call-site",
+   "boilerplate"
+  ],
+  "primitive": "Expose one coherent Numeric capability that covers core Int, Decimal, Fraction, and generic arithmetic operators.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-exact-numerics/store scripts/agent/jet-env jet check fixtures/generic_numeric.jet => E0109 (`+` cannot combine T and T) and E0905 (`Int` isn't Numeric). A separate T:Add fixture runs and prints 3.",
+  "areas": [
+   "data analysis",
+   "backend services",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Use separate operation bounds such as T:Add and T:Comparable; this works but does not provide a reusable numeric contract."
+ },
+ {
+  "probe": "prim-exact-numerics",
+  "kind": "prim",
+  "id": "prim-exact-numerics-G4",
+  "tags": [
+   "call-site"
+  ],
+  "primitive": "Allow library-defined exact scalar literal and suffix hooks so users can write Rational and scaled Decimal values directly.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-exact-numerics/store scripts/agent/jet-env jet check fixtures/custom_literal.jet => E0112: accept wants Rational but literal 1 is Int. The 1rat suffix fixture => E0134: `rat` isn't a unit in scope.",
+  "areas": [
+   "data analysis",
+   "backend services",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Use verbose Rational{numerator: ..., denominator: ...} or factory calls; suffixes are limited to declared UnitFamily members."
+ },
+ {
+  "probe": "prim-exact-numerics",
+  "kind": "prim",
+  "id": "prim-exact-numerics-G5",
+  "tags": [
+   "call-site"
+  ],
+  "primitive": "Ship a canonical Display implementation for built-in Decimal so exact values interpolate without a migration warning.",
+  "evidence": "Package run prints `decimal literal 0.3 true` but also emits Warning [L0520]: `Decimal` has no `Display` impl; the diagnostic points to run.jet:281 and suggests adding impl Decimal.Display.",
+  "areas": [
+   "data analysis",
+   "backend services",
+   "science"
+  ],
+  "severity": "annoys",
+  "workaround": "Call Decimal.to_string() at interpolation sites; the package's custom types use explicit Display implementations."
+ },
+ {
+  "probe": "prim-exact-numerics",
+  "kind": "prim",
+  "id": "prim-exact-numerics-G6",
+  "tags": [
+   "slow"
+  ],
+  "primitive": "Provide compiler/runtime help for arbitrary-precision Int loops to approach incumbent bigint speed from library code.",
+  "evidence": "Same 20,000-iteration, 30-digit seed: cached Jet `jet run bench/bigint.jet` prints 2469135780246913578024691557790000 in real 0m10.329s (first run 13.435s); Python 3.13 via `nix shell nixpkgs#python3` prints the same value in real 0m0.697s. Jet emits L2510 for the loop.",
+  "areas": [
+   "data analysis",
+   "backend services",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Use a fixed-width I64 when bounds permit; exact 30-digit arithmetic has no library-level speed workaround."
+ },
+ {
+  "probe": "prim-units",
+  "kind": "prim",
+  "id": "prim-units-G1",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Native code generation must compile ordinary cross-file fallible library functions without an internal compiler error.",
+  "evidence": "scripts/agent/jet-env jet build --verbose /home/nate/.cache/jet-luna/dx3/prim-units/buildcheck/run.jet -> front end checked; runtime cache bypassed (split crate rejected — inline retry); internal compiler error: the generated Rust did not compile; generated: /home/nate/Projects/Github/jet/build/run.rs. The package grants IO, Mem.Alloc, Panic. Default jet run of the same isolated package succeeds.",
+  "areas": [
+   "embedded",
+   "science",
+   "games"
+  ],
+  "severity": "blocks",
+  "workaround": "Use the default jet run tier or avoid exposing this fallible helper; neither is a native-build fix."
+ },
+ {
+  "probe": "prim-units",
+  "kind": "prim",
+  "id": "prim-units-G2",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Generic types need compile-time dimension arithmetic and normalization so a library can derive and cancel dimensions such as Quantity<A * B>.",
+  "evidence": "scripts/agent/jet-env jet run pkg/generic_probe.jet -> Error [E0003]: Expected `>` after `Quantity<…>`, found `*`; the generic grammar accepts a type name, not a type-level expression. A symbolic Product<A,B> phantom marker runs and prints 2.0 but has no normalization or equivalence proof.",
+  "areas": [
+   "embedded",
+   "science",
+   "games"
+  ],
+  "severity": "hurts",
+  "workaround": "Use compiler-known #UnitFamily units, or hand-write nominal wrappers and Product marker trees."
+ },
+ {
+  "probe": "prim-units",
+  "kind": "prim",
+  "id": "prim-units-G3",
+  "tags": [
+   "impossible",
+   "call-site",
+   "boilerplate"
+  ],
+  "primitive": "Operator traits need library-definable heterogeneous operands and result types, such as Meter / Second -> Speed.",
+  "evidence": "scripts/agent/jet-env jet run pkg/operator_probe.jet -> Error [E0907]: `div` doesn't match `Div` (impl methods must match the trait signature exactly), then Error [E0360]: No `/` operator is defined for `Meter`; user arithmetic dispatches only through one impl Meter.Div hook.",
+  "areas": [
+   "embedded",
+   "science",
+   "games"
+  ],
+  "severity": "hurts",
+  "workaround": "Expose a named helper for every pair, for example meters_per_second(distance, elapsed) -> Speed."
+ },
+ {
+  "probe": "prim-units",
+  "kind": "prim",
+  "id": "prim-units-G4",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Ordinary generic structs need const/numeric parameters so a dimension index can carry a compile-time exponent or scale.",
+  "evidence": "scripts/agent/jet-env jet run pkg/const_dimension_probe.jet -> Error [E0003]: Expected a type name, found a number at Quantity<MeterDim, 1>. Numeric values work in the special generic-module fixed-list path ([T#capacity]) only, not as ordinary struct arguments.",
+  "areas": [
+   "embedded",
+   "science",
+   "games"
+  ],
+  "severity": "hurts",
+  "workaround": "Use phantom marker types, hand-written dimensions, or the limited generic-module/fixed-list facility."
+ },
+ {
+  "probe": "prim-units",
+  "kind": "prim",
+  "id": "prim-units-G5",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Trait coherence needs an explicit extension mechanism for adding safe operators to imported quantity types.",
+  "evidence": "scripts/agent/jet-env jet run pkg/probe_coherence_import.jet -> Error [E0902]: This `impl` can't live here; at least one of the trait or type must be defined in this program (orphan rule), followed by Error [E0360]: No `+` operator is defined for imported Foreign.",
+  "areas": [
+   "embedded",
+   "science",
+   "games"
+  ],
+  "severity": "annoys",
+  "workaround": "Own the quantity type and its impls, or wrap the imported type and define a local operator surface."
+ },
+ {
+  "probe": "prim-receipts",
+  "kind": "prim",
+  "id": "prim-receipts-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "An extensible typed facet payload on the canonical jet-receipt-v2 receipt with shared query and diff access.",
+  "evidence": "Source/ReceiptStore.rs:47-54 fixes Receipt to claim/status/stdout/stderr/digest, and :301-328 write accepts only those fields; `jet status src/evidence.jet --json` emits only action/claim/reason/receipt/state, while `jet perf compare .jet/replays/evidence.jetproof-replay .jet/replays/evidence-shifted.jetproof-replay` returns Error [E2102]: Base trace: trace path must end with .jettrace.",
+  "areas": [
+   "data",
+   "backend",
+   "embedded",
+   "ai-ml"
+  ],
+  "severity": "blocks",
+  "workaround": "Keep a domain record in program memory or stdout and compare it outside Jet; it cannot become a shared receipt field or typed receipt query."
+ },
+ {
+  "probe": "prim-receipts",
+  "kind": "prim",
+  "id": "prim-receipts-G2",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "A replay adapter that executes a successfully captured ambient Time read in the source debugger.",
+  "evidence": "`jet run src/replay.jet --record=clock2 -- foo` prints captured:1788388744998 and `capture: finalized outcome=exit status=0` with artifact `.jet/replays/clock2.jetproof-replay`; `jet debug src/replay.jet --replay=clock2` opens `Time; dev-tir-v1`, stops at `time.now()`, then returns [E0956] `static `time.now`` isn't supported by the current evaluator yet`.",
+  "areas": [
+   "data",
+   "backend",
+   "embedded",
+   "ai-ml"
+  ],
+  "severity": "blocks",
+  "workaround": "Route time through an injected deterministic Clock and query pure recorded acts; captured ambient Time remains un-replayable."
+ },
+ {
+  "probe": "prim-receipts",
+  "kind": "prim",
+  "id": "prim-receipts-G3",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Replay queries that render user-defined evidence with its Jet source type name rather than an internal generated name.",
+  "evidence": "`printf 'when evidence\\ncontinue\\n' | jet debug src/evidence.jet --replay=evidence` returns `(jet) evidence = __jet_RegressionEvidence { __jet_slope: 1.9, ... }`; crates/jet-debug/src/lib.rs:3-6 promises values are in Jet terms and never generated Rust.",
+  "areas": [
+   "data",
+   "backend",
+   "embedded",
+   "ai-ml"
+  ],
+  "severity": "hurts",
+  "workaround": "Query scalar fields individually or inspect the program's printed JSON instead of the replay object rendering."
+ },
+ {
+  "probe": "prim-capabilities",
+  "kind": "prim",
+  "id": "prim-capabilities-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Capability-scoped host imports for sandbox components, so a host can bind checked FS, Net, or Exec rights to a plugin world without ambient authority.",
+  "evidence": "`/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/fs_guest_pkg/run.jet --target=sandbox` returns E1258: `A sandbox can't use any effect`; the source calls `fs.read`. `/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/net_guest_pkg/run.jet --target=sandbox` returns E3304: `core.net` is not available for target `sandbox`. The working plugin WIT has zero imports.",
+  "areas": [
+   "backend",
+   "cli",
+   "gui",
+   "games"
+  ],
+  "severity": "blocks",
+  "workaround": "Keep all FS, Net, and Exec in the trusted host and pass scalar data to the guest, or use trusted native code without the sandbox boundary."
+ },
+ {
+  "probe": "prim-capabilities",
+  "kind": "prim",
+  "id": "prim-capabilities-G2",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Resource-scoped authority enforcement for ordinary `core.files` operations, such as `read(path, authority)` with a no-follow root boundary.",
+  "evidence": "`/home/nate/Projects/Github/jet/scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-capabilities/scoped_fs_pkg/run.jet --allow-fs` with `authority.holds.allow: [IO, Mem.Alloc, \"FS.Read:/home/nate/.cache/jet-luna/dx3/prim-capabilities/inputs\"]` returns E1803: `required_effects=FS, IO, Mem.Alloc; granted_effects=FS.Read:/home/nate/.cache/jet-luna/dx3/prim-capabilities/inputs, IO, Mem.Alloc; undecided_effects=FS`. Replacing the manifest with broad `[FS, IO, Mem.Alloc]` lets the same path-only `fs.read` program print both `inside=inside-capability` and `outside=outside-capability`.",
+  "areas": [
+   "backend",
+   "cli",
+   "gui",
+   "games"
+  ],
+  "severity": "hurts",
+  "workaround": "Use package-wide FS and manually validate paths; the shipped no-follow root boundary is only on `plugin.load` for WASM artifacts."
+ },
+ {
+  "probe": "prim-capabilities",
+  "kind": "prim",
+  "id": "prim-capabilities-G3",
+  "tags": [
+   "impossible",
+   "call-site"
+  ],
+  "primitive": "A versioned typed plugin ABI for records, lists, resources, callbacks, and asynchronous values, in addition to homogeneous scalar exports.",
+  "evidence": "`/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/rich_guest_pkg/run.jet --target=sandbox` returns E1260: `pub fn sum` is not one homogeneous `Int`, `Float`, `Bool`, or `Text` shape. The generated `pkg/plugin_src/build/run_wit/world.wit` contains only `export scale: func(f64, f64) -> f64` and `export greet: func(string) -> string`; the frozen API is `api_version = 3` with two scalar functions.",
+  "areas": [
+   "backend",
+   "cli",
+   "gui",
+   "games"
+  ],
+  "severity": "hurts",
+  "workaround": "Encode structured data into Text and write serializers at both boundaries, or split the interface into many scalar calls."
+ },
+ {
+  "probe": "prim-distributed",
+  "kind": "prim",
+  "id": "prim-distributed-G1",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "First-class Stream operators for event-time keyed windows, watermark progress, and late-event disposition.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-distributed/pkg/window_api_attempt.jet -> Error [E0102]: `Stream` has no method `key_by`; /home/nate/.cache/jet-luna/dx3/prim-distributed/pkg/watermark_attempt.jet -> Error [E0102]: `Stream` has no method `watermark`. The finite workaround is 58 Jet lines with manual timestamp, watermark, keyed-map, and replay logic.",
+  "areas": [
+   "backend",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Carry timestamps in an Event struct, update a [String:Int] map, compute watermarks in user code, and duplicate the state loop for replay."
+ },
+ {
+  "probe": "prim-distributed",
+  "kind": "prim",
+  "id": "prim-distributed-G2",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "Restartable durable stream checkpoints that capture source position and keyed operator state and resume with explicit replay and commit semantics.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-distributed/pkg/checkpoint_attempt.jet -> Error [E0102]: `Stream` has no method `checkpoint`; the positive run reports only `recovery=in-memory replayed=3`, with no process-restart or exactly-once proof.",
+  "areas": [
+   "backend",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Copy in-memory maps and hand-code a suffix replay; a library would still need to design persistence, source offsets, restart, and commit ordering."
+ },
+ {
+  "probe": "prim-distributed",
+  "kind": "prim",
+  "id": "prim-distributed-G3",
+  "tags": [
+   "call-site",
+   "boilerplate"
+  ],
+  "primitive": "Schema-checked framed inter-process channels with typed send/receive, lifecycle, and failure receipts.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-distributed/pkg/typed_process_attempt.jet -> Error [E0102]: `ProcessChild` has no method `send`; the working socket protocol manually converts Int to text and back in socket_parent.jet:16-19 and socket_worker.jet:8-12.",
+  "areas": [
+   "backend",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Spawn children with core.process, connect with core.net TCP, serialize each message as text or bytes, parse it manually, and wait for process receipts."
+ },
+ {
+  "probe": "prim-bridges",
+  "kind": "prim",
+  "id": "prim-bridges-G1",
+  "tags": [
+   "impossible",
+   "boilerplate"
+  ],
+  "primitive": "Typed foreign-handle adapters for opaque C APIs with ownership and cleanup",
+  "evidence": "From /home/nate/.cache/jet-luna/dx3/prim-bridges/pkg: `jet inspect bind zlib_probe.h --pkg zlib` returned E3208, `No bindable C function prototypes found for zlib`; the header's gzFile declaration is opaque. A working zlib probe required zreader.c (34 lines), a custom archive, explicit null/allocation/close logic, and zreader.h scalar handles. The resulting native binary printed 22, 1.3.2, 22 after `jet build zlib_run.jet --verbose`.",
+  "areas": [
+   "games",
+   "ai-ml",
+   "data",
+   "gui",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Write one C/C++ adapter per library, expose integer handles and scalar operations, and manually free every foreign resource.",
+  "origId": "bridges-c-opaque-handle-adapter"
+ },
+ {
+  "probe": "prim-bridges",
+  "kind": "prim",
+  "id": "prim-bridges-G2",
+  "tags": [
+   "boilerplate",
+   "call-site"
+  ],
+  "primitive": "Transitive native dependency closure for foreign bridge archives",
+  "evidence": "The zreader archive calls gzopen/gzgets/gzclose, but the first Jet native link emitted only -lzreader; direct rustc then reported undefined references to all three zlib symbols. Adding `use c.z` with `z: c@system` returned E3210 because Jet tried nixpkgs#z. The working package required `z: c@nixpkgs:zlib`, a direct C import, and `RUSTFLAGS=-L native=/home/nate/.cache/jet-luna/dx3/prim-bridges/pkg`.",
+  "areas": [
+   "games",
+   "ai-ml",
+   "data",
+   "gui",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Declare and import every transitive native library manually, select the correct nixpkgs attribute, and add local archive search paths.",
+  "origId": "bridges-native-link-closure"
+ },
+ {
+  "probe": "prim-bridges",
+  "kind": "prim",
+  "id": "prim-bridges-G3",
+  "tags": [
+   "call-site",
+   "boilerplate"
+  ],
+  "primitive": "A complete Rust-crate bridge preparation path that carries authority and build prerequisites",
+  "evidence": "`jet check rust_run.jet` passed for `extern rust \"base64@0.22\"`, but `jet build rust_run.jet --verbose` stopped before bridge preparation with E1803: `Application authority is undecided for FFI`; the fix requires `allow: [FFI]` in package.jet. No native Rust-crate run was reachable after this gate.",
+  "areas": [
+   "games",
+   "ai-ml",
+   "data",
+   "gui",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Add an explicit FFI authority grant, then rely on Jet's hidden Cargo bridge cache; this probe could not validate the latter.",
+  "origId": "bridges-rust-authority-preparation"
+ },
+ {
+  "probe": "prim-bridges",
+  "kind": "prim",
+  "id": "prim-bridges-G4",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Reliable C++ bind generation and archive-symbol validation",
+  "evidence": "`jet inspect bind cpp reader.hpp --target x86_64-unknown-linux-gnu --clang /nix/store/xy32w323i90dlgscl5zbac0dyvgk7lig-clang-wrapper-21.1.8/bin/clang++ --ar /nix/store/3d1c302vw7kc8a5vknhmn34c0pd7zm6m-gcc-wrapper-15.3.0/bin/ar --pkg reader --namespace bridge -I . -L . -l reader_impl` bound 2 members. Importing the generated reader.jet then returned E0320 because it emitted `Reader.{ value: value }`. A low-level overlay passed check, but native build returned E3208 for missing `TLS_MODULE_BASE_`; nm showed `_TLS_MODULE_BASE_` undefined in the generated shim, while CFFI.rs ignorable_cpp_symbol does not cover it.",
+  "areas": [
+   "games",
+   "ai-ml",
+   "data",
+   "gui",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Hand-edit generated bindings and avoid the generated C++ archive path; neither workaround is acceptable for a library author.",
+  "origId": "bridges-cpp-generated-shim-finalization"
+ },
+ {
+  "probe": "prim-storage",
+  "kind": "prim",
+  "id": "prim-storage-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "OS-backed memory-mapped files with mapped-byte lifetime and flush controls",
+  "evidence": "JET_STORE_DIR=... scripts/agent/jet-env jet check pkg/mmap_probe.jet -> Error [E1004]: `core.files` has no item `mmap`; alternatives enumerate read/read_bytes/read_at/write_at/fsync/write_atomic/lock/open/create/append but no mapping API.",
+  "areas": [
+   "backend",
+   "data"
+  ],
+  "severity": "hurts",
+  "workaround": "Use read_bytes/read_at and explicit buffering; this is not equivalent for large random-access files."
+ },
+ {
+  "probe": "prim-storage",
+  "kind": "prim",
+  "id": "prim-storage-G2",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Native AOT generation for imported fallible storage modules",
+  "evidence": "jet check pkg/build_log.jet passes, but jet build --verbose pkg/build_log.jet and pkg/main.jet both emit `internal compiler error: the generated Rust did not compile` with generated build/build_log.rs or build/main.rs; single-file pkg/storage_probe.jet builds.",
+  "areas": [
+   "backend",
+   "data",
+   "cli"
+  ],
+  "severity": "blocks",
+  "workaround": "Run the modular package through jet run; no AOT workaround was found."
+ },
+ {
+  "probe": "prim-dsl",
+  "kind": "prim",
+  "id": "prim-dsl-G1",
+  "tags": [
+   "defect",
+   "impossible"
+  ],
+  "primitive": "Recursive algebraic data types must remain type-safe through default trait derivation and both Jet execution tiers.",
+  "evidence": "scripts/agent/jet-env jet run examples/features/types/recursive_enum.jet -> E0112 (_jet_derive_equal_Expr wants Expr but got Expr<>) and E0401 (fallible Bool/Ordering used without handling); the shipped 9-line recursive Expr example cannot run.",
+  "areas": [
+   "data",
+   "backend",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Use a flat postfix token list or an explicit heap/index representation; the symbolic probe uses a flat [Node] code instead of recursive Expr."
+ },
+ {
+  "probe": "prim-dsl",
+  "kind": "prim",
+  "id": "prim-dsl-G2",
+  "tags": [
+   "defect",
+   "impossible"
+  ],
+  "primitive": "Native code generation must lower named-payload enum pattern tests in imported library modules.",
+  "evidence": "scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-dsl/pkg/symbolic2_demo.jet -> internal compiler error: typed IR does not cover statement `if` at symbolic2.jet:9:5, compiler bug (I2/R7), crates/jet-codegen/src/Codegen/Items.rs:3409:5.",
+  "areas": [
+   "data",
+   "backend",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Wrap the named payload in one struct and match the single payload; that workaround built and ran in the earlier symbolic2 probe."
+ },
+ {
+  "probe": "prim-dsl",
+  "kind": "prim",
+  "id": "prim-dsl-G3",
+  "tags": [
+   "call-site",
+   "boilerplate"
+  ],
+  "primitive": "Provide a value-producing filter pipeline over dynamic trees: path selection, array mapping, and composable pipe stages.",
+  "evidence": "The jq-shaped workload needs a 28-line filter.jet walker with explicit DataTree.Object/Array matches, map lookup, optional handling, and a loop; scripts/agent/jet-env jet run .../prim_dsl_filter_demo.jet -> [3, 8]. jq's equivalent is a short `.items[] | .price` pipeline.",
+  "areas": [
+   "data",
+   "backend"
+  ],
+  "severity": "hurts",
+  "workaround": "Write ordinary DataTree walkers and list/map loops; the probe is safe and native-buildable, but every filter operator must be authored manually."
+ },
+ {
+  "probe": "prim-dsl",
+  "kind": "prim",
+  "id": "prim-dsl-G4",
+  "tags": [
+   "boilerplate",
+   "call-site"
+  ],
+  "primitive": "Provide compiler/runtime support for formula dependency graphs, topological ordering, and dirty transitive incremental recomputation.",
+  "evidence": "The 58-line formula.jet probe manually stores deps, fixes an evaluation order, propagates a dirty map, and records touched cells; native run prints `first total=5 touched=[a, b, total]` and `second total=11 touched=[a, b, total]`.",
+  "areas": [
+   "data",
+   "backend",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Represent formulas as structs plus maps/lists and implement dependency propagation in library code, as the probe does."
+ },
+ {
+  "probe": "prim-dsl",
+  "kind": "prim",
+  "id": "prim-dsl-G5",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Provide a user-defined syntax-extension hook for embedded-language macros and custom literals.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-dsl/pkg/macro_attempt.jet -> E0003: line computes a value but does nothing, pointing at `macro twice(x) {`; no macro declaration surface is accepted.",
+  "areas": [
+   "data",
+   "backend",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Use ordinary typed constructors/parsers, `@` comptime functions, and reflection/derive generation."
+ },
+ {
+  "probe": "prim-dsl",
+  "kind": "prim",
+  "id": "prim-dsl-G6",
+  "tags": [
+   "defect",
+   "impossible"
+  ],
+  "primitive": "The default evaluator must execute map index-field assignment used by an incremental formula engine.",
+  "evidence": "scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-dsl/pkg/prim_dsl_formula_demo.jet -> E0956: `index field assign on map` isn't supported by the current evaluator yet; the same source native-builds and runs.",
+  "areas": [
+   "data",
+   "backend",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Run the native tier (`jet build` then the executable); this does not provide default-tier/live-loop execution."
+ },
+ {
+  "probe": "prim-dsl",
+  "kind": "prim",
+  "id": "prim-dsl-G7",
+  "tags": [
+   "defect",
+   "impossible"
+  ],
+  "primitive": "The native backend must compile a flat tagged-token symbolic evaluator with nested helper records.",
+  "evidence": "scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-dsl/pkg/prim_dsl_symbolic_demo.jet -> `internal compiler error: the generated Rust did not compile`; default `jet run` on the same source succeeds.",
+  "areas": [
+   "data",
+   "backend",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Use the default evaluator for this shape or split the representation further; the exact rustc diagnostic was not emitted by Jet."
+ },
+ {
+  "probe": "prim-realtime",
+  "kind": "prim",
+  "id": "prim-realtime-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "A standard callback/device boundary is needed to register a fixed-rate buffer callback and report underruns or overruns.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/audio-missing.jet -> Error [E1001]: There is no core module `core.audio` at audio-missing.jet:7. The ten-second probe therefore used a timer fake; no Jet API opened the host's /dev/snd device.",
+  "areas": [
+   "games",
+   "embedded",
+   "gui"
+  ],
+  "severity": "blocks",
+  "workaround": "Use a separately authored C/FFI device backend and pass a caller-owned fixed buffer to a manually checked callback; Jet has no first-party registration or underrun receipt."
+ },
+ {
+  "probe": "prim-realtime",
+  "kind": "prim",
+  "id": "prim-realtime-G2",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "A monotonic sub-millisecond or absolute-period wait must preserve nanosecond deadlines instead of truncating them to scheduler milliseconds.",
+  "evidence": "scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/subms-sleep.jet printed requested_total_us=99999 and elapsed_total_us=245 after 100 calls of time.sleep(999_999ns). crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:53-68 implements saturating_div(1_000_000) before scheduler sleep.",
+  "areas": [
+   "games",
+   "embedded",
+   "gui"
+  ],
+  "severity": "blocks",
+  "workaround": "Busy-spin against time.instant() or call an external timer through FFI; neither is a portable hard-real-time wait guarantee."
+ },
+ {
+  "probe": "prim-realtime",
+  "kind": "prim",
+  "id": "prim-realtime-G3",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "A lock-free atomic or bounded nonblocking shared-state primitive must be visible to the type/effect checker for callback use.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/atomic-attempt.jet -> Error [E0102]: Nothing named `atomic` exists here at atomic-attempt.jet:2; scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/lock-free-attempt.jet -> Error [E0041]: `mutex` is not in Jet at lock-free-attempt.jet:2; yet shared-hot.jet:11-12 (`fn hot(state: Shared<State>) -[!Mem.Alloc, !Time]>` then `state.ready += 1`) passes with diagnostics=0. docs/spec/spec.md:587-600 defines Shared<T> as lock-guarded, and callback-channel-attempt.jet:1-5 also passes -[!Mem.Alloc, !Time]> while calling tx.send(1).",
+  "areas": [
+   "games",
+   "embedded",
+   "gui"
+  ],
+  "severity": "blocks",
+  "workaround": "Keep callback state in caller-owned buffers and move communication outside the callback, or provide a separately audited native atomic/ring-buffer backend."
+ },
+ {
+  "probe": "prim-realtime",
+  "kind": "prim",
+  "id": "prim-realtime-G4",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "The runtime needs a CPU-work deadline check or overrun receipt that interrupts or fails a callback, not only wait-point deadline observation.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/busy-deadline.jet passes with diagnostics=0; scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/busy-deadline.jet prints cpu-finished=49999995000000 and context-returned after busy-deadline.jet:10-15 runs 10,000,000 integer iterations under #Context(deadline: time.now() + 5). docs/spec/spec.md:2664-2668 limits inherited E3003 observation to wait/IO points. The ten-second realtime run's manual checks reported control.ticks=9307 and control.missed=9295.",
+  "areas": [
+   "games",
+   "embedded",
+   "gui"
+  ],
+  "severity": "blocks",
+  "workaround": "Manually sample time before and after every callback and use an external watchdog; this detects misses but cannot enforce or prove a CPU deadline."
+ },
+ {
+  "probe": "prim-tooling-hooks",
+  "kind": "prim",
+  "id": "prim-tooling-hooks-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Expose the versioned core.compiler lex/parse/check/source_map seam to runtime Jet tools, or provide a typed runtime subprocess bridge.",
+  "evidence": "Command: /home/nate/Projects/Github/jet/scripts/agent/jet-env jet run runtime_compiler.jet --watch=off. Output: Error [E0956]: core.compiler.lex is compile-time only; Why: The compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service; Fix: Move this call into fn build or a comptime binding.",
+  "areas": [
+   "cli",
+   "web",
+   "backend"
+  ],
+  "severity": "blocks",
+  "workaround": "Shell out to jet inspect compiler lex|parse|check and parse its JSON, as rename.mjs does; this is an external-process seam, not a Jet library API."
+ },
+ {
+  "probe": "prim-tooling-hooks",
+  "kind": "prim",
+  "id": "prim-tooling-hooks-G2",
+  "tags": [
+   "call-site"
+  ],
+  "primitive": "Expose a versioned machine-readable build-graph and receipt-diff API with affected files, cache hit or miss, key deltas, and action evidence.",
+  "evidence": "Commands: jet inspect graph graph.jet -> target graph_probe Executable; action stamp stamp.txt. jet inspect explain-build stamp graph.jet -> argv=printf graph; inputs=1; outputs=1; cache=Cached. After changing printf graph to printf graph2 and rebuilding, .jet/build-cache/explanations/0 contained only act-sha256:<digest>, sha256:<digest>, miss-key; receipt objects were binary jet-receipt-v2 blobs.",
+  "areas": [
+   "cli",
+   "web",
+   "backend"
+  ],
+  "severity": "blocks",
+  "workaround": "Invoke the text CLI and reverse-engineer private .jet receipt objects; there is no stable in-process graph/receipt query for a Jet tool."
+ },
+ {
+  "probe": "prim-tooling-hooks",
+  "kind": "prim",
+  "id": "prim-tooling-hooks-G3",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Make additive generated-module builds idempotent: generated outputs must not be rediscovered as handwritten modules or shadow the next build.",
+  "evidence": "First command: jet build /home/nate/.cache/jet-luna/dx3/prim-tooling-hooks/pkg succeeded and wrote .jet/generated/prim_tooling_hooks/facts.jet. Repeating the same command then emitted Error [E3510]: b.generate(\"facts\") would shadow the module at .jet/generated/prim_tooling_hooks/facts.jet; Why: Generation is additive: what you wrote is always what compiles.",
+  "areas": [
+   "cli",
+   "web",
+   "backend"
+  ],
+  "severity": "hurts",
+  "workaround": "Delete the generated artifact before rebuilding; jet run can consume the generated package, but repeated jet build is not cleanly repeatable."
+ },
+ {
+  "probe": "prim-arrays",
+  "kind": "prim",
+  "id": "prim-arrays-G1",
+  "tags": [
+   "defect",
+   "impossible"
+  ],
+  "primitive": "AOT code generation must support user-defined records containing Tensor fields without an ICE.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-arrays/store scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/tensor_wrapper_ice.jet -> exit 101: `codegen reached a construct the typed IR does not cover: the expression BoxedTensor{tensor: values}` at tensor_wrapper_ice.jet:9:14 (compiler bug I2/R7, Items.rs:3409:5).",
+  "areas": [
+   "data",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Use an anonymous named tuple (values: Tensor, dims: ..., coords: ...) and keep metadata parallel; nominal Tensor-bearing records and methods are not viable in AOT."
+ },
+ {
+  "probe": "prim-arrays",
+  "kind": "prim",
+  "id": "prim-arrays-G2",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "AOT code generation must support checked writes through compute.set on a Tensor.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-arrays/store scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/set_ice.jet -> exit 101: `internal compiler error: the generated Rust did not compile` (generated build/set_ice.rs). The same two-line set path succeeds under jet run: values:[0.0, 3.0, 0.0, 0.0].",
+  "areas": [
+   "data",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Use eager Tensor constructors and pure elementwise operations; no safe AOT workaround for a new indexed output without compute.set."
+ },
+ {
+  "probe": "prim-arrays",
+  "kind": "prim",
+  "id": "prim-arrays-G3",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Tensor must carry checked named dimensions, coordinate labels, attributes, and masks with label-aware lookup and alignment.",
+  "evidence": "/home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/labeled_tuple.jet:17-29 implements find_text plus numeric compute.get over a named tuple; jet run prints lookup:3.0 and missing:null. Archived climate-weather/report.md:47-63 and D-M-LABELED-ARRAYS1 state current Tensor exposes shape/strides only and has no labeled N-D or coordinate-aware alignment path.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Keep dimensions, coordinate lists, and Tensor in an anonymous named tuple and manually compare labels before numeric operations."
+ },
+ {
+  "probe": "prim-arrays",
+  "kind": "prim",
+  "id": "prim-arrays-G4",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Provide a deferred chunk-plan primitive with bounded reads, overlap-aware scheduling, and map/collect execution.",
+  "evidence": "/home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/chunked.jet:3-31 manually constructs one Tensor per chunk; jet run prints chunks:8 reads_before:0, then reads_after_one:1, mapped_len:64 reads_after_all:8, and AOT build succeeds. Archived climate-weather/report.md:47-51 and oceanography-hydrology/report.md:81-86 record Tensor eager storage and no lazy scientific graph or chunk scheduler.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Write a bespoke mutable plan, read function, counter, loop, and materialization list; this does not provide overlap, fusion, cancellation, or bounded scheduler guarantees."
+ },
+ {
+  "probe": "prim-arrays",
+  "kind": "prim",
+  "id": "prim-arrays-G5",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Provide a first-class raster/image value with channel axis, dtype, intensity range, color space, resize, and conversion operations.",
+  "evidence": "Archived medical-imaging/probes/missing_image_check.out:1-4 reports E1001: there is no core module core.image. /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/image_inline.jet can manually resize nearest-neighbor and grayscale in jet run (image:4x4x3 dtype:f64 corner:1.0; gray:2x2x1 first:0.3), while archived image-processing/report.md:50-61 records no image value, codec, colorspace, or resampler.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Represent pixels and image facts as a named tuple and hand-write indexed loops; file codecs, color/range semantics, and quality resampling remain unavailable."
+ },
+ {
+  "probe": "prim-arrays",
+  "kind": "prim",
+  "id": "prim-arrays-G6",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Make Tensor storage dtype a semantic generic parameter with checked conversions instead of always materializing f64 data.",
+  "evidence": "/home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/dtype_fixed.jet accepts U8 inputs but jet run prints values:[1.0, 2.0]. D-M-RASTER1.json:12-13 records JetTensor.data: Arc<Vec<f64>> and no dtype field. An explicit fn accept<T>(value:^Tensor<T>) Tensor<T> builds for Float, but jet check dtype_generic.jet reports E2104: type-parameterized callable has no complete TIR specialization.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Keep all compute values as Float/f64 and carry requested dtype as unenforced metadata; convert at external boundaries."
+ },
+ {
+  "probe": "prim-arrays",
+  "kind": "prim",
+  "id": "prim-arrays-G7",
+  "tags": [
+   "slow"
+  ],
+  "primitive": "Provide optimized parallel dense Tensor elementwise kernels that scale to large N-D maps.",
+  "evidence": "Release build of /home/nate/.cache/jet-luna/dx3/prim-arrays/pkg/map_4k.jet succeeded, but `time -p /home/nate/Projects/Github/jet/build/map_4k` timed out at 300s (real 300.25, user 2000.91, sys 287.53) before printing. Same 4096x4096 Float64 two-array add under Nix NumPy/xarray printed corner:3.0 in 0.036179 sec/0.017504 sec.",
+  "areas": [
+   "data",
+   "ai-ml",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Use smaller arrays or an external backend; no successful 4K Jet timing was obtained."
+ },
+ {
+  "probe": "prim-text",
+  "kind": "prim",
+  "id": "prim-text-G1",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "A reusable subword-tokenizer model/training capability with vocabulary, merge rules, encode/decode, and alignment metadata is missing.",
+  "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-text/pkg/nlp_gap.jet -> Error [E1001]: There is no core module `core.nlp`. pkg/main.jet:48-104 manually implements 12 BPE rounds, pair maps, sequence rebuilds, and encoding.",
+  "areas": [
+   "ai-ml",
+   "web",
+   "cli",
+   "gui"
+  ],
+  "severity": "hurts",
+  "workaround": "Implement BPE in Jet, as this probe does; alignment, special tokens, batching, persistence, and decode still require author code."
+ },
+ {
+  "probe": "prim-text",
+  "kind": "prim",
+  "id": "prim-text-G2",
+  "tags": [
+   "slow",
+   "boilerplate",
+   "call-site"
+  ],
+  "primitive": "An allocation-aware text view is missing: bytes or structured scalar/grapheme spans and offsets cannot be streamed without per-unit String allocation.",
+  "evidence": "jet check pkg/byte_gap.jet -> E1004: `core.text` has no item `bytes`; core.text.fmt.bytes(\"é\") -> E0112 because it wants Int. fixed_sigs.rs:2250-2263,2294-2297 returns List<String>; Top/Text.rs:387-390 collects Vec<char>/Vec<String>, 831-832 formats indices. Jet BPE=108233 ms vs Python=3197.409 ms and Rust=621.350 ms on 1 MiB; Jet streaming scan=7031 ms vs Python=581.307 ms and Rust=33.083 ms on 100 MB.",
+  "areas": [
+   "cli",
+   "gui",
+   "web",
+   "ai-ml"
+  ],
+  "severity": "hurts",
+  "workaround": "Use eager lists and formatted char_indices, and use files.open(...).lines() for bounded streaming input."
+ },
+ {
+  "probe": "prim-text",
+  "kind": "prim",
+  "id": "prim-text-G3",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Lookahead and lookbehind semantics are unavailable in the checked regular-expression language.",
+  "evidence": "scripts/agent/jet-env jet check pkg/regex_gap.jet -> Error [E0152]: This regex pattern is invalid at position 2; Why: Lookaround is not supported; use a linear rewrite. Regex.rs:949-950 emits the same rejection.",
+  "areas": [
+   "cli",
+   "web",
+   "ai-ml",
+   "gui"
+  ],
+  "severity": "hurts",
+  "workaround": "Rewrite conditions as separate linear scans or explicit supported patterns; typed regex matching, captures, replacement, and splitting remain available."
+ },
+ {
+  "probe": "prim-text",
+  "kind": "prim",
+  "id": "prim-text-G4",
+  "tags": [
+   "unsafe"
+  ],
+  "primitive": "A safe typed opaque-handle FFI with lifetime tracking and glyph-buffer/position-array access is missing for stateful shaping engines such as HarfBuzz.",
+  "evidence": "jet check shape_ffi_gap/pointer_gap.jet -> Error [E3202]: Type `*Int` cannot cross the C boundary here. jet inspect bind shape_ffi_gap/harfbuzz.h --pkg harfbuzz -o shape_ffi_gap/harfbuzz_bind.jet -> Error [E3208]: No bindable C function prototypes found for `harfbuzz`. docs/spec/spec.md:1475-1480 says pointer returns remain E3202. The probe used process.cmd(hb-shape) instead and received Arabic glyph positions.",
+  "areas": [
+   "gui",
+   "web"
+  ],
+  "severity": "blocks",
+  "workaround": "Use a bounded external hb-shape process or an audited native shim; neither provides a safe Jet glyph-buffer API."
+ },
+ {
+  "probe": "prim-time",
+  "kind": "prim",
+  "id": "prim-time-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "A first-class UTC instant must carry and round-trip a leap-second label such as 23:59:60 alongside ordinary DateTime values.",
+  "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-time/store scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-time/pkg/api_probe.jet --watch=off; output: Error: time out of range: 23:59:60; Trail [E3002] ... run (api_probe.jet:13). docs/reference/core-library.md:2315-2316 says RFC3339 parsing rejects :60.",
+  "areas": [
+   "backend",
+   "data",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Use a package-owned AstroTime split carrier and keep a leap label outside core DateTime; direct core DateTime interoperation is lost."
+ },
+ {
+  "probe": "prim-time",
+  "kind": "prim",
+  "id": "prim-time-G4",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Native lowering of time.from_unix_nanoseconds must preserve signed Int values at the i64 boundary.",
+  "evidence": "Native: JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-time/store scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-time/pkg/highres_max.jet --watch=off -> 1677-09-21T00:12:43.145224196Z. Interpreter: the same command with `run --interpret` -> 2262-04-11T23:47:16.854775807Z. Source probe line highres_max.jet:3 passes 9223372036854775807.",
+  "areas": [
+   "backend",
+   "data",
+   "science"
+  ],
+  "severity": "blocks",
+  "workaround": "Stay far below the boundary or use the interpreter/custom split carrier; neither is a production fix for native high-resolution epochs."
+ },
+ {
+  "probe": "prim-time",
+  "kind": "prim",
+  "id": "prim-time-G2",
+  "tags": [
+   "boilerplate"
+  ],
+  "primitive": "A versioned, provenance-carrying leap-second and Earth-rotation data source must provide checked UTC, TAI, TT, and UT1 conversions.",
+  "evidence": "Core docs list UTC DateTime, IANA zones, Duration, Instant, and Clock only (docs/reference/core-library.md:2255-2303). The working program's time_probe.jet:63-169 repeats 28 leap-table rows, offset lookup, inverse iteration, TT constants, and a caller-supplied DUT1 value; its run prints tai=1483228835s, tt=1483228867s+184000000ns, ut1=1483228799s+334000000ns and round-trips UTC. Archived astronomy claims mark UTC/TAI/UT1/TT and Earth-rotation provenance real gaps (astronomy-astrophysics/claims.json:163-176).",
+  "areas": [
+   "backend",
+   "data",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Ship and maintain a package-owned, versioned leap table and DUT1/IERS data, with explicit stale-data policy and provenance."
+ },
+ {
+  "probe": "prim-time",
+  "kind": "prim",
+  "id": "prim-time-G3",
+  "tags": [
+   "call-site"
+  ],
+  "primitive": "Core time needs an exact long-baseline high-resolution instant carrier with separate epoch parts and declared precision bounds.",
+  "evidence": "crates/jet-codegen/src/Prelude/Core/Time.rs:652-655 stores DateTime as i64 seconds plus nanoseconds, while :677-681 accepts an i64 Unix-nanosecond count. A normal fractional instant works in the final run (highres_ns=123456789 roundtrip=1711726200123456789), but astronomy-astrophysics/claims.json:179-192 records the two-part long-epoch requirement. The probe's AstroTime at time_probe.jet:68-94 is required to hold scale values without forcing them through core DateTime.",
+  "areas": [
+   "data",
+   "science"
+  ],
+  "severity": "hurts",
+  "workaround": "Use the package's AstroTime {seconds,nanoseconds,scale} and JulianDate {day,nanoseconds} split carriers, converting to core DateTime only for ordinary-range values."
+ }
+]

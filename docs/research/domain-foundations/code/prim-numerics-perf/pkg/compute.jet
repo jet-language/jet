@@ -1,0 +1,16 @@
+use core.compute as compute
+use core.time as time
+
+fn run() {
+    n :: 512
+    a :: compute.matrix(n, n, 1.0) ?? panic("a")
+    b :: compute.matrix(n, n, 2.0) ?? panic("b")
+    started :: time.instant()
+    c :: compute.matmul_f32_tile(a, b) ?? panic("matmul_f32_tile")
+    finished :: time.instant()
+    duration :: finished - started
+    elapsed :: duration.in(.Nanoseconds)
+    values :: compute.to_list(c)
+    print("compute_matmul_n:{n} ns:{elapsed} numel:{compute.numel(c)} first:{values[0]} last:{values[n * n - 1]}")
+    print("profile:{compute.profile_show()}")
+}

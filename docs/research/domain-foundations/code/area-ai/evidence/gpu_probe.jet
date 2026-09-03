@@ -1,0 +1,8 @@
+use core.compute as compute
+
+fn run() !(ComputeError) {
+    seed :: compute.matrix(1, 1, 2.0) ?? panic("seed")
+    f32_value :: compute.matmul_f32_tile(seed, seed) ?? panic("tile")
+    value :: compute.on_device(f32_value, compute.device_vulkan())
+    print("gpu accepted {compute.placement(value)}")
+}

@@ -1,0 +1,30 @@
+use core.compute as compute
+
+fn predict(weight: Tensor, input: Tensor) Tensor -> {
+    return compute.matmul(input, weight) ?? panic("predict")
+}
+
+fn training_loss(weight: Tensor, input: Tensor, target: Tensor) Tensor -> {
+    prediction :: predict(weight, input)
+    return compute.mse_loss(prediction, target) ?? panic("loss")
+}
+
+fn run() {
+    weight :: compute.matrix(2, 2, 0.0) ?? panic("weight")
+    input :: compute.eye(2) ?? panic("input")
+    target :: compute.ones([2, 2]) ?? panic("target")
+    before :: predict(weight, input)
+    print("before:{compute.to_list(before)}")
+    before_loss :: compute.mse_loss(before, target) ?? panic("before_loss")
+    print("loss:{compute.to_list(before_loss)}")
+    gradients :: compute.gradient(training_loss, ~weight, ~input, ~target, wrt: [weight])
+    next :: compute.sgd_step(weight, gradients.weight, 0.5) ?? panic("sgd")
+    after :: predict(next, input)
+    print("after:{compute.to_list(after)}")
+    after_loss :: compute.mse_loss(after, target) ?? panic("after_loss")
+    print("trained_loss:{compute.to_list(after_loss)}")
+    wire :: compute.serialize(next) ?? panic("serialize")
+    print("wire:{wire}")
+    round :: compute.deserialize(wire) ?? panic("deserialize")
+    print("round:{compute.to_list(round)}")
+}

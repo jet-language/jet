@@ -1,0 +1,19 @@
+use core.files as files
+use core.regex as re
+use core.time as time
+
+fn run() {
+    path :: Path.from("/home/nate/.cache/jet-luna/dx3/prim-text/fixtures/logs_100m.txt")
+    handle :: files.open(~path)
+    pattern :: Regex{"ERROR .* user_id=\d+"}
+    started :: time.instant()
+    lines := 0
+    matches := 0
+    loop line in handle.lines() {
+        lines += 1
+        if pattern.is_match(line) {
+            matches += 1
+        }
+    }
+    print("lines={lines} matches={matches} elapsed_ms={started.elapsed_millis()}")
+}

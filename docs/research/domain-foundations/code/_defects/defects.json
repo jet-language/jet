@@ -1,0 +1,213 @@
+[
+ {
+  "id": "DEF-1",
+  "rootCause": "A non-Send Cell capture is emitted into the Send+Sync HTTP handler closure.",
+  "kind": "rustc-rejected",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/web/pkg/minimal.jet",
+  "command": "JET_FFI_CACHE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/web/ffi JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/web/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet build --verbose pkg/minimal.jet",
+  "error": "error[E0277]: `Rc<JetCellInner<i64>>` cannot be sent between threads safely\\n     --> build/minimal.rs:81903:6\\n... required for the cast from `Arc<{closure...}>` to `Arc<dyn Fn(JetHTTPRequest) -> Result<..., ...> + Send + Sync>`",
+  "tiers": "check pass; run pass; run --release fail; build fail",
+  "probesAffected": [
+   "area-web-G1"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/TIR/lower/lambdas.rs:1188-1193; HTTP closure generated handler"
+ },
+ {
+  "id": "DEF-2",
+  "rootCause": "Non-fallible user functions are represented as Result at the module boundary while callers still apply `?`, producing a Rust carrier mismatch.",
+  "kind": "rustc-rejected",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/storage/pkg/import_bool.jet",
+  "command": "JET_FFI_CACHE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/storage/ffi JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/storage/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet build --verbose pkg/import_bool.jet",
+  "error": "error[E0308]: mismatched types\\n     --> build/import_bool.rs:23220:68\\n... this expression has type `bool`\\n... expected type `bool`\\n... found enum `Result<_, _>`",
+  "tiers": "check pass; run pass (control); run --release fail; build fail",
+  "probesAffected": [
+   "prim-storage-G2",
+   "prim-dsl-G7"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/TIR/lower/calls; generated caller build/import_bool.rs:23220"
+ },
+ {
+  "id": "DEF-3",
+  "rootCause": "The generated trait ABI names `LocalDate` as `__jet_LocalDate` although no such generated Rust type exists.",
+  "kind": "rustc-rejected",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/time/pkg/business.jet",
+  "command": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/time/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet build --verbose pkg/business.jet",
+  "error": "error[E0425]: cannot find type `__jet_LocalDate` in this scope\\n     --> build/business.rs:69830:39\\n      |\\n69830 |     fn is_business_day(&self, _date: &__jet_LocalDate) -> JetOutcome<bool, JetErr>;",
+  "tiers": "check pass; run pass; run --release fail; build fail",
+  "probesAffected": [
+   "prim-time-time_probe"
+  ],
+  "location": "generated trait declaration build/business.rs:69830; compiler source location not isolated"
+ },
+ {
+  "id": "DEF-4",
+  "rootCause": "The native time conversion narrows the maximum Unix nanosecond boundary through the wrong intermediate representation.",
+  "kind": "wrong-answer",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/time/pkg/highres_max.jet",
+  "command": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/time/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet run highres_max.jet --watch=off",
+  "error": "native output: 1677-09-21T00:12:43.145224196Z\\ninterpreter output: 2262-04-11T23:47:16.854775807Z",
+  "tiers": "check pass; run pass with wrong output; run --release pass with wrong output; build pass",
+  "probesAffected": [
+   "prim-time-G4"
+  ],
+  "location": "crates/jet-codegen/src/Prelude/Core/Time.rs:652-655,677-681"
+ },
+ {
+  "id": "DEF-5",
+  "rootCause": "Recursive enum payloads are not normalized before compiler-generated equality and comparison methods are checked.",
+  "kind": "jet-ice",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/dsl-recursive/recursive_min.jet",
+  "command": "/home/nate/Projects/Github/jet/scripts/agent/jet-env jet run recursive_min.jet --watch=off",
+  "error": "Error [E0112]: `_jet_derive_equal_Expr` wants `Expr` for arg 1, but this is `Expr`<>\\nError [E0401]: `_jet_derive_equal_Expr` needs Bool but value Bool\\nError [E0112]: `_jet_derive_compare_Expr` wants `Expr` for arg 1, but this is `Expr`<>\\nError [E0401]: `_jet_derive_compare_Expr` needs Ordering but value Ordering",
+  "tiers": "check fail; run fail; run --release fail; build fail",
+  "probesAffected": [
+   "prim-dsl-G1"
+  ],
+  "location": "compiler-generated enum derives; source location not isolated"
+ },
+ {
+  "id": "DEF-6",
+  "rootCause": "Named-payload enum patterns containing an if statement are outside typed-IR lowering coverage.",
+  "kind": "jet-ice",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/dsl-symbolic/pkg/symbolic2_min2.jet",
+  "command": "/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build --verbose pkg/symbolic2_min2.jet",
+  "error": "internal compiler error: codegen reached a construct the typed IR does not cover: the statement if at symbolic2_min2.jet:6:5, in fn run — compiler bug (I2/R7)\\n  at crates/jet-codegen/src/Codegen/Items.rs:3409:5",
+  "tiers": "check pass; run not exercised; run --release not exercised; build fail",
+  "probesAffected": [
+   "prim-dsl-G2"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/Items.rs:3409:5"
+ },
+ {
+  "id": "DEF-7",
+  "rootCause": "The dev TIR evaluator refuses map index-field assignment in the formula recalculation function.",
+  "kind": "jet-ice",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/dsl-symbolic/pkg/formula.jet",
+  "command": "/home/nate/Projects/Github/jet/scripts/agent/jet-env jet run pkg/prim_dsl_formula_demo.jet --watch=off",
+  "error": "Error [E0956]: `index field assign on map` isn't supported by the current evaluator yet\\n Why: The canonical TIR evaluator doesn't cover this construct yet",
+  "tiers": "check pass; run fail; run --release pass; build pass",
+  "probesAffected": [
+   "prim-dsl-G6"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs:2202"
+ },
+ {
+  "id": "DEF-8",
+  "rootCause": "TIR lowering cannot construct a user struct containing a Tensor field.",
+  "kind": "jet-ice",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/tensor/tensor_wrapper_ice.jet",
+  "command": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/tensor/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet build --verbose tensor_wrapper_ice.jet",
+  "error": "internal compiler error: codegen reached a construct the typed IR does not cover: the expression `BoxedTensor{tensor: values}` at tensor_wrapper_ice.jet:9:14, in fn `run` — compiler bug (I2/R7)\\n  at crates/jet-codegen/src/Codegen/Items.rs:3409:5",
+  "tiers": "check fail (E2104); run fail (TIR eval mod.rs:5592); run --release fail; build fail",
+  "probesAffected": [
+   "prim-arrays-G1",
+   "area-data-G04"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/Items.rs:3409:5; crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:5592:13"
+ },
+ {
+  "id": "DEF-9",
+  "rootCause": "The generated `set` call borrows an immutable local Tensor mutably.",
+  "kind": "rustc-rejected",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/set/set_ice.jet",
+  "command": "/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build --verbose set_ice.jet",
+  "error": "error[E0596]: cannot borrow `__jet_tensor` as mutable, as it is not declared as mutable\\n     --> build/set_ice.rs:79873:27\\n79873 |     match jet_compute_set(&mut (__jet_tensor), &(vec![0i64, 1i64]), 3.0f64) { Ok(__jet___ok) => __jet___ok, ... }",
+  "tiers": "check pass; run pass; run --release fail; build fail",
+  "probesAffected": [
+   "prim-arrays-G2"
+  ],
+  "location": "generated call build/set_ice.rs:79873; compute set lowering source not isolated"
+ },
+ {
+  "id": "DEF-10",
+  "rootCause": "Reactive-render callback lowering emits Result propagation and `return Ok(...)` into callbacks whose required Rust ABI is `Fn() -> ()`.",
+  "kind": "rustc-rejected",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/gui-view/reactive_view_smoke.jet",
+  "command": "JET_UI_HEADLESS=1 JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/gui-view/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet run --release reactive_view_smoke.jet --watch=off",
+  "error": "error[E0277]: the `?` operator can only be used in a closure that returns `Result` or `Option`\\n     --> build/reactive_view_smoke.rs:69848:162\\nerror[E0308]: mismatched types\\n     --> build/reactive_view_smoke.rs:69849:12\\n... expected unit type `()`; found enum `Result<(), _>`",
+  "tiers": "check pass; run pass; run --release fail; build fail",
+  "probesAffected": [
+   "area-gui-G8",
+   "area-gui-G9"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs:503-512; lambdas.rs:1188-1193"
+ },
+ {
+  "id": "DEF-11",
+  "rootCause": "Autodiff lowering passes the fallible gradient value directly to `jet_compute_vjp_begin` instead of extracting its Tensor.",
+  "kind": "rustc-rejected",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/ai/mini.jet",
+  "command": "/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build --verbose mini.jet",
+  "error": "error[E0308]: mismatched types\\n     --> build/mini.rs:79885:473\\n... expected `JetTensor`, found `Result<JetTensor, JetErr>`\\nnote: function defined here\\n     --> build/mini.rs:70106:4",
+  "tiers": "check pass; run fail (E0956); run --release fail; build fail",
+  "probesAffected": [
+   "area-ai-G1"
+  ],
+  "location": "generated autodiff call build/mini.rs:79885; compiler source location not isolated"
+ },
+ {
+  "id": "DEF-12",
+  "rootCause": "The `core.math.pi` constant is accepted by sema but has no typed-IR code-generation arm.",
+  "kind": "jet-ice",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/pi/pi_probe.jet",
+  "command": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/pi/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet run --release pi_probe.jet --watch=off",
+  "error": "internal compiler error: codegen reached a construct the typed IR does not cover: the expression `pi` at pi_probe.jet:2:35, in fn `angle` — compiler bug (I2/R7)\\n  at crates/jet-codegen/src/Codegen/Items.rs:3409:5",
+  "tiers": "check fail (E2104); run fail (E0956); run --release fail; build fail",
+  "probesAffected": [
+   "prim-numerics-perf-G1"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/Items.rs:3409:5"
+ },
+ {
+  "id": "DEF-13",
+  "rootCause": "The dev native tier folds exact comptime division as integer zero while the interpreter and release tier preserve the exact rational.",
+  "kind": "wrong-answer",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/exact-comptime/comptime_exact.jet",
+  "command": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/exact-comptime/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet run comptime_exact.jet --watch=off",
+  "error": "comptime 0/1 0\\nruntime 10/3 10\\n(correct interpreter/release comptime: `10/3 10`)",
+  "tiers": "check pass; run pass with wrong output; run --release pass; build pass",
+  "probesAffected": [
+   "prim-exact-numerics-G1"
+  ],
+  "location": "comptime exact-value evaluator/codegen boundary; source location not isolated"
+ },
+ {
+  "id": "DEF-14",
+  "rootCause": "Impl-method checking treats a plain helper call as fallible and rejects it inside a plain-returning method.",
+  "kind": "jet-ice",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/exact-impl/struct_impl.jet",
+  "command": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/exact-impl/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet check struct_impl.jet",
+  "error": "Error [E0403]: This fallible call only works inside a function that returns a fallible result\\n  --> struct_impl.jet:11:17",
+  "tiers": "check fail; run fail; run --release not reached; build not reached",
+  "probesAffected": [
+   "prim-exact-numerics-G2"
+  ],
+  "location": "crates/jet-sema/src/Sema/CheckerInfer/calls/lambdas.rs:1043-1053"
+ },
+ {
+  "id": "DEF-15",
+  "rootCause": "Float.is_finite is lowered to a runtime helper that is never emitted in the Rust prelude.",
+  "kind": "rustc-rejected",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/units/b_value.jet",
+  "command": "/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build --verbose b_value.jet",
+  "error": "error[E0425]: cannot find function `jet_std_math_is_finite` in this scope\\n     --> build/b_value.rs:23116:11\\n23116 |     if (!(jet_std_math_is_finite(__jet_x))) {",
+  "tiers": "check pass; run pass; run --release fail; build fail",
+  "probesAffected": [
+   "prim-units-isfinite"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:1516-1518"
+ },
+ {
+  "id": "DEF-16",
+  "rootCause": "The debug replay evaluator does not implement static `time.now`, despite the record and native tiers supporting it.",
+  "kind": "jet-ice",
+  "repro": "/home/nate/.cache/jet-luna/dx3/_defects/receipts/replay.jet",
+  "command": "printf 'yes\\n' | JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/_defects/receipts/store /home/nate/Projects/Github/jet/scripts/agent/jet-env jet debug replay.jet --replay=clock2",
+  "error": "[E0956] `static `time.now`` isn't supported by the current evaluator yet",
+  "tiers": "check pass; run pass; run --release pass; build pass; debug replay fail",
+  "probesAffected": [
+   "prim-receipts-G2"
+  ],
+  "location": "crates/jet-codegen/src/Codegen/TIR/eval; static time evaluator path"
+ }
+]

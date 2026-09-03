@@ -1,0 +1,27 @@
+// prim-distributed: two native worker processes exchange typed integer messages.
+// The parent owns the listener; each worker connects, decodes an Int, and replies.
+use core.net as net
+use core.process as process
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0")
+    addr :: net.socket_to_string(net.listener_local_socket_addr(listener))
+    worker_path :: "/home/nate/Projects/Github/jet/build/socket_worker"
+
+    first :: process.cmd([~worker_path, ~addr]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("first worker spawn failed")
+    second :: process.cmd([worker_path, addr]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("second worker spawn failed")
+
+    first_connection :: listener.accept()
+    second_connection :: listener.accept()
+    first_connection.write_all("7".bytes())
+    second_connection.write_all("11".bytes())
+    first_result :: first_connection.read_text(8192)
+    second_result :: second_connection.read_text(8192)
+    first_connection.close()
+    second_connection.close()
+
+    first_receipt :: first.wait() ?? panic("first worker wait failed")
+    second_receipt :: second.wait() ?? panic("second worker wait failed")
+    print("socket_workers=2 typed=Int results={first_result},{second_result}")
+    print("workers_exited={first_receipt.success && second_receipt.success}")
+}

@@ -1,0 +1,36 @@
+use core.http.client as http_client
+use core.http.server as http_server
+use core.net as net
+
+fn handle_completion(req: HTTPRequest) HTTPResponse !HTTPError -> {
+    body :: req.body().text(4096) ?? ""
+    if body.contains("tool_result") {
+        return Ok(http_server.sse("data: {{\"choices\":[{{\"delta\":{{\"content\":\"done\"}}}}]}}\n\ndata: [DONE]\n\n"))
+    }
+    return Ok(http_server.sse("data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[{{\"id\":\"call-1\",\"function\":{{\"name\":\"lookup\",\"arguments\":\"{{\\\"key\\\":\\\"jet\\\"}}\"}}}}]}}}}]}}\n\ndata: [DONE]\n\n"))
+}
+
+fn run() !(HTTPError | NetError | TaskFailure) {
+    listener :: net.tcp_listen("127.0.0.1:0")
+    addr :: listener.local_addr()
+    mux :: http_server.mux()
+    mux.post("/v1/chat/completions", (req: HTTPRequest) -> handle_completion(req))
+    t :: task {
+        http_server.serve_once_listener(listener, mux)
+        http_server.serve_once_listener(listener, mux)
+    }
+    loop step in 0..<2 {
+        body := if {
+            step == 0 -> "{{\"model\":\"mock\",\"stream\":true,\"messages\":[{{\"role\":\"user\",\"content\":\"lookup\"}}]}}"
+            else -> "{{\"model\":\"mock\",\"stream\":true,\"tool_result\":{{\"id\":\"call-1\",\"content\":\"ok\"}}}}"
+        }
+        req :: http_client.request("POST", "http://{addr}/v1/chat/completions").body(body).header("content-type", "application/json").read_timeout(1000)
+        resp :: req.send()
+        text :: resp.body().text(8 * 1024 * 1024) ?? "invalid body"
+        streamed :: text.contains("data:")
+        tool_call :: text.contains("tool_calls")
+        print("step={step} status={resp.status()} streamed={streamed} tool_call={tool_call}")
+    }
+    t.join()
+    print("bounded_tool_loop=2")
+}

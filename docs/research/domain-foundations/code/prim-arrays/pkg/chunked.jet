@@ -1,0 +1,49 @@
+use core.compute as compute
+
+struct ChunkedPlan {
+    length: Int
+    chunk_size: Int
+    reads: Int
+}
+
+fn chunk_count(plan: ChunkedPlan) Int -> (plan.length + plan.chunk_size - 1) /% plan.chunk_size
+
+fn read_chunk(plan: ChunkedPlan, index: Int) Tensor -> {
+    if index < 0 || index >= chunk_count(plan) -> panic("chunk index out of bounds")
+    start := index * plan.chunk_size
+    values := [Float]{}
+    offset := 0
+    loop offset < plan.chunk_size {
+        position := start + offset
+        if position >= plan.length -> break
+        values.push(Float.from_int(position))
+        offset += 1
+    }
+    return compute.from_list(values) ?? panic("chunk")
+}
+
+fn map_chunk(plan: &ChunkedPlan, index: Int, f: fn(Float) Float -[]>) [Float] -> {
+    plan.reads += 1
+    chunk :: read_chunk(plan, index)
+    values :: compute.to_list(chunk)
+    mapped := [Float]{}
+    loop value in values -> mapped.push(f(value))
+    return mapped
+}
+
+fn double(value: Float) Float -[]> -> value * 2.0
+
+fn run() {
+    first_plan := ChunkedPlan{length: 64, chunk_size: 8, reads: 0}
+    print("chunks:{chunk_count(first_plan)} reads_before:{first_plan.reads}")
+    first :: map_chunk(&first_plan, 0, double)
+    print("first:{first} reads_after_one:{first_plan.reads}")
+
+    all_plan := ChunkedPlan{length: 64, chunk_size: 8, reads: 0}
+    out := [Float]{}
+    loop chunk in 0..<chunk_count(all_plan) {
+        mapped :: map_chunk(&all_plan, chunk, double)
+        loop value in mapped -> out.push(value)
+    }
+    print("mapped_len:{out.len()} reads_after_all:{all_plan.reads}")
+}

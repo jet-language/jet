@@ -1,0 +1,119 @@
+package {
+    name: "prim-realtime"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Time, Mem.Alloc] } }
+}
+
+use core.time as time
+
+struct AudioStats {
+    callbacks: Int
+    missed: Int
+    min_jitter_us: Int
+    max_jitter_us: Int
+    sum_jitter_us: Int
+    max_callback_us: Int
+}
+
+struct ControlStats {
+    ticks: Int
+    missed: Int
+    min_jitter_us: Int
+    max_jitter_us: Int
+    sum_jitter_us: Int
+}
+
+// The hot callback takes a caller-owned fixed buffer and only writes samples.
+// The !Mem.Alloc contract rejects a growable collection operation here.
+fn fill_audio(&buffer: [Float#256], sample: Float) -[!Mem.Alloc]> {
+    loop i in 0..<buffer.len() {
+        buffer[i] = sample
+    }
+}
+
+fn audio_loop() AudioStats -> {
+    buffer := [Float#256]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    started :: time.instant()
+    callbacks := 0
+    missed := 0
+    min_jitter := 999999999
+    max_jitter := -999999999
+    sum_jitter := 0
+    max_callback := 0
+
+    // 48 kHz / 256 frames = 5333 us nominal period. The fake device waits
+    // 5 ms because the current scheduler sleep ABI is millisecond-based.
+    loop started.elapsed().in(.Milliseconds) < 10000 {
+        due_us :: (callbacks + 1) * 5333
+        observed_us :: started.elapsed().in(.Microseconds)
+        jitter := observed_us - due_us
+        if jitter < min_jitter -> min_jitter = jitter
+        if jitter > max_jitter -> max_jitter = jitter
+        sum_jitter += jitter
+        if observed_us > due_us -> missed += 1
+
+        callback_started :: time.instant()
+        fill_audio(&buffer, 0.25)
+        callback_us :: callback_started.elapsed().in(.Microseconds)
+        if callback_us > max_callback -> max_callback = callback_us
+        callbacks += 1
+        time.sleep(5ms)
+    }
+
+    return AudioStats{
+        callbacks: callbacks,
+        missed: missed,
+        min_jitter_us: min_jitter,
+        max_jitter_us: max_jitter,
+        sum_jitter_us: sum_jitter,
+        max_callback_us: max_callback
+    }
+}
+
+fn control_loop() ControlStats -> {
+    started :: time.instant()
+    ticks := 0
+    missed := 0
+    min_jitter := 999999999
+    max_jitter := -999999999
+    sum_jitter := 0
+
+    // 1 kHz control period. A miss is observed when the loop starts after
+    // its absolute due time; this is a check, not an interrupting deadline.
+    loop started.elapsed().in(.Milliseconds) < 10000 {
+        due_us :: (ticks + 1) * 1000
+        observed_us :: started.elapsed().in(.Microseconds)
+        jitter := observed_us - due_us
+        if jitter < min_jitter -> min_jitter = jitter
+        if jitter > max_jitter -> max_jitter = jitter
+        sum_jitter += jitter
+        if observed_us > due_us -> missed += 1
+        ticks += 1
+        time.sleep(1ms)
+    }
+
+    return ControlStats{
+        ticks: ticks,
+        missed: missed,
+        min_jitter_us: min_jitter,
+        max_jitter_us: max_jitter,
+        sum_jitter_us: sum_jitter
+    }
+}
+
+fn run() {
+    // Both loops are independent fake devices and run for the same 10 s wall
+    // window. No shared state or channel is touched by fill_audio.
+    audio :: task audio_loop()
+    control :: task control_loop()
+    a :: audio.join() ?? panic("audio task failed")
+    c :: control.join() ?? panic("control task failed")
+
+    print("audio.callbacks={a.callbacks}")
+    print("audio.missed={a.missed}")
+    print("audio.jitter_us=min:{a.min_jitter_us},max:{a.max_jitter_us},sum:{a.sum_jitter_us}")
+    print("audio.max_callback_us={a.max_callback_us}")
+    print("control.ticks={c.ticks}")
+    print("control.missed={c.missed}")
+    print("control.jitter_us=min:{c.min_jitter_us},max:{c.max_jitter_us},sum:{c.sum_jitter_us}")
+}

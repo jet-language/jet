@@ -1,0 +1,44 @@
+use core.compute as compute
+
+fn run() {
+    pixels :: compute.from_list([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]) ?? panic("image")
+    rgb :: compute.reshape(pixels, [2, 2, 3]) ?? panic("image reshape")
+    image := (pixels: rgb, width: 2, height: 2, channels: 3, dtype: "f64")
+
+    enlarged :: compute.zeros([4, 4, image.channels]) ?? panic("resize allocation")
+    y := 0
+    loop y < 4 {
+        x := 0
+        loop x < 4 {
+            source_y := y * image.height /% 4
+            source_x := x * image.width /% 4
+            channel := 0
+            loop channel < image.channels {
+                value :: compute.get(image.pixels, [source_y, source_x, channel]) ?? panic("resize read")
+                compute.set(&enlarged, [y, x, channel], value) ?? panic("resize write")
+                channel += 1
+            }
+            x += 1
+        }
+        y += 1
+    }
+
+    gray :: compute.zeros([image.height, image.width, 1]) ?? panic("grayscale allocation")
+    y = 0
+    loop y < image.height {
+        x := 0
+        loop x < image.width {
+            red :: compute.get(image.pixels, [y, x, 0]) ?? panic("red read")
+            green :: compute.get(image.pixels, [y, x, 1]) ?? panic("green read")
+            blue :: compute.get(image.pixels, [y, x, 2]) ?? panic("blue read")
+            gray_value := red * 0.3 + green * 0.59 + blue * 0.11
+            compute.set(&gray, [y, x, 0], gray_value) ?? panic("gray write")
+            x += 1
+        }
+        y += 1
+    }
+    corner :: compute.get(enlarged, [3, 3, 2]) ?? panic("corner")
+    first_gray :: compute.get(gray, [0, 0, 0]) ?? panic("gray corner")
+    print("image:4x4x3 dtype:{image.dtype} corner:{corner}")
+    print("gray:2x2x1 first:{first_gray}")
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "area-cli-G1",
+    "tags": ["impossible"],
+    "primitive": "A spawned child needs a closable ProcessStdin so a library can send filtered data and then deliver EOF to an arbitrary consumer.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-cli/stdin_close.jet reports E0102: `ProcessStdin` has no method `close` at stdin_close.jet:5. The matching producer-to-cat code in pkg/run.jet:75-85 timed out after 60 seconds at consumer.wait because cat never received EOF. pipe_head.jet:4-11 exits 0 only because head stops after two lines.",
+    "areas": ["cli"],
+    "severity": "blocks",
+    "workaround": "Use a fixed-count consumer such as head, or use all-native process.pipeline; neither supports an arbitrary in-process filter followed by EOF."
+  },
+  {
+    "id": "area-cli-G2",
+    "tags": ["boilerplate"],
+    "primitive": "core.files needs an ignore-aware recursive walk with .gitignore matching for nested rules, negation, anchoring, and directory semantics.",
+    "evidence": "core-library.md:437-438 exposes only walk and walk_files, with no ignore API. pkg/run.jet:45-60 reads one root file and ignored() at lines 15-21 handles only trailing slash, *.suffix, and exact paths. With data/.gitignore containing ignored/, *.secret, and !private.secret, `scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-cli/pkg -- search jet /home/nate/.cache/jet-luna/dx3/area-cli/pkg/data` prints matches=2 and omits private.secret, so the hand-written matcher is not git-compatible.",
+    "areas": ["cli"],
+    "severity": "hurts",
+    "workaround": "Write a full .gitignore parser and thread its state through traversal; the probe's small matcher is only a subset."
+  },
+  {
+    "id": "area-cli-G3",
+    "tags": ["call-site", "boilerplate"],
+    "primitive": "A typed object-pipeline edge should decode native output and bind record properties to the next stage without a per-command text adapter.",
+    "evidence": "`scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-cli/pkg -- objects work` succeeds with alpha and gamma records, but pkg/run.jet:99-107 must capture ProcessReceipt.output as String, declare #Codable NoteRow, call data.csv<NoteRow>, then write filter/sort closures. shell-sysadmin/report.md:49-51 records PowerShell property binding and native structured filtering as real gaps; core-library.md:1743-1745 types ProcessReceipt.output as String.",
+    "areas": ["cli"],
+    "severity": "hurts",
+    "workaround": "Manually declare each row schema, decode CSV or JSON, and call data.filter/sort_by; ordinary typed rows work, but shell-style binding does not."
+  }
+]

@@ -1,0 +1,57 @@
+use core.data as data
+use core.files as files
+
+#Codable
+struct Observation {
+    team: String
+    segment: String
+    x: Float
+    y: Float
+    value: Float
+}
+
+#Codable
+struct Regression {
+    slope: Float
+    intercept: Float
+    r_squared: Float
+}
+
+fn fit(rows: [Observation]) Regression -> {
+    n := 0
+    sum_x := Float{0.0}
+    sum_y := Float{0.0}
+    sum_xx := Float{0.0}
+    sum_xy := Float{0.0}
+    loop row in rows {
+        n += 1
+        sum_x += row.x
+        sum_y += row.y
+        sum_xx += row.x * row.x
+        sum_xy += row.x * row.y
+    }
+    nf :: Float.from_int(n)
+    denominator :: nf * sum_xx - sum_x * sum_x
+    slope :: (nf * sum_xy - sum_x * sum_y) / denominator
+    intercept :: (sum_y - slope * sum_x) / nf
+    mean_y :: sum_y / nf
+    total := Float{0.0}
+    residual := Float{0.0}
+    loop row in rows {
+        predicted :: intercept + slope * row.x
+        total += (row.y - mean_y) * (row.y - mean_y)
+        residual += (row.y - predicted) * (row.y - predicted)
+    }
+    return Regression{
+        slope: slope,
+        intercept: intercept,
+        r_squared: 1.0 - residual / total,
+    }
+}
+
+fn run() {
+    raw :: files.read("/home/nate/.cache/jet-luna/dx3/area-data/fixture-100k.csv") ?? panic("read")
+    rows :: data.csv<Observation>(raw) ?? panic("csv")
+    result :: fit(rows)
+    print("slope={result.slope} intercept={result.intercept} r2={result.r_squared}")
+}

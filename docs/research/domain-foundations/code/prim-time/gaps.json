@@ -1,0 +1,38 @@
+[
+  {
+    "id": "prim-time-G1",
+    "tags": ["impossible"],
+    "primitive": "A first-class UTC instant must carry and round-trip a leap-second label such as 23:59:60 alongside ordinary DateTime values.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-time/store scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-time/pkg/api_probe.jet --watch=off; output: Error: time out of range: 23:59:60; Trail [E3002] ... run (api_probe.jet:13). docs/reference/core-library.md:2315-2316 says RFC3339 parsing rejects :60.",
+    "areas": ["backend", "data", "science"],
+    "severity": "blocks",
+    "workaround": "Use a package-owned AstroTime split carrier and keep a leap label outside core DateTime; direct core DateTime interoperation is lost."
+  },
+  {
+    "id": "prim-time-G4",
+    "tags": ["defect"],
+    "primitive": "Native lowering of time.from_unix_nanoseconds must preserve signed Int values at the i64 boundary.",
+    "evidence": "Native: JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/prim-time/store scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-time/pkg/highres_max.jet --watch=off -> 1677-09-21T00:12:43.145224196Z. Interpreter: the same command with `run --interpret` -> 2262-04-11T23:47:16.854775807Z. Source probe line highres_max.jet:3 passes 9223372036854775807.",
+    "areas": ["backend", "data", "science"],
+    "severity": "blocks",
+    "workaround": "Stay far below the boundary or use the interpreter/custom split carrier; neither is a production fix for native high-resolution epochs."
+  },
+  {
+    "id": "prim-time-G2",
+    "tags": ["boilerplate"],
+    "primitive": "A versioned, provenance-carrying leap-second and Earth-rotation data source must provide checked UTC, TAI, TT, and UT1 conversions.",
+    "evidence": "Core docs list UTC DateTime, IANA zones, Duration, Instant, and Clock only (docs/reference/core-library.md:2255-2303). The working program's time_probe.jet:63-169 repeats 28 leap-table rows, offset lookup, inverse iteration, TT constants, and a caller-supplied DUT1 value; its run prints tai=1483228835s, tt=1483228867s+184000000ns, ut1=1483228799s+334000000ns and round-trips UTC. Archived astronomy claims mark UTC/TAI/UT1/TT and Earth-rotation provenance real gaps (astronomy-astrophysics/claims.json:163-176).",
+    "areas": ["backend", "data", "science"],
+    "severity": "hurts",
+    "workaround": "Ship and maintain a package-owned, versioned leap table and DUT1/IERS data, with explicit stale-data policy and provenance."
+  },
+  {
+    "id": "prim-time-G3",
+    "tags": ["call-site"],
+    "primitive": "Core time needs an exact long-baseline high-resolution instant carrier with separate epoch parts and declared precision bounds.",
+    "evidence": "crates/jet-codegen/src/Prelude/Core/Time.rs:652-655 stores DateTime as i64 seconds plus nanoseconds, while :677-681 accepts an i64 Unix-nanosecond count. A normal fractional instant works in the final run (highres_ns=123456789 roundtrip=1711726200123456789), but astronomy-astrophysics/claims.json:179-192 records the two-part long-epoch requirement. The probe's AstroTime at time_probe.jet:68-94 is required to hold scale values without forcing them through core DateTime.",
+    "areas": ["data", "science"],
+    "severity": "hurts",
+    "workaround": "Use the package's AstroTime {seconds,nanoseconds,scale} and JulianDate {day,nanoseconds} split carriers, converting to core DateTime only for ordinary-range values."
+  }
+]

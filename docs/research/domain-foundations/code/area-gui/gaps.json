@@ -1,0 +1,83 @@
+[
+  {
+    "id": "area-gui-G1",
+    "tags": ["impossible"],
+    "primitive": "Android and iOS GUI target artifacts and host-toolchain admission.",
+    "evidence": "env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store scripts/agent/jet-env jet build --release --target android /home/nate/.cache/jet-luna/dx3/area-gui/pkg/note_app.jet -> Error [E3302]: Target `android` is not available (3.97 s); the corresponding --target ios command -> Error [E3302]: Target `ios` is not available (1.79 s).",
+    "areas": ["gui", "embedded"],
+    "severity": "blocks",
+    "workaround": "Install the target standard libraries and supply Android/iOS host and packaging toolchains outside Jet; this probe did not install them."
+  },
+  {
+    "id": "area-gui-G2",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Typed native open/save file-dialog results with filters, cancellation, and authority checks.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_dialog_api.jet -> Error [E1004]: `core.ui` has no item `file_open_dialog`; the diagnostic lists only the fixed UI items ending in `button` (2.94 s).",
+    "areas": ["gui", "office-document-automation", "education-teaching"],
+    "severity": "blocks",
+    "workaround": "Call GTK, Qt, or an OS dialog through FFI and hand-write path, cancellation, filter, and authority conversion."
+  },
+  {
+    "id": "area-gui-G3",
+    "tags": ["impossible", "call-site"],
+    "primitive": "Typed native text-editing input services for clipboard, selection, IME composition, and drag-and-drop.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_gui_api.jet -> Error [E1004]: `core.ui` has no item `clipboard_read`; the fixed public list exposes only `key_event` and `resize_event` as input constructors (1.95 s).",
+    "areas": ["gui", "data", "education-teaching", "office-document-automation"],
+    "severity": "blocks",
+    "workaround": "Use host FFI events and maintain selection, composition, clipboard, and transfer state manually around the TextInput node."
+  },
+  {
+    "id": "area-gui-G4",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Font discovery and fallback plus OpenType script, Bidi, glyph-run, and shaping operations.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_font_api.jet -> Error [E1001]: There is no core module `core.font` (2.03 s); the successful app handles Unicode as scalar strings only.",
+    "areas": ["gui", "typography-publishing", "office-document-automation", "education-teaching"],
+    "severity": "blocks",
+    "workaround": "Bind fontconfig/FreeType/HarfBuzz through C FFI and hand-write font handles, fallback, glyph clusters, and positioned-run conversion."
+  },
+  {
+    "id": "area-gui-G5",
+    "tags": ["impossible", "call-site"],
+    "primitive": "Typed shortcut registration and host action dispatch for commands such as Ctrl+S and Ctrl+Z.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_shortcut_api.jet -> Error [E1004]: `core.ui` has no item `shortcut`; the fixed public list contains no shortcut registry (1.89 s).",
+    "areas": ["gui", "education-teaching", "office-document-automation"],
+    "severity": "hurts",
+    "workaround": "Decode host key strings manually and maintain an application action table outside core.ui."
+  },
+  {
+    "id": "area-gui-G6",
+    "tags": ["impossible", "call-site"],
+    "primitive": "Accessible names, descriptions, and control states attached to UI nodes beyond a role enum.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-gui/pkg/missing_a11y_api.jet -> Error [E1004]: `core.ui` has no item `aria_label`; the list has role constructors but no naming API (1.95 s).",
+    "areas": ["gui", "education-teaching", "office-document-automation"],
+    "severity": "hurts",
+    "workaround": "Repeat visible labels and bridge every control to native accessibility APIs through an external host binding."
+  },
+  {
+    "id": "area-gui-G7",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Jet desktop bundle, installer, signing, metadata, and updater artifact command.",
+    "evidence": "scripts/agent/jet-env jet package --help -> Error [E2101]: `package` isn't a jet command (1.84 s); jet build emits only a native executable.",
+    "areas": ["gui"],
+    "severity": "blocks",
+    "workaround": "Invoke platform bundlers and signing/updater tools separately and carry their metadata outside Jet."
+  },
+  {
+    "id": "area-gui-G8",
+    "tags": ["defect"],
+    "primitive": "Reactive render closure capture that preserves signal ownership when a conditional reads it and later code updates it.",
+    "evidence": "env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/area-gui/pkg/reactive_conditional_smoke.jet -> internal compiler error, generated Rust did not compile (9.65 s); matching rustc output is `error[E0382]: borrow of moved value: __jet_selected` at `.set(1)`.",
+    "areas": ["gui", "web", "data", "ai-ml"],
+    "severity": "hurts",
+    "workaround": "Avoid conditional logic in the render closure or precompute the marker before rendering."
+  },
+  {
+    "id": "area-gui-G9",
+    "tags": ["defect"],
+    "primitive": "Reactive render lowering that supports calling a user view helper without emitting an invalid Result-returning closure.",
+    "evidence": "env JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-gui/store JET_UI_HEADLESS=1 scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/area-gui/pkg/reactive_view_smoke.jet -> internal compiler error, generated Rust did not compile (9.03 s); matching rustc output is `error[E0277]` for `?` in a `()` closure and `error[E0308]` for `expected (), found Result`.",
+    "areas": ["gui", "web", "data", "ai-ml"],
+    "severity": "hurts",
+    "workaround": "Inline the UI tree inside the render closure until helper lowering returns the correct closure result type."
+  }
+]

@@ -1,0 +1,47 @@
+[
+ {
+  "id": "prim-tooling-hooks-G1",
+  "tags": [
+   "impossible"
+  ],
+  "primitive": "Expose the versioned core.compiler lex/parse/check/source_map seam to runtime Jet tools, or provide a typed runtime subprocess bridge.",
+  "evidence": "Command: /home/nate/Projects/Github/jet/scripts/agent/jet-env jet run runtime_compiler.jet --watch=off. Output: Error [E0956]: core.compiler.lex is compile-time only; Why: The compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service; Fix: Move this call into fn build or a comptime binding.",
+  "areas": [
+   "cli",
+   "web",
+   "backend"
+  ],
+  "severity": "blocks",
+  "workaround": "Shell out to jet inspect compiler lex|parse|check and parse its JSON, as rename.mjs does; this is an external-process seam, not a Jet library API."
+ },
+ {
+  "id": "prim-tooling-hooks-G2",
+  "tags": [
+   "call-site"
+  ],
+  "primitive": "Expose a versioned machine-readable build-graph and receipt-diff API with affected files, cache hit or miss, key deltas, and action evidence.",
+  "evidence": "Commands: jet inspect graph graph.jet -> target graph_probe Executable; action stamp stamp.txt. jet inspect explain-build stamp graph.jet -> argv=printf graph; inputs=1; outputs=1; cache=Cached. After changing printf graph to printf graph2 and rebuilding, .jet/build-cache/explanations/0 contained only act-sha256:<digest>, sha256:<digest>, miss-key; receipt objects were binary jet-receipt-v2 blobs.",
+  "areas": [
+   "cli",
+   "web",
+   "backend"
+  ],
+  "severity": "blocks",
+  "workaround": "Invoke the text CLI and reverse-engineer private .jet receipt objects; there is no stable in-process graph/receipt query for a Jet tool."
+ },
+ {
+  "id": "prim-tooling-hooks-G3",
+  "tags": [
+   "defect"
+  ],
+  "primitive": "Make additive generated-module builds idempotent: generated outputs must not be rediscovered as handwritten modules or shadow the next build.",
+  "evidence": "First command: jet build /home/nate/.cache/jet-luna/dx3/prim-tooling-hooks/pkg succeeded and wrote .jet/generated/prim_tooling_hooks/facts.jet. Repeating the same command then emitted Error [E3510]: b.generate(\"facts\") would shadow the module at .jet/generated/prim_tooling_hooks/facts.jet; Why: Generation is additive: what you wrote is always what compiles.",
+  "areas": [
+   "cli",
+   "web",
+   "backend"
+  ],
+  "severity": "hurts",
+  "workaround": "Delete the generated artifact before rebuilding; jet run can consume the generated package, but repeated jet build is not cleanly repeatable."
+ }
+]

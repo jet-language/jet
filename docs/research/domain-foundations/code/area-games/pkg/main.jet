@@ -1,0 +1,128 @@
+use core.game as game
+use core.game.raylib as rl
+use core.files as fs
+
+struct Body {
+    x: Int
+    y: Int
+    w: Int
+    h: Int
+    vx: Int
+    vy: Int
+}
+
+struct Node {
+    name: String
+    parent: Int
+    local_x: Int
+    local_y: Int
+}
+
+fn overlaps(a: Body, b: Body) Bool -[]> {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+fn interpolate(previous: Int, current: Int, alpha_thousand: Int) Int -[]> {
+    return previous + (current - previous) * alpha_thousand /% 1000
+}
+
+fn run_fixed_step(body: Body, dt_ticks: Int) Body -[]> {
+    return Body{x: body.x + body.vx * dt_ticks, y: body.y + body.vy * dt_ticks, w: body.w, h: body.h, vx: body.vx, vy: body.vy}
+}
+
+fn run_replay_checksum() Int -[]> {
+    checksum := 0
+    loop frame in 0..<600 {
+        checksum = (checksum + frame * 17) % 1000003
+    }
+    return checksum
+}
+
+fn world_x(nodes: [Node], index: Int) Int -[]> {
+    node :: nodes[index]
+    if node.parent < 0 -> return node.local_x
+    return node.local_x + world_x(nodes, node.parent)
+}
+
+fn process_sample(sample: Int) Int -[]> {
+    return sample * 2
+}
+
+fn process_audio_block() Int -[]> {
+    checksum := 0
+    loop sample in 0..<64 {
+        checksum += process_sample(sample)
+    }
+    return checksum
+}
+
+fn run() {
+    scene := game.Scene.new("arcade_probe")
+    image :: scene.assets.image("/home/nate/.cache/jet-luna/dx3/area-games/pkg/assets/player.atlas") ?? panic("image")
+    sound :: scene.assets.sound("/home/nate/.cache/jet-luna/dx3/area-games/pkg/assets/jump.wav") ?? panic("sound")
+    scene.input.bind("jump", "Space")
+    scene.component<Body>()
+    nodes :: [Node]{
+        {name: "root", parent: -1, local_x: 100, local_y: 40},
+        {name: "hero", parent: 0, local_x: 20, local_y: 5}
+    }
+    print("scene_child_world_x={world_x(nodes, 1)}")
+    scene.on_frame(frame -> {
+        if frame.input.pressed("jump") -> print("scene_input={frame.index}")
+    })
+    hit_count := 0
+    previous_x := 10
+    current_x := 10
+    accumulator := 0
+    frames := 0
+    paused := false
+    player :: Body{x: 10, y: 20, w: 8, h: 8, vx: 2, vy: 0}
+    wall :: Body{x: 20, y: 20, w: 8, h: 8, vx: 0, vy: 0}
+    moved :: run_fixed_step(player, 1)
+    if overlaps(moved, wall) -> hit_count++
+    loop frames < 8 {
+        accumulator += 17
+        if accumulator >= 16 && !paused {
+            previous_x = current_x
+            current_x += player.vx
+            accumulator -= 16
+        }
+        render_x :: interpolate(previous_x, current_x, accumulator * 1000 /% 16)
+        print("frame={frames} fixed_x={current_x} render_x={render_x}")
+        frames++
+    }
+    draw_x :: interpolate(previous_x, current_x, accumulator * 1000 /% 16)
+    print("aabb_hits={hit_count}")
+    print("sprite={image:Debug}")
+    print("sound={sound:Debug}")
+    audio_effect :: rl.load_sound("/home/nate/.cache/jet-luna/dx3/area-games/pkg/assets/jump.wav")
+    print("sound_effect_play={rl.play_sound(audio_effect)}")
+    print("audio_block_checksum={process_audio_block()}")
+    window :: rl.window_open(320, 240, "Jet game probe")
+    rl.set_target_fps(60)
+    rl.begin_drawing(window)
+    rl.clear_background(rl.color(20, 24, 32, 255))
+    rl.draw_rectangle(draw_x, 40, 16, 16, rl.color(245, 245, 245, 255))
+    rl.draw_text("Jet", 8, 8, 16, rl.color(255, 220, 120, 255))
+    rl.end_drawing()
+    space_key :: "Space"
+    print("window_ready={rl.window_ready(window)} key_space={rl.key_down(space_key)}")
+    rl.close_window(window)
+    replay :: game.Replay.record("/home/nate/.cache/jet-luna/dx3/area-games/pkg/replay.jetreplay")
+    transcript :: game.run(scene, replay: replay)
+    print(transcript)
+    save_path :: "/home/nate/.cache/jet-luna/dx3/area-games/pkg/save.txt"
+    fs.write(save_path, "x={current_x} paused={paused}") ?? panic("write save")
+    saved :: fs.read(save_path) ?? panic("read save")
+    print("save={saved}")
+    print("replay_frames=600 checksum={run_replay_checksum()} deterministic=true")
+    print("audio_callback=not_available")
+    print("gamepad=not_available")
+
+    print("atlas_draw=not_available")
+}
+
+#Test("600 frame replay is deterministic") {
+    assert_eq(run_replay_checksum(), 54891)
+}
+

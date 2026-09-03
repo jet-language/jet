@@ -1,0 +1,16 @@
+// prim-distributed: local work-stealing parallel map over sixteen workers.
+// The callback is pure and owned; para_map preserves input order.
+fn cpu_work(n: Int) Int -> {
+    total := n
+    loop i in 1..12000 {
+        total = (total * 33 + i + n) % 1000003
+    }
+    return total
+}
+
+fn run() {
+    values := [Int]{}
+    loop n in 0..255 -> values.push(n)
+    parallel :: values.para_map((n: Int) -> cpu_work(n), limit: 16)
+    print("parallel_map workers=16 items={values.len()} results={parallel.len()}")
+}

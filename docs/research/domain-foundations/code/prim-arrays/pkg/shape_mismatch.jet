@@ -1,0 +1,15 @@
+use core.compute as compute
+
+fn run() !ComputeError -> {
+    left :: compute.full([2, 3], 1.0) ?? panic("left")
+    right :: compute.full([4], 2.0) ?? panic("right")
+    attempt :: compute.add(left, right)
+    if attempt == {
+        .Ok(value) -> {
+            print("unexpected:{compute.shape(value)}")
+        }
+        .Err(error) -> {
+            print("mismatch_error:{error}")
+        }
+    }
+}

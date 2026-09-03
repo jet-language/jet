@@ -1,0 +1,20 @@
+use core.compute as compute
+use core.encoding.json as json
+use core.files as files
+
+#Codable
+struct Regression { slope: Float intercept: Float r_squared: Float }
+#Codable
+struct Receipt { tensor_shape: [Int] tensor_cell: Float regression: Regression }
+
+fn run() {
+    source :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("tensor")
+    tensor :: compute.reshape(source, [2, 3]) ?? panic("reshape")
+    shape :: compute.shape(tensor)
+    cell :: compute.get(tensor, [1, 2]) ?? panic("cell")
+    result :: Regression{slope: Float{3.5}, intercept: Float{0.0}, r_squared: Float{1.0}}
+    receipt :: Receipt{tensor_shape: shape, tensor_cell: cell, regression: result}
+    text :: json.to_string(receipt)
+    files.write("/home/nate/.cache/jet-luna/dx3/area-data/tensor.receipt.json", text) ?? panic("write")
+    print(text)
+}

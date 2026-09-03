@@ -1,0 +1,38 @@
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    meeting_title :: "Meeting"
+    ideas_title :: "Ideas"
+    body := reactive.signal("old")
+    selected := reactive.signal(0)
+    dark := reactive.signal(true)
+    settings_open := reactive.signal(false)
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        marker :: if selected.get() == 0 -> "* " else -> "  "
+        mode :: if dark.get() -> "dark" else -> "light"
+        rows := [UiNode]{
+            ui.node_color("JET NOTES — {mode} mode", 72.0, 1.0, "#161616"),
+            ui.node_role("{marker}{meeting_title}", 28.0, 1.0, ui.aria_role_button()),
+            ui.node_role("  {ideas_title}", 28.0, 1.0, ui.aria_role_button()),
+            ui.node_color("EDITOR — {meeting_title}", 72.0, 1.0, "#f3f0e8"),
+            ui.node_role(body.get(), 72.0, 4.0, ui.aria_role_text_input()),
+            ui.button("Save", on_click: () -> { print("save") }),
+            ui.button("Undo", on_click: () -> { print("undo") })
+        }
+        if settings_open.get() {
+            rows.push(ui.node_color("SETTINGS", 72.0, 1.0, "#f3f0e8"))
+            rows.push(ui.text("Theme and editor preferences"))
+        }
+        rows.push(ui.text("Shortcuts: Ctrl+S · Ctrl+Z · Ctrl+Shift+Z · Ctrl+,"))
+        ui.mount(render_backend, ui.box(rows))
+    })
+    print("initial renders: {backend.render_count()}")
+    selected.set(1)
+    dark.set(false)
+    settings_open.set(true)
+    body.set("new")
+    print("updated renders: {backend.render_count()}")
+}

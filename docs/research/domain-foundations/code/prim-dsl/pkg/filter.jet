@@ -1,0 +1,28 @@
+use core.encoding.json as json
+
+fn price(item: DataTree) ?Int -> {
+    if item == .Object(fields) {
+        if fields.get("price") == .Val(price_tree) -> return Val(price_tree.int() ?? 0)
+    }
+    return None
+}
+
+fn select_prices(data: DataTree) [Int] -> {
+    prices := [Int]{}
+    if data == .Object(root) {
+        rows :: root["items"]
+        if rows == .Array(items) {
+            loop item in items {
+                p :: price(item)
+                if p != None -> prices.push(p)
+            }
+        }
+    }
+    return prices
+}
+
+pub fn sample() [Int] -> {
+    raw :: "{{\"items\":[{{\"price\":3}},{{\"price\":8}},{{\"name\":\"free\"}}]}}"
+    data :: json.parse(raw) ?? DataTree.Null
+    return select_prices(data)
+}

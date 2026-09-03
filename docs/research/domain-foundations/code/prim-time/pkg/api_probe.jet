@@ -1,0 +1,21 @@
+use core.time as time
+
+fn run() {
+    d :: time.new(2024, 3, 29)
+    wd :: d.iso_weekday()
+    ds :: d.to_string()
+    print("date={d} wd={wd} str={ds}")
+    dt :: time.datetime(2024, 3, 29, 15, 30, 0)
+    dts :: dt.to_string()
+    ns :: dt.nanosecond()
+    unixns :: dt.to_unix_ns()
+    print("dt={dts} ns={ns} unixns={unixns}")
+    parsed :: time.parse_rfc3339("2016-12-31T23:59:60Z")
+    print("parse60={parsed}")
+    next :: d.add_days(1)
+    print("dateadd={next}")
+    zone :: time.zone("America/New_York") ?? time.utc()
+    z :: time.zoned_local(d, time.time(9, 0, 0), zone)
+    zs :: z.format("yyyy-MM-dd HH:mm:ss VV XXX")
+    print("z={zs}")
+}

@@ -1,0 +1,47 @@
+[
+  {
+    "id": "area-backend-G1",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Provide a bounded database connection pool with acquisition limits, health/reset, and shutdown lifecycle.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-backend/pool_probe.jet -> Error [E1004]: `core.db` has no item `pool`; the diagnostic lists only open/open_memory/policy/transaction/migrate. The real package uses one db.open(path) at pkg/run.jet:140.",
+    "areas": ["backend", "data", "web", "cli"],
+    "severity": "blocks",
+    "workaround": "Use one SQLite connection or write an application pool around separately opened connections; neither gives a checked reset/readiness contract."
+  },
+  {
+    "id": "area-backend-G2",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Expose typed route contract metadata and a standard OpenAPI/schema validator-exporter tied to HTTP methods, inputs, responses, auth, and operation identity.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-backend/openapi_probe.jet -> Error [E1001]: There is no core module `core.openapi`. pkg/run.jet:72-87 hand-writes JSON and checks only three substrings; jq accepts the resulting file, but no schema or route consistency is checked.",
+    "areas": ["backend", "web", "cli", "ai"],
+    "severity": "hurts",
+    "workaround": "Hand-maintain an OpenAPI string and ad-hoc assertions, as this probe does, or build a package-owned route table that duplicates mux declarations."
+  },
+  {
+    "id": "area-backend-G3",
+    "tags": ["impossible"],
+    "primitive": "Provide request-scoped server deadline and cancellation middleware that propagates cancellation into route tasks.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-backend/timeout_probe.jet -> Error [E1004]: `core.http.server` has no item `timeout`; the available list contains bind/mux/serve/shutdown-adjacent serving helpers but no timeout wrapper. The HTTP reference also marks server timeout middleware open at docs/reference/core-library.md:753.",
+    "areas": ["backend", "web", "games", "gui", "embedded"],
+    "severity": "hurts",
+    "workaround": "Use client-side phase timeouts and manual time checks; graceful server shutdown works, but an in-flight handler cannot be cancelled by a server policy."
+  },
+  {
+    "id": "area-backend-G4",
+    "tags": ["impossible"],
+    "primitive": "Provide typed process-signal subscription that forwards SIGTERM-style shutdown into the service cancellation lifecycle.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-backend/signal_probe.jet -> Error [E1004]: `core.process` has no item `signal`; the diagnostic lists only exit/run/cmd/pipeline/argv/args.",
+    "areas": ["backend", "cli", "embedded", "gui"],
+    "severity": "hurts",
+    "workaround": "Have an external supervisor call an application shutdown endpoint, or add an explicit unsafe/native signal bridge."
+  },
+  {
+    "id": "area-backend-G5",
+    "tags": ["defect"],
+    "primitive": "Make the default evaluator lower the documented core.log.set_trace_id operation.",
+    "evidence": "scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/area-backend/pkg -> Error [E0956]: `core.log.set_trace_id()` isn't supported by the current evaluator yet at pkg/run.jet:136. The same package succeeds under jet run --release and jet build --release.",
+    "areas": ["backend", "web", "cli", "data", "ai", "games", "gui", "embedded"],
+    "severity": "hurts",
+    "workaround": "Use the release/native evaluator or remove set_trace_id from the default-tier development run."
+  }
+]

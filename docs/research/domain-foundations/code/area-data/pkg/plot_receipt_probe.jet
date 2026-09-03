@@ -1,0 +1,29 @@
+use core.data as data
+use core.files as files
+use core.encoding.json as json
+
+#Codable
+struct Row {
+    team: String
+    value: Float
+}
+
+#Codable
+struct Receipt {
+    rows: Int
+    groups: Int
+    svg_bytes: Int
+}
+
+fn run() {
+    raw :: "team,value\nA,2.0\nB,4.0\nA,6.0\n"
+    rows :: data.csv<Row>(raw) ?? panic("csv")
+    groups :: data.group_mean(rows, row -> row.team, row -> row.value) ?? panic("group")
+    svg :: data.bar_svg(groups) ?? panic("plot")
+    svg_path :: "/home/nate/.cache/jet-luna/dx3/area-data/output.svg"
+    files.write(svg_path, svg) ?? panic("write svg")
+    receipt :: Receipt{rows: rows.len(), groups: groups.len(), svg_bytes: svg.len()}
+    receipt_json :: json.to_string(receipt)
+    files.write("/home/nate/.cache/jet-luna/dx3/area-data/receipt.json", receipt_json) ?? panic("write receipt")
+    print("rows={receipt.rows} groups={receipt.groups} svg={receipt.svg_bytes}")
+}

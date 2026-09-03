@@ -1,0 +1,38 @@
+[
+  {
+    "id": "prim-realtime-G1",
+    "tags": ["impossible"],
+    "primitive": "A standard callback/device boundary is needed to register a fixed-rate buffer callback and report underruns or overruns.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/audio-missing.jet -> Error [E1001]: There is no core module `core.audio` at audio-missing.jet:7. The ten-second probe therefore used a timer fake; no Jet API opened the host's /dev/snd device.",
+    "areas": ["games", "embedded", "gui"],
+    "severity": "blocks",
+    "workaround": "Use a separately authored C/FFI device backend and pass a caller-owned fixed buffer to a manually checked callback; Jet has no first-party registration or underrun receipt."
+  },
+  {
+    "id": "prim-realtime-G2",
+    "tags": ["impossible"],
+    "primitive": "A monotonic sub-millisecond or absolute-period wait must preserve nanosecond deadlines instead of truncating them to scheduler milliseconds.",
+    "evidence": "scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/subms-sleep.jet printed requested_total_us=99999 and elapsed_total_us=245 after 100 calls of time.sleep(999_999ns). crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs:53-68 implements saturating_div(1_000_000) before scheduler sleep.",
+    "areas": ["games", "embedded", "gui"],
+    "severity": "blocks",
+    "workaround": "Busy-spin against time.instant() or call an external timer through FFI; neither is a portable hard-real-time wait guarantee."
+  },
+  {
+    "id": "prim-realtime-G3",
+    "tags": ["impossible"],
+    "primitive": "A lock-free atomic or bounded nonblocking shared-state primitive must be visible to the type/effect checker for callback use.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/atomic-attempt.jet -> Error [E0102]: Nothing named `atomic` exists here at atomic-attempt.jet:2; scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/lock-free-attempt.jet -> Error [E0041]: `mutex` is not in Jet at lock-free-attempt.jet:2; yet shared-hot.jet:11-12 (`fn hot(state: Shared<State>) -[!Mem.Alloc, !Time]>` then `state.ready += 1`) passes with diagnostics=0. docs/spec/spec.md:587-600 defines Shared<T> as lock-guarded, and callback-channel-attempt.jet:1-5 also passes -[!Mem.Alloc, !Time]> while calling tx.send(1).",
+    "areas": ["games", "embedded", "gui"],
+    "severity": "blocks",
+    "workaround": "Keep callback state in caller-owned buffers and move communication outside the callback, or provide a separately audited native atomic/ring-buffer backend."
+  },
+  {
+    "id": "prim-realtime-G4",
+    "tags": ["impossible"],
+    "primitive": "The runtime needs a CPU-work deadline check or overrun receipt that interrupts or fails a callback, not only wait-point deadline observation.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/busy-deadline.jet passes with diagnostics=0; scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-realtime/pkg/busy-deadline.jet prints cpu-finished=49999995000000 and context-returned after busy-deadline.jet:10-15 runs 10,000,000 integer iterations under #Context(deadline: time.now() + 5). docs/spec/spec.md:2664-2668 limits inherited E3003 observation to wait/IO points. The ten-second realtime run's manual checks reported control.ticks=9307 and control.missed=9295.",
+    "areas": ["games", "embedded", "gui"],
+    "severity": "blocks",
+    "workaround": "Manually sample time before and after every callback and use an external watchdog; this detects misses but cannot enforce or prove a CPU deadline."
+  }
+]

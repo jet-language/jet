@@ -1,0 +1,15 @@
+package {
+    name: "prim-realtime-timer-resolution"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Time, Mem.Alloc] } }
+}
+
+use core.time as time
+
+fn run() {
+    started :: time.instant()
+    time.sleep(5_333_333ns)
+    elapsed :: started.elapsed().in(.Microseconds)
+    print("requested_us=5333")
+    print("elapsed_us={elapsed}")
+}

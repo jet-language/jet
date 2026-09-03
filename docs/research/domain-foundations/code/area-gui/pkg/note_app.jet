@@ -1,0 +1,84 @@
+use core.ui as ui
+use core.reactive as reactive
+use core.files as fs
+
+fn shortcut_label(code: String) String -> {
+    if code == {
+        "Ctrl+S" -> "save"
+        "Ctrl+Z" -> "undo"
+        "Ctrl+Shift+Z" -> "redo"
+        "Ctrl+," -> "settings"
+        else -> "ignored"
+    }
+}
+
+fn run() {
+    path :: "/home/nate/.cache/jet-luna/dx3/area-gui/pkg/sample-note.txt"
+    fs.write(path, "Meeting notes — café\nBring résumé and naïve examples.\n") ?? panic("seed note")
+    loaded :: fs.read(path) ?? panic("open note")
+    loaded_len :: loaded.len()
+
+    meeting_title :: "Meeting"
+    ideas_title :: "Ideas"
+    selected := reactive.signal(0)
+    draft := reactive.signal(~loaded)
+    mode := reactive.signal("dark")
+    settings := reactive.signal("closed")
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+
+    ui.reactive_render(() -> {
+        rows := [UiNode]{
+            ui.node_color("JET NOTES — {mode.get()} mode", 72.0, 1.0, "#161616"),
+            ui.node_role("* {meeting_title}", 28.0, 1.0, ui.aria_role_button()),
+            ui.node_role("  {ideas_title}", 28.0, 1.0, ui.aria_role_button()),
+            ui.node_color("EDITOR — selected {selected.get()}", 72.0, 1.0, "#f3f0e8"),
+            ui.node_role("{draft.get()}", 72.0, 4.0, ui.aria_role_text_input()),
+            ui.button("Save", on_click: () -> { print("button: Save") }),
+            ui.button("Undo", on_click: () -> { print("button: Undo") }),
+            ui.button("Redo", on_click: () -> { print("button: Redo") }),
+            ui.button("Toggle theme", on_click: () -> { print("button: Toggle theme") }),
+            ui.node_color("SETTINGS ({settings.get()})", 72.0, 1.0, "#f3f0e8"),
+            ui.text("Shortcuts: Ctrl+S · Ctrl+Z · Ctrl+Shift+Z · Ctrl+,"),
+            ui.text("Accessible labels: Save, Undo, Redo, Toggle theme, Editor")
+        }
+        ui.mount(render_backend, ui.box(rows))
+    })
+
+    print("loaded bytes: {loaded_len}")
+    print("focus before mount: {backend.focused_label()}")
+    backend.set_focus_group([
+        ui.node_role("Save", 10.0, 1.0, ui.aria_role_button()),
+        ui.node_role("Editor", 40.0, 3.0, ui.aria_role_text_input()),
+        ui.node_role("Toggle theme", 16.0, 1.0, ui.aria_role_button())
+    ])
+    print("focus initial: {backend.focused_label()}")
+    _tab_result :: backend.on_event(ui.key_event("Tab"))
+    print("tab result: handled")
+    print("focus after Tab: {backend.focused_label()}")
+    save_shortcut :: shortcut_label("Ctrl+S")
+    undo_shortcut :: shortcut_label("Ctrl+Z")
+    print("shortcut Ctrl+S: {save_shortcut}")
+    print("shortcut Ctrl+Z: {undo_shortcut}")
+    print("initial renders: {backend.render_count()}")
+    loop line in backend.frame_lines() -> print("frame: {line}")
+
+    undo := [String]{}
+    redo := [String]{}
+    previous :: draft.get()
+    undo.push(previous)
+    draft.set("Edited — café, résumé, 中文")
+    selected.set(1)
+    mode.set("light")
+    settings.set("open")
+    print("edited renders: {backend.render_count()}")
+    print("theme/settings: light / open")
+    restored :: undo.pop() ?? ""
+    redo.push(draft.get())
+    draft.set(restored)
+    print("undo restored: {draft.get() == loaded}")
+    print("redo depth: {redo.len()}")
+
+    fs.write(path, draft.get()) ?? panic("save note")
+    print("saved: {fs.read(path) == draft.get()}")
+}

@@ -1,0 +1,17 @@
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    body := reactive.signal("old")
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        ui.mount(render_backend, ui.box([
+            ui.text(body.get()),
+            ui.button("Save", on_click: () -> { print("save") })
+        ]))
+    })
+    loop line in backend.frame_lines() -> print("frame: {line}")
+    body.set("new")
+    loop line in backend.frame_lines() -> print("updated: {line}")
+}

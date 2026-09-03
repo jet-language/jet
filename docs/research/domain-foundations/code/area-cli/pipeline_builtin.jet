@@ -1,0 +1,8 @@
+use core.process as process
+
+fn run() {
+    source :: process.cmd(["printf", "keep-one\nskip\nkeep-two\n"])
+    filter :: process.cmd(["grep", "keep"])
+    result :: process.pipeline([source, filter]) ?? panic("pipeline")
+    print("exit={result.code} output={result.output.trim()}")
+}

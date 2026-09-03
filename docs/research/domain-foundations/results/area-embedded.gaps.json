@@ -1,0 +1,65 @@
+[
+  {
+    "id": "area-embedded-G1",
+    "tags": ["impossible"],
+    "primitive": "A usable freestanding Cortex-M target backend and toolchain path for board.sensor_v1.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet build --target=board.sensor_v1 /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/run.jet -> Error [E3302]: Target `thumbv7em-none-eabihf` is not available; jet self doctor --target=thumbv7em-none-eabihf reports the target-specific standard-library component is missing.",
+    "areas": ["embedded"],
+    "severity": "blocks",
+    "workaround": "Install the missing rustc target component outside Jet, then rebuild; this probe did not install it."
+  },
+  {
+    "id": "area-embedded-G2",
+    "tags": ["impossible"],
+    "primitive": "Compiler/runtime binding from a Cortex-M vector table to a bounded ISR and task handoff.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_interrupt.jet -> Error [E1004]: `core` has no item `interrupt`.",
+    "areas": ["embedded", "hardware-drivers", "real-time-safety-critical", "automotive-embedded", "robotics", "plc-industrial"],
+    "severity": "blocks",
+    "workaround": "Provide a target-specific startup/vector-table and callback ABI through external FFI and an audited unsafe boundary."
+  },
+  {
+    "id": "area-embedded-G3",
+    "tags": ["unsafe", "boilerplate"],
+    "primitive": "DMA mapping and ownership transfer that validates buffer lifetime, addressability, and completion.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_dma.jet -> Error [E1004]: `core` has no item `dma`; run.jet:67-72 and 207-217 hand-code owner/submitted/completed flags and DMA register writes.",
+    "areas": ["embedded", "hardware-drivers", "real-time-safety-critical", "robotics", "automotive-embedded"],
+    "severity": "hurts",
+    "workaround": "Use mem.pin(&buffer), raw target registers, and a hand-written ownership protocol inside #Unsafe; the replay does not prove hardware completion."
+  },
+  {
+    "id": "area-embedded-G4",
+    "tags": ["impossible", "call-site"],
+    "primitive": "Compiler-enforced target-aware WCET and hard-deadline contracts for control loops.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_wcet.jet -> Error [E1004]: `core` has no item `wcet`; jet inspect facts lists Target.Memory, Target.MMIO, Target.Startup, Time.Monotonic, Time.Sleep, and Target.Scheduler but no WCET fact; check run.jet emits L2510 hidden-cost-in-loop warnings.",
+    "areas": ["embedded", "real-time-safety-critical", "automotive-embedded", "robotics", "plc-industrial"],
+    "severity": "blocks",
+    "workaround": "Carry a manual integer estimate and runtime comparison as this probe does, then obtain an external qualified WCET/schedulability analysis."
+  },
+  {
+    "id": "area-embedded-G5",
+    "tags": ["impossible", "unsafe"],
+    "primitive": "Target-backed flash storage and authenticated A/B update state with persistent rollback.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_flash.jet -> Error [E1004]: `core` has no item `flash`; JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/missing_ota.jet -> Error [E1004]: `core` has no item `ota`; JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet flash --help -> Error [E2101]: `flash` isn't a jet command. The run.jet slot state is only an in-memory policy replay.",
+    "areas": ["embedded", "automotive-embedded", "hardware-drivers", "real-time-safety-critical"],
+    "severity": "blocks",
+    "workaround": "Call a board bootloader/flash implementation through target FFI or an external updater and persist a separately audited slot journal."
+  },
+  {
+    "id": "area-embedded-G6",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Hardware debug/programming transport that flashes a target and emits a device receipt.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet flash --help -> Error [E2101]: `flash` isn't a jet command; JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet debug --help exposes source debugging, --raw-frames, --dap, and --replay; native JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/run.jet emits `Built build/run` but no device operation or hardware receipt.",
+    "areas": ["embedded", "hardware-drivers", "automotive-embedded", "robotics", "plc-industrial"],
+    "severity": "blocks",
+    "workaround": "Invoke probe-rs, OpenOCD, or a board vendor tool outside Jet and manually carry its result into a release receipt."
+  },
+  {
+    "id": "area-embedded-G7",
+    "tags": ["unsafe", "boilerplate"],
+    "primitive": "Target-profile-backed typed MMIO bindings for named register blocks, widths, and access modes.",
+    "evidence": "JET_STORE_DIR=/home/nate/.cache/jet-luna/dx3/area-embedded/store scripts/agent/jet inspect unsafe /home/nate/.cache/jet-luna/dx3/area-embedded/pkg/mmio_fixed.jet reports `unsafe gates: 1`, with pointer_from_address and volatile read/write discharged only inside the #Unsafe gate; run.jet:19-41 manually declares four #Layout(c) register records and run.jet:96-106 manually records peripheral base addresses.",
+    "areas": ["embedded", "hardware-drivers", "real-time-safety-critical", "robotics", "automotive-embedded", "plc-industrial"],
+    "severity": "hurts",
+    "workaround": "Define each board's #Layout(c) records and address constants, then wrap every raw access in #Unsafe with the required memory obligations."
+  }
+]

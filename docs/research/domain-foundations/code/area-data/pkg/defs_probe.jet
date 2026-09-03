@@ -1,0 +1,22 @@
+use core.data as data
+use core.files as files
+
+#Codable
+struct Observation { team: String segment: String x: Float y: Float value: Float }
+#Codable
+struct Owner { team: String owner: String }
+#Codable
+struct Summary { team: String mean: Float }
+#Codable
+struct Joined { team: String owner: String mean: Float }
+#Codable
+struct Regression { slope: Float intercept: Float r_squared: Float }
+#Codable
+struct AnalysisReceipt { rows: Int columns: Int filtered: Int groups: Int joined: Int pivot_cells: Int window_width: Int svg_bytes: Int tensor_shape: [Int] regression: Regression }
+fn mark(stage: String) { files.write("/home/nate/.cache/jet-luna/dx3/area-data/stage.txt", stage) ?? panic("mark") }
+fn run() {
+    raw :: files.read("/home/nate/.cache/jet-luna/dx3/area-data/fixture-100k.csv") ?? panic("read")
+    rows :: data.csv<Observation>(raw) ?? panic("csv")
+    mark("loaded")
+    print("rows={rows.len()}")
+}

@@ -1,0 +1,27 @@
+use core.files as fs
+
+pub fn append_record(path: Path, record: String) Bool -> {
+    fs.append_all(path, "{record}\n") ?? return false
+    fs.fsync(path) ?? return false
+    return true
+}
+
+pub fn read_records(path: Path) [String] -> {
+    records := [String]{}
+    if !fs.exists(path) -> return records
+    reader :: fs.open(path) ?? return records
+    loop line in reader.lines() -> records.push(line)
+    return records
+}
+
+pub fn compact_records(path: Path, records: [String]) Bool -> {
+    temp :: Path.from("{path.to_string()}.compact")
+    writer :: fs.create(temp) ?? return false
+    loop record in records {
+        writer.write_line(record) ?? return false
+    }
+    writer.flush() ?? return false
+    fs.fsync(temp) ?? return false
+    fs.rename(temp, path) ?? return false
+    return true
+}

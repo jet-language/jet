@@ -1,0 +1,14 @@
+use core.compute as compute
+use core.time as time
+
+fn run() {
+    left :: compute.matrix(32, 32, 1.0) ?? panic("left")
+    right :: compute.matrix(32, 32, 2.0) ?? panic("right")
+    start :: time.instant()
+    result := compute.zeros([32, 32]) ?? panic("result")
+    loop _repeat in 0..<8 {
+        result = compute.matmul(left, right) ?? panic("matmul")
+    }
+    elapsed :: start.elapsed().in(.Milliseconds)
+    print("jet_matmul shape=32x32 repeats=8 elapsed_ms={elapsed} first={compute.to_list(result)[0]}")
+}

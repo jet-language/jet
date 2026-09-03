@@ -1,0 +1,27 @@
+use core.data as data
+use core.files as files
+
+#Codable
+struct Observation {
+    team: String
+    segment: String
+    x: Float
+    y: Float
+    value: Float
+}
+
+fn run() {
+    raw :: files.read("/home/nate/.cache/jet-luna/dx3/area-data/fixture-100k.csv") ?? panic("read")
+    rows :: data.csv<Observation>(raw) ?? panic("csv")
+    filtered :: data.filter(rows, row -> row.value >= 50.0)
+    groups :: data.group_mean(filtered, row -> row.team, row -> row.value) ?? panic("group")
+    sums :: data.group_sum(filtered, row -> row.team, row -> row.value) ?? panic("sum")
+    pivot :: data.pivot_sum(filtered, row -> row.team, row -> row.segment, row -> row.value) ?? panic("pivot")
+    values := [Float]{}
+    loop row in filtered {
+        values.push(row.value)
+    }
+    rolling :: data.rolling_mean(values, 5) ?? panic("rolling")
+    desc :: data.describe(values) ?? panic("describe")
+    print("rows={rows.len()} filtered={filtered.len()} groups={groups.len()} sums={sums.len()} pivot={pivot.len()} rolling={rolling.len()} count={desc.count}")
+}

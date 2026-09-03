@@ -1,0 +1,29 @@
+[
+  {
+    "id": "prim-receipts-G1",
+    "tags": ["impossible"],
+    "primitive": "An extensible typed facet payload on the canonical jet-receipt-v2 receipt with shared query and diff access.",
+    "evidence": "Source/ReceiptStore.rs:47-54 fixes Receipt to claim/status/stdout/stderr/digest, and :301-328 write accepts only those fields; `jet status src/evidence.jet --json` emits only action/claim/reason/receipt/state, while `jet perf compare .jet/replays/evidence.jetproof-replay .jet/replays/evidence-shifted.jetproof-replay` returns Error [E2102]: Base trace: trace path must end with .jettrace.",
+    "areas": ["data", "backend", "embedded", "ai-ml"],
+    "severity": "blocks",
+    "workaround": "Keep a domain record in program memory or stdout and compare it outside Jet; it cannot become a shared receipt field or typed receipt query."
+  },
+  {
+    "id": "prim-receipts-G2",
+    "tags": ["defect"],
+    "primitive": "A replay adapter that executes a successfully captured ambient Time read in the source debugger.",
+    "evidence": "`jet run src/replay.jet --record=clock2 -- foo` prints captured:1788388744998 and `capture: finalized outcome=exit status=0` with artifact `.jet/replays/clock2.jetproof-replay`; `jet debug src/replay.jet --replay=clock2` opens `Time; dev-tir-v1`, stops at `time.now()`, then returns [E0956] `static `time.now`` isn't supported by the current evaluator yet`.",
+    "areas": ["data", "backend", "embedded", "ai-ml"],
+    "severity": "blocks",
+    "workaround": "Route time through an injected deterministic Clock and query pure recorded acts; captured ambient Time remains un-replayable."
+  },
+  {
+    "id": "prim-receipts-G3",
+    "tags": ["defect"],
+    "primitive": "Replay queries that render user-defined evidence with its Jet source type name rather than an internal generated name.",
+    "evidence": "`printf 'when evidence\\ncontinue\\n' | jet debug src/evidence.jet --replay=evidence` returns `(jet) evidence = __jet_RegressionEvidence { __jet_slope: 1.9, ... }`; crates/jet-debug/src/lib.rs:3-6 promises values are in Jet terms and never generated Rust.",
+    "areas": ["data", "backend", "embedded", "ai-ml"],
+    "severity": "hurts",
+    "workaround": "Query scalar fields individually or inspect the program's printed JSON instead of the replay object rendering."
+  }
+]

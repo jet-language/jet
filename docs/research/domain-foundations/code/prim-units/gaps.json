@@ -1,0 +1,47 @@
+[
+  {
+    "id": "prim-units-G1",
+    "tags": ["defect"],
+    "primitive": "Native code generation must compile ordinary cross-file fallible library functions without an internal compiler error.",
+    "evidence": "scripts/agent/jet-env jet build --verbose /home/nate/.cache/jet-luna/dx3/prim-units/buildcheck/run.jet -> front end checked; runtime cache bypassed (split crate rejected — inline retry); internal compiler error: the generated Rust did not compile; generated: /home/nate/Projects/Github/jet/build/run.rs. The package grants IO, Mem.Alloc, Panic. Default jet run of the same isolated package succeeds.",
+    "areas": ["embedded", "science", "games"],
+    "severity": "blocks",
+    "workaround": "Use the default jet run tier or avoid exposing this fallible helper; neither is a native-build fix."
+  },
+  {
+    "id": "prim-units-G2",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Generic types need compile-time dimension arithmetic and normalization so a library can derive and cancel dimensions such as Quantity<A * B>.",
+    "evidence": "scripts/agent/jet-env jet run pkg/generic_probe.jet -> Error [E0003]: Expected `>` after `Quantity<…>`, found `*`; the generic grammar accepts a type name, not a type-level expression. A symbolic Product<A,B> phantom marker runs and prints 2.0 but has no normalization or equivalence proof.",
+    "areas": ["embedded", "science", "games"],
+    "severity": "hurts",
+    "workaround": "Use compiler-known #UnitFamily units, or hand-write nominal wrappers and Product marker trees."
+  },
+  {
+    "id": "prim-units-G3",
+    "tags": ["impossible", "call-site", "boilerplate"],
+    "primitive": "Operator traits need library-definable heterogeneous operands and result types, such as Meter / Second -> Speed.",
+    "evidence": "scripts/agent/jet-env jet run pkg/operator_probe.jet -> Error [E0907]: `div` doesn't match `Div` (impl methods must match the trait signature exactly), then Error [E0360]: No `/` operator is defined for `Meter`; user arithmetic dispatches only through one impl Meter.Div hook.",
+    "areas": ["embedded", "science", "games"],
+    "severity": "hurts",
+    "workaround": "Expose a named helper for every pair, for example meters_per_second(distance, elapsed) -> Speed."
+  },
+  {
+    "id": "prim-units-G4",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Ordinary generic structs need const/numeric parameters so a dimension index can carry a compile-time exponent or scale.",
+    "evidence": "scripts/agent/jet-env jet run pkg/const_dimension_probe.jet -> Error [E0003]: Expected a type name, found a number at Quantity<MeterDim, 1>. Numeric values work in the special generic-module fixed-list path ([T#capacity]) only, not as ordinary struct arguments.",
+    "areas": ["embedded", "science", "games"],
+    "severity": "hurts",
+    "workaround": "Use phantom marker types, hand-written dimensions, or the limited generic-module/fixed-list facility."
+  },
+  {
+    "id": "prim-units-G5",
+    "tags": ["impossible"],
+    "primitive": "Trait coherence needs an explicit extension mechanism for adding safe operators to imported quantity types.",
+    "evidence": "scripts/agent/jet-env jet run pkg/probe_coherence_import.jet -> Error [E0902]: This `impl` can't live here; at least one of the trait or type must be defined in this program (orphan rule), followed by Error [E0360]: No `+` operator is defined for imported Foreign.",
+    "areas": ["embedded", "science", "games"],
+    "severity": "annoys",
+    "workaround": "Own the quantity type and its impls, or wrap the imported type and define a local operator surface."
+  }
+]

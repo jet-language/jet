@@ -1,0 +1,35 @@
+use core.compute as compute
+
+struct LabeledMatrix {
+    row_labels: [String]
+    col_labels: [String]
+    values: Tensor
+}
+
+fn cell(matrix: LabeledMatrix, row: String, column: String) Float -> {
+    ri := 0
+    ci := 0
+    loop label in matrix.row_labels {
+        if label == row -> break
+        ri += 1
+    }
+    loop label in matrix.col_labels {
+        if label == column -> break
+        ci += 1
+    }
+    return compute.get(matrix.values, [ri, ci]) ?? 0.0
+}
+
+fn run() {
+    tensor :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("tensor")
+    matrix :: compute.reshape(tensor, [2, 3]) ?? panic("reshape")
+    labeled :: LabeledMatrix{
+        row_labels: ["north", "south"],
+        col_labels: ["sales", "cost", "margin"],
+        values: matrix,
+    }
+    row_name :: "south"
+    col_name :: "margin"
+    print("south/margin={cell(labeled, row_name, col_name)}")
+    print("shape={compute.shape(labeled.values)}")
+}

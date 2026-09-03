@@ -1,0 +1,20 @@
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    title :: "Meeting"
+    body := reactive.signal("old")
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        tree :: ui.box([
+            ui.text(title),
+            ui.node_role(body.get(), 30.0, 3.0, ui.aria_role_text_input()),
+            ui.button("Save", on_click: () -> { print("save") })
+        ])
+        ui.mount(render_backend, tree)
+    })
+    print("renders: {backend.render_count()}")
+    body.set("new")
+    print("renders after set: {backend.render_count()}")
+}

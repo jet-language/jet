@@ -1,0 +1,22 @@
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    body := reactive.signal("old")
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        ui.mount(render_backend, ui.text(body.get()))
+    })
+    undo := [String]{}
+    redo := [String]{}
+    previous :: body.get()
+    undo.push(previous)
+    body.set("new")
+    restored :: undo.pop() ?? ""
+    redo.push(body.get())
+    body.set(restored)
+    print("restored: {body.get()}")
+    print("redo depth: {redo.len()}")
+    print("renders: {backend.render_count()}")
+}

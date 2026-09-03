@@ -1,0 +1,12 @@
+use core.compute as compute
+
+fn run() {
+    values :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("values")
+    matrix :: compute.reshape(values, [2, 3]) ?? panic("reshape")
+    transposed :: compute.transpose(matrix) ?? panic("transpose")
+    row :: compute.vec(3, 10.0) ?? panic("row")
+    broadcast :: compute.broadcast_to(row, [2, 3]) ?? panic("broadcast")
+    summed :: compute.add(matrix, broadcast) ?? panic("add")
+    print("matrix:{compute.shape(matrix)} transpose:{compute.shape(transposed)} values:{compute.to_list(transposed)}")
+    print("broadcast_sum:{compute.to_list(summed)}")
+}

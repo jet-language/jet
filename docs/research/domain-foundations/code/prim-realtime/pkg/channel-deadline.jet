@@ -1,0 +1,20 @@
+package {
+    name: "prim-realtime-channel-deadline"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Time, Mem.Alloc] } }
+}
+
+use core.time as time
+
+fn hot(tx: Sender<Int>) -[!Time]> {
+    tx.send(1)
+}
+
+fn run() {
+    (tx, rx) :: channel<Int>(capacity: 1)
+    tx.send(0)
+    #Context(deadline: time.now() + 5) {
+        hot(tx)
+    }
+    print(rx.receive() ?? 0)
+}

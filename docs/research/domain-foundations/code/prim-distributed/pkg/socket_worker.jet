@@ -1,0 +1,14 @@
+// Child process for prim-distributed message passing.
+use core.net as net
+use core.process as process
+
+fn run() {
+    args :: process.argv()
+    addr :: args.get(1) ?? panic("missing listener address")
+    stream :: net.tcp_connect(addr)
+    request :: stream.read_text(8192)
+    value :: request.trim().to_int() ?? panic("typed message was not Int")
+    response :: (value * value).to_string()
+    stream.write_all(response.bytes())
+    stream.close()
+}

@@ -1,0 +1,50 @@
+use core.math as math
+
+struct Embedding {
+    id: Int
+    values: [Float]
+}
+
+fn make_embedding(id: Int) [Float] -> {
+    x :: Float{id}
+    return [x, Float{id % 7}, Float{id % 11}, Float{id % 13}]
+}
+
+fn cosine(left: [Float], right: [Float]) Float -> {
+    dot := Float{0.0}
+    left_norm := Float{0.0}
+    right_norm := Float{0.0}
+    loop i in 0..<4 {
+        dot += left[i] * right[i]
+        left_norm += left[i] * left[i]
+        right_norm += right[i] * right[i]
+    }
+    return dot / (math.sqrt(left_norm) * math.sqrt(right_norm))
+}
+
+fn build_embedding_index() [Embedding] -> {
+    index := [Embedding]{}
+    loop id in 0..<10000 {
+        index.push(Embedding{id: id, values: make_embedding(id)})
+    }
+    return index
+}
+
+fn nearest(index: [Embedding], query: [Float]) Int -> {
+    best_id := -2
+    best_score := Float{-2.0}
+    loop item in index {
+        score :: cosine(item.values, query)
+        if score > best_score {
+            best_score = score
+            best_id = item.id
+        }
+    }
+    return best_id
+}
+
+fn run() {
+    index :: build_embedding_index()
+    query :: make_embedding(4242)
+    print("embeddings={index.len()} nearest={nearest(index, query)}")
+}

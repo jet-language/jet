@@ -1,0 +1,160 @@
+use core.auth as auth
+use core.db as db
+use core.http.client as client
+use core.http.server as server
+use core.net as net
+
+#Codable
+struct Order {
+    id: Int
+    item: String
+    quantity: Int
+}
+
+#Codable
+struct NewOrder {
+    item: String
+    quantity: Int
+}
+
+#Codable
+struct Login {
+    user: String
+    password: String
+}
+
+fn list_orders(path: String, _cache_version: Cell<Int>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+    conn :: db.open(path)
+    policy :: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
+    scope :: conn.with_policy(policy, "web")
+    rows :: scope.query(SQL{"SELECT id, item, quantity FROM orders ORDER BY id"}) ?? []
+    body := "<h1>Orders</h1><p>request-path={req.path()}</p><p>orders={rows.len()}</p>"
+    scope.close()
+    return Ok(server.response(200, body))
+}
+
+fn detail_order(path: String, req: HTTPRequest) HTTPResponse !HTTPError -> {
+    id_text :: req.param("id") ?? return Ok(server.response(404, "missing order"))
+    id :: id_text.to_int() ?? return Ok(server.response(400, "bad order id"))
+    conn :: db.open(path)
+    policy :: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
+    scope :: conn.with_policy(policy, "web")
+    row :: scope.query_one(SQL{"SELECT id, item, quantity FROM orders WHERE id = {id}"}) ?? return Ok(server.response(404, "order not found"))
+    item :: db.row_text(row, "item") ?? "?"
+    quantity :: db.row_int(row, "quantity") ?? 0
+    scope.close()
+    return Ok(server.response(200, "<h1>Order {id}</h1><p>{item} × {quantity}</p>"))
+}
+
+fn parse_order_form(body: String) ?NewOrder -> {
+    fields :: body.split("&").to_list()
+    if fields.len() < 2 -> return None
+    item_text := ""
+    quantity_text := ""
+    first :: fields[0].split("=").to_list()
+    second :: fields[1].split("=").to_list()
+    if first.len() >= 2 {
+        if first[0] == "item" -> item_text = first[1]
+        if first[0] == "quantity" -> quantity_text = first[1]
+    }
+    if second.len() >= 2 {
+        if second[0] == "item" -> item_text = second[1]
+        if second[0] == "quantity" -> quantity_text = second[1]
+    }
+    if item_text == "" || quantity_text == "" -> return None
+    quantity_value :: Int.parse(quantity_text) ?? return None
+    if quantity_value <= 0 -> return None
+    return Val(NewOrder{item: item_text, quantity: quantity_value})
+}
+
+fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+    body :: req.text() ?? return Ok(server.response(400, "invalid body"))
+    order :: parse_order_form(body) ?? return Ok(server.response(422, "item and quantity are required"))
+    conn :: db.open(path)
+    policy :: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
+    scope :: conn.with_policy(policy, "web")
+    inserted :: scope.execute(SQL{"INSERT INTO orders (item, quantity) VALUES ({order.item}, {order.quantity})"}) ?? 0
+    cache_version.set(cache_version.get() + 1)
+    scope.close()
+    return Ok(server.response(201, "created order rows={inserted}"))
+}
+
+fn login(req: HTTPRequest) HTTPResponse !HTTPError -> {
+    input :: req.json<Login>() ?? return Ok(server.response(400, "invalid login"))
+    session :: auth.password_login(input.user, input.password, 1_700_000_000_000, 3_600_000) ?? return Ok(server.response(401, "login failed"))
+    cookie :: auth.session_cookie(session)
+    response := server.response(200, "logged in")
+    with_cookie :: response.header("set-cookie", cookie)
+    return Ok(with_cookie)
+}
+fn protected(session_id: String, req: HTTPRequest) HTTPResponse !HTTPError -> {
+    cookie :: req.header("cookie") ?? return Ok(server.response(401, "login required"))
+    if cookie == "" -> return Ok(server.response(401, "login required"))
+    _validated :: auth.session_validate(session_id, 1_700_000_000_001) ?? return Ok(server.response(401, "invalid session"))
+    return Ok(server.response(200, "protected orders"))
+}
+
+fn run() !(HTTPError | NetError | TaskFailure) {
+    db_path :: "/home/nate/.cache/jet-luna/dx3/area-web/pkg/orders.sqlite"
+    conn :: db.open(db_path)
+    policy :: db.policy("orders", "true") ?? return
+    scope :: conn.with_policy(policy, "web")
+    _migrated :: db.migrate(scope, "orders-v1", [SQL{"CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL, quantity INTEGER NOT NULL)"}]) ?? return
+    existing :: scope.query(SQL{"SELECT id FROM orders"}) ?? []
+    if existing.len() == 0 {
+        item :: "book"
+        quantity :: 2
+        _seeded :: scope.execute(SQL{"INSERT INTO orders (item, quantity) VALUES ({item}, {quantity})"}) ?? return
+    }
+    scope.close()
+    auth.register_user("alice", "argon2id:demo") ?? return
+    seed_session :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? return
+    session_id :: auth.session_id(seed_session)
+
+    cache_version := Cell.new(0)
+    listener :: net.tcp_listen("127.0.0.1:0")
+    addr :: listener.local_addr()
+    mux :: server.mux()
+    mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
+        _path :: req.path()
+        return Ok(server.response(200, "<h1>Orders</h1><a href=\"/orders\">list</a>"))
+    })
+    mux.get("/orders", (req: HTTPRequest) HTTPResponse !HTTPError -> list_orders(db_path, cache_version, req))
+    mux.get("/orders/:id", (req: HTTPRequest) HTTPResponse !HTTPError -> detail_order(db_path, req))
+    mux.post("/orders", (req: HTTPRequest) HTTPResponse !HTTPError -> create_order(db_path, cache_version, req))
+    mux.post("/login", (req: HTTPRequest) HTTPResponse !HTTPError -> login(req))
+    mux.get("/protected", (req: HTTPRequest) HTTPResponse !HTTPError -> protected(session_id, req))
+    server.static_files(mux, "/assets", "/home/nate/.cache/jet-luna/dx3/area-web/pkg/public")
+
+    t :: task {
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+    }
+
+    home :: client.get("http://{addr}/")
+    print("home:{home.status()}")
+    listed :: client.get("http://{addr}/orders?limit=3")
+    print("list-before:{listed.status()}:{listed.body().text(8192) ?? "bad"}")
+    created_req :: client.request("POST", "http://{addr}/orders").form("item", "pen").form("quantity", "3")
+    created :: created_req.send()
+    print("create:{created.status()}")
+    listed_after :: client.get("http://{addr}/orders")
+    print("list-after:{listed_after.status()}:{listed_after.body().text(8192) ?? "bad"}")
+    detail :: client.get("http://{addr}/orders/1")
+    print("detail:{detail.status()}")
+    login_req :: client.request("POST", "http://{addr}/login").json(Login{user: "alice", password: "argon2id:demo"})
+    logged :: login_req.send()
+    print("login:{logged.status()}:{logged.header("set-cookie") ?? "missing"}")
+    protected_req :: client.request("GET", "http://{addr}/protected").cookie("session", "present")
+    protected_resp :: protected_req.send()
+    print("protected:{protected_resp.status()}")
+    asset :: client.get("http://{addr}/assets/index.html")
+    print("asset:{asset.status()}:{asset.body().text(8192) ?? "bad"}")
+    t.join()
+}

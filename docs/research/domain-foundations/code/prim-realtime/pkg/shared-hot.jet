@@ -1,0 +1,19 @@
+package {
+    name: "prim-realtime-shared-hot"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc] } }
+}
+
+struct State {
+    ready: Int
+}
+
+fn hot(state: Shared<State>) -[!Mem.Alloc, !Time]> {
+    state.ready += 1
+}
+
+fn run() {
+    state :: shared State{ready: 0}
+    hot(state)
+    print("ready={state.ready}")
+}

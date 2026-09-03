@@ -1,0 +1,202 @@
+use core.auth as auth
+use core.db as db
+use core.files as files
+use core.http.client as http_client
+use core.http.server as http_server
+use core.log as log
+use core.service as service
+use core.time as time
+
+#Codable
+struct HealthResponse {
+    status: String
+    trace_id: String
+}
+
+#Codable
+struct OrderRequest {
+    item: String
+}
+
+#Codable
+struct OrderResponse {
+    id: Int
+    item: String
+    role: String
+    queued: Bool
+    trace_id: String
+}
+
+#Codable
+struct ErrorResponse {
+    error: String
+    trace_id: String
+}
+
+struct Metrics {
+    requests: Int
+    errors: Int
+}
+
+fn error_response(status: Int, message: String, metrics: Shared<Metrics>) HTTPResponse !HTTPError -> {
+    metrics.guard_edit().value.errors += 1
+    return Ok(http_server.json(status, ErrorResponse{error: message, trace_id: "backend-probe"}))
+}
+
+fn authorized(req: HTTPRequest, session_id: String) Bool !Never -[DB, Time]> -> {
+    provided :: req.header("x-session") ?? return false
+    if provided != session_id -> return false
+    role :: req.header("x-role") ?? return false
+    if role != "writer" -> return false
+    _checked :: auth.session_validate(provided, time.now()) ?? return false
+    return true
+}
+
+fn health(_req: HTTPRequest, metrics: Shared<Metrics>) HTTPResponse !HTTPError -> {
+    metrics.guard_edit().value.requests += 1
+    return Ok(http_server.json(200, HealthResponse{status: "ok", trace_id: "backend-probe"}))
+}
+
+fn create_order(req: HTTPRequest, session_id: String, metrics: Shared<Metrics>, queue: ServiceEndpoint) HTTPResponse !HTTPError -> {
+    metrics.guard_edit().value.requests += 1
+    if !authorized(req, session_id) -> return error_response(401, "unauthorized", metrics)
+    body :: req.json<OrderRequest>() ?? return error_response(400, "malformed-json", metrics)
+    order_id :: metrics.guard_read().value.requests
+    if queue.send("order:{order_id}") == {
+        .Ok(_) -> {}
+        .Err(_) -> return error_response(503, "queue-full", metrics)
+    }
+    return Ok(http_server.json(202, OrderResponse{id: order_id, item: body.item, role: "writer", queued: true, trace_id: "backend-probe"}))
+}
+
+fn openapi_document() String !Never -[]> {
+    return """
+    {{
+      "openapi": "3.0.3",
+      "info": {{"title": "Jet Backend Probe", "version": "0.1.0"}},
+      "paths": {{
+        "/health": {{"get": {{"operationId": "health", "responses": {{"200": {{"description": "healthy"}}}}}}}},
+        "/orders": {{"post": {{"operationId": "createOrder", "requestBody": {{"required": true}}, "responses": {{"202": {{"description": "queued"}}, "401": {{"description": "unauthorized"}}}}}}}}
+      }}
+    }}
+    """
+}
+fn contract_check(document: String) !Never -[]> {
+    if !document.contains("\"openapi\": \"3.0.3\"") -> panic("contract missing version")
+    if !document.contains("\"/health\"") -> panic("contract missing health")
+    if !document.contains("\"/orders\"") -> panic("contract missing orders")
+}
+fn state_label(delivery: ^Delivery) String !Never -[DB]> {
+    state :: delivery.status() ?? panic("delivery status")
+    if state == {
+        .Pending -> "pending"
+        .Accepted -> "accepted"
+        .Delivering -> "delivering"
+        .Delivered -> "delivered"
+        .DeadLettered -> "dead"
+        .Cancelled -> "cancelled"
+        else -> "unknown"
+    }
+}
+
+
+fn load_user(address: String, tx: Sender<Int>) {
+    started :: time.now()
+    _response :: http_client.get("http://{address}/health") ?? return
+    tx.send(time.now() - started)
+}
+
+fn load_test(address: String) !Never {
+    (sender, samples_channel) :: channel<Int>(capacity: 2048)
+    workers := [Task<()>]{}
+    loop _user in 1..1000 {
+        tx :: ~sender
+        workers.push(task {
+            load_user(address, tx) ?? return
+        })
+    }
+    loop workers.len() > 0 {
+        worker :: workers.pop() ?? panic("missing load worker")
+        worker.join() ?? panic("load worker failed")
+    }
+    sender.close()
+    samples := [Int]{}
+    loop value in samples_channel -> samples.push(value)
+    if samples.len() != 1000 -> panic("load test dropped requests")
+    samples.sort()
+    p99 :: samples[990]
+    if p99 > 1000 -> panic("p99 exceeded 1000ms")
+    print("load:vus=1000 p99-ms={p99}")
+}
+
+fn queue_worker() {}
+
+fn run() !(HTTPError | IOError | NetError | TaskFailure | DBError) {
+    log.setup("json")
+    log.set_trace_id("backend-probe")
+    span :: log.span("backend.request")
+    log.enter(span)
+
+    conn :: db.open("/home/nate/.cache/jet-luna/dx3/area-backend/pkg/orders.sqlite")
+    policy :: db.policy("orders", "true") ?? panic("db policy")
+    scoped :: conn.with_policy(policy, "backend")
+    _created :: db.migrate(scoped, "orders-v1", [SQL{"CREATE TABLE orders (id INTEGER PRIMARY KEY, item TEXT)"}]) ?? panic("db migrate")
+    item :: "bootstrap"
+    _inserted :: scoped.execute(SQL{"INSERT INTO orders (item) VALUES ({item})"}) ?? panic("db insert")
+    row :: scoped.query_one(SQL{"SELECT item FROM orders ORDER BY id"}) ?? panic("db query")
+    print("db-item:{db.row_text(row, "item") ?? "missing"}")
+
+    auth.register_user("ada", "argon2id:demo") ?? panic("auth register")
+    session :: auth.password_login("ada", "argon2id:demo", time.now(), 600000) ?? panic("auth login")
+    session_id :: auth.session_id(session)
+
+    tree := service.tree("backend")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state_store :: service.state_store("/home/nate/.cache/jet-luna/dx3/area-backend/pkg/service-state.log") ?? panic("state store")
+    tree.set_state_event_log(state_store, "backend-events", 1, "reversible") ?? panic("state log")
+    queue_endpoint :: tree.worker("orders", queue_worker, capacity: 8) ?? panic("worker")
+    tree.start() ?? panic("service start")
+
+    metrics :: shared Metrics{requests: 0, errors: 0}
+    mux :: http_server.mux()
+    http_server.request_id(mux)
+    mux.get("/health", (req: HTTPRequest) -> health(req, metrics))
+    mux.post("/orders", (req: HTTPRequest) -> create_order(req, session_id, metrics, queue_endpoint))
+    server :: http_server.bind("127.0.0.1:0", mux)
+    address :: server.local_addr()
+    serving :: task { server.serve() }
+    time.sleep(20ms)
+
+    openapi_path :: "/home/nate/.cache/jet-luna/dx3/area-backend/pkg/openapi.json"
+    files.write(openapi_path, openapi_document()) ?? panic("openapi export")
+    print("openapi:{files.exists(openapi_path)}")
+    exported :: files.read(openapi_path) ?? panic("openapi read")
+    contract_check(exported)
+    print("contract:openapi-basic-pass")
+
+    health_response :: http_client.get("http://{address}/health") ?? panic("health request")
+    print("health:{health_response.status()}")
+    denied_request :: http_client.request("POST", "http://{address}/orders").header("x-session", session_id).header("x-role", "reader").json(OrderRequest{item: "book"})
+    denied_response :: denied_request.send() ?? panic("denied request")
+    print("denied:{denied_response.status()}")
+    order_request :: http_client.request("POST", "http://{address}/orders").header("x-session", session_id).header("x-role", "writer").json(OrderRequest{item: "book"})
+    order_response :: order_request.send() ?? panic("order request")
+    print("order:{order_response.status()}")
+    order_body :: order_response.json<OrderResponse>() ?? panic("order decode")
+    print("queued:{order_body.queued}")
+    delivery :: tree.send_durable(queue_endpoint, "durable-order", key: "d1") ?? panic("durable send")
+    print("delivery:{state_label(^delivery)}")
+    load_test(address)
+    message :: tree.receive(queue_endpoint) ?? panic("queue receive")
+    print("worker:{message}")
+
+    grace :: 100ms
+    shutdown_report :: server.shutdown(grace) ?? panic("shutdown")
+    print("shutdown-cancelled:{shutdown_report.cancelled}")
+    serving.join() ?? panic("server join")
+    tree.stop() ?? panic("service stop")
+    log.close(span)
+    log.info_fields("backend.summary", [log.counter("requests", metrics.guard_read().value.requests), log.counter("errors", metrics.guard_read().value.errors)])
+    log.flush()
+    scoped.close()
+}

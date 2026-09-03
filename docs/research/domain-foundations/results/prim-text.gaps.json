@@ -1,0 +1,38 @@
+[
+  {
+    "id": "prim-text-G1",
+    "tags": ["boilerplate"],
+    "primitive": "A reusable subword-tokenizer model/training capability with vocabulary, merge rules, encode/decode, and alignment metadata is missing.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-text/pkg/nlp_gap.jet -> Error [E1001]: There is no core module `core.nlp`. pkg/main.jet:48-104 manually implements 12 BPE rounds, pair maps, sequence rebuilds, and encoding.",
+    "areas": ["ai-ml", "web", "cli", "gui"],
+    "severity": "hurts",
+    "workaround": "Implement BPE in Jet, as this probe does; alignment, special tokens, batching, persistence, and decode still require author code."
+  },
+  {
+    "id": "prim-text-G2",
+    "tags": ["slow", "boilerplate", "call-site"],
+    "primitive": "An allocation-aware text view is missing: bytes or structured scalar/grapheme spans and offsets cannot be streamed without per-unit String allocation.",
+    "evidence": "jet check pkg/byte_gap.jet -> E1004: `core.text` has no item `bytes`; core.text.fmt.bytes(\"é\") -> E0112 because it wants Int. fixed_sigs.rs:2250-2263,2294-2297 returns List<String>; Top/Text.rs:387-390 collects Vec<char>/Vec<String>, 831-832 formats indices. Jet BPE=108233 ms vs Python=3197.409 ms and Rust=621.350 ms on 1 MiB; Jet streaming scan=7031 ms vs Python=581.307 ms and Rust=33.083 ms on 100 MB.",
+    "areas": ["cli", "gui", "web", "ai-ml"],
+    "severity": "hurts",
+    "workaround": "Use eager lists and formatted char_indices, and use files.open(...).lines() for bounded streaming input."
+  },
+  {
+    "id": "prim-text-G3",
+    "tags": ["impossible"],
+    "primitive": "Lookahead and lookbehind semantics are unavailable in the checked regular-expression language.",
+    "evidence": "scripts/agent/jet-env jet check pkg/regex_gap.jet -> Error [E0152]: This regex pattern is invalid at position 2; Why: Lookaround is not supported; use a linear rewrite. Regex.rs:949-950 emits the same rejection.",
+    "areas": ["cli", "web", "ai-ml", "gui"],
+    "severity": "hurts",
+    "workaround": "Rewrite conditions as separate linear scans or explicit supported patterns; typed regex matching, captures, replacement, and splitting remain available."
+  },
+  {
+    "id": "prim-text-G4",
+    "tags": ["unsafe"],
+    "primitive": "A safe typed opaque-handle FFI with lifetime tracking and glyph-buffer/position-array access is missing for stateful shaping engines such as HarfBuzz.",
+    "evidence": "jet check shape_ffi_gap/pointer_gap.jet -> Error [E3202]: Type `*Int` cannot cross the C boundary here. jet inspect bind shape_ffi_gap/harfbuzz.h --pkg harfbuzz -o shape_ffi_gap/harfbuzz_bind.jet -> Error [E3208]: No bindable C function prototypes found for `harfbuzz`. docs/spec/spec.md:1475-1480 says pointer returns remain E3202. The probe used process.cmd(hb-shape) instead and received Arabic glyph positions.",
+    "areas": ["gui", "web"],
+    "severity": "blocks",
+    "workaround": "Use a bounded external hb-shape process or an audited native shim; neither provides a safe Jet glyph-buffer API."
+  }
+]

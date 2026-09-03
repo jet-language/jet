@@ -1,0 +1,58 @@
+pub struct CalcCell {
+    kind: Int
+    value: Int
+    left: String
+    right: String
+    deps: [String]
+}
+
+pub struct RecalcResult {
+    values: [String:Int]
+    touched: [String]
+}
+
+fn eval(cell: CalcCell, values: [String:Int]) Int -> {
+    if cell.kind == 0 -> return cell.value
+    return (values.get(~cell.left) ?? 0) + (values.get(~cell.right) ?? 0)
+}
+
+pub fn recalc(cells: [String:CalcCell], previous: [String:Int], changed: String) RecalcResult -> {
+    values := previous.copy()
+    touched := [String]{}
+    dirty := [String:Bool]{}
+    dirty[changed] = true
+    order :: [String]{"a", "one", "b", "total", "unrelated"}
+    loop name in order {
+        if dirty.get(~name) ?? false {
+            if cells.get(~name) == .Val(cell) {
+                values[name] = eval(~cell, values)
+                touched.push(name)
+                loop target in order {
+                    if cells.get(~target) == .Val(next) {
+                        if next.deps.contains(name) -> dirty[target] = true
+                    }
+                }
+            }
+        }
+    }
+    return RecalcResult{ values: values, touched: touched }
+}
+
+pub fn sample() [String] -> {
+    cells := [String:CalcCell]{
+        "a": CalcCell{ kind: 0, value: 2, left: "", right: "", deps: [] },
+        "one": CalcCell{ kind: 0, value: 1, left: "", right: "", deps: [] },
+        "b": CalcCell{ kind: 1, value: 0, left: "a", right: "one", deps: ["a", "one"] },
+        "total": CalcCell{ kind: 1, value: 0, left: "b", right: "a", deps: ["b", "a"] },
+        "unrelated": CalcCell{ kind: 0, value: 99, left: "", right: "", deps: [] }
+    }
+    first :: recalc(cells, [String:Int]{"one": 1}, "a")
+    cells["a"].value = 5
+    second :: recalc(cells, first.values, "a")
+    first_total :: first.values.get("total") ?? 0
+    second_total :: second.values.get("total") ?? 0
+    return [
+        "first total={first_total} touched={first.touched}",
+        "second total={second_total} touched={second.touched}"
+    ]
+}

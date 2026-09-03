@@ -1,0 +1,29 @@
+[
+  {
+    "id": "prim-distributed-G1",
+    "tags": ["boilerplate"],
+    "primitive": "First-class Stream operators for event-time keyed windows, watermark progress, and late-event disposition.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-distributed/pkg/window_api_attempt.jet -> Error [E0102]: `Stream` has no method `key_by`; /home/nate/.cache/jet-luna/dx3/prim-distributed/pkg/watermark_attempt.jet -> Error [E0102]: `Stream` has no method `watermark`. The finite workaround is 58 Jet lines with manual timestamp, watermark, keyed-map, and replay logic.",
+    "areas": ["backend", "ai-ml", "science"],
+    "severity": "hurts",
+    "workaround": "Carry timestamps in an Event struct, update a [String:Int] map, compute watermarks in user code, and duplicate the state loop for replay."
+  },
+  {
+    "id": "prim-distributed-G2",
+    "tags": ["boilerplate"],
+    "primitive": "Restartable durable stream checkpoints that capture source position and keyed operator state and resume with explicit replay and commit semantics.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-distributed/pkg/checkpoint_attempt.jet -> Error [E0102]: `Stream` has no method `checkpoint`; the positive run reports only `recovery=in-memory replayed=3`, with no process-restart or exactly-once proof.",
+    "areas": ["backend", "ai-ml", "science"],
+    "severity": "blocks",
+    "workaround": "Copy in-memory maps and hand-code a suffix replay; a library would still need to design persistence, source offsets, restart, and commit ordering."
+  },
+  {
+    "id": "prim-distributed-G3",
+    "tags": ["call-site", "boilerplate"],
+    "primitive": "Schema-checked framed inter-process channels with typed send/receive, lifecycle, and failure receipts.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-distributed/pkg/typed_process_attempt.jet -> Error [E0102]: `ProcessChild` has no method `send`; the working socket protocol manually converts Int to text and back in socket_parent.jet:16-19 and socket_worker.jet:8-12.",
+    "areas": ["backend", "ai-ml", "science"],
+    "severity": "hurts",
+    "workaround": "Spawn children with core.process, connect with core.net TCP, serialize each message as text or bytes, parse it manually, and wait for process receipts."
+  }
+]

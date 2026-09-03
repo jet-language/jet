@@ -1,0 +1,83 @@
+use core.math as math
+use core.time as time
+
+fn fft_in_place(re: &[Float], im: &[Float], n: Int) {
+    j := 0
+    i := 1
+    loop i < n {
+        bit := n /% 2
+        loop bit > 0 {
+            if j >= bit {
+                j -= bit
+                bit /%= 2
+            } else {
+                break
+            }
+        }
+        j += bit
+        if i < j {
+            tmp_re :: ~re[i]
+            re[i] = re[j]
+            re[j] = tmp_re
+            tmp_im :: ~im[i]
+            im[i] = im[j]
+            im[j] = tmp_im
+        }
+        i += 1
+    }
+
+    length := 2
+    half_f := Float{1.0}
+    loop length <= n {
+        half := length /% 2
+        angle :: -Float{3.141592653589793} / half_f
+        step_re :: math.cos(angle)
+        step_im :: math.sin(angle)
+        w_re := Float{1.0}
+        w_im := Float{0.0}
+        j = 0
+        loop j < half {
+            i = j
+            loop i < n {
+                k := i + half
+                odd_re :: ~re[k]
+                odd_im :: ~im[k]
+                t_re :: w_re * odd_re - w_im * odd_im
+                t_im :: w_re * odd_im + w_im * odd_re
+                even_re :: ~re[i]
+                even_im :: ~im[i]
+                re[i] = even_re + t_re
+                im[i] = even_im + t_im
+                re[k] = even_re - t_re
+                im[k] = even_im - t_im
+                i += length
+            }
+            next_re :: w_re * step_re - w_im * step_im
+            next_im :: w_re * step_im + w_im * step_re
+            w_re = next_re
+            w_im = next_im
+            j += 1
+        }
+        length *= 2
+        half_f *= Float{2.0}
+    }
+}
+
+fn run() {
+    n :: 8
+    re := [Float]{}
+    im := [Float]{}
+    loop i in 0..<n {
+        if i == 0 {
+            re.push(Float{1.0})
+        } else {
+            re.push(Float{0.0})
+        }
+        im.push(Float{0.0})
+    }
+    sw :: time.start()
+    fft_in_place(&re, &im, n)
+    print("ms:{sw.elapsed_millis()}")
+    print("re:{re}")
+    print("im:{im}")
+}

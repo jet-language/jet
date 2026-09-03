@@ -1,0 +1,50 @@
+use core.time as time
+
+fn dense_matmul(a: [Float], b: [Float], n: Int) [Float] -> {
+    out := [Float]{}
+    i := 0
+    loop i < n {
+        base_a :: i * n
+        j := 0
+        loop j < n {
+            idx_a := base_a
+            idx_b := j
+            acc := Float{0.0}
+            k := 0
+            loop k < n {
+                acc += a[idx_a] * b[idx_b]
+                idx_a += 1
+                idx_b += n
+                k += 1
+            }
+            out.push(acc)
+            j += 1
+        }
+        i += 1
+    }
+    return out
+}
+
+fn sum_values(values: [Float]) Float -> {
+    total := Float{0.0}
+    loop value in values -> total += value
+    return total
+}
+
+fn run() {
+    n :: 512
+    count :: n * n
+    a := [Float]{}
+    b := [Float]{}
+    loop _i in 0..<count {
+        a.push(Float{1.0})
+        b.push(Float{2.0})
+    }
+    started :: time.instant()
+    c :: dense_matmul(a, b, n)
+    finished :: time.instant()
+    duration :: finished - started
+    elapsed :: duration.in(.Nanoseconds)
+    total :: sum_values(c)
+    print("matmul_n:{n} ns:{elapsed} checksum:{total} first:{c[0]} last:{c[count - 1]}")
+}

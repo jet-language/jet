@@ -1,0 +1,47 @@
+[
+  {
+    "id": "area-games-G1",
+    "tags": ["impossible"],
+    "primitive": "A headless game runner must accept a declared frame budget and consume a replay for that many frames.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_replay_frames.jet => Error [E0764]: `run` has no parameter labelled `frames`; Fix: `run` accepts `replay`, `backend`. The working game.run transcript in jet run main.jet contains only frame:0, frame:1, frame:2; the separate pure Jet 600-loop hash passes.",
+    "areas": ["games", "embedded", "data"],
+    "severity": "blocks",
+    "workaround": "Write a separate pure-Jet frame loop and test its hash; it cannot drive the core.game scene runner for 600 frames."
+  },
+  {
+    "id": "area-games-G2",
+    "tags": ["impossible"],
+    "primitive": "A typed game input contract must expose gamepad buttons and axes alongside keyboard actions.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_gamepad.jet => Error [E1004]: `core.game.raylib` has no item `gamepad_down`; Fix lists only window, drawing, key_down, set_target_fps, color, load_sound, and play_sound.",
+    "areas": ["games", "embedded", "gui"],
+    "severity": "blocks",
+    "workaround": "Use scene.input.bind or rl.key_down for keyboard-only controls, or supply a separate native controller bridge."
+  },
+  {
+    "id": "area-games-G3",
+    "tags": ["impossible"],
+    "primitive": "The graphics contract must decode a texture atlas, resolve a named region, and draw that region as a sprite.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_atlas.jet => Error [E1004] for `load_texture_atlas` and `draw_sprite`; Fix lists no texture, atlas, or sprite operation. scene.assets.image accepts the path and rl.draw_rectangle works, but the real atlas file cannot be decoded or drawn.",
+    "areas": ["games", "gui", "web"],
+    "severity": "blocks",
+    "workaround": "Keep the atlas as an opaque scene asset and draw rectangles, or add a native texture/atlas bridge."
+  },
+  {
+    "id": "area-games-G4",
+    "tags": ["impossible"],
+    "primitive": "The audio runtime must provide a sample-accurate callback deadline and a music-stream lifecycle, not only one-shot sound handles.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_audio.jet => Error [E1001]: There is no core module `core.audio`. scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-games/pkg/gap_music.jet => Error [E1004] for `load_music`, `play_music_stream`, and `update_music_stream`; the fixed public list ends at `load_sound`, `play_sound`.",
+    "areas": ["games", "embedded"],
+    "severity": "blocks",
+    "workaround": "Process a finite audio block as ordinary Jet code and use rl.load_sound/play_sound for effects; neither provides a deadline-bound callback or music stream."
+  },
+  {
+    "id": "area-games-G5",
+    "tags": ["boilerplate"],
+    "primitive": "A package-level native bridge should link a generated C binding and prepare its runtime adapter in one declared step.",
+    "evidence": "jet inspect bind /home/nate/.cache/jet-luna/dx3/area-games/pkg/include/game_probe.h --pkg game_probe => bound 3 functions ... to .jet/bindings/c/game_probe.jet. The 5-line header and 6-line generated cache type-check (`jet check bridge_check.jet` diagnostics=0), but `jet run bridge_check.jet` => Error [E0956]: Extern call `jet_ffi_game_probe_add` has no prepared bridge. The scratch probe had no native archive/compiler, so this is setup friction, not a defect claim.",
+    "areas": ["games", "embedded", "backend", "gui", "ai"],
+    "severity": "annoys",
+    "workaround": "Use the shipped raylib surface, or provide the header, generated cache, package link dependency, native archive, and prepared bridge for every custom C library."
+  }
+]

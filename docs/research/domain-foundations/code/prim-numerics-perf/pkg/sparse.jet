@@ -1,0 +1,57 @@
+use core.time as time
+
+fn csr_matvec(data: [Float], indices: [Int], indptr: [Int], x: [Float], rows: Int) [Float] -> {
+    out := [Float]{}
+    row := 0
+    loop row < rows {
+        start :: indptr[row]
+        finish :: indptr[row + 1]
+        acc := Float{0.0}
+        p := start
+        loop p < finish {
+            acc += data[p] * x[indices[p]]
+            p += 1
+        }
+        out.push(acc)
+        row += 1
+    }
+    return out
+}
+
+fn sum_values(values: [Float]) Float -> {
+    total := Float{0.0}
+    loop value in values -> total += value
+    return total
+}
+
+fn run() {
+    rows :: 100000
+    cols :: 1000
+    entries_per_row :: 10
+    nnz :: rows * entries_per_row
+
+    data := [Float]{}
+    indices := [Int]{}
+    indptr := [Int]{}
+    x := [Float]{}
+    loop _i in 0..<cols -> x.push(Float{1.0})
+
+    offset := 0
+    indptr.push(offset)
+    loop _row in 0..<rows {
+        loop k in 0..<entries_per_row {
+            data.push(Float{1.0})
+            indices.push(k)
+            offset += 1
+        }
+        indptr.push(offset)
+    }
+
+    started :: time.instant()
+    y :: csr_matvec(data, indices, indptr, x, rows)
+    finished :: time.instant()
+    duration :: finished - started
+    elapsed :: duration.in(.Nanoseconds)
+    total :: sum_values(y)
+    print("csr_rows:{rows} cols:{cols} nnz:{nnz} ns:{elapsed} checksum:{total} first:{y[0]} last:{y[rows - 1]}")
+}

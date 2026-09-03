@@ -1,0 +1,15 @@
+use "log" as log
+
+fn require(ok: Bool, message: String) {
+    if !ok -> panic(message)
+}
+
+fn run() {
+    root :: "/home/nate/.cache/jet-luna/dx3/prim-storage"
+    p :: Path.from("{root}/local2.txt")
+    a :: log.append_record(~p, "a") ?? false
+    require(a, "a")
+    b :: log.append_record(Path.from("{root}/local2.txt"), "b") ?? false
+    require(b, "b")
+    print("{a} {b}")
+}

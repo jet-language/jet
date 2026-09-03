@@ -1,0 +1,132 @@
+use core.data as data
+use core.files as fs
+use core.process as process
+use core.regex as re
+use core.sys as sys
+use core.term as term
+
+#Codable
+struct NoteRow {
+    title: String
+    tag: String
+    path: String
+}
+
+fn ignored(path: String, patterns: [String]) Bool -> {
+    loop pattern in patterns {
+        if pattern.ends_with("/") && path.starts_with(pattern) -> return true
+        if pattern.starts_with("*.") && path.ends_with(pattern.remove_prefix("*")) -> return true
+        if path == pattern -> return true
+    }
+    false
+}
+
+#CLI(Standard)
+struct Notes {
+    #[Doc("directory for the notes store"), Env("NOTES_CONFIG")] config_dir: String{"notes-config"}
+
+    #Doc("write one note to the config directory")
+    fn add(self, title: String, body: String) {
+        fs.create_dir_all(self.config_dir) ?? panic("create config")
+        path :: Path.from(self.config_dir).join("notes.txt")
+        fs.append_all(path, "{title}\t{body}\n") ?? panic("append note")
+        shown :: term.style("green", "saved {title}")
+        print(shown)
+    }
+
+    #Doc("read the config file and show its contents")
+    fn config(self) {
+        fs.create_dir_all(self.config_dir) ?? panic("create config")
+        path :: Path.from(self.config_dir).join("settings.conf")
+        fs.write(path, "color=auto\nformat=aligned\n") ?? panic("write config")
+        print(fs.read(path) ?? panic("read config"))
+    }
+
+    #Doc("search files while honoring simple .gitignore rules")
+    fn search(self, pattern: String, root: String) {
+        ignore_path :: Path.from(root).join(".gitignore")
+        patterns := [String]{}
+        if fs.exists(ignore_path) {
+            ignore_text :: fs.read(ignore_path) ?? ""
+            loop raw in ignore_text.split("\n") {
+                candidate := raw.trim()
+                if candidate != "" && !candidate.starts_with("#") -> patterns.push(candidate)
+            }
+        }
+        rx :: re.compile(pattern) ?? panic("bad pattern")
+        entries :: fs.walk_files(root) ?? panic("walk")
+        matches := 0
+        loop entry in entries {
+            if entry.relative == ".gitignore" || ignored(entry.relative, patterns) -> next
+            text :: fs.read(entry.path) ?? ""
+            line_no := 0
+            loop line in text.split("\n") {
+                line_no += 1
+                if re.is_match(rx, line) {
+                    matches += 1
+                    shown :: entry.relative.pad_end(32, " ")
+                    print(term.style("cyan", "{shown}:{line_no}: {line}"))
+                }
+            }
+        }
+        print("matches={matches}")
+    }
+
+    #Doc("stream filtered lines into another process")
+    fn pipe(self, pattern: String) {
+        producer :: process.cmd(["printf", "keep-one\nskip\nkeep-two\n"]).stdout(.Stream).spawn() ?? panic("spawn producer")
+        consumer :: process.cmd(["cat"]).stdin(.Stream).stdout(.Capture).spawn() ?? panic("spawn consumer")
+        loop line in producer.stdout.lines() {
+            if line.contains(pattern) -> consumer.stdin.write("{line}\n") ?? panic("write consumer")
+        }
+        producer_status :: producer.wait() ?? panic("wait producer")
+        consumer_status :: consumer.wait() ?? panic("wait consumer")
+        print("producer={producer_status.code} consumer={consumer_status.code}")
+        print(consumer_status.output.trim())
+    }
+
+    #Doc("run an environment overlay and report a nonzero exit")
+    fn env(self, value: String) {
+        sys.set("NOTES_MODE", "parent")
+        child :: process.cmd(["printenv", "NOTES_MODE"]).env("NOTES_MODE", value).stdout(.Capture).run() ?? panic("env child")
+        failed :: process.cmd(["false"]).stdout(.Capture).run() ?? panic("false child")
+        print("overlay={child.output.trim()}")
+        print("exit={failed.code} success={failed.success}")
+    }
+
+    #Doc("pass typed note records through filter and sort stages")
+    fn objects(self, wanted: String) {
+        source :: process.cmd(["printf", "title,tag,path\nalpha,work,a.md\nbeta,home,b.md\ngamma,work,c.md\n"]).stdout(.Capture).run() ?? panic("records source")
+        rows :: data.csv<NoteRow>(source.output) ?? panic("decode records")
+        selected :: data.filter(rows, row -> row.tag == wanted)
+        sorted :: data.sort_by(selected, row -> row.title)
+        loop row in sorted {
+            padded :: row.title.pad_end(8, " ")
+            print("{padded} {row.tag} {row.path}")
+        }
+        print("records={sorted.len()}")
+    }
+
+    #Doc("show ten typed options")
+    fn flags(self,
+        one: String{"1"},
+        two: String{"2"},
+        three: String{"3"},
+        four: String{"4"},
+        five: String{"5"},
+        six: String{"6"},
+        seven: String{"7"},
+        eight: String{"8"},
+        nine: String{"9"},
+        ten: String{"10"}) {
+        print("{one},{two},{three},{four},{five},{six},{seven},{eight},{nine},{ten}")
+    }
+}
+
+#[Job(.Dev), Doc("refresh the local notes index"), Every(1s)]
+fn refresh() {
+    print("job=refresh")
+}
+
+fn run(args: Notes) {
+}

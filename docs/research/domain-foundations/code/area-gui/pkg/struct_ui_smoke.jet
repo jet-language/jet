@@ -1,0 +1,26 @@
+use core.ui as ui
+use core.reactive as reactive
+
+struct Note {
+    title: String
+    body: String
+}
+
+fn view(note: Note, body: String) UiNode -> ui.box([
+    ui.text(note.title),
+    ui.node_role(body, 30.0, 3.0, ui.aria_role_text_input())
+])
+
+fn run() {
+    note :: Note{title: "Meeting", body: "old"}
+    body := reactive.signal("old")
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        tree :: view(note, body.get())
+        ui.mount(render_backend, tree)
+    })
+    print("renders: {backend.render_count()}")
+    body.set("new")
+    print("renders after set: {backend.render_count()}")
+}

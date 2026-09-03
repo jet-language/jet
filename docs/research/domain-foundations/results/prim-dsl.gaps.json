@@ -1,0 +1,65 @@
+[
+  {
+    "id": "prim-dsl-G1",
+    "tags": ["defect", "impossible"],
+    "primitive": "Recursive algebraic data types must remain type-safe through default trait derivation and both Jet execution tiers.",
+    "evidence": "scripts/agent/jet-env jet run examples/features/types/recursive_enum.jet -> E0112 (_jet_derive_equal_Expr wants Expr but got Expr<>) and E0401 (fallible Bool/Ordering used without handling); the shipped 9-line recursive Expr example cannot run.",
+    "areas": ["data", "backend", "science"],
+    "severity": "blocks",
+    "workaround": "Use a flat postfix token list or an explicit heap/index representation; the symbolic probe uses a flat [Node] code instead of recursive Expr."
+  },
+  {
+    "id": "prim-dsl-G2",
+    "tags": ["defect", "impossible"],
+    "primitive": "Native code generation must lower named-payload enum pattern tests in imported library modules.",
+    "evidence": "scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-dsl/pkg/symbolic2_demo.jet -> internal compiler error: typed IR does not cover statement `if` at symbolic2.jet:9:5, compiler bug (I2/R7), crates/jet-codegen/src/Codegen/Items.rs:3409:5.",
+    "areas": ["data", "backend", "science"],
+    "severity": "hurts",
+    "workaround": "Wrap the named payload in one struct and match the single payload; that workaround built and ran in the earlier symbolic2 probe."
+  },
+  {
+    "id": "prim-dsl-G3",
+    "tags": ["call-site", "boilerplate"],
+    "primitive": "Provide a value-producing filter pipeline over dynamic trees: path selection, array mapping, and composable pipe stages.",
+    "evidence": "The jq-shaped workload needs a 28-line filter.jet walker with explicit DataTree.Object/Array matches, map lookup, optional handling, and a loop; scripts/agent/jet-env jet run .../prim_dsl_filter_demo.jet -> [3, 8]. jq's equivalent is a short `.items[] | .price` pipeline.",
+    "areas": ["data", "backend"],
+    "severity": "hurts",
+    "workaround": "Write ordinary DataTree walkers and list/map loops; the probe is safe and native-buildable, but every filter operator must be authored manually."
+  },
+  {
+    "id": "prim-dsl-G4",
+    "tags": ["boilerplate", "call-site"],
+    "primitive": "Provide compiler/runtime support for formula dependency graphs, topological ordering, and dirty transitive incremental recomputation.",
+    "evidence": "The 58-line formula.jet probe manually stores deps, fixes an evaluation order, propagates a dirty map, and records touched cells; native run prints `first total=5 touched=[a, b, total]` and `second total=11 touched=[a, b, total]`.",
+    "areas": ["data", "backend", "science"],
+    "severity": "hurts",
+    "workaround": "Represent formulas as structs plus maps/lists and implement dependency propagation in library code, as the probe does."
+  },
+  {
+    "id": "prim-dsl-G5",
+    "tags": ["impossible"],
+    "primitive": "Provide a user-defined syntax-extension hook for embedded-language macros and custom literals.",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/prim-dsl/pkg/macro_attempt.jet -> E0003: line computes a value but does nothing, pointing at `macro twice(x) {`; no macro declaration surface is accepted.",
+    "areas": ["data", "backend", "science"],
+    "severity": "hurts",
+    "workaround": "Use ordinary typed constructors/parsers, `@` comptime functions, and reflection/derive generation."
+  },
+  {
+    "id": "prim-dsl-G6",
+    "tags": ["defect", "impossible"],
+    "primitive": "The default evaluator must execute map index-field assignment used by an incremental formula engine.",
+    "evidence": "scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-dsl/pkg/prim_dsl_formula_demo.jet -> E0956: `index field assign on map` isn't supported by the current evaluator yet; the same source native-builds and runs.",
+    "areas": ["data", "backend", "science"],
+    "severity": "hurts",
+    "workaround": "Run the native tier (`jet build` then the executable); this does not provide default-tier/live-loop execution."
+  },
+  {
+    "id": "prim-dsl-G7",
+    "tags": ["defect", "impossible"],
+    "primitive": "The native backend must compile a flat tagged-token symbolic evaluator with nested helper records.",
+    "evidence": "scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-dsl/pkg/prim_dsl_symbolic_demo.jet -> `internal compiler error: the generated Rust did not compile`; default `jet run` on the same source succeeds.",
+    "areas": ["data", "backend", "science"],
+    "severity": "hurts",
+    "workaround": "Use the default evaluator for this shape or split the representation further; the exact rustc diagnostic was not emitted by Jet."
+  }
+]

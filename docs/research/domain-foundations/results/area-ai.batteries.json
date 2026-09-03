@@ -1,0 +1,42 @@
+[
+  {
+    "part": "Ranked Tensor construction, broadcasting, matmul, reduction, and shape inspection",
+    "why": "The application needs one checked array value and a visible shape law before model code or embedding code can be trusted.",
+    "libraryOnly": true
+  },
+  {
+    "part": "Two-layer training recipe with named parameters, loss, gradient, and SGD update",
+    "why": "This is the central AI training loop. The manual chain-rule fallback works, but the intended compute.gradient path is not executable across tiers.",
+    "libraryOnly": false
+  },
+  {
+    "part": "Deterministic Dataset/Loader wrapper with seed, shuffle, bounded batches, and collate",
+    "why": "The probe had to hand-write order shuffling and two batch constructors; this is common connective tissue for every training example.",
+    "libraryOnly": true
+  },
+  {
+    "part": "Checksummed model-state save and restore with explicit file authority",
+    "why": "A training run must prove that restored parameters equal the saved parameters before deployment or resume.",
+    "libraryOnly": true
+  },
+  {
+    "part": "Exact embedding vector index with cosine scoring and bounded top-result scan",
+    "why": "The AI application needs a small retrieval path that can serve as a correctness oracle for any later approximate index.",
+    "libraryOnly": true
+  },
+  {
+    "part": "OpenAI-compatible JSON request, SSE response reader, and bounded tool-call loop",
+    "why": "A provider-neutral adapter needs streaming output, tool-call detection, a tool result turn, and a hard step bound.",
+    "libraryOnly": true
+  },
+  {
+    "part": "Explicit F32 GPU placement and backend receipt",
+    "why": "Accelerator use must report requested and selected devices, precision profile, capabilities, and fail closed when unavailable.",
+    "libraryOnly": true
+  },
+  {
+    "part": "Same-size matmul timing harness for interpreter, native Jet, and NumPy/PyTorch when installed",
+    "why": "Performance claims need the same dimensions, repetitions, result check, tier, and incumbent availability record.",
+    "libraryOnly": true
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "prim-capabilities-G1",
+    "tags": ["impossible"],
+    "primitive": "Capability-scoped host imports for sandbox components, so a host can bind checked FS, Net, or Exec rights to a plugin world without ambient authority.",
+    "evidence": "`/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/fs_guest_pkg/run.jet --target=sandbox` returns E1258: `A sandbox can't use any effect`; the source calls `fs.read`. `/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/net_guest_pkg/run.jet --target=sandbox` returns E3304: `core.net` is not available for target `sandbox`. The working plugin WIT has zero imports.",
+    "areas": ["backend", "cli", "gui", "games"],
+    "severity": "blocks",
+    "workaround": "Keep all FS, Net, and Exec in the trusted host and pass scalar data to the guest, or use trusted native code without the sandbox boundary."
+  },
+  {
+    "id": "prim-capabilities-G2",
+    "tags": ["impossible"],
+    "primitive": "Resource-scoped authority enforcement for ordinary `core.files` operations, such as `read(path, authority)` with a no-follow root boundary.",
+    "evidence": "`/home/nate/Projects/Github/jet/scripts/agent/jet-env jet run /home/nate/.cache/jet-luna/dx3/prim-capabilities/scoped_fs_pkg/run.jet --allow-fs` with `authority.holds.allow: [IO, Mem.Alloc, \"FS.Read:/home/nate/.cache/jet-luna/dx3/prim-capabilities/inputs\"]` returns E1803: `required_effects=FS, IO, Mem.Alloc; granted_effects=FS.Read:/home/nate/.cache/jet-luna/dx3/prim-capabilities/inputs, IO, Mem.Alloc; undecided_effects=FS`. Replacing the manifest with broad `[FS, IO, Mem.Alloc]` lets the same path-only `fs.read` program print both `inside=inside-capability` and `outside=outside-capability`.",
+    "areas": ["backend", "cli", "gui", "games"],
+    "severity": "hurts",
+    "workaround": "Use package-wide FS and manually validate paths; the shipped no-follow root boundary is only on `plugin.load` for WASM artifacts."
+  },
+  {
+    "id": "prim-capabilities-G3",
+    "tags": ["impossible", "call-site"],
+    "primitive": "A versioned typed plugin ABI for records, lists, resources, callbacks, and asynchronous values, in addition to homogeneous scalar exports.",
+    "evidence": "`/home/nate/Projects/Github/jet/scripts/agent/jet-env jet build /home/nate/.cache/jet-luna/dx3/prim-capabilities/rich_guest_pkg/run.jet --target=sandbox` returns E1260: `pub fn sum` is not one homogeneous `Int`, `Float`, `Bool`, or `Text` shape. The generated `pkg/plugin_src/build/run_wit/world.wit` contains only `export scale: func(f64, f64) -> f64` and `export greet: func(string) -> string`; the frozen API is `api_version = 3` with two scalar functions.",
+    "areas": ["backend", "cli", "gui", "games"],
+    "severity": "hurts",
+    "workaround": "Encode structured data into Text and write serializers at both boundaries, or split the interface into many scalar calls."
+  }
+]

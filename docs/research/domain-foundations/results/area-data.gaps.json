@@ -1,0 +1,38 @@
+[
+  {
+    "id": "area-data-G01",
+    "tags": ["impossible"],
+    "primitive": "Typed Parquet/Arrow columnar reader into core table or stream",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-data/pkg/parquet_attempt.jet exits 1: E1004, core.data has no item parquet; fix list has csv/json/csv_reader but no Parquet reader.",
+    "areas": ["data-analysis", "backend-services", "ai-ml-apps"],
+    "severity": "blocks",
+    "workaround": "Convert input to CSV/JSON outside Jet, or implement a columnar codec in library code."
+  },
+  {
+    "id": "area-data-G02",
+    "tags": ["impossible", "boilerplate"],
+    "primitive": "Direct PNG raster chart export from core data plots",
+    "evidence": "scripts/agent/jet-env jet check /home/nate/.cache/jet-luna/dx3/area-data/pkg/png_attempt.jet exits 1: E1004, core.data has no item bar_png; only bar_svg is suggested.",
+    "areas": ["data-analysis", "gui-apps", "web-apps", "reporting"],
+    "severity": "blocks",
+    "workaround": "Use working data.bar_svg and write SVG; provide or implement a PNG encoder for raster output."
+  },
+  {
+    "id": "area-data-G03",
+    "tags": ["defect"],
+    "primitive": "Default evaluator support for documented typed core.data.inner_join",
+    "evidence": "scripts/agent/jet-env jet run examples/features/tooling/data_pipeline.jet exits 1: E0956, core.data.inner_join() is not supported by the current evaluator; diagnostic suggests jet build.",
+    "areas": ["data-analysis", "backend-services", "web-apps", "ai-ml-apps"],
+    "severity": "blocks",
+    "workaround": "Write a user-level nested-loop join; pkg/manual_join_probe.jet succeeds, but the fallback is quadratic and not a general table primitive."
+  },
+  {
+    "id": "area-data-G04",
+    "tags": ["defect"],
+    "primitive": "Store core.compute.Tensor handles in user-defined structs",
+    "evidence": "scripts/agent/jet run pkg/tensor_struct_probe.jet exits 101 with whole-program TIR lowering compiler bug; jet build on the same file exits 101 at TensorBox{values: values} with compiler bug (I2/R7).",
+    "areas": ["data-analysis", "numerical-computing", "ai-ml-apps", "gui-apps"],
+    "severity": "hurts",
+    "workaround": "Keep labels and Tensor in separate bindings, or represent the labeled matrix as nested [[Float]] with user-written coordinate lookup."
+  }
+]

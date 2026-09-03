@@ -1,0 +1,22 @@
+use "units" as units
+
+fn run() {
+    target :: units.meter(10.0)
+    elapsed :: units.second(0.5)
+    acceleration :: units.meters_per_second_squared(target, elapsed)
+    position := units.meter(0.0)
+    tick := 0
+    loop tick < 4 {
+        speed :: units.acceleration_step(acceleration, elapsed)
+        increment :: units.speed_per_second(speed, elapsed)
+        position = units.checked_meters_add(position, increment) ?? panic("control sum failed")
+        tick += 1
+    }
+    converted :: units.meter_to_centimeter(position)
+    back :: units.centimeters_to_meter(converted)
+    frequency :: units.hertz(2.0)
+    print(units.format_meter(back))
+    print(units.format_centimeter(converted))
+    print(units.format_speed(units.meters_per_second(target, elapsed)))
+    print(units.format_hertz(frequency))
+}

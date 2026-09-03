@@ -1,0 +1,21 @@
+use core.mem
+
+fn make_buffer() [Float#4] -[!Mem.Alloc]> {
+    buffer := [Float#4]{ uninit }
+    loop i in 0..<buffer.len() {
+        buffer[i] = 0.0
+    }
+    return buffer
+}
+
+fn fill(&buffer: [Float#4]) -[!Mem.Alloc]> {
+    loop i in 0..<buffer.len() {
+        buffer[i] = 0.25
+    }
+}
+
+fn run() {
+    buffer := make_buffer()
+    fill(&buffer)
+    print(buffer[0])
+}

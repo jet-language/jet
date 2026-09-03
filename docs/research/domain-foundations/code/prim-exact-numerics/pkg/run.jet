@@ -1,0 +1,286 @@
+use core.math as math
+use core.encoding.json as json
+
+@ten :: 10
+@third :: @ten / 3
+
+#Codable
+struct Rational {
+    numerator: Int
+    denominator: Int
+}
+
+#Codable
+struct BuiltInExact {
+    amount: Decimal
+    whole: Int
+}
+
+fn rational(numerator: Int, denominator: Int) ?Rational -> {
+    if denominator == 0 -> return None
+    gcd :: math.gcd(numerator, denominator)
+    n :: numerator /% gcd
+    d :: denominator /% gcd
+    if d < 0 -> return Val(Rational{numerator: 0 - n, denominator: 0 - d})
+    return Val(Rational{numerator: n, denominator: d})
+}
+
+impl Rational.Add {
+    fn add(self, rhs: Rational) Rational -> {
+        made :: rational(self.numerator * rhs.denominator + rhs.numerator * self.denominator, self.denominator * rhs.denominator)
+        return made ?? panic("rational overflow")
+    }
+}
+
+impl Rational.Sub {
+    fn sub(self, rhs: Rational) Rational -> {
+        made :: rational(self.numerator * rhs.denominator - rhs.numerator * self.denominator, self.denominator * rhs.denominator)
+        return made ?? panic("rational overflow")
+    }
+}
+
+impl Rational.Mul {
+    fn mul(self, rhs: Rational) Rational -> {
+        made :: rational(self.numerator * rhs.numerator, self.denominator * rhs.denominator)
+        return made ?? panic("rational overflow")
+    }
+}
+
+impl Rational.Div {
+    fn div(self, rhs: Rational) Rational -> {
+        made :: rational(self.numerator * rhs.denominator, self.denominator * rhs.numerator)
+        return made ?? panic("division by zero")
+    }
+}
+
+impl Rational.Equatable {
+    fn equal(self, rhs: Rational) Bool -> self.numerator * rhs.denominator == rhs.numerator * self.denominator
+}
+
+impl Rational.Comparable {
+    fn compare(self, rhs: Rational) Ordering -> {
+        left :: self.numerator * rhs.denominator
+        right :: rhs.numerator * self.denominator
+        if left < right -> return Ordering.Less
+        if left > right -> return Ordering.Greater
+        return Ordering.Equal
+    }
+}
+
+impl Rational.Display {
+    fn display(self) String -> "{self.numerator}/{self.denominator}"
+}
+
+#Codable
+struct ScaledDecimal {
+    coefficient: Int
+    scale: Int
+}
+
+impl ScaledDecimal.Add {
+    fn add(self, rhs: ScaledDecimal) ScaledDecimal -> {
+        if self.scale == rhs.scale -> return ScaledDecimal{coefficient: self.coefficient + rhs.coefficient, scale: self.scale}
+        if self.scale > rhs.scale {
+            factor := 1
+            power_index := 0
+            loop power_index < self.scale - rhs.scale {
+                factor *= 10
+                power_index += 1
+            }
+            return ScaledDecimal{coefficient: self.coefficient + rhs.coefficient * factor, scale: self.scale}
+        }
+        factor := 1
+        power_index := 0
+        loop power_index < rhs.scale - self.scale {
+            factor *= 10
+            power_index += 1
+        }
+        return ScaledDecimal{coefficient: self.coefficient * factor + rhs.coefficient, scale: rhs.scale}
+    }
+}
+
+impl ScaledDecimal.Sub {
+    fn sub(self, rhs: ScaledDecimal) ScaledDecimal -> {
+        if self.scale == rhs.scale -> return ScaledDecimal{coefficient: self.coefficient - rhs.coefficient, scale: self.scale}
+        if self.scale > rhs.scale {
+            factor := 1
+            power_index := 0
+            loop power_index < self.scale - rhs.scale {
+                factor *= 10
+                power_index += 1
+            }
+            return ScaledDecimal{coefficient: self.coefficient - rhs.coefficient * factor, scale: self.scale}
+        }
+        factor := 1
+        power_index := 0
+        loop power_index < rhs.scale - self.scale {
+            factor *= 10
+            power_index += 1
+        }
+        return ScaledDecimal{coefficient: self.coefficient * factor - rhs.coefficient, scale: rhs.scale}
+    }
+}
+
+impl ScaledDecimal.Mul {
+    fn mul(self, rhs: ScaledDecimal) ScaledDecimal -> {
+        return ScaledDecimal{coefficient: self.coefficient * rhs.coefficient, scale: self.scale + rhs.scale}
+    }
+}
+
+impl ScaledDecimal.Equatable {
+    fn equal(self, rhs: ScaledDecimal) Bool -> {
+        if self.scale == rhs.scale -> return self.coefficient == rhs.coefficient
+        if self.scale > rhs.scale {
+            factor := 1
+            power_index := 0
+            loop power_index < self.scale - rhs.scale {
+                factor *= 10
+                power_index += 1
+            }
+            return self.coefficient == rhs.coefficient * factor
+        }
+        factor := 1
+        power_index := 0
+        loop power_index < rhs.scale - self.scale {
+            factor *= 10
+            power_index += 1
+        }
+        return self.coefficient * factor == rhs.coefficient
+    }
+}
+
+impl ScaledDecimal.Comparable {
+    fn compare(self, rhs: ScaledDecimal) Ordering -> {
+        if self.scale == rhs.scale {
+            if self.coefficient < rhs.coefficient -> return Ordering.Less
+            if self.coefficient > rhs.coefficient -> return Ordering.Greater
+            return Ordering.Equal
+        }
+        if self.scale > rhs.scale {
+            factor := 1
+            power_index := 0
+            loop power_index < self.scale - rhs.scale {
+                factor *= 10
+                power_index += 1
+            }
+            left :: self.coefficient
+            right :: rhs.coefficient * factor
+            if left < right -> return Ordering.Less
+            if left > right -> return Ordering.Greater
+            return Ordering.Equal
+        }
+        factor := 1
+        power_index := 0
+        loop power_index < rhs.scale - self.scale {
+            factor *= 10
+            power_index += 1
+        }
+        left :: self.coefficient * factor
+        right :: rhs.coefficient
+        if left < right -> return Ordering.Less
+        if left > right -> return Ordering.Greater
+        return Ordering.Equal
+    }
+}
+
+impl ScaledDecimal.Display {
+    fn display(self) String -> "{self.coefficient}e-{self.scale}"
+}
+
+enum Rounding {
+    Down
+    Up
+    HalfUp
+}
+
+#Codable
+struct Money {
+    cents: Int
+}
+
+impl Money.Add {
+    fn add(self, rhs: Money) Money -> Money{cents: self.cents + rhs.cents}
+}
+
+impl Money.Sub {
+    fn sub(self, rhs: Money) Money -> Money{cents: self.cents - rhs.cents}
+}
+
+impl Money.Equatable {
+    fn equal(self, rhs: Money) Bool -> self.cents == rhs.cents
+}
+
+impl Money.Display {
+    fn display(self) String -> "{self.cents} cents"
+}
+
+fn round_tax(amount: Money, basis_points: Int, mode: Rounding) Money -> {
+    scaled :: amount.cents * basis_points
+    whole := scaled /% 10000
+    remainder :: scaled % 10000
+    if mode == Rounding.Up && remainder != 0 -> whole += 1
+    if mode == Rounding.HalfUp && remainder >= 5000 -> whole += 1
+    return Money{cents: whole}
+}
+
+fn pair_add<T: Add>(left: T, right: T) T -> left + right
+
+fn largest<T: Comparable>(values: [T]) ?T -> {
+    if values.len() == 0 -> return None
+    best := ~values[0]
+    index := 1
+    loop index < values.len() {
+        if values[index] > best -> best = ~values[index]
+        index += 1
+    }
+    return Val(best)
+}
+
+fn million_money() Money -> {
+    total := Money{cents: 0}
+    loop i in 0..<1_000_000 {
+        total += Money{cents: i % 100}
+    }
+    return total
+}
+
+
+fn run() {
+    first :: rational(2, 4) ?? panic("first")
+    second :: rational(1, 3) ?? panic("second")
+    sum :: first + second
+    difference :: first - second
+    product :: first * second
+    quotient :: first / second
+    print("rational {sum} {difference} {product} {quotient}")
+    print("rational checks {sum == Rational{numerator: 5, denominator: 6}} {sum < quotient}")
+    print("rational generic {pair_add(first, second)} {largest([first, second, quotient])}")
+    big_first :: rational(123456789012345678901234567890, 7) ?? panic("big first")
+    big_second :: rational(1, 7) ?? panic("big second")
+    print("big rational {big_first + big_second}")
+
+    decimal_a :: ScaledDecimal{coefficient: 12340, scale: 3}
+    decimal_b :: ScaledDecimal{coefficient: 6, scale: 1}
+    decimal_sum :: decimal_a + decimal_b
+    decimal_product :: decimal_a * decimal_b
+    print("scaled decimal {decimal_sum} {decimal_product} {decimal_sum == ScaledDecimal{coefficient: 12940, scale: 3}}")
+    print("scaled json {json.to_string(decimal_sum)}")
+    decoded_decimal :: json.decode<ScaledDecimal>(json.to_string(decimal_sum)) ?? panic("scaled decode")
+    print("scaled roundtrip {decoded_decimal == decimal_sum}")
+
+    invoice :: Money{cents: 10007}
+    print("money {invoice} {round_tax(invoice, 1750, Rounding.Down)} {round_tax(invoice, 1750, Rounding.Up)} {round_tax(invoice, 1750, Rounding.HalfUp)}")
+    money_wire :: json.to_string(invoice)
+    money_back :: json.decode<Money>(money_wire) ?? panic("money decode")
+    print("money json {money_wire} {money_back == invoice}")
+
+    print("built-in exact {@third} {@third * 3}")
+    runtime_third :: 1 / 3
+    print("runtime exact {runtime_third} {runtime_third * 3}")
+    builtin_decimal :: 0.1 + 0.2
+    print("decimal literal {builtin_decimal} {builtin_decimal == 0.3}")
+    built_in_raw :: "{{\"amount\":12.340,\"whole\":123456789012345678901234567890}}"
+    built_in :: json.decode<BuiltInExact>(built_in_raw) ?? panic("built-in decode")
+    print("built-in json {built_in.amount.to_string()} {built_in.whole.to_string()} {json.to_string(built_in)}")
+    print("million money {million_money()}")
+}

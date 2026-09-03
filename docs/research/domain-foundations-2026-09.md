@@ -1,14 +1,15 @@
-# Foundations for every domain — mining report and probe program (v0, 2026-09-02)
+# Foundations for every domain — findings, slate, and evidence (2026-09-02)
 
 ## Status
 
 | Field | Value |
 |---|---|
-| State | Research in progress: mining done, probes prepared, probe wave not yet run |
+| State | Probe wave complete: 22 probes, 99 gaps, 23 root-cause defects, 11 ballots on the board, 55 cards homed in e15 |
 | Epoch | e15 "Foundations for every domain" |
-| Blocker | The Codex usage limit (Luna and Sol) is exhausted until 2026-09-06 22:29; owner guidance forbids substituting another model family for these lanes, so the 22-probe wave waits. Everything that is thinking is done below. |
-| Ballots | None yet. Owner rule: one consolidated slate after all probes, 5-15 primitive ballots, recommended option A, every loss designed away. |
-| Owner gates | None open |
+| Ballots | 11 open, all recommending A: D-FOUND-REALTIME1, HANDLE1, SANDBOX1, LIFECYCLE1, OPMIX1, LITERAL1, VIEW1, RECEIPT1, PLATFORM1, BOARD1, COREAPI1 (cards #2784-#2794) |
+| Cards | 22 defect cards (#2762-#2783, e15-m13), 8 battery cards (#2795-#2801, #2815), 13 example cards (#2802-#2814), 11 primitive cards (#2784-#2794) |
+| Owner gates | The eleven ballots. Nothing else waits on the owner. |
+| Reading path | `docs/proposals/domain-foundations.html` (the story), then the ballots in Tower Focus Mode |
 
 ## The one idea
 
@@ -139,7 +140,7 @@ Each former mechanism gets one of five verdicts under the rule. "Evidence" names
 
 Counts: 15 primitives, 4 shared types, 10 ecosystem tools, 10 batteries, 49 libraries. Of the 88, only 29 can stay anywhere near core, and most of those already exist in some form (networking, receipts, tables, the tensor, notebook, jobs, prove). The question the probes answer is not "what to build" but "what stops a library author today".
 
-## What the census already says (hypotheses, not findings)
+## What the census said before the probes (hypotheses; the findings above are the test)
 
 Counting the 3,348 census rows the field surveys marked as real gaps by how many of the 108 fields raise them, the same needs recur far outside any one niche. These are the "two birds" candidates: one primitive would unblock many fields at once. Each is a hypothesis until a probe reproduces it in code.
 
@@ -170,40 +171,60 @@ Counting the 3,348 census rows the field surveys marked as real gaps by how many
 
 Reading across the rows, the words that recur in what authors ask for are the same everywhere: explicit, bounded, checked, identity, provenance, versioned, diagnostics, deterministic. That is the shape of the primitives we expect the probes to name: not "a signal library" but "a way to declare a bounded resource and get a diagnostic when it is exceeded", not "a format reader" but "a way to write a checked reader once and get the same diagnostics as core".
 
-## Where we could be: the probe program
+## What the probes found
 
-Twenty-two probes, each a Luna max worker with a 60-minute box, all read `docs/research/domain-foundations/probes/COMMON.md` and one brief in the same directory. Eight build a small real program end to end in one critical area; fourteen test one cross-cutting primitive from library code. Every probe returns `probe.md`, `gaps.json` (tagged by the rubric, each gap named as a capability with exact evidence), and, for areas, `batteries.json`.
+Twenty-two Luna max probes ran for 23 to 46 minutes each against the real `jet` binary (22 of 22 returned; every gap carries a command, its output, and a rubric tag). They wrote 99 gaps: 47 block, 49 hurt, 3 annoy; by tag, 52 impossible, 31 boilerplate, 24 defect, 19 call-site, 6 slow, 4 unsafe. The eight critical areas all reached a working first program on today's Jet; none reached its complete target.
 
-| Probe | Builds | Informs |
+| Area | Verdict, in the probe's words | Working today | Blocked by |
+|---|---|---|---|
+| Web | development flow buildable; native server build ends in an ICE | routes, HTML, SQLite, session auth, static assets, browser WASM build, watcher restart | #2762 (handler closure ICE); query and form typing under e14 #2472/#2474 |
+| Games | buildable with listed gaps fixed | package, scene, input, fixed-step loop, AABB, save file, 3-frame headless transcript, AOT build | frame budget, gamepad, atlas (D-FOUND-COREAPI1); audio callback (D-FOUND-REALTIME1) |
+| CLI and scripts | buildable today | typed #CLI with ten options, files, env overlays, regex search, records, #Job, script mode, release install | closable stdin and ignore-aware walk (D-FOUND-COREAPI1) |
+| Data analysis | credible typed in-memory floor; not yet columnar or raster | 100k CSV in 10 s, filter/group/pivot/window, typed OLS, SVG, notebook invalidation | Parquet (D-FOUND-HANDLE1), PNG (battery), Tensor in a struct (#2769) |
+| Backend services | buildable for a small single-process service; not production-complete | typed JSON routes, SQLite, durable queue, sessions, logs, 1000-task p99 3 ms, graceful drain, native release build | pool and OpenAPI (D-FOUND-COREAPI1), deadlines and SIGTERM (D-FOUND-LIFECYCLE1), #2782 |
+| AI and ML | useful small app buildable; cross-tier autodiff missing | Tensor algebra, manual chain-rule training (loss 0.5 to 0.0037), serialize/restore, SSE tool loop, Vulkan F32 receipt | autodiff (#2772), Tensor in a struct (#2769), checker slowdown at 10k entries (#2779) |
+| GUI | headless and TUI app buildable; native desktop and mobile not | Unicode files, reactive tree, roles and focus, themes, undo, release build in 8.5 s | platform services (D-FOUND-PLATFORM1), reactive ICEs (#2771), packaging (COREAPI1), android/ios target admission |
+| Embedded | host-shaped firmware buildable; a Cortex-M deliverable not | board records, C layout, rings, pinning, signing, slot policy, host replay, native build | interrupts, DMA, registers (D-FOUND-BOARD1), deadline (REALTIME1), flashing (COREAPI1), thumbv7em toolchain |
+
+The fourteen primitive probes confirmed most of the archive's judgments and overturned three:
+
+- **Dimension arithmetic is not a gap.** `#UnitFamily` already derives, cancels, and formats dimensions (D-SHAPE-QUANTITY1, D-DIMENSION-OPEN1, D-DERIVED-DIMENSION-CLAIM1); the units probe rebuilt it with plain structs and hit the generic grammar. The supported path is the shipped mechanism (I8). What remains is a real gap for everyone else: operators between different types (D-FOUND-OPMIX1).
+- **Numerics reach Rust.** A hand-written radix-2 FFT and a plain 512x512 matmul in release Jet matched native Rust (105 us vs 117 us; 341 ms vs 344 ms); the shipped `compute.fft` is a naive O(n^2) DFT, 4,500 times slower than the library kernel at N=4096 (#2780), and a 4096x4096 elementwise map never finishes (#2778). The compiler is not the problem; two Prelude functions are.
+- **Tensor dtypes are ratified, not shipped.** D-COMPUTE-TYPE1 already names `Tensor<T>`; the runtime stores f64 only and the docs disagree with D-COMPUTE-BACKEND1 on the default profile. That is implementation and reconciliation, not a ballot.
+
+### The gaps, deduplicated
+
+Ninety-nine gaps fold into eleven primitives, twenty-three defects, and two rulings that stand:
+
+| Primitive (ballot) | Gaps it closes | Areas |
 |---|---|---|
-| area-web | an Orders full-stack app: typed routes, island, form, query cache, SQLite, session auth, live reload, web and native builds, one e2e test | web |
-| area-games | a 2-D game: fixed-timestep loop, input, sprite atlas, AABB physics, audio callback, scene graph, save file, headless 600-frame replay | games |
-| area-cli | a notes tool: typed subcommands, ignore-aware search, process pipelines, typed object pipeline, #Job, script mode, release install | cli |
-| area-data | a data session: CSV and Parquet into the core table, group/join/pivot/window, regression, labeled array, SVG/PNG plot, notebook, receipt; timing against pandas/polars | data |
-| area-backend | a JSON API: typed bodies with OpenAPI export, pool, queue, auth, logs/metrics/traces, graceful shutdown, 1,000-VU load test, contract test | backend |
-| area-ai | an AI app: tensors, a two-layer net with autodiff, data loader, checkpoints, embeddings index, streaming LLM call with a tool loop, GPU matmul receipt; timing against numpy/PyTorch | ai-ml |
-| area-gui | a desktop notes app: window, menu, editor with real text shaping, shortcuts, dialogs, undo, themes, reactive settings, accessibility, packaging; mobile needs | gui |
-| area-embedded | Cortex-M firmware: board, MMIO, interrupt handoff, DMA ownership, UART ring buffer, deadline loop with WCET, signed flash slot with rollback, flash/debug receipt | embedded |
-| prim-numerics-perf | FFT, dense matmul, sparse SpMV, stencil in library Jet, timed against numpy/scipy at both tiers | data, ai-ml, games, science |
-| prim-exact-numerics | Rational, Decimal, money over BigInt with literals and operators | data, backend |
-| prim-units | a units layer as a library against the type system | embedded, science, games |
-| prim-receipts | extending the shared receipt with a domain field group; replay and diff from library code | data, backend, embedded, ai-ml |
-| prim-capabilities | loading a plugin with granted capabilities; a sandboxed untrusted file; an OS service under authority | backend, cli, gui, games |
-| prim-distributed | parallel map, two-process typed messaging, backpressure pipeline, checkpointed windowed stream | backend, ai-ml, science |
-| prim-bridges | a C handle API, a header via `jet inspect bind cpp`, a Rust crate via the extern bridge; boilerplate per foreign function | games, ai-ml, data, gui, science |
-| prim-storage | append-only log with fsync and crash recovery, KV store, pool, durable queue, content cache; kill mid-write | backend, data, cli |
-| prim-dsl | symbolic math, rules engine, jq-style filter, spreadsheet formulas as library DSLs | data, backend, science |
-| prim-realtime | 48 kHz audio callback and a 1 kHz control loop with deadline and jitter reporting, allocation-free | games, embedded, gui |
-| prim-tooling-hooks | syntax-tree rename, "what changed" over the build graph, headless replay, deterministic load runner | cli, web, backend |
-| prim-arrays | labeled N-D, chunked lazy, and image arrays over the core tensor; timing against numpy/xarray | data, ai-ml, science |
-| prim-text | BPE tokenizer, segmentation, 100 MB log scan, HarfBuzz shaping through a bridge | cli, gui, ai-ml, web |
-| prim-time | business dates, DST schedules, astronomical time scales over core time | backend, data, science |
+| Real-time boundary (D-FOUND-REALTIME1) | prim-realtime G1-G4, area-games G4, area-embedded G4 | games, embedded, gui, audio |
+| Opaque C handles and link closure (D-FOUND-HANDLE1) | prim-bridges G1-G3, prim-text G4, area-games G5, area-gui G4 (fonts), area-data G01 (Parquet) | games, ai-ml, data, gui, science, text |
+| Sandbox capabilities (D-FOUND-SANDBOX1) | prim-capabilities G1-G3 | backend, cli, gui, games |
+| Signals and deadlines as cancellation (D-FOUND-LIFECYCLE1) | area-backend G3-G4, area-cli G1 | backend, cli, web, games, gui, embedded |
+| Operators between types (D-FOUND-OPMIX1, amends D-OPDEF1) | prim-units G3 (and every vector, matrix, money library) | science, games, data, embedded |
+| Literals for library types (D-FOUND-LITERAL1) | prim-exact-numerics G4 | numerics, data, backend |
+| Zero-copy views (D-FOUND-VIEW1) | prim-text G2, prim-storage G1, prim-numerics-perf G3 | cli, web, ai-ml, data, backend |
+| Typed receipt sections (D-FOUND-RECEIPT1) | prim-receipts G1, area-embedded G6, prim-tooling-hooks G2 | data, backend, embedded, ai-ml |
+| Platform services in core.ui (D-FOUND-PLATFORM1) | area-gui G2-G6 | gui |
+| Interrupts, DMA, registers (D-FOUND-BOARD1) | area-embedded G2, G3, G7 | embedded |
+| Eleven core API names (D-FOUND-COREAPI1) | area-cli G1-G2, area-games G1-G3, area-backend G1-G2, prim-distributed G1, prim-time G1, area-gui G7, area-embedded G6, prim-tooling-hooks G2 | all |
 
-To run the wave once the quota resets: copy the briefs to the machine-local scratch and dispatch one OMP `task` per probe (bundled `task` maps to GPT-5.6 Luna max), with the context and acceptance text in `docs/research/domain-foundations/probes/probes.json` and the briefs; up to 22 concurrently under the owner's 30-lane allowance. The orchestrator then reads every `gaps.json`, deduplicates by primitive across probes (one primitive that unblocks several areas is one proposal), writes this report's findings section, and only then drafts the ballot slate.
+Rulings that stand, with the gap that tested them: user-defined macros (prim-dsl G5) are rejected by D-EXT1 and the philosophy's non-goals; regex lookaround (prim-text G3) is refused by design for linear-time matching (E0152); runtime access to `core.compiler` (prim-tooling-hooks G1) is compile-time only by D-FRONTENDAPI1 and the JSON CLI mirror served the rename tool. Const generics beyond `[T#capacity]` (prim-units G4) are closed by D-GENMOD-VALUE1 and were not re-opened. The orphan rule (prim-units G5) matches Rust and Swift; a newtype is the standard answer. Library-buildable and left as examples: event-time windows and durable checkpoints (prim-distributed G1-G2 ran in user code), typed inter-process channels (G3), jq-style filters and formula graphs (prim-dsl G3-G4), labeled and chunked arrays (prim-arrays G3-G4), the BPE tokenizer (prim-text G1), calendars and time scales (prim-time G2-G3), CSR storage and complex buffers (prim-numerics-perf G4-G5).
+
+### The defects, by root cause
+
+Twenty-three root causes explain thirty-one probe symptoms (`docs/research/domain-foundations/defects.json`, cards #2762-#2783). Two patterns matter more than the rest. Ten are "the generated Rust did not compile": ordinary programs that check and run in the default tier and then fail native build (a Send-less cell in an HTTP handler, a Result carrier on imported functions, `Float.is_finite`, `compute.set`, reactive callbacks, autodiff, a mangled `LocalDate`). The CLI discards rustc's error before printing the banner (#2783), so none could be diagnosed from the tool; a worker reconstructed the rustc call to find each cause. Four are evaluator gaps (E0956) that make the default tier refuse what native code runs, the I9 drift the invariant names: `core.math.pi`, map index-field assignment, `set_trace_id`, a replayed `time.now`. Two are wrong answers with no error at all: comptime `10/3` folds to `0/1` in the dev native tier, and `from_unix_nanoseconds` narrows at the i64 boundary. A shipped example fails on check (recursive enums, #2766) and another in release (`data_pipeline.jet`, #2781). Two were reported and could not be reproduced on the current binary (an `inner_join` E0956 and a second-build E3510); they are recorded as stale, not carded.
+
+### The batteries
+
+Each critical area's probe named the parts a first-party battery needs to get a builder to a working first program, marking which are pure library code and which wait for core (`docs/research/domain-foundations/results/<area>.batteries.json`). Cards #2795-#2801 and #2815 carry the lists; library parts can start now, core parts wait on the ballots and defects the card names.
 
 ## What has to be decided
 
-Nothing yet. The owner ruled the frame, the rubric, the critical areas, the undo, the gate, the ballot law, and the output shape on 2026-09-02 (recorded in `docs/agents/agent-memory.md` under `domain-rescope-2026-09-02`). The next owner decisions are the primitive ballots themselves, which exist only after the probes produce evidence.
+Eleven ballots, all short, each with its reading surface (one question, one lesson, the current and in-the-wild code, one proposed block per option, real gains and losses, why the others lose, and what the recommendation still costs). Every recommendation is A. Two ballots amend a ratified ruling and say so: D-FOUND-OPMIX1 amends D-OPDEF1 (same-type operators); D-FOUND-SANDBOX1 fills the open D-PLUGIN1/D-DEP-WASM1 records. Suggested reading order: COREAPI1 (one batch, eleven names), then the four that unblock the most areas (VIEW1, HANDLE1, LIFECYCLE1, REALTIME1), then OPMIX1 and LITERAL1 (the language), then SANDBOX1, RECEIPT1, PLATFORM1, BOARD1.
+
+Nothing else waits on the owner. Defect cards are ready for the implementing orchestrator; battery and example cards are planned with their gates named; the probe wave card (#2761) is closed with its evidence.
 
 ## Evidence index
 
@@ -212,4 +233,11 @@ Nothing yet. The owner ruled the frame, the rubric, the critical areas, the undo
 | `docs/research/domain-matrix-archive/` | the mined research: census, claims, performance rows, family syntheses, the 46 withdrawn ballots |
 | `docs/research/domain-foundations/classification.json` | the 88 verdicts above with their probe assignments |
 | `docs/research/domain-foundations/probes/` | COMMON.md, 22 briefs, probes.json |
-| Tower e15 | milestone e15-m13 (substrate defects, 9 cards), card #2759 (ballot surface), card #2760 (ballot gate), card #2761 (the probe wave, blocked on the Codex quota until 2026-09-06 22:29) |
+| `docs/research/domain-foundations/results/` | every probe's report, gaps.json, and batteries.json (22 probes) |
+| `docs/research/domain-foundations/code/` | the probe programs and the minimal defect repros, as written by the workers |
+| `docs/research/domain-foundations/all-gaps.json` | the 99 gaps in one file |
+| `docs/research/domain-foundations/defects.json` | the 23 root causes with commands, errors, tiers, and locations |
+| `docs/research/domain-foundations/law/` | the ratified-law map per ballot area (what is ratified, shipped, undecided, in conflict) |
+| `docs/research/domain-foundations/slate/` | the ballot source (ballots.mjs) and the e15 milestones |
+| `docs/proposals/domain-foundations.html` | the owner-facing story |
+| Tower e15 | milestones e15-m01..m10 and m13; cards #2761-#2815; ballots D-FOUND-* on #2784-#2794 |

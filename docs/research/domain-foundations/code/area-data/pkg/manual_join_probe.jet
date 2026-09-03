@@ -1,0 +1,41 @@
+#Codable
+struct Observation {
+    team: String
+    segment: String
+    x: Float
+    y: Float
+    value: Float
+}
+
+#Codable
+struct Owner {
+    team: String
+    owner: String
+}
+
+#Codable
+struct Joined {
+    team: String
+    owner: String
+    value: Float
+}
+
+fn join_rows(rows: [Observation], owners: [Owner]) [Joined] -> {
+    out := [Joined]{}
+    loop row in rows {
+        loop owner in owners {
+            if row.team == owner.team {
+                out.push(Joined{team: row.team, owner: owner.owner, value: row.value})
+                break
+            }
+        }
+    }
+    return out
+}
+
+fn run() {
+    rows :: [Observation]{{team: "A", segment: "s", x: 1.0, y: 2.0, value: 3.0}, {team: "B", segment: "s", x: 2.0, y: 4.0, value: 5.0}}
+    owners :: [Owner]{{team: "A", owner: "Ada"}, {team: "B", owner: "Grace"}}
+    joined :: join_rows(rows, owners)
+    print("joined={joined.len()} {joined[0].owner} {joined[1].owner}")
+}
