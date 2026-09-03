@@ -1421,7 +1421,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         let mut child = outer.clone();
         for (source, runtime, _) in &lam.captures {
             if !super::capture_is_one_slot(source, runtime) {
-                if let Some(value) = outer.get(source).cloned() {
+                if let Some(value) = super::capture_value(outer, source, runtime) {
                     child.insert(runtime.clone(), value);
                 }
             }
@@ -1513,7 +1513,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         child.insert(param.clone(), arg);
         for (source, runtime, _) in &lam.captures {
             if !super::capture_is_one_slot(source, runtime) {
-                if let Some(value) = outer.get(source).cloned() {
+                if let Some(value) = super::capture_value(outer, source, runtime) {
                     child.insert(runtime.clone(), value);
                 }
             }

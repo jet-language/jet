@@ -2485,9 +2485,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         let span = self.span();
         let mut child = HashMap::new();
         for capture in &lam.captures {
-            let value = scope
-                .get(&capture.source)
-                .cloned()
+            let value = capture_value(scope, &capture.source, &capture.name)
                 .or_else(|| self.globals.get(&capture.source).cloned())
                 .unwrap_or(CtValue::Unit);
             // D-TASKBORROW1=A: a whole-place write window crossing into a child
@@ -4465,6 +4463,28 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
 pub(super) fn capture_is_one_slot(source: &str, place: &str) -> bool {
     place == source || place == TIR::local_place(source)
 }
+/// Resolve a capture from the evaluator scope, including a taken resource's
+/// generated storage place. A moved closure clones a resource capture in AOT
+/// from that generated place, while the source name is intentionally absent
+/// from the runtime scope.
+pub(super) fn capture_value(
+    scope: &HashMap<String, CtValue>,
+    source: &str,
+    runtime: &str,
+) -> Option<CtValue> {
+    scope
+        .get(source)
+        .cloned()
+        .or_else(|| scope.get(runtime).cloned())
+        .or_else(|| {
+            let prefix =
+                jet_foundation::Names::mangle_generated(&format!("resource_{source}_"));
+            scope.iter().find_map(|(name, value)| {
+                name.starts_with(&prefix).then(|| value.clone())
+            })
+        })
+}
+
 
 fn empty_cx() -> Cx {
     build_cx_items(&[], "", "<eval>", None, &HashMap::new(), "")

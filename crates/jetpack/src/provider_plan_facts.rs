@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-const HEADER: &str = "jet-provider-plan-facts-v1";
+const HEADER: &str = "jet-build-plan-replay-v1";
 
 /// Versioned, canonical provider facts carried with a realized producer plan.
 /// The codec is independent from compiler build-plan internals.
@@ -99,9 +99,9 @@ mod tests {
         let encoded = facts.encode();
         assert_eq!(ProviderPlanFacts::decode(&encoded).unwrap(), facts);
         assert_eq!(facts.encode(), encoded);
-        assert!(ProviderPlanFacts::decode("jet-provider-plan-facts-v1\n61\t6").is_err());
+        assert!(ProviderPlanFacts::decode("jet-build-plan-replay-v1\n61\t6").is_err());
         assert!(ProviderPlanFacts::decode(
-            "jet-provider-plan-facts-v1\n61\t62\n61\t63\n"
+            "jet-build-plan-replay-v1\n61\t62\n61\t63\n"
         )
         .is_err());
     }

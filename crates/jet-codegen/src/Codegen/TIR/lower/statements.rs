@@ -2187,6 +2187,12 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
     if !matches!(expected, Type::List(_) | Type::FixedList { .. }) {
         return expr;
     }
+    // A carrier is already a complete value. Retagging its visible payload
+    // shape would leave `Ok(...)`/`Present(...)` with a bare list type and
+    // trigger a second wrapper at the surrounding return boundary.
+    if matches!(&expr.ty, Type::Result { .. } | Type::Option(_)) {
+        return expr;
+    }
     let mut expr = match expr {
         TExpr {
             ty,

@@ -5144,9 +5144,12 @@ impl<'a> Checker<'a> {
                             self.infer(&mut arg.expr);
                             self.expected_type = old;
                         }
-                        let ret = Some(msig.effective_return_type());
-                        *resolved_ret_out = ret.clone();
-                        return ret;
+                        // Keep source inference on the declared success value.
+                        // The effective Result carrier is an ABI fact carried on
+                        // the call node for TIR/codegen.
+                        let carrier = msig.effective_return_type();
+                        *resolved_ret_out = Some(carrier);
+                        return msig.return_type.clone();
                     }
                 }
             }
@@ -5480,9 +5483,13 @@ impl<'a> Checker<'a> {
                 );
                 self.record_edge(crate::Sema::effect_key(Some(&trait_name), method), span);
                 *recv_type_out = Some(trait_name.clone());
-                let ret = self.check_trait_method_args(method, &msig, receiver, args, span);
-                *resolved_ret_out = ret.clone();
-                return ret;
+                let source = self.check_trait_method_args(method, &msig, receiver, args, span);
+                // Trait-object calls have the same split as generic dispatch:
+                // source inference consumes the declared success value while
+                // TIR receives the effective failure carrier.
+                let carrier = msig.effective_return_type();
+                *resolved_ret_out = Some(carrier);
+                return source;
             }
             // Keep the original single-trait wording byte-for-byte (it's snapshot-
             // pinned product copy, docs/spec/diagnostics.md) when there's only one

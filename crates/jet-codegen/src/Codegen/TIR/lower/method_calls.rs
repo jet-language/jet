@@ -4824,8 +4824,18 @@ fn lower_method_call_impl(
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
         return in_own_frame(|| {
             let recv_t = lower_expr(receiver, cx, env);
-            // The element type `T` from the receiver's `Apply<T>` (the first type arg).
+            // `Task<T>` is source-shaped in sema, while a spawned closure may
+            // store its effective `Result<T, E>` carrier in the handle.  `join`
+            // exposes the source success value, so project one private carrier
+            // layer before constructing its public `T !TaskFailure` result.
             let elem = match &recv_t.ty {
+                Type::Apply { name, args } if name == "Task" => match args.first() {
+                    Some(Type::Result { ok, .. }) | Some(Type::Option(ok)) => {
+                        Some((**ok).clone())
+                    }
+                    Some(other) => Some(other.clone()),
+                    None => None,
+                },
                 Type::Apply { args, .. } => args.first().cloned(),
                 _ => None,
             };

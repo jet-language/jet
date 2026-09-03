@@ -1345,7 +1345,7 @@ impl<'a> Checker<'a> {
             for arg in args.iter_mut() {
                 self.infer(&mut arg.expr);
             }
-            return Some(sig.effective_return_type());
+            return sig.return_type.clone();
         }
         self.register_binder_refs(args);
 
@@ -1502,7 +1502,10 @@ impl<'a> Checker<'a> {
 
         }
         self.activate_call_reservations(&call_access, span);
-        Some(sig.effective_return_type())
+        // Trait calls expose the declared success value to source inference;
+        // `infer_method_call` records the effective failure carrier separately
+        // for TIR/codegen at the ABI boundary.
+        sig.return_type.clone()
     }
     fn public_failure_visibility_edit(
         &self,

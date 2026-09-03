@@ -2938,42 +2938,77 @@ fn eval_pure_program_value_inner(
     src: &str,
     file: &str,
 ) -> Result<(CtValue, String), Vec<Diagnostic>> {
-    use std::collections::HashMap;
-
-    let (toks, lex_diags) = Lexer::lex(src);
-    if !lex_diags.is_empty() {
-        return Err(lex_diags);
-    }
-    let prog = Parser::parse(&toks)?;
-
-    let func_map: HashMap<String, &AST::Func> = prog
-        .items
+    // Use the checked eval bundle rather than rebuilding a top-level function
+    // map.  The bundle carries the same impl/trait methods and sema facts that
+    // the forced interpreter consumes, so eval cannot silently lose operators.
+    let (diagnostics, bundle, _) = Driver::check_eval_with_effect_facts(src, file);
+    if diagnostics
         .iter()
-        .filter_map(|item| {
-            if let AST::Item::Func(f) = item {
-                Some((f.name.clone(), f))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let main_fn = func_map.get("run").ok_or_else(|| {
-        vec![Diagnostics::Diagnostic::error(
-            "E3401",
-            "no `run` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `fn run() -[]>` entry point".to_string(),
-            "add `fn run() -[]> { … }` to the program".to_string(),
+        .any(|diagnostic| diagnostic.severity == Diagnostics::Severity::Error)
+    {
+        return Err(diagnostics);
+    }
+    let bundle = bundle.ok_or(diagnostics)?;
+    let program = Codegen::TIR::lower_interp_program(&bundle).ok_or_else(|| {
+        vec![Sema::Diagnostics::render_registered(
+            "E0956",
+            "the eval program couldn't be lowered".to_string(),
+            "the interpreter needs the checked program's canonical TIR".to_string(),
+            "report this as a compiler bug".to_string(),
             None,
         )]
     })?;
 
-    let base_dir = std::path::Path::new(file)
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
+    let mut globals = std::collections::HashMap::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let AST::Item::Const(constant) = item {
+                if let Some(value) = &constant.ct {
+                    globals
+                        .entry(constant.name.clone())
+                        .or_insert_with(|| value.clone());
+                }
+            }
+        }
+    }
+    let mut struct_fields = std::collections::HashMap::new();
+    let mut struct_field_types = std::collections::HashMap::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let AST::Item::Struct(structure) = item {
+                struct_fields.insert(
+                    structure.name.clone(),
+                    structure
+                        .fields
+                        .iter()
+                        .map(|field| (field.name.clone(), field.redact))
+                        .collect(),
+                );
+                struct_field_types.insert(
+                    structure.name.clone(),
+                    structure
+                        .fields
+                        .iter()
+                        .map(|field| (field.name.clone(), field.ty.clone()))
+                        .collect(),
+                );
+            }
+        }
+    }
+    let core_imports = Codegen::core_imports_for_bundle(&bundle);
     let mut sink = Comptime::DevSink::new();
-    let value =
-        Comptime::run_main_value(main_fn, &func_map, base_dir, &mut sink).map_err(|d| vec![d])?;
+    let value = Codegen::TIR::run_program_with_structs(
+        &program,
+        &bundle.project_root,
+        &mut sink,
+        globals,
+        &core_imports,
+        Policy::GateSet::default(),
+        struct_fields,
+        struct_field_types,
+
+    )
+    .map_err(|diagnostic| vec![diagnostic])?;
     Ok((value, sink.stdout))
 }
 

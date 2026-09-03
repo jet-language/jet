@@ -580,10 +580,30 @@ impl LowerCtx<'_, '_> {
                 .iter()
                 .find(|(name, _, _)| name == outer)
                 .map(|(_, place, _)| place);
+            let resource_prefix =
+                jet_foundation::Names::mangle_generated(&format!("resource_{outer}_"));
             let var = self
                 .vars
                 .get(&key)
                 .or_else(|| capture_place.and_then(|place| self.vars.get(place)))
+                .or_else(|| {
+                    // A borrowed resource is rebound by TIR's AOT clone
+                    // prelude as `cap_<name>`, but the JIT has no emitted
+                    // prelude statement for that temporary. The resource
+                    // binding itself is the same opaque handle ABI, so use
+                    // the live generated resource slot when the cap is not
+                    // present. Keep the type check to avoid selecting a
+                    // shadowed resource with the same source name.
+                    self.vars.iter().find_map(|(place, candidate)| {
+                        if !place.starts_with(&resource_prefix) {
+                            return None;
+                        }
+                        match self.var_tys.get(place) {
+                            Some(bound_ty) if bound_ty != ty => None,
+                            _ => Some(candidate),
+                        }
+                    })
+                })
                 .or_else(|| self.vars.get(outer))
                 .copied()
                 .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
@@ -918,11 +938,30 @@ impl LowerCtx<'_, '_> {
         }
         let arg_values = self.marshal_host_args(row.symbol.name(), &params, arg_values)?;
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host_ref, &arg_values);
         let never = matches!(
             ret_ty,
             Type::Named(name) if name == jet_foundation::Syntax::TYPE_NEVER
         );
+        if never {
+            // D-FAIL-EXIT1=A: a Never-returning Core row is a lexical scope
+            // exit. Flush deferred closes before the host records its exit,
+            // matching the AOT cleanup boundary and the other resident exits.
+            // Drain the compile-time list so the trap epilogue does not close
+            // the same resource a second time after the host sets its status.
+            let closes = std::mem::take(&mut self.deferred_closes);
+            for (place, ty) in closes.into_iter().rev() {
+                let take = TExpr {
+                    ty: ty.clone(),
+                    kind: TExprKind::ResourceTake(place),
+                };
+                let close = TExpr {
+                    ty: Type::Named("Unit".to_string()),
+                    kind: TExprKind::Close(Box::new(take)),
+                };
+                self.lower_expr(&close)?;
+            }
+        }
+        let call = self.b.ins().call(host_ref, &arg_values);
         let value = if never {
             Some(self.b.ins().iconst(types::I8, 0))
         } else {
@@ -1426,7 +1465,17 @@ impl LowerCtx<'_, '_> {
     fn result_new(&mut self, ok: bool, inner: &TExpr) -> Result<Value, String> {
         let tag = self.b.ins().iconst(types::I8, i64::from(ok));
         let (host_id, payload) = if matches!(&inner.ty, Type::Named(n) if n == "Unit") {
-            (self.host.result_new_i64, self.b.ins().iconst(types::I64, 0))
+            let payload = self.b.ins().iconst(types::I64, 0);
+            // A unit-typed branch expression can still carry lexical exits
+            // (for example `return if { ... }`). Do not skip its lowering:
+            // the branches own the actual return values and cleanup.
+            if !matches!(&inner.kind, TExprKind::Unit) {
+                let _ = self.lower_expr(inner)?;
+                if self.dead || self.current_block_terminated() {
+                    return Ok(payload);
+                }
+            }
+            (self.host.result_new_i64, payload)
         } else {
             let value = self.lower_expr(inner)?;
             let host = match clif_ty(&inner.ty) {
@@ -7492,6 +7541,10 @@ impl LowerCtx<'_, '_> {
                             any_reaches_merge = true;
                         }
                         tail = next;
+                        // A terminating arm does not make the next conditional arm dead.
+                        // `tail` is its distinct fall-through block; restore lowering state
+                        // before emitting the next arm's condition and body.
+                        self.dead = false;
                     }
                     self.b.switch_to_block(tail);
                     self.b.seal_block(tail);
@@ -11658,7 +11711,7 @@ impl LowerCtx<'_, '_> {
     /// parity: guard tests/dev.rs::fixed_interpolation_matches_interpreter_and_resident_jit_rounding
     fn lower_string_lit(&mut self, parts: &[TStrPart]) -> Result<Value, String> {
         if let Some(text) = flatten_string(parts) {
-            let id = self.runtime.heap.alloc_string(text);
+            let id = self.runtime.heap.alloc_string(text.clone());
             return Ok(self.b.ins().iconst(types::I64, id));
         }
         let buf_id = self.call_host(self.host.str_begin, &[]);
@@ -17250,26 +17303,6 @@ impl LowerCtx<'_, '_> {
                             let a0 = self.lower_expr(&args[0])?;
                             let call = self.b.ins().call(host_ref, &[a0]);
                             return Ok(self.b.inst_results(call)[0]);
-                        });
-                    }
-                    if module == "core.sys" && method == "vars" && args.is_empty() {
-                        return in_own_frame(|| -> Result<Value, String> {
-                            return Ok(self.call_host(self.host.core.env_vars, &[]));
-                        });
-                    }
-                    if module == "core.process" && method == "exit" && args.len() == 1 {
-                        return in_own_frame(|| -> Result<Value, String> {
-                            let host_ref = self
-                                .module
-                                .declare_func_in_func(self.host.core.process_exit, self.b.func);
-                            let a0 = self.lower_expr(&args[0])?;
-                            self.b.ins().call(host_ref, &[a0]);
-                            // Host sets exit_code + trap; unwind to epilogue like rich panic.
-                            let value = self.b.ins().iconst(types::I8, 0);
-                            self.emit_trap_check()?;
-                            self.b.ins().trap(TrapCode::UnreachableCodeReached);
-                            self.dead = true;
-                            return Ok(value);
                         });
                     }
                     if module == "core.process" {

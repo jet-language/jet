@@ -6378,11 +6378,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReflectValueFields => format!("({}).fields()", recv),
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
-                // D-CONC-FAIL1=A: `join()` returns the task element `T` on
-                // its success branch and `TaskFailure` on its own failure
-                // rail. A fallible task stores its private `Result<T, E>`
-                // inside the handle, so keep that nested carrier here;
-                // `jet_task_join_result` would erase the task body's E.
+                // D-CONC-FAIL1=A: `join()` exposes the source success value
+                // while a fallible task stores `Result<T, E>` privately in its
+                // handle.  The shared flatten adapter preserves that inner `E`
+                // in the returned `TaskFailure` instead of erasing it.
+                THandleOp::TaskJoin if task_result_carrier(&recv_ty_for_stream) => {
+                    format!(
+                        "{}jet_std::jet_task_join_result({})",
+                        cx.root_prefix, recv
+                    )
+                }
                 THandleOp::TaskJoin => format!("({}).join()", recv),
                 THandleOp::TaskDetach => format!("({}).detach()", recv),
                 THandleOp::TaskPause => {

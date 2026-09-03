@@ -231,10 +231,36 @@ fn lower_lambda_expecting_with_host_borrow(
     let by_value = by_value || http_handler;
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
-    // does not leak its own bindings into the enclosing function.
+    // does not leak its own bindings into the enclosing function. The lambda's return
+    // carrier is its own body result plus the callback slot's failure type; inheriting
+    // the enclosing function's success type would erase a callback tail such as `true`
+    // to `Unit`.
+    let lambda_ret_ty = expected_return
+        .or(lam.meta.fallible_carrier.as_ref())
+        .or_else(|| env.ret_ty.as_ref())
+        .map(|ret| match ret {
+            Type::Result { err, .. } => Type::Result {
+                ok: Box::new(body_ty.clone()),
+                err: err.clone(),
+            },
+            Type::Option(_) => Type::Option(Box::new(body_ty.clone())),
+            other => other.clone(),
+        })
+        .unwrap_or_else(|| body_ty.clone());
+    // A lambda called immediately in a fallible outer expression still needs the
+    // outer error carrier while lowering `??`, but it never escapes that call.
+    let direct_fallible = expected_return.is_none()
+        && lam.meta.fallible_carrier.is_none()
+        && env
+            .ret_ty
+            .as_ref()
+            .is_some_and(|ty| matches!(ty, Type::Result { .. } | Type::Option(_)))
+        && !by_value
+        && host_borrow.is_none();
     let mut lam_env = fork_panic(env);
-    // Sema suspends transaction checks inside deferred lambdas. Do not attach
-    // a foreign call in a closure to the outer transaction at codegen time.
+    lam_env.ret_ty = Some(lambda_ret_ty.clone());
+    // Sema suspends transaction checks inside deferred lambdas. Do not attach a
+    // foreign call in a closure to the outer transaction at codegen time.
     lam_env.txn_handle = None;
     lam_env.txn_undo_needed = None;
     // `move ` keyword: the AST emits it UNLESS the lambda is FnMut and does not escape.
@@ -475,16 +501,13 @@ fn lower_lambda_expecting_with_host_borrow(
         param_types,
         ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit")).then_some(body_ty),
         is_move,
-        boxed: lam.meta.escapes,
-        // Native callback helpers consume the closure as an ordinary `Fn` value.
-        // Keep the `Box` escape wrapper for those call sites; `Rc<closure>` is a
-        // cloneable Jet fn value, but it does not satisfy a generic `F: Fn(...)`
-        // parameter because the generic bound sees the wrapper type itself.
+        boxed: lam.meta.escapes && !direct_fallible,
         rc: lam.meta.escapes
             && !lam.meta.needs_fn_mut
             && !http_handler
             && !by_value
-            && host_borrow.is_none(),
+            && host_borrow.is_none()
+            && !direct_fallible,
         arc: http_handler,
         captures,
         materialized_captures: lam.meta.materialized_captures.clone(),

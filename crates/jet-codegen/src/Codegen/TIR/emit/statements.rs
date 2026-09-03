@@ -2611,6 +2611,37 @@ fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize
     }
 }
 
+/// A named diverging call is lowered as an expression block so it can occupy a
+/// value position. In statement position its terminal `unreachable!` still
+/// crosses the same cleanup boundary as a direct `RequireStop`.
+fn tir_expr_ends_in_unreachable(expr: &crate::Codegen::TIR::TExpr) -> bool {
+    match &expr.kind {
+        crate::Codegen::TIR::TExprKind::Unreachable { .. } => true,
+        crate::Codegen::TIR::TExprKind::InlineBlock(stmts) => stmts
+            .iter()
+            .rev()
+            .find_map(|stmt| match stmt {
+                TStmt::ExprStmt(expr) => Some(tir_expr_ends_in_unreachable(expr)),
+                TStmt::SourceSpan(_) | TStmt::LineMarker(_) => None,
+                _ => Some(false),
+            })
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+fn tir_expr_always_stops(expr: &crate::Codegen::TIR::TExpr) -> bool {
+    matches!(
+        &expr.ty,
+        Type::Named(name) if name == crate::Syntax::TYPE_NEVER
+    ) || matches!(
+        &expr.kind,
+        crate::Codegen::TIR::TExprKind::RequireStop {
+            always_stops: true,
+            ..
+        }
+    ) || tir_expr_ends_in_unreachable(expr)
+}
+
 fn materialize_cleanup_markers(rendered: String, cleanups: &[ActiveCleanup]) -> String {
     if !rendered.contains(crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER) {
         return rendered;
@@ -2810,13 +2841,7 @@ pub(crate) fn emit_tir_lambda_block(stmts: &[TStmt], cx: &Cx, out: &mut String, 
     emit_tir_stmts_inline(prefix, cx, out, indent, &mut active_cleanups);
     if let TStmt::ExprStmt(expr) = last {
         let pad = "    ".repeat(indent);
-        if matches!(
-            expr.kind,
-            crate::Codegen::TIR::TExprKind::RequireStop {
-                always_stops: true,
-                ..
-            }
-        ) {
+        if tir_expr_always_stops(expr) {
             emit_cleanups_now(&active_cleanups, out, indent);
         }
         out.push_str(&format!(
@@ -3620,13 +3645,7 @@ fn emit_tir_stmt_with_collection_proof(
             out.push_str(&format!("{}return;\n", pad));
         }
         TStmt::ExprStmt(e) => {
-            if matches!(
-                e.kind,
-                crate::Codegen::TIR::TExprKind::RequireStop {
-                    always_stops: true,
-                    ..
-                }
-            ) {
+            if tir_expr_always_stops(e) {
                 // `jet_panic` terminates the process instead of unwinding. Run
                 // all lexical deferred closes explicitly before that boundary;
                 // each guard drains its Option so its later Drop is a no-op.

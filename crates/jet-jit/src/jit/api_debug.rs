@@ -990,7 +990,12 @@ fn resident_jit_safe_bundle_detail_lowered(bundle: &ProgramBundle) -> String {
                 jet_codegen::Codegen::TIR::TJitSpawnBody::Block { prefix, tail } => {
                     for (si, s) in prefix.iter().enumerate() {
                         if !resident_safe_stmt(s, &names) {
-                            why.push(format!("stmt{si} unsafe"));
+                            let detail = match s {
+                                TStmt::Let { name, .. } => format!("Let `{name}` init unsafe"),
+                                TStmt::ExprStmt(_) => "ExprStmt unsafe".to_string(),
+                                _ => jit_stmt_tag(s).to_string(),
+                            };
+                            why.push(format!("stmt{si} {detail} unsafe"));
                         }
                     }
                     if let Some(t) = tail {
@@ -1002,7 +1007,12 @@ fn resident_jit_safe_bundle_detail_lowered(bundle: &ProgramBundle) -> String {
                 jet_codegen::Codegen::TIR::TJitSpawnBody::SharedBlock { body, tail } => {
                     for (si, s) in body.iter().enumerate() {
                         if !resident_safe_stmt(s, &names) {
-                            why.push(format!("stmt{si} unsafe"));
+                            let detail = match s {
+                                TStmt::Let { name, .. } => format!("Let `{name}` init unsafe"),
+                                TStmt::ExprStmt(_) => "ExprStmt unsafe".to_string(),
+                                _ => jit_stmt_tag(s).to_string(),
+                            };
+                            why.push(format!("stmt{si} {detail} unsafe"));
                         }
                     }
                     if *tail {

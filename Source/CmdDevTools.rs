@@ -5666,7 +5666,9 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                 println!("{}", render_eval_json(&value));
             } else {
                 print!("{printed}");
-                println!("{}", value.render_pretty());
+                if let Some(value) = render_eval_value(&value) {
+                    println!("{value}");
+                }
             }
         }
         Err(diags) => {
@@ -5676,6 +5678,14 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
             );
             exit(ExitCodes::USER_ERROR);
         }
+    }
+}
+
+fn render_eval_value(value: &jet::CtValue) -> Option<String> {
+    match value {
+        jet::CtValue::Present(inner) => render_eval_value(inner),
+        jet::CtValue::Unit => None,
+        value => Some(value.jet_show()),
     }
 }
 

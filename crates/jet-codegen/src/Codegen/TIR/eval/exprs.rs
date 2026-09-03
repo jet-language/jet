@@ -6334,9 +6334,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     .and_then(|persist_key| jet_foundation::Persist::shared_read_key(persist_key))
                     .or_else(|| scope.get(&local.name).cloned())
                     .or_else(|| self.globals.get(&local.name).cloned())
-                    .ok_or_else(|| {
-                        unsupported(&format!("unbound `{}`", local.name), self.span())
-                    })?;
+                    .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span()))?;
                 if local.deref {
                     if let Some(value) = self.materialize_allocator_view(&value)? {
                         return Ok(value);
@@ -6595,6 +6593,77 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     } else {
                         !equal
                     }));
+                }
+                // D-TYPE2-DEFAULT1: eval fragments can reach this arm before
+                // sema rewrites a bare integer beside an exact carrier. Promote
+                // through the same exact Prelude constructors as AOT lowering.
+                let precise_op = match op {
+                    BinOp::Add => Some("add"),
+                    BinOp::Sub => Some("sub"),
+                    BinOp::Mul => Some("mul"),
+                    BinOp::Div => Some("div"),
+                    BinOp::Eq | BinOp::Ne => Some("equal"),
+                    _ => None,
+                };
+                if let Some(func) = precise_op {
+                    let mixed = match (&lhs.ty, &rhs.ty) {
+                        (Type::Int, Type::Named(name))
+                            if name == crate::Syntax::TYPE_DECIMAL
+                                && !matches!(op, BinOp::Div) =>
+                        {
+                            Some((crate::Syntax::TYPE_DECIMAL, true, false))
+                        }
+                        (Type::Named(name), Type::Int)
+                            if name == crate::Syntax::TYPE_DECIMAL
+                                && !matches!(op, BinOp::Div) =>
+                        {
+                            Some((crate::Syntax::TYPE_DECIMAL, false, true))
+                        }
+                        (Type::Int, Type::Named(name))
+                            if name == crate::Syntax::TYPE_FRACTION =>
+                        {
+                            Some((crate::Syntax::TYPE_FRACTION, true, false))
+                        }
+                        (Type::Named(name), Type::Int)
+                            if name == crate::Syntax::TYPE_FRACTION =>
+                        {
+                            Some((crate::Syntax::TYPE_FRACTION, false, true))
+                        }
+                        _ => None,
+                    };
+                    if let Some((type_name, left_int, right_int)) = mixed {
+                        let promote = |value: &CtValue, is_int: bool| {
+                            if is_int {
+                                eval_precise_builtin(
+                                    type_name,
+                                    "from_int",
+                                    vec![value.clone()],
+                                    self.span(),
+                                )
+                            } else {
+                                Ok(value.clone())
+                            }
+                        };
+                        let result = promote(&l, left_int).and_then(|left| {
+                            promote(&r, right_int).and_then(|right| {
+                                eval_precise_builtin(
+                                    type_name,
+                                    func,
+                                    vec![left, right],
+                                    self.span(),
+                                )
+                            })
+                        });
+                        let result = if *op == BinOp::Ne {
+                            result.map(|value| match value {
+                                CtValue::Bool(equal) => CtValue::Bool(!equal),
+                                _ => value,
+                            })
+                        } else {
+                            result
+                        };
+                        return self.route_runtime_arithmetic(result, self.span());
+                    }
                 }
                 if let Type::IntN { signed, bits } = &lhs.ty {
                     let fixed_operand = |value: &CtValue, ty: &Type| {
@@ -10440,11 +10509,13 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 // whose place is only the Rust spelling of the SAME slot
                 // (`__jet_stop`) is one slot, and adding the second spelling
                 // would create a phantom the body never writes
-                // (`capture_is_one_slot`).
+                // (`capture_is_one_slot`). Resource bindings are keyed by their
+                // generated storage place, so `capture_value` also resolves
+                // the source name against that place before cloning the slot.
                 let mut captured = scope.clone();
                 for (source, runtime, _) in &lambda.captures {
                     if !super::capture_is_one_slot(source, runtime) {
-                        if let Some(value) = scope.get(source).cloned() {
+                        if let Some(value) = super::capture_value(scope, source, runtime) {
                             captured.insert(runtime.clone(), value);
                         }
                     }
@@ -10751,7 +10822,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     let mut captured = scope.clone();
                     for (source, runtime, _) in &lambda.captures {
                         if !super::capture_is_one_slot(source, runtime) {
-                            if let Some(value) = scope.get(source).cloned() {
+                            if let Some(value) = super::capture_value(scope, source, runtime) {
                                 captured.insert(runtime.clone(), value);
                             }
                         }

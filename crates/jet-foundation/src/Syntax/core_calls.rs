@@ -652,6 +652,9 @@ pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.net", "udp_packet_original_len"),
     ("core.net", "udp_packet_truncated"),
     ("core.data", "inner_join"),
+    ("core.net", "unix_listen"),
+    ("core.net", "tcp_reply"),
+    ("core.net", "unix_accept"),
 ];
 
 pub fn core_call_ambient_routes() -> &'static [(&'static str, &'static str)] {
@@ -3688,7 +3691,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_net_tcp_reply",
         true,
         &[false, true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.net", "udp_bind", "jet_net_udp_bind", true, &[true]),
     CoreCallRecord::new(
         "core.net",
@@ -3790,14 +3794,16 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_net_unix_listen",
         true,
         &[true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "unix_accept",
         "jet_net_unix_accept",
         true,
         &[true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.net",
         "getservbyname",

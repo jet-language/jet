@@ -1149,13 +1149,16 @@ fn jet_jit_net_udp_packet_truncated(packet: i64) -> i64 {
     )
 }
 fn jet_jit_net_udp_packet_addr(packet: i64) -> i64 {
-    with_handle(packet, |handle| match handle {
-        NetHttpHandle::UDPPacket(packet) => {
-            Some(push_handle(NetHttpHandle::SocketAddr(jet_net_udp_packet_addr(packet))))
-        }
+    // Copy the address while holding the handle-table lock, then publish the
+    // new address handle after releasing it. Calling `push_handle` inside the
+    // `with_handle` callback would re-lock the same table and deadlock.
+    let address = with_handle(packet, |handle| match handle {
+        NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_addr(packet)),
         _ => None,
-    })
-    .unwrap_or(0)
+    });
+    address
+        .map(|address| push_handle(NetHttpHandle::SocketAddr(address)))
+        .unwrap_or(0)
 }
 
 
@@ -3969,6 +3972,67 @@ pub(crate) fn runtime_tcp_listen(address: String) -> CtValue {
         Ok(listener) => tcp_listener_result(listener),
         Err(error) => CtValue::failed(Box::new(net_error_value(error))),
     }
+}
+#[cfg(unix)]
+pub(crate) fn runtime_unix_listen(path: String) -> CtValue {
+    match jet_net_unix_listen(&path) {
+        Ok(listener) => CtValue::Present(Box::new(net_ct_handle(
+            "UnixListener",
+            push_handle(NetHttpHandle::UnixListener(Arc::new(listener))),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn runtime_unix_listen(path: String) -> CtValue {
+    CtValue::failed(Box::new(net_error_value(net_invalid_error(
+        "unix listen",
+        &path,
+    ))))
+}
+#[cfg(unix)]
+pub(crate) fn runtime_unix_connect(path: String) -> CtValue {
+    match jet_net_unix_connect(&path) {
+        Ok(stream) => CtValue::Present(Box::new(net_ct_handle(
+            "UnixStream",
+            push_handle(NetHttpHandle::UnixStream(Arc::new(Mutex::new(stream)))),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn runtime_unix_connect(path: String) -> CtValue {
+    CtValue::failed(Box::new(net_error_value(net_invalid_error(
+        "unix connect",
+        &path,
+    ))))
+}
+
+#[cfg(unix)]
+pub(crate) fn runtime_unix_accept(listener: i64) -> CtValue {
+    let Some(listener) = unix_listener(listener) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "unix accept",
+            "UnixListener",
+        ))));
+    };
+    match jet_net_unix_accept(&listener) {
+        Ok(stream) => CtValue::Present(Box::new(net_ct_handle(
+            "UnixStream",
+            push_handle(NetHttpHandle::UnixStream(Arc::new(Mutex::new(stream)))),
+        ))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn runtime_unix_accept(_listener: i64) -> CtValue {
+    CtValue::failed(Box::new(net_error_value(net_invalid_error(
+        "unix accept",
+        "UnixListener",
+    ))))
 }
 
 pub(crate) fn runtime_tcp_listen_addr(address: i64) -> CtValue {

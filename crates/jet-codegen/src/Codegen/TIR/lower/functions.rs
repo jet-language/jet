@@ -789,19 +789,13 @@ fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
         _ => {}
     }
 }
-/// Bare generic parameters with the default read convention are owned values
-/// in the source ABI. Explicit write/move conventions remain unchanged.
+/// Bare generic parameters keep the source access convention. A default `Read`
+/// remains a borrowed `&T` slot; explicit `Move` (for example `^T`) is owned.
 fn effective_generic_convention(
     p: &Param,
-    type_params: &[crate::AST::TypeParam],
+    _type_params: &[crate::AST::TypeParam],
 ) -> AccessConvention {
-    if p.convention == AccessConvention::Read
-        && matches!(&p.ty, Type::Named(name) if type_params.iter().any(|param| param.name == *name))
-    {
-        AccessConvention::Move
-    } else {
-        p.convention
-    }
+    p.convention
 }
 
 /// c109 Phase 17: `param_place` for a (possibly generic) free function.

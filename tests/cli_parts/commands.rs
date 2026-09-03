@@ -1,6 +1,31 @@
 use super::*;
 
 #[test]
+fn eval_unit_run_prints_only_program_output() {
+    let dir = isolated_cwd("eval_unit_output");
+    fs::write(dir.join("run.jet"), "fn run() {\n    print(\"hello\")\n}\n").unwrap();
+    let output = Command::new(jet())
+        .args(["eval", "run.jet"])
+        .current_dir(&dir)
+        .env("JET_STORE_DIR", dir.join(".jet/store"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"hello\n");
+    assert!(
+        output.stderr.is_empty(),
+        "unit eval wrote diagnostics: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn status_renders_no_claim_without_a_receipt() {
     let dir = isolated_cwd("status_missing_receipts");
     fs::write(dir.join("run.jet"), "fn run() { print(\"status\") }\n").unwrap();

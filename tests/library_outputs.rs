@@ -532,6 +532,83 @@ fn library_build_load_and_foreign_call_are_one_surface() {
 }
 
 #[test]
+fn guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic() {
+    assert!(have_rustc(), "guest embedding proof requires rustc");
+    let cxx = cxx().expect("guest embedding proof requires a C++ compiler");
+
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/interop/guest_library");
+    let scratch = Scratch::new("guest-embedding-contract");
+    copy_tree(&fixture, &scratch.path);
+    let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
+    assert!(
+        build.status.success(),
+        "guest embedding Library build failed:\n{}",
+        compiler_text(&build)
+    );
+
+    let target = scratch.path.join("target");
+    let shared = if cfg!(target_os = "macos") {
+        target.join("libembedding.dylib")
+    } else if cfg!(target_os = "windows") {
+        target.join("libembedding.dll")
+    } else {
+        target.join("libembedding.so")
+    };
+    assert!(shared.is_file(), "guest embedding build missed {}", shared.display());
+    let header = target.join("embedding.h");
+    assert!(header.is_file(), "guest embedding build missed {}", header.display());
+    let header_text = fs::read_to_string(&header).unwrap();
+    assert!(header_text.contains("int64_t on_tick(int64_t p0);"));
+    assert!(header_text.contains("int64_t reenter(int64_t p0);"));
+    assert!(header_text.contains("void jet_text_free(JetText value);"));
+
+    let cpp_source = scratch.path.join("foreign.cpp");
+    let cpp_binary = scratch.path.join("foreign");
+    let mut cpp_build = Command::new(cxx);
+    cpp_build
+        .args(["-std=c++17", "-I"])
+        .arg(&target)
+        .arg(&cpp_source)
+        .arg("-o")
+        .arg(&cpp_binary)
+        .arg("-pthread");
+    if cfg!(target_os = "linux") {
+        cpp_build.args(["-ldl", "-rdynamic"]);
+    } else if cfg!(target_os = "macos") {
+        cpp_build.args(["-ldl", "-Wl,-export_dynamic"]);
+    }
+    let cpp_result = cpp_build.output().unwrap();
+    assert!(
+        cpp_result.status.success(),
+        "guest embedding host failed to compile:\n{}",
+        compiler_text(&cpp_result)
+    );
+
+    // Initialization, shutdown, thread entry, TLS, re-entry, signals, allocator
+    // ownership, panic containment, and repeated load/unload are named table
+    // rows; the checked-in host exercises each row in one process.
+    // Deliberate double-free and post-dlclose calls are not executed: the
+    // allocator row documents those invalid C operations as UB-by-C.
+    let host = Command::new(&cpp_binary)
+        .arg(&shared)
+        .output()
+        .unwrap();
+    assert!(
+        host.status.success(),
+        "guest embedding host failed at runtime:\n{}",
+        compiler_text(&host)
+    );
+    assert_eq!(String::from_utf8_lossy(&host.stdout), "embedding-ok\n");
+    assert!(
+        String::from_utf8_lossy(&host.stderr).contains("Stop [E3001]"),
+        "panic child did not emit the E3001 report:\n{}",
+        compiler_text(&host)
+    );
+}
+
+
+#[test]
 fn component_build_load_and_foreign_call_are_one_surface() {
     if !have_rustc() {
         eprintln!("note: skipping Component end-to-end proof (need rustc)");
@@ -672,10 +749,11 @@ fn guest_import_rejects_invalid_signature_and_duplicate_native_symbol() {
     .unwrap();
     let duplicate = jet::compile_library(&source_text, None)
         .expect_err("duplicate guest native symbol accepted");
+    // D-CASE-PROSE1=A: diagnostic prose uses sentence case for the subject.
     assert!(
         duplicate.iter().any(|error| {
             error.code == "E1341"
-                && error.what.contains("guest imports")
+                && error.what.contains("Guest imports")
                 && error.what.contains("same C symbol")
         }),
         "missing duplicate guest import symbol diagnostic: {duplicate:?}"
@@ -715,11 +793,15 @@ fn library_output_selection_is_named_and_fail_closed() {
     let source = source.to_string_lossy();
 
     let ambiguous = jet::compile_library(&source, None).expect_err("ambiguous Library accepted");
-    assert!(ambiguous.iter().any(|error| {
-        error.code == "E1341"
-            && error.what.contains("multiple Library outputs")
-            && error.fix.contains("alpha, beta")
-    }));
+    // D-CASE-PROSE1=A: diagnostic prose uses sentence case for the subject.
+    assert!(
+        ambiguous.iter().any(|error| {
+            error.code == "E1341"
+                && error.what.contains("Multiple Library outputs")
+                && error.fix.contains("alpha, beta")
+        }),
+        "missing ambiguous Library diagnostic: {ambiguous:?}"
+    );
 
     let selected = jet::compile_library(&source, Some("beta"))
         .expect("named Library output should compile");
@@ -729,17 +811,19 @@ fn library_output_selection_is_named_and_fail_closed() {
 
     let missing = jet::compile_library(&source, Some("missing"))
         .expect_err("missing Library output accepted");
+    // D-CASE-PROSE1=A: diagnostic prose uses sentence case for the subject.
     assert!(
         missing.iter().any(|error| {
-            error.code == "E1341" && error.what.contains("library output `missing`")
+            error.code == "E1341" && error.what.contains("Library output `missing`")
         }),
         "missing named Library diagnostic: {missing:?}"
     );
 
     let non_library = jet::compile_library(&source, Some("app"))
         .expect_err("non-Library output accepted");
+    // D-CASE-PROSE1=A: diagnostic prose uses sentence case for the subject.
     assert!(non_library.iter().any(|error| {
-        error.code == "E1341" && error.what.contains("output `app` is not a Library")
+        error.code == "E1341" && error.what.contains("Output `app` is not a Library")
     }));
 }
 

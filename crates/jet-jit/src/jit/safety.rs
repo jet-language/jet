@@ -2707,7 +2707,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
         }
         TExprKind::ColumnarGather { base, index, .. } => {
             jit_list_record_type(&base.ty)
-                && matches!(&index.ty, Type::Int)
+                && intish_ty(&index.ty)
                 && record_type_key(&expr.ty).is_some()
                 && resident_safe_expr(base, callees)
                 && resident_safe_expr(index, callees)
@@ -2718,7 +2718,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             // CLIF type. Gate on exactly that, so no cell shape reaches a lowering
             // that has no accessor for it.
             jit_list_record_type(&base.ty)
-                && matches!(&index.ty, Type::Int)
+                && intish_ty(&index.ty)
                 && (matches!(&expr.ty, Type::String)
                     || super::types_meta::clif_ty(&expr.ty).is_some())
                 && resident_safe_expr(base, callees)
@@ -2748,7 +2748,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some()
                     || jit_float_view_type(&base.ty))
-                    && matches!(&index.ty, Type::Int)
+                    && intish_ty(&index.ty)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
             }
@@ -2909,7 +2909,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                                     && args.len() == 1
                                     && record_type_key(&args[0]).is_some()
                         ))
-                    && matches!(&index.ty, Type::Int)
+                    && intish_ty(&index.ty)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
             }
@@ -5354,7 +5354,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some()
                     || jit_float_view_mut_type(&base.ty))
-                    && matches!(&index.ty, Type::Int)
+                    && intish_ty(&index.ty)
                     && (matches!(
                         &value.ty,
                         Type::Int
@@ -5384,7 +5384,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             !assign.is_map
                 && !assign.clone_value
                 && base_ok
-                && matches!(&assign.index.ty, Type::Int)
+                && intish_ty(&assign.index.ty)
                 && assign
                     .op
                     .is_none_or(|_| matches!(&assign.field_ty, Type::Int | Type::Float))

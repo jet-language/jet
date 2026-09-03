@@ -5887,6 +5887,36 @@ pub fn ambient_core_call(
             };
             Some(Ok(crate::net_http_rt::runtime_udp_packet_truncated(packet)))
         }
+        ("core.net", "unix_accept") => {
+            let Some(listener) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UnixListener"))
+            else {
+                return Some(Err(unsupported("core.net.unix_accept listener", span)));
+            };
+            if args.len() != 1 {
+                return Some(Err(unsupported("core.net.unix_accept arguments", span)));
+            }
+            Some(Ok(crate::net_http_rt::runtime_unix_accept(listener)))
+        }
+        ("core.net", "unix_connect") => {
+            let Some(CtValue::Str(path)) = args.first() else {
+                return Some(Err(unsupported("core.net.unix_connect path", span)));
+            };
+            if args.len() != 1 {
+                return Some(Err(unsupported("core.net.unix_connect arguments", span)));
+            }
+            Some(Ok(crate::net_http_rt::runtime_unix_connect(path.clone())))
+        }
+        ("core.net", "unix_listen") => {
+            let Some(CtValue::Str(path)) = args.first() else {
+                return Some(Err(unsupported("core.net.unix_listen path", span)));
+            };
+            if args.len() != 1 {
+                return Some(Err(unsupported("core.net.unix_listen arguments", span)));
+            }
+            Some(Ok(crate::net_http_rt::runtime_unix_listen(path.clone())))
+        }
         ("core.net", "unix_close") => {
             let Some(stream) = args
                 .first()

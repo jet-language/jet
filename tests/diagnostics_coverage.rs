@@ -692,7 +692,7 @@ fn assert_ui_snapshot_matches_row(code: &str, holes: &[(&str, &str)], fixture: &
         .unwrap_or_else(|| panic!("{code} must stay registered"));
     let rendered = row.render(holes);
     let expected = format!(
-        "Error [{code}]: {}\n Why: {}\n Fix: {}\n",
+        "Error [{code}]: {}\n Why: {}\n Fix: {}\nMore: jet-lang.dev/e/{code}\n",
         rendered.what, rendered.why, rendered.fix
     );
     assert_eq!(

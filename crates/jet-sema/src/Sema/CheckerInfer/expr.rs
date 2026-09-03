@@ -1841,25 +1841,69 @@ impl<'a> Checker<'a> {
         // carrier is recorded for both the direct callback root and that
         // nested success-position call. A real Result expectation remains a
         // carrier position and must not be reinterpreted as callback failure.
+        //
+        // A statement-root call can itself have a value-producing call nested
+        // in one of its arguments (`print(f())`). When the enclosing callback
+        // slot is already a Result, that nested call is still a source value:
+        // consume its carrier once here, rather than handing Result<T, E> to
+        // the outer display/argument checker.
+        // Trait methods keep their declared success type for source inference,
+        // while `resolved_ret` carries the effective Result ABI for lowering.
+        // Use that persisted carrier for propagation without changing the
+        // source type returned to the enclosing expression.
+        let propagation_result = match e.without_parens() {
+            Expr::MethodCall {
+                resolved_ret: Some(carrier),
+                ..
+            } if carrier.is_fallible() => Some(carrier.clone()),
+            _ => result.clone(),
+        };
+        // D-CHOOSE-FIND1=A: a finite value/collecting loop is an
+        // immediately evaluated expression, not a fallible function-value
+        // call. Preserve its CallValue shape so the exhaustion route can
+        // attach to the generated loop before ordinary propagation.
+        let inline_loop_call = matches!(
+            e.without_parens(),
+            Expr::CallValue { callee, args, .. }
+                if args.is_empty()
+                    && matches!(
+                        callee.as_ref(),
+                        Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
+                    )
+        );
+        let nested_statement_value = self.statement_expr_inference
+            && self
+                .statement_expr_root_depth
+                .is_some_and(|root| self.source_nesting > root)
+            && (self.failure_carrier_inference
+                || matches!(self.ret.as_ref(), Some(Type::Result { .. })));
         if self.failure_carrier_inference
-            && matches!(result, Some(Type::Result { .. }))
-            && !matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
+            && matches!(propagation_result, Some(Type::Result { .. }))
+            && (!matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
+                || nested_statement_value)
         {
             if self.failure_carrier.is_none() {
-                self.failure_carrier = result.clone();
-                self.ret = result.clone();
+                self.failure_carrier = propagation_result.clone();
+            }
+            if nested_statement_value {
+                self.ret = self
+                    .expected_type
+                    .clone()
+                    .or_else(|| propagation_result.clone());
+            } else if self.ret.is_none() {
+                self.ret = propagation_result.clone();
             }
             self.task_body_propagates = true;
-            if self.expected_type.is_none() {
+            if self.expected_type.is_none() && !nested_statement_value {
                 return result;
             }
         }
-        if self.compiler_generated
+        if inline_loop_call || self.compiler_generated
             || !matches!(
                 e.without_parens(),
                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
             )
-            || !matches!(result, Some(Type::Result { .. }))
+            || !matches!(propagation_result, Some(Type::Result { .. }))
             || (self.ordinary_binding_root_depth != Some(self.source_nesting)
                 && self.expected_type.as_ref().is_some_and(|expected| {
                     matches!(
@@ -1867,7 +1911,8 @@ impl<'a> Checker<'a> {
                         Type::Result { err, .. }
                             if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
                     )
-                }))
+                })
+                && !nested_statement_value)
         {
             return result;
         }
@@ -1876,7 +1921,7 @@ impl<'a> Checker<'a> {
         let mut wrapped = Expr::Try(Box::new(inner), span, TryConvert::None, None);
         let result = match &mut wrapped {
             Expr::Try(inner, try_span, convert, note) => {
-                self.infer_try_with_inner_type(inner, *try_span, convert, note, result)
+                self.infer_try_with_inner_type(inner, *try_span, convert, note, propagation_result)
             }
             _ => unreachable!("automatic failure propagation builds a Try node"),
         };

@@ -236,18 +236,20 @@ fn refined_collection_types_survive_tir_chains() {
     if !have_rustc() {
         return;
     }
+    // D-TYPE2-DEFAULT1: decimal literals are exact; use `approx(...)` for
+    // each intentional integer-to-Float crossing in this Float pipeline.
     let src = "\
 fn use_float(value: Float) Float -> {
-    return value + 0.25
+    return value + approx(1) / Float{4.0}
 }
 fn run() {
-    print(use_float([1, 2].fold(0.5, (a: Float, n: Int) -> a + 0.5)))
-    print(use_float([1, 2].reduce(0.5, (a: Float, n: Int) -> a + 0.5)))
-    print(use_float([1, 2].para_fold(() -> 0.5, (a: Float, n: Int) -> a + 0.5, (left: Float, right: Float) -> left + right)))
-    print(use_float([1, 2].scan(0.5, (a: Float, n: Int) -> a + 0.5).sum()))
-    print(use_float([1, 2].map((n: Int) -> 1.5).sum()))
+    print(use_float([1, 2].fold(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0})))
+    print(use_float([1, 2].reduce(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0})))
+    print(use_float([1, 2].para_fold(() -> approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0}, (left: Float, right: Float) -> left + right)))
+    print(use_float([1, 2].scan(approx(1) / Float{2.0}, (a: Float, n: Int) -> a + approx(1) / Float{2.0}).sum()))
+    print(use_float([1, 2].map((n: Int) -> approx(3) / Float{2.0}).sum()))
     print(use_float([\"1.5\", \"bad\", \"2.5\"].filter_map((s: String) -> Float.parse(s)).sum()))
-    print(use_float([1, 2].flat_map((n: Int) -> [1.5]).sum()))
+    print(use_float([1, 2].flat_map((n: Int) -> [approx(3) / Float{2.0}]).sum()))
     print([1, 2, 3].group_by((n: Int) -> n % 2 == 0).has_key(true))
     print([1, 2, 3].count_by((n: Int) -> n % 2).has_key(1))
     print([1, 2, 3].group_by((n: Int) -> \"x\").get(\"x\"))

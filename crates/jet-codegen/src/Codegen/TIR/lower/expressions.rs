@@ -91,6 +91,22 @@ use std::collections::{HashMap, VecDeque};
 pub(crate) fn in_own_frame<R>(body: impl FnOnce() -> R) -> R {
     body()
 }
+/// A propagated call owns the only ABI-carrier projection. Argument-order
+/// preservation and foreign undo registration may put the call in a terminal
+/// `InlineBlock`, but the surrounding `Try` still performs the projection.
+/// Clear the module-call adapter in that shape so it cannot emit a second `?`.
+fn suppress_module_call_target_return(expr: &mut TExpr) {
+    match &mut expr.kind {
+        TExprKind::ModuleCall { target_return, .. } => *target_return = None,
+        TExprKind::InlineBlock(stmts) => {
+            if let Some(TStmt::ExprStmt(tail)) = stmts.last_mut() {
+                suppress_module_call_target_return(tail);
+            }
+        }
+        _ => {}
+    }
+}
+
 
 fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
     match expr {
@@ -6977,7 +6993,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // location is resolved here so emit never reads `cx.current_fn`/`cx.src`.
         Expr::Try(inner, span, convert, note) => {
             in_own_frame(|| {
-                let inner_t = lower_expr(inner, cx, env);
+                let mut inner_t = lower_expr(inner, cx, env);
+                suppress_module_call_target_return(&mut inner_t);
                 if matches!(&inner_t.ty, Type::Named(name) if name == Syntax::TYPE_NEVER) {
                     return inner_t;
                 }

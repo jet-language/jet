@@ -500,7 +500,7 @@ impl<'a> super::Checker<'a> {
     }
 
     pub(crate) fn attribute_fn_arg(&mut self, arg: &crate::AST::Expr) {
-        use crate::AST::Expr;
+        use crate::AST::{Expr, Type};
         match arg {
             Expr::Lambda(_) => {}
             Expr::Ident(name, _)
@@ -509,6 +509,35 @@ impl<'a> super::Checker<'a> {
                 // The callee is sealed, but the higher-order function may
                 // invoke this callback any number of times.
                 self.record_edge_with_executions(name.clone(), arg.span(), None);
+            }
+            Expr::Ident(name, _)
+                if self.lookup(name).is_some_and(|info| {
+                    matches!(
+                        &info.ty,
+                        Type::Fn {
+                            effect_bound: Some(_),
+                            ..
+                        }
+                    )
+                }) =>
+            {
+                // A local function value may retain a source effect row even
+                // after its return is projected onto the ABI carrier. Keep
+                // that proof; substituting a generic `T` with this function
+                // must not widen a known row to the maximal effect set.
+                if let Some(Type::Fn {
+                    effect_bound: Some(row),
+                    ..
+                }) = self.lookup(name).map(|info| info.ty.clone())
+                {
+                    for (effect, _) in row {
+                        if effect_row_var(&effect).is_none()
+                            && parse_effect_name(&effect).is_some()
+                        {
+                            self.record_effect(&effect, arg.span());
+                        }
+                    }
+                }
             }
             _ => self.record_maximal(arg.span()),
         }
