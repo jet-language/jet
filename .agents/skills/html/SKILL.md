@@ -42,6 +42,19 @@ The first screen is the thesis plus one picture of the arc. The thesis is one pl
 
 One scroll, nothing collapsed: three to five screens, linear, every section earning its place. If content does not fit, cut it; do not hide it behind an expander. Precision lives inline as a quiet "More precisely" aside, not in a fold.
 
+### Density and hierarchy (owner ruling, 2026-09-03)
+
+A report is scanned, not read. The first report built under the shapes above was rejected as "extremely verbose, monotonous, very little visual separation": long prose acts with the act name as the heading. The rules that prevent it, enforced by `scripts/check.mjs`:
+
+- **Headline first.** Every `h2` states the takeaway in one sentence ("Eight areas build; none is complete"), never the act name. The act name ("Where we are") is the eyebrow above it. A reader who reads only the eyebrows and headlines gets the whole story.
+- **Structure over prose.** Anything with two or more items is a structure: a grid of cards, a two-column list, a Before/After pair, a numbered sequence, a row per area with a status chip. Prose is connective tissue between structures: at most two `<p>` in a row, each under 60 words, and no `<p>` anywhere over 90 words. Every section holds at least one structured element (`.grid`, `.card`, `.pair`, `ol`, `ul`, `table`, `pre`, `figure`).
+- **One idea per block.** A card carries one finding, one item, one step: a bold lead of five to ten words, then at most two lines. Lists of names become chips or a compact grid, never a comma run inside a sentence.
+- **Numbers as placards.** When the number is the finding (a measured time, a count of failures), set it as a `.value` placard with a label, not inside a sentence.
+- **Visual rhythm.** Alternate surfaces down the page: a card grid, then a pair, then a sequence, then a full-width figure. Two consecutive sections must not share the same layout.
+- **Asides stay short.** A "More precisely" aside is one or two sentences under 40 words; more than that is a section of its own or gets cut.
+
+Before delegation, write the page as an outline of blocks (eyebrow, headline, block type, items) rather than as paragraphs; the outline is the brief. The checker rejects a `<p>` over 90 words, three prose paragraphs in a row, and a section without a structured element.
+
 ### What stays out
 
 - Card numbers, decision ids, ballot lists, and file paths. Tower owns them and already carries each recommendation; the report gives the context needed to decide, in plain words. The final act names each pending decision as a question, the stakes, and what changes with each answer.
@@ -50,14 +63,15 @@ One scroll, nothing collapsed: three to five screens, linear, every section earn
 - Metrics readouts (progress bars, tables, meters) in proposals. They belong to status pages, where a measured value is the finding.
 - Interactive filters and sorting, unless a status page has a list the owner must search.
 - Decorative diagrams. A diagram appears only when structure or sequence is the finding.
+- Prose walls: an act set as running paragraphs (see Density and hierarchy).
 
 ### Voice
 
-ELI5 by default: lead with the point, one new idea at a time, every term defined on first use, one concrete example per act. Add a short "More precisely" aside inline only where exact detail changes a decision. Keep identifiers, commands, and diagnostic text verbatim when they appear in an example.
+ELI5 by default: lead with the point, one new idea at a time, every term defined on first use, one concrete example per act. Short declarative sentences; cut every clause that does not change what the reader knows. Add a short "More precisely" aside inline only where exact detail changes a decision. Keep identifiers, commands, and diagnostic text verbatim when they appear in an example.
 
 ### The "so what" test
 
-Before delegation, read the plan as the owner: after each screen, can you say in one sentence what you now know or must decide? Cut anything that fails.
+Before delegation, read the plan as the owner: after each screen, can you say in one sentence what you now know or must decide? Then read only the eyebrows and headlines: do they tell the story alone? Cut anything that fails either test.
 
 ## Execution contract (mandatory)
 
