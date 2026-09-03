@@ -18,15 +18,13 @@ fn run() {
     print(re.replace(Regex{"\d+"}, "#", text))
     print(re.replace(Regex{"a"}, "x", "a-a-a"))
     print(re.replace_first(Regex{"a"}, "x", "a-a-a"))
-    print(re.replace(Regex{""}, "x", "aé"))
     print(re.split(Regex{"\s+"}, text).len())
-    print(re.split(Regex{"[\t-\r ]+"}, "a\tb\nc\u00a0d").len())
     print(Regex{"\d+"}.is_match(text))
     print(Regex{"[a-z]+"}.is_match("hello123"))
     print(Regex{"[a-z]+"}.full_match("hello123"))
 
     flag_set :: re.flags(true, true, false)
-    rx :: re.compile_with("(?<word>[a-z]+)", flag_set) ?? return Err("bad pattern")
+    rx :: re.compile_with("(?<word>[a-z]+)", flag_set) ?? return
     print(rx.matches("Ada lovelace").len())
     first_named :: rx.match("Ada lovelace")
     if first_named == .Val(mat) {
@@ -35,9 +33,9 @@ fn run() {
         print(mat.end())
         print(mat.named_captures().len())
     }
-    word :: re.compile("\\w+") ?? return Err("bad word")
+    word :: re.compile("\\w+") ?? return
     print(word.replace_all_with("a b", (m: Match) -> "hit"))
-    sep :: re.compile(",\\s*") ?? return Err("bad sep")
+    sep :: re.compile(",\\s*") ?? return
     print(sep.split_limit("a, b, c", 2)[1])
     print(rx.pattern())
     print(rx.source())
@@ -45,9 +43,11 @@ fn run() {
     print(rx.names().len())
     print(rx.count("Ada lovelace"))
     print(re.escape("a+b?"))
+    print(re.replace(Regex{""}, "x", "aé"))
 
     zero_width :: re.split(Regex{""}, "abc")
     print(zero_width.len())
+    print(re.split(Regex{"[\t-\r ]+"}, "a\tb\nc d").len())
     print(zero_width[1])
     print(zero_width[2])
     print(zero_width[3])
@@ -61,6 +61,6 @@ fn run() {
     }
 
     print(Regex{"(a+)+$"}.is_match("aaaaaaaaaaaaaaaaaaaaX"))
-    absolute_end :: re.compile_with("a$", re.flags(false, true, false)) ?? return Err("bad end")
+    absolute_end :: re.compile_with("a$", re.flags(false, true, false)) ?? return
     print(absolute_end.is_match("a\nb"))
 }

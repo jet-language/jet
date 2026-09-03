@@ -32,6 +32,7 @@ struct RegexProgram {
     anchored_start: bool,
     literal: Option<Vec<u8>>,
     required_literals: Vec<Vec<u8>>,
+    prefix: Option<Vec<u8>>,
     // ponytail: one per-regex scratch lock; split per-worker scratch if concurrent matching contends.
     scratch: std::sync::Mutex<RegexScratch>,
 }
@@ -819,6 +820,7 @@ fn jet_regex_compile_uncached(pattern: &str, flags: &RegexFlags) -> Result<JetRe
             insts,
             start: frag.start,
             literal: regex_literal_candidate(&root),
+            prefix: regex_prefix_literal(&root),
             required_literals: regex_required_literals(&root),
         }),
         group_names: std::sync::Arc::from(parser.names.into_boxed_slice()),
@@ -1571,12 +1573,33 @@ fn regex_scan<F>(
     scratch.current.clear();
     scratch.next.clear();
     scratch.capture_arena.clear();
+    let prefilter = if !anchored && !flags.case_insensitive {
+        program.prefix.as_deref()
+    } else {
+        None
+    };
+    let mut prefilter_pos = start;
     let mut pos = start;
     let mut winner_start = None;
     let mut last_match = None;
     let single_start = anchored || (program.anchored_start && !flags.multiline);
-
     loop {
+        if let Some(prefix) = prefilter {
+            if scratch.current.threads.is_empty()
+                && winner_start.is_none()
+                && last_match.is_none()
+            {
+                let Some(candidate) =
+                    regex_find_literal_boundary(text, prefix, prefilter_pos)
+                else {
+                    return;
+                };
+                pos = candidate;
+                prefilter_pos =
+                    regex_next_search_pos(text, candidate, candidate + prefix.len());
+            }
+        }
+
         let can_start = !program.anchored_start
             || flags.multiline
             || pos == 0;
@@ -1657,6 +1680,7 @@ fn regex_scan<F>(
             scratch.current.clear();
             winner_start = None;
             last_match = None;
+            prefilter_pos = resume;
             pos = resume;
             continue;
         }
@@ -1737,6 +1761,7 @@ fn regex_scan<F>(
                 scratch.current.clear();
                 winner_start = None;
                 last_match = None;
+                prefilter_pos = resume;
                 pos = resume;
                 continue;
             }
@@ -1820,6 +1845,64 @@ fn regex_add_thread(
                 state.threads.push(thread);
             }
             _ => {}
+        }
+    }
+}
+
+fn regex_prefix_literal(node: &RegexNode) -> Option<Vec<u8>> {
+    match node {
+        RegexNode::Seq(pieces) => {
+            let mut prefix = Vec::new();
+            for piece in pieces {
+                let required = match piece.quant {
+                    RegexQuant::One
+                    | RegexQuant::OneOrMore
+                    | RegexQuant::Range { min: 1.., .. } => true,
+                    RegexQuant::ZeroOrMore
+                    | RegexQuant::ZeroOrOne
+                    | RegexQuant::Range { min: 0, .. } => false,
+                };
+                if !required {
+                    break;
+                }
+                match &piece.atom {
+                    RegexAtom::Literal(ch) => {
+                        let mut bytes = [0; 4];
+                        prefix.extend_from_slice(ch.encode_utf8(&mut bytes).as_bytes());
+                    }
+                    RegexAtom::Group(_, inner) => {
+                        let Some(inner_prefix) = regex_prefix_literal(inner) else {
+                            break;
+                        };
+                        if inner_prefix.is_empty() {
+                            break;
+                        }
+                        prefix.extend_from_slice(&inner_prefix);
+                    }
+                    RegexAtom::Start => {}
+                    RegexAtom::Any
+                    | RegexAtom::Class(_)
+                    | RegexAtom::End => break,
+                }
+            }
+            (!prefix.is_empty()).then_some(prefix)
+        }
+        RegexNode::Alt(arms) => {
+            let mut arms = arms.iter();
+            let mut prefix = regex_prefix_literal(arms.next()?)?;
+            for arm in arms {
+                let other = regex_prefix_literal(arm)?;
+                let common = prefix
+                    .iter()
+                    .zip(other.iter())
+                    .take_while(|(left, right)| left == right)
+                    .count();
+                prefix.truncate(common);
+                if prefix.is_empty() {
+                    return None;
+                }
+            }
+            Some(prefix)
         }
     }
 }
@@ -1949,6 +2032,18 @@ fn regex_find_literal(haystack: &[u8], needle: &[u8], start: usize) -> Option<us
     }
     None
 }
+
+fn regex_find_literal_boundary(text: &str, needle: &[u8], start: usize) -> Option<usize> {
+    let mut pos = start.min(text.len());
+    loop {
+        let candidate = regex_find_literal(text.as_bytes(), needle, pos)?;
+        if text.is_char_boundary(candidate) {
+            return Some(candidate);
+        }
+        pos = candidate.saturating_add(1);
+    }
+}
+
 
 fn regex_scan_literal<F>(
     text: &str,
