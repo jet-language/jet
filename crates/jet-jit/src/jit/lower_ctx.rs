@@ -5526,7 +5526,18 @@ impl LowerCtx<'_, '_> {
                     let allocator_view = direct_allocator_view || init.ty.is_allocator_view();
                     let prior_allocator_view = self.preserve_allocator_view;
                     self.preserve_allocator_view = direct_allocator_view;
-                    let lowered = self.lower_expr(init);
+                    // AOT's `jet_index_vec` clones list elements; resident JIT
+                    // indexing yields the element handle, so bind a fresh
+                    // value before a later mutation can alias the source.
+                    let lowered = if matches!(
+                        &init.kind,
+                        TExprKind::Index { is_map: false, .. }
+                    ) && !init.ty.is_scalar()
+                    {
+                        self.lower_clone(init)
+                    } else {
+                        self.lower_expr(init)
+                    };
                     self.preserve_allocator_view = prior_allocator_view;
                     let mut val = lowered?;
                     if self.dead {
@@ -11857,13 +11868,7 @@ impl LowerCtx<'_, '_> {
         if mode == JitTextMode::Display {
             if type_name == "IOError" {
                 let packed = self.lower_expr(expr)?;
-                // This process-local pointer and its host table cannot
-                // survive disk tier-cache reuse in another process.
-                super::tier_cache::abort_capture();
-                let leaked: &'static str = Box::leak(type_name.to_string().into_boxed_str());
-                let ptr = self.b.ins().iconst(types::I64, leaked.as_ptr() as i64);
-                let len = self.b.ins().iconst(types::I64, leaked.len() as i64);
-                let text = self.call_host(self.host.coll.enum_show, &[packed, ptr, len]);
+                let text = self.call_host(self.host.process.error_show, &[packed]);
                 let push_ref = self
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -19774,8 +19779,8 @@ impl LowerCtx<'_, '_> {
                                         self.b.ins().call(host, &[sel, ev, cb]);
                                         return Ok(self.b.ins().iconst(types::I8, 0));
                                     }
-                                    ("core.web", "value") if args.is_empty() => {
-                                        (self.host.web.value, Vec::new())
+                                    ("core.web", "value") if args.len() == 1 => {
+                                        (self.host.web.value, vec![self.lower_expr(&args[0])?])
                                     }
                                     ("core.web", "app") if args.is_empty() => {
                                         (self.host.web.app, Vec::new())

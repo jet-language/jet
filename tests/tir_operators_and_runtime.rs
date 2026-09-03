@@ -555,3 +555,16 @@ fn run() {
 "#;
     assert_tiers_agree("tir_card_2838_float_nan_predicate", src, "true\n");
 }
+
+/// Hardening finding lane-5/core-time-calendar-misclassified (card #2833): tier-parity regression fixture.
+#[test]
+fn card_2833_calendar_arithmetic_is_pure_tier_parity() {
+    let src = r#"
+use core.time as time
+
+fn run() {
+    print(time.days_in_month(2024, 2))
+}
+"#;
+    assert_tiers_agree("tir_card_2833_calendar_arithmetic", src, "29\n");
+}

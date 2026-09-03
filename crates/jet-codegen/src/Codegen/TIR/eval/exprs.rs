@@ -1814,7 +1814,9 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             ))),
         },
         "DateTime" => match datatree_variant(&tree) {
-            Some(("Text", Some(CtValue::Str(text)))) => {
+            // Typed JSON preserves string leaves as `TypedText`; both tags
+            // carry the same RFC3339 wire text for built-in DateTime.
+            Some(("Text" | "TypedText", Some(CtValue::Str(text)))) => {
                 match codec_rt::jet_codec_datetime_decode(text) {
                     Ok((secs, nanos)) => CtValue::Present(Box::new(CtValue::Struct {
                         type_name: "DateTime".to_string(),
@@ -5820,8 +5822,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 .ok_or_else(|| unsupported("reflect value", source_span))?;
             return Ok(self.reflect_value(value, &args[0].ty));
         }
-        if module == "core.web" && matches!(method, "app" | "page") {
-            return self.eval_web_core_call(method, argv);
+        if module == "core.web" {
+            if matches!(method, "app" | "page") {
+                return self.eval_web_core_call(method, argv);
+            }
+            if method == "on" {
+                return Ok(CtValue::Unit);
+            }
+            if method == "value" && argv.len() == 1 {
+                return Ok(CtValue::Str(String::new()));
+            }
+        }
+        if module == "core.web.devserver" {
+            return Ok(CtValue::Struct {
+                type_name: "__JetTirDevServer".to_string(),
+                fields: vec![(
+                    "file".to_string(),
+                    argv.first().cloned().unwrap_or(CtValue::Str(String::new())),
+                )],
+            });
         }
         if module == "core.http.server" && method == "json" && args.len() == 2 {
             let tree = self.eval_serde_encode_value(argv[1].clone(), &args[1].ty)?;
@@ -7264,6 +7283,22 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
                 if let crate::Codegen::TIR::THandleOp::AppMethod { method } = op {
                     return self.eval_app_method(&r, method, argv);
+                }
+                if let crate::Codegen::TIR::THandleOp::DevServerMethod { method } = op {
+                    if !matches!(
+                        &r,
+                        CtValue::Struct { type_name, .. } if type_name == "__JetTirDevServer"
+                    ) {
+                        return Err(unsupported("DevServer interpreter handle", self.span()));
+                    }
+                    return match method.as_str() {
+                        "html" | "port" => Ok(r),
+                        "serve" => Ok(CtValue::Unit),
+                        _ => Err(unsupported(
+                            &format!("DevServer.{method} interpreter method"),
+                            self.span(),
+                        )),
+                    };
                 }
                 if let Some(index) = handle_index(&r, "__JetTirClock") {
                     let delta = argv.first().and_then(|value| match value {
@@ -12190,6 +12225,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             let canonical_type_name = crate::Codegen::nominal_leaf(type_name)
                 .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
                 .unwrap_or_else(|| crate::Codegen::nominal_leaf(type_name));
+            if canonical_type_name == "IOError" {
+                if let Some(text) = crate::Comptime::display_core_pure_value(v) {
+                    return Ok(text);
+                }
+            }
             for key in [
                 format!("{type_name}::display"),
                 format!("{canonical_type_name}::display"),
@@ -12267,10 +12307,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             if type_name != "IOError" {
                 return None;
             }
-            let variant = match variant
+            let variant_name = variant
                 .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                .unwrap_or(variant.as_str())
-            {
+                .unwrap_or(variant.as_str());
+            let variant = match variant_name {
                 "InvalidInput" => 0,
                 "NotFound" => 1,
                 "PermissionDenied" => 2,

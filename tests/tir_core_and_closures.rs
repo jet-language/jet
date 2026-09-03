@@ -1094,3 +1094,23 @@ fn run() {
 "#;
     assert_tiers_agree("tir_card_2842_function_value_call", src, "42\n");
 }
+
+/// Hardening finding lane-8/json-datetime-interpreter-empty (card #2836): tier-parity regression fixture.
+#[test]
+fn card_2836_json_datetime_field_tier_parity() {
+    let src = r#"
+use core.encoding.json as json
+
+#Codable
+struct Event {
+    at: DateTime
+}
+
+fn run() {
+    raw :: "{{\"at\":\"2024-03-15T12:30:45Z\"}}"
+    event :: json.decode<Event>(raw) ?? return
+    print(event.at.to_unix_ms())
+}
+"#;
+    assert_tiers_agree("tir_card_2836_json_datetime_field", src, "1710505845000\n");
+}

@@ -156,3 +156,18 @@ fn card_2826_nested_scalar_write_view() {
         "12\n12\n",
     );
 }
+
+/// Hardening finding lane-1/nested-place-copy-jet-run-alias (card #2821): tier-parity regression fixture.
+#[test]
+fn card_2821_nested_copy_binding_tier_parity() {
+    let src = r###"
+fn run() {
+    rows := [[1, 2]]
+    alias := rows[0]
+    alias[0] = 9
+    print(alias[0])
+    print(rows[0][0])
+}
+"###;
+    assert_tiers_agree("tir_card_2821_nested_copy_binding", src, "9\n1\n");
+}
