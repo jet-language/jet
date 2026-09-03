@@ -965,6 +965,25 @@ impl<'a> Checker<'a> {
             .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0801" | "E3203"));
         let init_type_unusable =
             init_has_error && (initializer_type_error || b.ty.is_none() && it.is_none());
+        if b.ty.is_none() && it.is_none() && !init_has_error {
+            if let Expr::MethodCall {
+                method,
+                method_span,
+                ..
+            } = b.init.without_parens()
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0116",
+                    format!("`.{method}()` doesn't hand back a value"),
+                    "a call is a value only when its function declares a result after the parameter list"
+                        .to_string(),
+                    format!(
+                        "put `{method}` on its own line, or declare a result after the parameter list"
+                    ),
+                    Some(*method_span),
+                ));
+            }
+        }
         let final_ty = match (&b.ty, it) {
             (Some(_), Some(actual)) if !annot_valid => actual,
             (Some(annot), Some(actual)) => {
@@ -1028,7 +1047,9 @@ impl<'a> Checker<'a> {
             }
             (Some(annot), None) => self.resolve_type(annot.clone()),
             (None, Some(actual)) => actual,
-            (None, None) => Type::Int, // an error was already reported
+            // Keep an unresolved binding explicitly unknown after the
+            // initializer's diagnostic; never invent Int and leak it into TIR.
+            (None, None) => Type::Named("Unknown".to_string()),
         };
         if contains_taskgroup(&final_ty)
             && !matches!(&final_ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)

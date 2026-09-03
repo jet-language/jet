@@ -549,6 +549,7 @@ fn stopping_sort_key(n: Int, seen: &String) String !Err -> {
     if n == 1 { return Err(\"stop\", code: \"E_SORT\") }
     return \"{n}\"
 }
+fn unit() {}
 fn run() {
     ascending := [3, 1, 2]
     ascending.sort_by((n: Int) -> sort_key(n))
@@ -557,9 +558,11 @@ fn run() {
 
     values := [3, 1, 2]
     seen := \"\"
-    recovered :: values.sort_by((n: Int) -> stopping_sort_key(n, &seen)) ?? {
+    recovered := false
+    values.sort_by((n: Int) -> stopping_sort_key(n, &seen)) ?? {
         print(\"{err.code}:{err.message}\")
-        \"recovered\"
+        recovered = true
+        unit()
     }
     print(\"{ascending}|{descending}\")
     print(seen)
@@ -570,7 +573,7 @@ fn run() {
     assert_tiers_agree(
         "tir_try_sort_by",
         src,
-        "E_SORT:stop\n[1, 2, 3]|[3, 2, 1]\n31\n[3, 1, 2]\nrecovered\n",
+        "E_SORT:stop\n[1, 2, 3]|[3, 2, 1]\n31\n[3, 1, 2]\ntrue\n",
     );
 }
 

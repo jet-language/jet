@@ -967,13 +967,64 @@ impl<'a> Checker<'a> {
         if suppress_auto {
             self.failure_auto_depth += 1;
         }
-        let val_ty = if suppress_auto {
+        let mut val_ty = if suppress_auto {
             self.infer_without_auto_propagation(value)
         } else {
             self.infer(value)
         };
         if suppress_auto {
             self.failure_auto_depth -= 1;
+        }
+        // Collection methods with a callback have a void source return, but a
+        // fallible callback gives the operation a `Result<Unit, E>` carrier.
+        // Recover that carrier here so `??` checks its fallback against Unit
+        // instead of letting the binding checker invent a value type.
+        if val_ty.is_none() {
+            let callback_error = match value.as_ref().without_parens() {
+                Expr::MethodCall {
+                    receiver, method, args, ..
+                } => {
+                    let receiver_ty = match receiver.as_ref().without_parens() {
+                        Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+                        _ => {
+                            let mut receiver = receiver.clone();
+                            self.infer_without_auto_propagation(&mut receiver)
+                        }
+                    };
+                    if receiver_ty.is_some_and(|recv_ty| {
+                        matches!(
+                            crate::Collections::builtin_method_return(
+                                &recv_ty,
+                                method,
+                                args.len(),
+                                false,
+                            ),
+                            Some(None)
+                        )
+                    }) {
+                        args.first().and_then(|arg| match arg.expr.without_parens() {
+                            Expr::Lambda(lambda) => lambda
+                                .meta
+                                .fallible_carrier
+                                .as_ref()
+                                .and_then(|carrier| match carrier {
+                                    Type::Result { err, .. } => Some((**err).clone()),
+                                    _ => None,
+                                }),
+                            _ => None,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some(err) = callback_error {
+                val_ty = Some(Type::Result {
+                    ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                    err: Box::new(err),
+                });
+            }
         }
         let val_ty = val_ty?;
         // D-FAILURE-FOUNDATION1=A: `??` consumes the success-side carrier
