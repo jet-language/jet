@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2817,
-    "rev": 49854,
+    "nextNum": 2845,
+    "rev": 49917,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32,7 +32,7 @@
         "radar:e15"
       ]
     },
-    "completionCursor": "2026-09-03T01:10:45.661Z"
+    "completionCursor": "2026-09-03T06:32:22.059Z"
   },
   "epochs": [
     {
@@ -139471,11 +139471,11 @@
         {
           "n": 4,
           "text": "re.find_all literal scan over the 4MB corpus completes under default jet run within a stated multiple of GNU grep; zero per-position Vec/BTreeSet/caps.clone allocation on the scan hot path; matches are span-based (no haystack String clone); engine lives in Prelude with byte-identical output on AOT/default/interpreter (I9).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-01T20:49:15.755Z"
+          "evidence": "4 MiB corpus (4,217,784 bytes, 31,476 struct lines): GNU grep -c 0.347 s; default jet run 1.31 s (jet/grep = 3.78x), --interpret 1.43 s, --release 27.63 s including AOT compile; count 31476 on every tier. Hot path anchors in Prelude/CoreLib/JetStd/Regex.rs: JetRegexMatch = Arc<str> + byte span (:18-25), matches shares one Arc and emits spans (:557-574), one shared VM with preallocated RegexScratch/state reused per search (:1534-1600), epsilon stack on preallocated RegexState (:1748-1825), SWAR/SIMD literal candidate scan with UTF-8 boundary check (:2013-2045). Golden text/regex green. Commit e24719b58.",
+          "at": "2026-09-03T05:31:40.858Z"
         },
         {
           "n": 5,
@@ -139495,8 +139495,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:44:41.135Z",
-      "updated": "2026-09-01T20:49:19.851Z",
-      "updatedBy": "Main"
+      "updated": "2026-09-03T05:31:40.859Z",
+      "updatedBy": "fable-orchestrator"
     },
     {
       "id": "c0p48658",
@@ -139557,11 +139557,11 @@
         {
           "n": 4,
           "text": "A parallel fs.walk/scan path implements the shared-queue-of-directories architecture; a grep-style flagship example with golden output matches the sequential walk result set; measured throughput on the 200k-file fixture is recorded on the card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-01T20:49:21.725Z"
+          "evidence": "Shared-queue kernel verified in Prelude/Core/FSWalk.rs (VecDeque directory queue, active-worker counter + condvar termination, per-directory batches under one sink lock, final sort); flagship examples/features/io/parallel_grep.jet + golden identical on AOT/jet run/--interpret; 200k-file fixture (200 dirs x 1000 files) in-program walk medians: parallel 36 ms vs sequential 150 ms; 4 KiB-per-file scan variant: parallel 965 ms vs sequential 1066 ms (fair alternating reps after warm-up). Commit 19c807e3a.",
+          "at": "2026-09-03T05:29:11.185Z"
         },
         {
           "n": 5,
@@ -139581,8 +139581,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:08.410Z",
-      "updated": "2026-09-01T20:49:25.726Z",
-      "updatedBy": "Main"
+      "updated": "2026-09-03T05:29:11.185Z",
+      "updatedBy": "fable-orchestrator"
     },
     {
       "id": "c0y3llif",
@@ -156246,11 +156246,11 @@
         {
           "n": 2,
           "text": "Harness binparse: jet/C ratio <= 10x (from 460x); expected.out byte-identical; stretch <= 3x",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-01T20:27:55.412Z"
+          "evidence": "Harness gauntlet/harness/run.mjs --entry binparse --runs 5 at 19c807e3a: Jet AOT median 0.006844 s vs C median 0.044411 s (jet/C = 0.154x, i.e. Jet 6.5x faster; target <= 10x, stretch <= 3x both met); both rails byte_exact_stdout passed; cmp of AOT, default jet run, and --release outputs against expected.out = 0. Generated Rust (jet emit --rust) hot loop lines 82829-82903: inline little-endian loads with one bounds guard, reader-region fixed 14-byte record loads, no jet_reader_read_*/jet_int_mul/jet_int_add or outcome plumbing in the loop. Truncated-fixture cold path byte-identical across run/--release/--interpret.",
+          "at": "2026-09-03T05:31:41.521Z"
         },
         {
           "n": 3,
@@ -156290,8 +156290,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-27T21:47:19.666Z",
-      "updated": "2026-09-01T20:27:59.491Z",
-      "updatedBy": "Main"
+      "updated": "2026-09-03T05:31:41.521Z",
+      "updatedBy": "fable-orchestrator"
     },
     {
       "id": "c09lvtej",
@@ -158987,6 +158987,11 @@
         {
           "at": "2026-09-03",
           "by": "fable-orchestrator",
+          "text": "Owner decision needed (criterion 2): public row core.crypto.password_hash_with_salt is rejected unconditionally by E2702 (caller-controlled salt), even inside #Unsafe, so no value-consuming witness can exist and the gate's --check refuses a substitute call. Options: (A) delete the dead public row (sema fixed_sigs/module_items, docs) since E2702's own Fix names crypto.password_hash or expert.argon2id; (B) add an owner-ratified counted carve-out row in tests/conformance/exclusions.tsv. Recommendation: A (greenfield: no unusable API)."
+        },
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
           "text": "2026-09-03 01:55: 17 previously failing stems re-censused after the w6 wave: net/dns_aaaa_at, dns_txt_at, dns_srv*, set_ttl, set_write_timeout, tcp_accept, tcp_close, tcp_local, tcp_reply, tcp_shutdown, udp_packet, unix_close, tls (11 rows), http/server/bind, serve_once, db/row_value, term/binwrite. All green on both legs except the net/dns_* forced-interpreter task stall, carded separately (interpreter spawned responder blocks until the parent's DNS wait wakes it). Full unfiltered strict gate running (conformance-full) at 06534ce1c for criterion 2."
         },
         {
@@ -159075,7 +159080,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T18:12:41.984Z",
-      "updated": "2026-09-03T04:50:35.189Z",
+      "updated": "2026-09-03T06:54:17.194Z",
       "updatedBy": "fable-orchestrator",
       "claimedAt": "2026-08-31T12:10:33.667Z"
     },
@@ -162533,7 +162538,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "1) Add a red-team session manifest that freezes Jet commit, binary hash, rig config, public-surface snapshot, oracle versions, lane briefs, quota, and resource caps. 2) Run the D-HARDENING-GATE1 lane count as fresh Luna-max contexts, at most two execution lanes at once. Give the public mission and attack surface, but hide current defect cards until each lane records its independent finding. 3) Cover eight named slices: tier seams/nested places; numeric and representation extremes; optimization and dev/release/interpreter; stdin/argv/env/files/exit/resources; host/effect Core and exclusions; concurrency/cancellation; parser/sema/TIR construct boundaries; cross-domain compositions. 4) Require value-consuming programs and record attempts, valid cases, duplicates, false positives, minimized repros, and unique findings. 5) The orchestrator replays every load-bearing find on the frozen binary, then routes it through #2338. 6) Emit one signed result bundle. Pass only when the full quota completes with zero new P0. Any P0, semantic change, registry change, or target mismatch invalidates the result and forces a new session.",
       "checkSteps": "fresh lanes cannot read current defect cards before discovery;all named surfaces assigned;concurrency never exceeds two;every claimed find replayed on frozen binary;early exit cannot pass;P0 and semantic change invalidate;complete zero-P0 quota yields valid signed bundle",
@@ -162543,6 +162548,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Real eight-lane session red-team-1788411290527-3118947 complete on frozen commit 8d246d4 (worktree .claude/worktrees/redteam, binary sha256:0f7d928c). Verdict FAILED with 26 unique findings assimilated as #2819-#2844. Incidents: the devshell JET_ROOT export hijacked the kit root for wave 1 (fixed in the kit, receipts unaffected: identical binary bytes); executeCommand never wrote stdin so the receipt runner timed out (fixed fe9911167 + test); replay used the wrong cwd for ICE paths (fixed 79a887e9b). Consumed markers from the two aborted verdict attempts were cleared before the final run; the lane receipts themselves were never edited."
+        },
         {
           "at": "2026-09-01",
           "by": "Main",
@@ -162592,20 +162602,20 @@
         {
           "n": 2,
           "text": "The ratified number of fresh Luna-max contexts completes all eight named attack slices with at most two execution lanes active at once.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-29T03:02:33.770Z"
+          "evidence": "Session red-team-1788411290527-3118947: eight fresh-context Luna-max OMP lanes (RedLane1..8) ran in four waves of two (two execution lanes active at most), each on its own frozen context packet; receipts lane-1..lane-8.json validated by the receipt runner (model gpt-5.6-luna, reasoning max, fresh_context, defect cards hidden). Signed receipt ~/.cache/jet-hardening/v1/red-team/receipt.json, lane_agents=8, verify: FAILED verified=true.",
+          "at": "2026-09-03T08:28:25.767Z"
         },
         {
           "n": 3,
           "text": "Each lane submits value-consuming source plus attempts, valid cases, duplicates, false positives, minimized reproducers, and unique findings; early stop or missing slice is failure.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-29T03:02:33.770Z"
+          "evidence": "Every lane receipt carries value-consuming source programs, attempts, valid cases, duplicates, false positives, minimized reproducers, and unique findings (lane counts: 44/27/29/20/30/57/63/24 valid cases; 30 findings, 4 in-session duplicates); the runner rejects early stop, missing slices, and unconsumed values by schema. Kit: ~/.cache/jet-luna/redteam/lane-kit.mjs.",
+          "at": "2026-09-03T08:28:26.413Z"
         },
         {
           "n": 4,
@@ -162619,20 +162629,20 @@
         {
           "n": 5,
           "text": "Every load-bearing find replays on the frozen binary and routes through #2338 before the session verdict is written.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-29T03:02:33.770Z"
+          "evidence": "Session red-team-1788411290527-3118947: 25 of 26 unique load-bearing findings replayed byte-for-byte on the frozen binary (commit 8d246d4, sha256:0f7d928c) and were assimilated through #2338 into cards #2819-#2844 before the verdict was signed; the one non-replay (lane-1/captured-nested-place-aot-ice: ICE stderr embeds a cwd path recorded before the kit root moved to the frozen worktree) was refused and listed as a failure reason, which is the protocol working. Tooling fixes landed: executeCommand now delivers stdin (fe9911167), replay runs from the frozen root (79a887e9b).",
+          "at": "2026-09-03T08:28:27.071Z"
         },
         {
           "n": 6,
           "text": "The signed result passes only after the full quota produces zero new P0; a P0, semantic change, registry change, target mismatch, or incomplete lane makes it stale or failed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-29T03:02:33.770Z"
+          "evidence": "Signed verdict status FAILED on commit 8d246d4: 9 P0 + 13 P1 + 4 P2 new findings, plus one replay refusal; signer hardening-red-team-signer, reviewer hardening-red-team-reviewer distinct from every lane agent; execution_gate OWNER_AUTHORIZED_REAL_EIGHT_LANE_EXECUTION; verify command reports FAILED verified=true. A PASS requires a new session on a new commit after the carded P0s are fixed.",
+          "at": "2026-09-03T08:28:27.733Z"
         },
         {
           "n": 7,
@@ -162661,8 +162671,9 @@
       "parentId": "c0lnb7zq",
       "needsAcceptance": false,
       "created": "2026-08-29T03:02:33.770Z",
-      "updated": "2026-09-01T21:32:52.245Z",
-      "updatedBy": "Main"
+      "updated": "2026-09-03T08:28:29.233Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T08:28:29.233Z"
     },
     {
       "id": "c0vm00kc",
@@ -163163,11 +163174,11 @@
         {
           "n": 3,
           "text": "`tools/perf/ci-perf-check.sh` accepts the generated baseline and rejects a baseline with a changed identity or unsupported schema version.",
-          "status": "verified",
-          "metBy": "Main",
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": "fable",
-          "evidence": "Orchestrator reran tools/perf/test-ci-perf-check.sh; exit 0; ci-perf-check self-check: all pass.",
-          "at": "2026-08-31T17:40:43.450Z"
+          "evidence": "tools/perf/test-ci-perf-check.sh: 'ci-perf-check self-check: all pass'; accept v4 generated baseline -> 'perf gate OK (... rows 6)'; changed identity -> 'cargo-version changed: 1.97.0 -> 1.97.1'; unsupported generator -> 'unsupported compiler-speed generator version: 2'; stale committed v2 baseline -> 'unsupported compiler-speed baseline version: 2'. Identity fields validated: rustc, Cargo, Jet commit, generator version, CPU model, cores per socket. Commit e60bc1a0e.",
+          "at": "2026-09-03T05:35:34.943Z"
         },
         {
           "n": 4,
@@ -163186,8 +163197,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T03:59:41.739Z",
-      "updated": "2026-09-02T03:57:59.487Z",
-      "updatedBy": "fable"
+      "updated": "2026-09-03T05:35:34.943Z",
+      "updatedBy": "fable-orchestrator"
     },
     {
       "id": "c0r2zvln",
@@ -166140,20 +166151,20 @@
         {
           "n": 4,
           "text": "Receipt honesty: an unchanged invocation replays its receipt; creating a higher-priority entry candidate, or changing workspace, output, lock, or generated inputs, invalidates it; a behavioral test covers the stale-entry replay scenario.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-30T14:07:52.343Z"
+          "evidence": "Source/ReceiptStore.rs check claims fingerprint authority roots, entry candidate set with priority, workspace/output/lock/generated state and log the invalidating input; tests/cli_parts/commands.rs check_receipt_invalidates_when_higher_priority_entry_appears passes (replay on unchanged rerun, invalidation after a higher-priority entry candidate appears). Commit ac12095ef.",
+          "at": "2026-09-03T05:34:52.994Z"
         },
         {
           "n": 5,
           "text": "Checking one file from inside a package uses the owning project graph; with the graph absent, the diagnostic names the missing context and the canonical import form; both paths have UI snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-30T14:07:52.343Z"
+          "evidence": "jet check <file> inside a package resolves the owning project graph (tests/ui/check_scope_owned clean snapshot); orphan file with a project import reports E2393 'Use project.<module> needs an owning project context' naming the missing context and the canonical file-relative form (tests/ui/check_scope_orphan/stderr); both fixtures pass diagnostic_snapshots ui_snapshots via the @check_cli route; project_check explicit_file_without_owning_project_context_teaches_missing_context passes. Commit ac12095ef.",
+          "at": "2026-09-03T05:34:53.863Z"
         },
         {
           "n": 6,
@@ -166187,8 +166198,8 @@
       "parentId": "c0mhgpbh",
       "needsAcceptance": false,
       "created": "2026-08-30T13:46:01.389Z",
-      "updated": "2026-09-01T10:33:03.519Z",
-      "updatedBy": "Main"
+      "updated": "2026-09-03T05:34:53.863Z",
+      "updatedBy": "fable-orchestrator"
     },
     {
       "id": "c01pars1",
@@ -181589,6 +181600,2041 @@
       "created": "2026-09-03T04:50:33.923Z",
       "updated": "2026-09-03T04:50:33.923Z",
       "updatedBy": "fable-orchestrator"
+    },
+    {
+      "id": "c0jd3f3y",
+      "num": 2817,
+      "title": "Sema defaults an uninferred binding to Int: `recovered :: list.sort_by(cmp) ?? fallback` types Unit as Int",
+      "body": "Reproducer: tests/tir_core_and_closures.rs try_sort_by_is_atomic_and_tier_stable (added 2026-09-02 in a9941b416, never green). The binding `recovered :: items.sort_by((a, b) -> ...) ?? fallback` has a Unit-returning fallible subject. CheckerCore::check_binding (crates/jet-sema/src/Sema/CheckerCore/bindings.rs) falls back to Type::Int when initializer inference returns None ((None, None) => Int), while TIR lowering sees the subject as Result<Unit, Err>. Generated Rust then annotates the local as i64 and rustc rejects it (E0308), which is an I2 violation; on any shape where rustc accepts an Int default, the program would carry the wrong type silently.\n\nA silent Int default for an uninferred binding is the defect, not the sort test: sema must either infer the fallback type from the subject's success type (Unit here) or report a typed diagnostic that names the binding; it must never invent Int.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "1. In CheckerCore::check_binding, remove the (None, None) => Int default; when the initializer's inferred type is None, resolve it through the same OrFallback inference used for value-carrying subjects (success type of the fallible subject; Unit for Unit-returning collection operations such as sort_by/try_sort_by).\n2. If inference still yields None, emit the existing 'could not infer type' diagnostic (or register one per docs/spec/diagnostics.md) naming the binding, with a UI snapshot.\n3. Prove: try_sort_by_is_atomic_and_tier_stable passes on all tiers; a UI fixture for a genuinely uninferable binding shows the diagnostic; no other tir_core_and_closures test changes.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "CheckerCore::check_binding no longer defaults an uninferred binding to Int; a `?? fallback` over a Unit-returning fallible subject infers Unit.",
+          "status": "met",
+          "metBy": "fable-orchestrator",
+          "verifiedBy": null,
+          "evidence": "bindings.rs (None,None) => Unknown, never Int; fallible.rs infer_or_fallback derives Result<Unit,E> from builtin_method_return Some(None) + lambda fallible_carrier (no method-name list). Commit e90023f37.",
+          "at": "2026-09-03T07:18:09.224Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/tir_core_and_closures.rs try_sort_by_is_atomic_and_tier_stable passes (AOT, default jet run, --interpret byte-identical).",
+          "status": "met",
+          "metBy": "fable-orchestrator",
+          "verifiedBy": null,
+          "evidence": "tir_core_and_closures try_sort_by_is_atomic_and_tier_stable: 1 passed (valid program: recovered flag, expected E_SORT:stop / [1, 2, 3]|[3, 2, 1] / 31 / [3, 1, 2] / true, byte-identical on all tiers). Commit e90023f37.",
+          "at": "2026-09-03T07:18:09.929Z"
+        },
+        {
+          "n": 3,
+          "text": "An uninferable binding reports a registered diagnostic with a UI snapshot instead of a silent Int type.",
+          "status": "met",
+          "metBy": "fable-orchestrator",
+          "verifiedBy": null,
+          "evidence": "String fallback over a Unit-returning fallible sort reports E0405 (fallback String vs success value Unit, Fix: Use Unit here) — tests/ui/sort_by_unit_fallback_mismatch.stderr passes diagnostic_snapshots; bound valueless method calls report E0116. Commit e90023f37.",
+          "at": "2026-09-03T07:18:10.930Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "sema",
+        "i2",
+        "silent-wrong-data",
+        "conformance"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T06:46:19.690Z",
+      "updated": "2026-09-03T07:18:11.861Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T07:18:11.861Z"
+    },
+    {
+      "id": "c0njqjid",
+      "num": 2818,
+      "title": "AOT emits an empty typed list literal `[U8]{}` as Vec<i64>, so `bytes == [U8]{}` fails rustc (I2)",
+      "body": "Conformance witness conformance/core/crypto/expert/aes256gcm_open (strict three-tier gate, census at 8d246d4): the program type-checks and runs in dev, but the generated Rust fails to build: `error[E0277]: can't compare u8 with i64` at `jet_term_write_stdout_line(&((((__jet_result) == (Vec::<i64>::new()))).jet_display()), false)`. Minimal program (inside #Unsafe for the expert call): `result :: expert.aes256gcm_open(key, nonce, ciphertext, [U8]{}) ?? panic(\"open\")` then `print(result == [U8]{})`. The typed empty list literal `[U8]{}` is emitted as `Vec::<i64>::new()` on the AOT path, ignoring the declared element type when the literal appears as an equality operand (and possibly elsewhere). rustc rejection of generated code is an internal compiler error by invariant I2.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "1. Locate the TIR lowering/emission of typed empty list literals (`[T]{}`) in crates/jet-codegen/src/Codegen/TIR (lower/expressions.rs list literal arm and emit of TExprKind::List with an element type) and find why the element type is dropped for an empty literal used as an operand (likely the sema type is available on the TExpr but the emitter falls back to Int for an empty literal).\n2. Emit the declared element type for every empty typed list literal position (binding, argument, comparison, return), using the TExpr type fact; no operand-position special case.\n3. Prove: JET_CORE_CONFORMANCE_FILTER=crypto/expert/aes256gcm_open strict gate passes; add a tir_core_and_closures fixture `typed_empty_list_equality_matches_all_tiers` comparing [U8]{} , [Float]{} , [Text]{} against computed lists on every tier.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An empty typed list literal keeps its declared element type in generated Rust in every expression position; the aes256gcm_open strict three-tier witness passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T06:53:37.476Z"
+        },
+        {
+          "n": 2,
+          "text": "A tir_core_and_closures fixture compares typed empty list literals for U8, Float, and Text on AOT, default jet run, and --interpret with byte-identical output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-09-03T06:53:37.476Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "codegen",
+        "i2",
+        "conformance",
+        "aot"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T06:53:37.476Z",
+      "updated": "2026-09-03T06:53:37.476Z",
+      "updatedBy": "fable-orchestrator"
+    },
+    {
+      "id": "c0wgk4fm",
+      "num": 2819,
+      "title": "Red-team hardening finding: lane-1/nested-list-struct-aot-write",
+      "body": "Hardening finding: lane-1/nested-list-struct-aot-write\nMinimized reproducer:\nstruct Parcel {\n    score: Int\n}\n\nfn run() {\n    rows := [[Parcel{score: 1}]]\n    rows[0][0].score = 17\n    print(rows[0][0].score)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"17\\n\"\nActual relation: \"1\\n\"\nSeed: c07-nested-list-struct-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:8ec4913c9be0d542a04a990bdf8c38dc3450b7a59c03699bdff395e66a47ec41\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:25433921feb130031a70c2aaadbea3ca17561e44bcaf33c7d68424c4119cc23a\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-1/nested-list-struct-aot-write (sha256:8ec4913c9be0d542a04a990bdf8c38dc3450b7a59c03699bdff395e66a47ec41)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-1/nested-list-struct-aot-write (sha256:8ec4913c9be0d542a04a990bdf8c38dc3450b7a59c03699bdff395e66a47ec41)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:47.319Z",
+      "updated": "2026-09-03T08:26:53.574Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"17\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2217%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-1/nested-list-struct-aot-write",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-1/nested-list-struct-aot-write",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2217%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "struct Parcel {\n    score: Int\n}\n\nfn run() {\n    rows := [[Parcel{score: 1}]]\n    rows[0][0].score = 17\n    print(rows[0][0].score)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"17\\n\"",
+          "actual_relation": "\"1\\n\"",
+          "seed": "c07-nested-list-struct-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "silent-wrong-data",
+          "stdout_bytes": "base64:MQo=",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:8ec4913c9be0d542a04a990bdf8c38dc3450b7a59c03699bdff395e66a47ec41",
+          "bundle_digest": "sha256:8ec4913c9be0d542a04a990bdf8c38dc3450b7a59c03699bdff395e66a47ec41"
+        }
+      ]
+    },
+    {
+      "id": "c03gpy03",
+      "num": 2820,
+      "title": "Red-team hardening finding: lane-1/captured-nested-place-aot-ice",
+      "body": "Hardening finding: lane-1/captured-nested-place-aot-ice\nMinimized reproducer:\nfn run() {\n    rows := [[1]]\n    bump :: () Int -> {\n        rows[0][0] = rows[0][0] + 4\n        rows[0][0]\n    }\n    print(bump())\n    print(rows[0][0])\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"5\\n5\\n\"\nActual relation: \"\"\nSeed: c10-captured-nested-list-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:002f350e5551dc2fa2f2adfecb80bcf32ff5cfdcae07e6296e0008dd6db7b4f6\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:5fa9f649334b12dab630134c2f813371f44974beedd729447e19015fd8e3ce46\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-1/captured-nested-place-aot-ice (sha256:002f350e5551dc2fa2f2adfecb80bcf32ff5cfdcae07e6296e0008dd6db7b4f6)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:47.742Z",
+      "updated": "2026-09-03T08:23:47.742Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"5\\n5\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn5%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-1/captured-nested-place-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-1/captured-nested-place-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn5%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    rows := [[1]]\n    bump :: () Int -> {\n        rows[0][0] = rows[0][0] + 4\n        rows[0][0]\n    }\n    print(bump())\n    print(rows[0][0])\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"5\\n5\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c10-captured-nested-list-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0L2J1aWxkL2Nhc2UucnMK",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:002f350e5551dc2fa2f2adfecb80bcf32ff5cfdcae07e6296e0008dd6db7b4f6",
+          "bundle_digest": "sha256:002f350e5551dc2fa2f2adfecb80bcf32ff5cfdcae07e6296e0008dd6db7b4f6"
+        }
+      ]
+    },
+    {
+      "id": "c0dc9zdf",
+      "num": 2821,
+      "title": "Red-team hardening finding: lane-1/nested-place-copy-jet-run-alias",
+      "body": "Hardening finding: lane-1/nested-place-copy-jet-run-alias\nMinimized reproducer:\nfn run() {\n    rows := [[1, 2]]\n    alias := rows[0]\n    alias[0] = 9\n    print(alias[0])\n    print(rows[0][0])\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\nExpected relation: \"9\\n1\\n\"\nActual relation: \"9\\n9\\n\"\nSeed: c18-nested-place-copy-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:ff45431f8bcc31c4c90346d3a8a14e044c822fc92baf5b625580198c0dac204c\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-1/nested-place-copy-jet-run-alias (sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-1/nested-place-copy-jet-run-alias (sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:48.339Z",
+      "updated": "2026-09-03T08:26:53.983Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"9\\n1\\n\"",
+      "hardeningWrongTierMask": [
+        "aot",
+        "interpreter"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn1%5Cn%22|tiers=aot%2Cinterpreter|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-1/nested-place-copy-jet-run-alias",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-1/nested-place-copy-jet-run-alias",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn1%5Cn%22|tiers=aot%2Cinterpreter|partition=red-team-handwritten",
+          "source": "fn run() {\n    rows := [[1, 2]]\n    alias := rows[0]\n    alias[0] = 9\n    print(alias[0])\n    print(rows[0][0])\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"{source}\""
+          ],
+          "expected_relation": "\"9\\n1\\n\"",
+          "actual_relation": "\"9\\n9\\n\"",
+          "seed": "c18-nested-place-copy-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "silent-wrong-data",
+          "stdout_bytes": "base64:OQo5Cg==",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30",
+          "bundle_digest": "sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30"
+        }
+      ]
+    },
+    {
+      "id": "c0rj48lc",
+      "num": 2822,
+      "title": "Red-team hardening finding: lane-1/nested-write-window-jit-tier-gap",
+      "body": "Hardening finding: lane-1/nested-write-window-jit-tier-gap\nMinimized reproducer:\nfn run() {\n    rows := [[1, 2]]\n    if true {\n        view :: &rows[0]\n        view[0] = 9\n        print(view[0])\n    }\n    print(rows[0][0])\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"9\\n9\\n\"\nActual relation: \"9\\n9\\n\"\nSeed: c23-nested-write-window\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:be305b15f4451362b6250d4036cbdf02c46e6dd1650c7178117b3ab4587418b0\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:ee36b3e41fcdea3b3e1677bfad50bcfb3957b38198b0844959166a488e391288\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-1/nested-write-window-jit-tier-gap (sha256:be305b15f4451362b6250d4036cbdf02c46e6dd1650c7178117b3ab4587418b0)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-1/nested-write-window-jit-tier-gap (sha256:be305b15f4451362b6250d4036cbdf02c46e6dd1650c7178117b3ab4587418b0)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:49.197Z",
+      "updated": "2026-09-03T08:26:54.413Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"9\\n9\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn9%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-1/nested-write-window-jit-tier-gap",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-1/nested-write-window-jit-tier-gap",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn9%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    rows := [[1, 2]]\n    if true {\n        view :: &rows[0]\n        view[0] = 9\n        print(view[0])\n    }\n    print(rows[0][0])\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"9\\n9\\n\"",
+          "actual_relation": "\"9\\n9\\n\"",
+          "seed": "c23-nested-write-window",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "diagnostic-drift",
+          "stdout_bytes": "base64:OQo5Cg==",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:be305b15f4451362b6250d4036cbdf02c46e6dd1650c7178117b3ab4587418b0",
+          "bundle_digest": "sha256:be305b15f4451362b6250d4036cbdf02c46e6dd1650c7178117b3ab4587418b0"
+        }
+      ]
+    },
+    {
+      "id": "c02jhcit",
+      "num": 2823,
+      "title": "Red-team hardening finding: lane-1/indexed-field-write-window-detaches",
+      "body": "Hardening finding: lane-1/indexed-field-write-window-detaches\nMinimized reproducer:\nstruct Parcel {\n    score: Int\n}\n\nfn run() {\n    parcels := [Parcel{score: 2}]\n    if true {\n        edit :: &parcels[0].score\n        edit = 12\n        print(edit)\n    }\n    print(parcels[0].score)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"12\\n12\\n\"\nActual relation: \"12\\n2\\n\"\nSeed: c39-indexed-field-window\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:b58dd5f5ccaff4ec3a4645e197ec65ce86cac51c3e500a54fc701bf87258afa0\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:a52931f0d719328deafa3504d443892c5c93bc6e49a3fe24e940de6b3017db96\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-1/indexed-field-write-window-detaches (sha256:b58dd5f5ccaff4ec3a4645e197ec65ce86cac51c3e500a54fc701bf87258afa0)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-1/indexed-field-write-window-detaches (sha256:b58dd5f5ccaff4ec3a4645e197ec65ce86cac51c3e500a54fc701bf87258afa0)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:49.863Z",
+      "updated": "2026-09-03T08:26:54.930Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"12\\n12\\n\"",
+      "hardeningWrongTierMask": [
+        "aot"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn12%5Cn%22|tiers=aot|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-1/indexed-field-write-window-detaches",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-1/indexed-field-write-window-detaches",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn12%5Cn%22|tiers=aot|partition=red-team-handwritten",
+          "source": "struct Parcel {\n    score: Int\n}\n\nfn run() {\n    parcels := [Parcel{score: 2}]\n    if true {\n        edit :: &parcels[0].score\n        edit = 12\n        print(edit)\n    }\n    print(parcels[0].score)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"12\\n12\\n\"",
+          "actual_relation": "\"12\\n2\\n\"",
+          "seed": "c39-indexed-field-window",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "wrong-result",
+          "stdout_bytes": "base64:MTIKMgo=",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:b58dd5f5ccaff4ec3a4645e197ec65ce86cac51c3e500a54fc701bf87258afa0",
+          "bundle_digest": "sha256:b58dd5f5ccaff4ec3a4645e197ec65ce86cac51c3e500a54fc701bf87258afa0"
+        }
+      ]
+    },
+    {
+      "id": "c0bj4dpy",
+      "num": 2824,
+      "title": "Red-team hardening finding: lane-1/map-index-field-write-tier-gap",
+      "body": "Hardening finding: lane-1/map-index-field-write-tier-gap\nMinimized reproducer:\nstruct Parcel {\n    score: Int\n}\n\nfn run() {\n    parcels := [String:Parcel]{\"x\": Parcel{score: 2}}\n    parcels[\"x\"].score = 12\n    print(parcels[\"x\"].score)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"12\\n\"\nActual relation: \"12\\n\"\nSeed: c44-map-struct-field-write\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:ba984b46b1234bc3ee85640941be2b858730a53a87c1daee6bd1243fe905d7fd\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:f57cb5bd586f44a86624aa5e1e617f6818859bba2a9bf1298b9262e3bd7b5f2b\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-1/map-index-field-write-tier-gap (sha256:ba984b46b1234bc3ee85640941be2b858730a53a87c1daee6bd1243fe905d7fd)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-1/map-index-field-write-tier-gap (sha256:ba984b46b1234bc3ee85640941be2b858730a53a87c1daee6bd1243fe905d7fd)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:50.407Z",
+      "updated": "2026-09-03T08:26:55.365Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"12\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-1/map-index-field-write-tier-gap",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-1/map-index-field-write-tier-gap",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "struct Parcel {\n    score: Int\n}\n\nfn run() {\n    parcels := [String:Parcel]{\"x\": Parcel{score: 2}}\n    parcels[\"x\"].score = 12\n    print(parcels[\"x\"].score)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"12\\n\"",
+          "actual_relation": "\"12\\n\"",
+          "seed": "c44-map-struct-field-write",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "diagnostic-drift",
+          "stdout_bytes": "base64:MTIK",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:ba984b46b1234bc3ee85640941be2b858730a53a87c1daee6bd1243fe905d7fd",
+          "bundle_digest": "sha256:ba984b46b1234bc3ee85640941be2b858730a53a87c1daee6bd1243fe905d7fd"
+        }
+      ]
+    },
+    {
+      "id": "c0intq69",
+      "num": 2825,
+      "title": "Red-team hardening finding: lane-1/nested-range-view-aot-ice",
+      "body": "Hardening finding: lane-1/nested-range-view-aot-ice\nMinimized reproducer:\nfn run() {\n    rows := [[1, 2, 3]]\n    window :: rows[0][0..1]\n    print(window[1])\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\nExpected relation: \"2\\n\"\nActual relation: \"2\\n\"\nSeed: c46-nested-range-read\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:b5e5dd7039e753b90a7150f5b64a72894cccb29c01ecd7574d84df14843b7b24\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:8a5fd0a0b93cc25850caf93eedb76f722cc2e03a3042cecbeb5b681bdf1e2bd6\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-1/nested-range-view-aot-ice (sha256:b5e5dd7039e753b90a7150f5b64a72894cccb29c01ecd7574d84df14843b7b24)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-1/nested-range-view-aot-ice (sha256:b5e5dd7039e753b90a7150f5b64a72894cccb29c01ecd7574d84df14843b7b24)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:50.838Z",
+      "updated": "2026-09-03T08:26:55.794Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"2\\n\"",
+      "hardeningWrongTierMask": [
+        "aot"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%222%5Cn%22|tiers=aot|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-1/nested-range-view-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-1/nested-range-view-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%222%5Cn%22|tiers=aot|partition=red-team-handwritten",
+          "source": "fn run() {\n    rows := [[1, 2, 3]]\n    window :: rows[0][0..1]\n    print(window[1])\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"{source}\""
+          ],
+          "expected_relation": "\"2\\n\"",
+          "actual_relation": "\"2\\n\"",
+          "seed": "c46-nested-range-read",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:Mgo=",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:b5e5dd7039e753b90a7150f5b64a72894cccb29c01ecd7574d84df14843b7b24",
+          "bundle_digest": "sha256:b5e5dd7039e753b90a7150f5b64a72894cccb29c01ecd7574d84df14843b7b24"
+        }
+      ]
+    },
+    {
+      "id": "c0sppg1f",
+      "num": 2826,
+      "title": "Red-team hardening finding: lane-1/nested-scalar-window-shape-drift",
+      "body": "Hardening finding: lane-1/nested-scalar-window-shape-drift\nMinimized reproducer:\nfn run() {\n    rows := [[2]]\n    if true {\n        edit :: &rows[0][0]\n        edit = 12\n        print(edit)\n    }\n    print(rows[0][0])\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"12\\n12\\n\"\nActual relation: \"12\\n12\\n\"\nSeed: c40-nested-index-window\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:eb76c63a220e471bd96dd2fc57ccac47741aee4a6ebf17a5e4b1abfed4b52683\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:f48dbee953eb3659844daf188dad11437641001e4d54b85dd83fb700feb2eebb\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-1/nested-scalar-window-shape-drift (sha256:eb76c63a220e471bd96dd2fc57ccac47741aee4a6ebf17a5e4b1abfed4b52683)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-1/nested-scalar-window-shape-drift (sha256:eb76c63a220e471bd96dd2fc57ccac47741aee4a6ebf17a5e4b1abfed4b52683)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:51.446Z",
+      "updated": "2026-09-03T08:26:56.216Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"12\\n12\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn12%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-1/nested-scalar-window-shape-drift",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-1/nested-scalar-window-shape-drift",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn12%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    rows := [[2]]\n    if true {\n        edit :: &rows[0][0]\n        edit = 12\n        print(edit)\n    }\n    print(rows[0][0])\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"12\\n12\\n\"",
+          "actual_relation": "\"12\\n12\\n\"",
+          "seed": "c40-nested-index-window",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "silent-wrong-data",
+          "stdout_bytes": "base64:MTIKMTIK",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:eb76c63a220e471bd96dd2fc57ccac47741aee4a6ebf17a5e4b1abfed4b52683",
+          "bundle_digest": "sha256:eb76c63a220e471bd96dd2fc57ccac47741aee4a6ebf17a5e4b1abfed4b52683"
+        }
+      ]
+    },
+    {
+      "id": "c026waut",
+      "num": 2827,
+      "title": "Red-team hardening finding: lane-2/interpreter-u64-to-int-large",
+      "body": "Hardening finding: lane-2/interpreter-u64-to-int-large\nMinimized reproducer:\nfn run() {\n    print(Int.from_u64(U64{9223372036854775808}))\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: tier-self-diff:aot-vs-jet_run-vs-interpreter\nActual relation: \"9223372036854775808\"\nSeed: c05-u64-conversion-stable\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:92811af32407840f9f5bd6cc5d99307f007353234666644fcd1b8fe68d66261c\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:914efa09ec80b0e15329a37a00162b8b77511f9478f216ef7ea914e7d002c424\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-2/interpreter-u64-to-int-large (sha256:92811af32407840f9f5bd6cc5d99307f007353234666644fcd1b8fe68d66261c)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-2/interpreter-u64-to-int-large (sha256:92811af32407840f9f5bd6cc5d99307f007353234666644fcd1b8fe68d66261c)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:52.019Z",
+      "updated": "2026-09-03T08:26:56.619Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "tier-self-diff:aot-vs-jet_run-vs-interpreter",
+      "hardeningWrongTierMask": [
+        "interpreter"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=interpreter|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-2/interpreter-u64-to-int-large",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-2/interpreter-u64-to-int-large",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=interpreter|partition=red-team-handwritten",
+          "source": "fn run() {\n    print(Int.from_u64(U64{9223372036854775808}))\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "tier-self-diff:aot-vs-jet_run-vs-interpreter",
+          "actual_relation": "\"9223372036854775808\"",
+          "seed": "c05-u64-conversion-stable",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "crash",
+          "stdout_bytes": "base64:OTIyMzM3MjAzNjg1NDc3NTgwOAo=",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [
+            "stdout.trailing_newline"
+          ],
+          "bundleDigest": "sha256:92811af32407840f9f5bd6cc5d99307f007353234666644fcd1b8fe68d66261c",
+          "bundle_digest": "sha256:92811af32407840f9f5bd6cc5d99307f007353234666644fcd1b8fe68d66261c"
+        }
+      ]
+    },
+    {
+      "id": "c09lbkr7",
+      "num": 2828,
+      "title": "Red-team hardening finding: lane-2/interpreter-u64-high-bit-shift-signs",
+      "body": "Hardening finding: lane-2/interpreter-u64-high-bit-shift-signs\nMinimized reproducer:\nfn run() {\n    print(U64{1} << 63)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"\nExpected relation: \"9223372036854775808\\n\"\nActual relation: \"-9223372036854775808\\n\"\nSeed: c06-bit-boundaries-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:616e48b6b072973558d3258b4e07916db446db8c16f8c7c0aa935247f3c601e4\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:d013f4645a207edb27ce8b0379aef778454507e90fb0575d7dbb496c55b65946\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-2/interpreter-u64-high-bit-shift-signs (sha256:616e48b6b072973558d3258b4e07916db446db8c16f8c7c0aa935247f3c601e4)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-2/interpreter-u64-high-bit-shift-signs (sha256:616e48b6b072973558d3258b4e07916db446db8c16f8c7c0aa935247f3c601e4)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:52.466Z",
+      "updated": "2026-09-03T08:26:57.046Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"9223372036854775808\\n\"",
+      "hardeningWrongTierMask": [
+        "aot",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229223372036854775808%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-2/interpreter-u64-high-bit-shift-signs",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-2/interpreter-u64-high-bit-shift-signs",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229223372036854775808%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    print(U64{1} << 63)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\""
+          ],
+          "expected_relation": "\"9223372036854775808\\n\"",
+          "actual_relation": "\"-9223372036854775808\\n\"",
+          "seed": "c06-bit-boundaries-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "silent-wrong-data",
+          "stdout_bytes": "base64:LTkyMjMzNzIwMzY4NTQ3NzU4MDgK",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:616e48b6b072973558d3258b4e07916db446db8c16f8c7c0aa935247f3c601e4",
+          "bundle_digest": "sha256:616e48b6b072973558d3258b4e07916db446db8c16f8c7c0aa935247f3c601e4"
+        }
+      ]
+    },
+    {
+      "id": "c0gxtorg",
+      "num": 2829,
+      "title": "Red-team hardening finding: lane-2/interpreter-u64-bit-count-unsupported",
+      "body": "Hardening finding: lane-2/interpreter-u64-bit-count-unsupported\nMinimized reproducer:\nfn run() {\n    print(U64{9223372036854775808}.count_ones())\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"1\\n\"\nActual relation: \"1\\n\"\nSeed: c07-u64-count-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:f6981d41e7da13b1048446e8fcc56b94ca649d233cb973af01489b4620bbd661\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:06d3919de2c5216168e4daf6aca5024875d61169c671ace2ed89083a388e405c\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-2/interpreter-u64-bit-count-unsupported (sha256:f6981d41e7da13b1048446e8fcc56b94ca649d233cb973af01489b4620bbd661)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-2/interpreter-u64-bit-count-unsupported (sha256:f6981d41e7da13b1048446e8fcc56b94ca649d233cb973af01489b4620bbd661)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:52.911Z",
+      "updated": "2026-09-03T08:26:57.478Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"1\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%221%5Cn%22|tiers=interpreter|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-2/interpreter-u64-bit-count-unsupported",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-2/interpreter-u64-bit-count-unsupported",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%221%5Cn%22|tiers=interpreter|partition=red-team-handwritten",
+          "source": "fn run() {\n    print(U64{9223372036854775808}.count_ones())\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"1\\n\"",
+          "actual_relation": "\"1\\n\"",
+          "seed": "c07-u64-count-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "crash",
+          "stdout_bytes": "base64:MQo=",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:f6981d41e7da13b1048446e8fcc56b94ca649d233cb973af01489b4620bbd661",
+          "bundle_digest": "sha256:f6981d41e7da13b1048446e8fcc56b94ca649d233cb973af01489b4620bbd661"
+        }
+      ]
+    },
+    {
+      "id": "c0o62eme",
+      "num": 2830,
+      "title": "Red-team hardening finding: lane-3/float-sum-interpreter-gap",
+      "body": "Hardening finding: lane-3/float-sum-interpreter-gap\nMinimized reproducer:\nfn run() {\n    values :: [Float]{1.0, 2.0}\n    result :: values.sum()\n    print(result)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"3.0\\n\"\nActual relation: \"3.0\\n\"\nSeed: c26-float-sum-gap-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:4327bfaf0354bfb62c4a892b48cd844e982bb95d337d22677776c03baa03ab91\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:e4838dd8f428137fe1d790a84b4b14e3b6dcfb6e594012a5bb45c53eb2cabc78\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-3/float-sum-interpreter-gap (sha256:4327bfaf0354bfb62c4a892b48cd844e982bb95d337d22677776c03baa03ab91)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-3/float-sum-interpreter-gap (sha256:4327bfaf0354bfb62c4a892b48cd844e982bb95d337d22677776c03baa03ab91)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:53.348Z",
+      "updated": "2026-09-03T08:26:58.731Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"3.0\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%223.0%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-3/float-sum-interpreter-gap",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-3/float-sum-interpreter-gap",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%223.0%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    values :: [Float]{1.0, 2.0}\n    result :: values.sum()\n    print(result)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"3.0\\n\"",
+          "actual_relation": "\"3.0\\n\"",
+          "seed": "c26-float-sum-gap-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "diagnostic-drift",
+          "stdout_bytes": "base64:My4wCg==",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:4327bfaf0354bfb62c4a892b48cd844e982bb95d337d22677776c03baa03ab91",
+          "bundle_digest": "sha256:4327bfaf0354bfb62c4a892b48cd844e982bb95d337d22677776c03baa03ab91"
+        }
+      ]
+    },
+    {
+      "id": "c0v7ffqn",
+      "num": 2831,
+      "title": "Red-team hardening finding: lane-4/process-output-limit-error-display",
+      "body": "Hardening finding: lane-4/process-output-limit-error-display\nMinimized reproducer:\nuse core.process as process\n\nfn run() {\n    result :: process.cmd([\"printf\", \"abcdef\"]).stdout(.Capture).output_limit(3).run() ?? {\n        print(err)\n        return\n    }\n    print(result.output)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\nExpected relation: tier-self-diff:aot-vs-jet_run-vs-interpreter\nActual relation: \"Output\\n\"\nSeed: c09c-process-output-limit-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:084b5e21350526152f30486f80e2c6ef09f6e3f14ba860634ab9e08a4aad8af7\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-4/process-output-limit-error-display (sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-4/process-output-limit-error-display (sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:53.773Z",
+      "updated": "2026-09-03T08:26:59.702Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "tier-self-diff:aot-vs-jet_run-vs-interpreter",
+      "hardeningWrongTierMask": [
+        "aot",
+        "interpreter"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=aot%2Cinterpreter|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-4/process-output-limit-error-display",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-4/process-output-limit-error-display",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=aot%2Cinterpreter|partition=red-team-handwritten",
+          "source": "use core.process as process\n\nfn run() {\n    result :: process.cmd([\"printf\", \"abcdef\"]).stdout(.Capture).output_limit(3).run() ?? {\n        print(err)\n        return\n    }\n    print(result.output)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"{source}\""
+          ],
+          "expected_relation": "tier-self-diff:aot-vs-jet_run-vs-interpreter",
+          "actual_relation": "\"Output\\n\"",
+          "seed": "c09c-process-output-limit-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "diagnostic-drift",
+          "stdout_bytes": "base64:T3V0cHV0Cg==",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5",
+          "bundle_digest": "sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5"
+        }
+      ]
+    },
+    {
+      "id": "c02shwob",
+      "num": 2832,
+      "title": "Red-team hardening finding: lane-5/core-int-checked-add-aot-wrap",
+      "body": "Hardening finding: lane-5/core-int-checked-add-aot-wrap\nMinimized reproducer:\nuse core.math as math\n\nfn run() {\n    print(math.checked_add(9223372036854775807, 1))\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"9223372036854775808\\n\"\nActual relation: \"-9223372036854775806\\n\"\nSeed: c03-min-checked-add\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:d578fa94b06d86214a54cb7af51bfc17d485dda89b0f660be2c657ecd759bbf4\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:69b5b7768828d7998e5f1a06448743ff26eec6b49b707b289ff9c2b35fef1a54\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-5/core-int-checked-add-aot-wrap (sha256:d578fa94b06d86214a54cb7af51bfc17d485dda89b0f660be2c657ecd759bbf4)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-5/core-int-checked-add-aot-wrap (sha256:d578fa94b06d86214a54cb7af51bfc17d485dda89b0f660be2c657ecd759bbf4)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:54.232Z",
+      "updated": "2026-09-03T08:27:00.182Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"9223372036854775808\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229223372036854775808%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-5/core-int-checked-add-aot-wrap",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-5/core-int-checked-add-aot-wrap",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229223372036854775808%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "use core.math as math\n\nfn run() {\n    print(math.checked_add(9223372036854775807, 1))\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"9223372036854775808\\n\"",
+          "actual_relation": "\"-9223372036854775806\\n\"",
+          "seed": "c03-min-checked-add",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "silent-wrong-data",
+          "stdout_bytes": "base64:LTkyMjMzNzIwMzY4NTQ3NzU4MDYK",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:d578fa94b06d86214a54cb7af51bfc17d485dda89b0f660be2c657ecd759bbf4",
+          "bundle_digest": "sha256:d578fa94b06d86214a54cb7af51bfc17d485dda89b0f660be2c657ecd759bbf4"
+        }
+      ]
+    },
+    {
+      "id": "c0d7kt95",
+      "num": 2833,
+      "title": "Red-team hardening finding: lane-5/core-time-calendar-misclassified",
+      "body": "Hardening finding: lane-5/core-time-calendar-misclassified\nMinimized reproducer:\nuse core.time as time\n\nfn run() {\n    print(time.days_in_month(2024, 2))\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"29\\n\"\nActual relation: \"\"\nSeed: c25-days-in-month-authority\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:2537829289c5b8a24a8752509feea0ae2a277569614c1b93649f84649346ecb2\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-5/core-time-calendar-misclassified (sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-5/core-time-calendar-misclassified (sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:54.862Z",
+      "updated": "2026-09-03T08:27:00.674Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"29\\n\"",
+      "hardeningWrongTierMask": [
+        "aot"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2229%5Cn%22|tiers=aot|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-5/core-time-calendar-misclassified",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-5/core-time-calendar-misclassified",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2229%5Cn%22|tiers=aot|partition=red-team-handwritten",
+          "source": "use core.time as time\n\nfn run() {\n    print(time.days_in_month(2024, 2))\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"29\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c25-days-in-month-authority",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "wrong-result",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:RXJyb3IgW0UxODAzXTogQXBwbGljYXRpb24gYXV0aG9yaXR5IGlzIHVuZGVjaWRlZCBmb3IgYFRpbWVgCiBXaHk6IHJlcXVpcmVkX2VmZmVjdHM9SU8sIFRpbWU7IGdyYW50ZWRfZWZmZWN0cz1FeGVjLCBJTywgTWVtLkFsbG9jOyBkZW5pZWRfZWZmZWN0cz07IGRlbmllZF9yZXF1aXJlZF9lZmZlY3RzPW5vbmU7IHVuZGVjaWRlZF9lZmZlY3RzPVRpbWU7IGF1dGhvcml0eT1hcHBsaWNhdGlvbiBkZWZhdWx0CiBGaXg6IEFkZCBgYWxsb3c6IFtUaW1lXWAgdW5kZXIgYGF1dGhvcml0eS5ob2xkc2AgaW4gYHBhY2thZ2UuamV0YDsgb3RoZXJ3aXNlIGRlbnkgZWZmZWN0cyBkZWxpYmVyYXRlbHksIG9yIGFwcHJvdmUgdGhlIGV4YWN0IG9wZXJhdGlvbiBvbmNlIG9yIGZvciB0aGUgcHJvamVjdCBpbiBhbiBpbnRlcmFjdGl2ZSB0ZXJtaW5hbApNb3JlOiBqZXQtbGFuZy5kZXYvZS9FMTgwMwoKMSBwcm9ibGVtIGZvdW5kCnJ1biBgamV0IGV4cGxhaW4gRTE4MDNgIHRvIGxlYXJuIG1vcmUK",
+          "exit": 1,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19",
+          "bundle_digest": "sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19"
+        }
+      ]
+    },
+    {
+      "id": "c0ounca2",
+      "num": 2834,
+      "title": "Red-team hardening finding: lane-7/negative-range-stride-aot-drift",
+      "body": "Hardening finding: lane-7/negative-range-stride-aot-drift\nMinimized reproducer:\nfn run() {\n    total := 0\n    loop i in 5..1, -2 {\n        total += i\n    }\n    print(total)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"9\\n\"\nActual relation: \"\"\nSeed: c61-range-descending\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:7ec7c733f5c8129b2cdb8f9e07c6ab50a6cd39e1c2f3f37b18222338484f8d12\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:49c8c50de37f74fc348d951fe2c3db72b111d99200003d89dcf147c7553a4091\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-7/negative-range-stride-aot-drift (sha256:7ec7c733f5c8129b2cdb8f9e07c6ab50a6cd39e1c2f3f37b18222338484f8d12)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-7/negative-range-stride-aot-drift (sha256:7ec7c733f5c8129b2cdb8f9e07c6ab50a6cd39e1c2f3f37b18222338484f8d12)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:55.566Z",
+      "updated": "2026-09-03T08:27:02.769Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"9\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-7/negative-range-stride-aot-drift",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-7/negative-range-stride-aot-drift",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    total := 0\n    loop i in 5..1, -2 {\n        total += i\n    }\n    print(total)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"9\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c61-range-descending",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "diagnostic-drift",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:U3RvcCBbRTMwMDFdOiBgcGFuaWM6IEUwMTIzOiBsb29wIHN0cmlkZSBtdXN0IGJlIHBvc2l0aXZlYAogIC0tPiBjYXNlLmpldDowCiBXaHk6IFRoZSBwcm9ncmFtIGhpdCBhIGBwYW5pY2AsIGBhc3NlcnRgLCBvciBgYXNzZXJ0X2VxYCBjYWxsIHRoYXQgZmFpbGVkLCBhIGJvdW5kcy9rZXkgY2hlY2sgdHJpZ2dlcmVkIGF0IHJ1bnRpbWUsIG9yIGFub3RoZXIgcHJvZ3JhbS1zaWRlIHN0b3AuIFRoZSBzaGFyZWQgcmVwb3J0IGJvdW5kYXJ5IG93bnMgdGhlIHByb2dyYW0tc2lkZSBzdG9wOyBhbiB1bmhhbmRsZWQgZW50cnkgZXJyb3IgaXMgYSByZXR1cm5lZCByZXBvcnQsIG5vdCBFMzAwMS4gSmV0IGZpbGUgYW5kIGxpbmUgYXJlIHNob3duIGluIEpldCB0ZXJtcyDigJQgbmV2ZXIgZ2VuZXJhdGVkLVJ1c3QgdGVybXMgKEkyKS4KIEZpeDogRml4IHRoZSBsb2dpYyB0aGF0IGxlZCB0byB0aGUgZmFpbHVyZS4gUHJvZ3JhbS1zaWRlIHN0b3BzIGV4aXQgNzAgdGhyb3VnaCB0aGUgc2hhcmVkIGJvdW5kYXJ5OyB1bmhhbmRsZWQgZW50cnkgZXJyb3JzIHByaW50IHRoZWlyIHJlcG9ydCBhbmQgZXhpdCAxOyBleGl0IDEwMSBpcyByZXNlcnZlZCBmb3IgSmV0IGRlZmVjdHMuCk1vcmU6IGpldC1sYW5nLmRldi9lL0UzMDAxCg==",
+          "exit": 70,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:7ec7c733f5c8129b2cdb8f9e07c6ab50a6cd39e1c2f3f37b18222338484f8d12",
+          "bundle_digest": "sha256:7ec7c733f5c8129b2cdb8f9e07c6ab50a6cd39e1c2f3f37b18222338484f8d12"
+        }
+      ]
+    },
+    {
+      "id": "c027resd",
+      "num": 2835,
+      "title": "Red-team hardening finding: lane-7/generic-trait-authority-tier-drift",
+      "body": "Hardening finding: lane-7/generic-trait-authority-tier-drift\nMinimized reproducer:\ntrait Measure {\n    fn measure(self) Int\n}\n\nstruct Parcel {\n    n: Int\n}\n\nimpl Parcel.Measure {\n    fn measure(self) Int -> self.n\n}\n\nfn via<T: Measure>(value: T) Int -> value.measure()\n\nfn run() {\n    print(via(Parcel{n: 5}))\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"\nExpected relation: \"5\\n\"\nActual relation: \"\"\nSeed: c21-trait-generic-only\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:0d14be3716f917025a9695d2cfc46d8a246afdc03862f241779b66b80091c998\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-7/generic-trait-authority-tier-drift (sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-7/generic-trait-authority-tier-drift (sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:56.374Z",
+      "updated": "2026-09-03T08:27:03.756Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"5\\n\"",
+      "hardeningWrongTierMask": [
+        "aot"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn%22|tiers=aot|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-7/generic-trait-authority-tier-drift",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-7/generic-trait-authority-tier-drift",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn%22|tiers=aot|partition=red-team-handwritten",
+          "source": "trait Measure {\n    fn measure(self) Int\n}\n\nstruct Parcel {\n    n: Int\n}\n\nimpl Parcel.Measure {\n    fn measure(self) Int -> self.n\n}\n\nfn via<T: Measure>(value: T) Int -> value.measure()\n\nfn run() {\n    print(via(Parcel{n: 5}))\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"{source}\""
+          ],
+          "expected_relation": "\"5\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c21-trait-generic-only",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "diagnostic-drift",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:RXJyb3IgW0UxODAzXTogQXBwbGljYXRpb24gYXV0aG9yaXR5IGlzIHVuZGVjaWRlZCBmb3IgYEJyb3dzZXIsIERCLCBFbnYsIEZGSSwgRlMsIEdQVSwgTG9nLCBOZXQsIFJhbmQsIFNlY3JldCwgVGltZWAKIFdoeTogcmVxdWlyZWRfZWZmZWN0cz1Ccm93c2VyLCBEQiwgRW52LCBFeGVjLCBGRkksIEZTLCBHUFUsIElPLCBMb2csIE5ldCwgUmFuZCwgU2VjcmV0LCBUaW1lOyBncmFudGVkX2VmZmVjdHM9RXhlYywgSU8sIE1lbS5BbGxvYzsgZGVuaWVkX2VmZmVjdHM9bm9uZTsgZGVuaWVkX3JlcXVpcmVkX2VmZmVjdHM9bm9uZTsgdW5kZWNpZGVkX2VmZmVjdHM9QnJvd3NlciwgREIsIEVudiwgRkZJLCBGUywgR1BVLCBMb2csIE5ldCwgUmFuZCwgU2VjcmV0LCBUaW1lOyBhdXRob3JpdHk9YXBwbGljYXRpb24gZGVmYXVsdAogRml4OiBBZGQgYGFsbG93OiBbQnJvd3NlciwgREIsIEVudiwgRkZJLCBGUywgR1BVLCBMb2csIE5ldCwgUmFuZCwgU2VjcmV0LCBUaW1lXWAgdW5kZXIgYGF1dGhvcml0eS5ob2xkc2AgaW4gYHBhY2thZ2UuamV0YDsgb3RoZXJ3aXNlIGRlbnkgZWZmZWN0cyBkZWxpYmVyYXRlbHksIG9yIGFwcHJvdmUgdGhlIGV4YWN0IG9wZXJhdGlvbiBvbmNlIG9yIGZvciB0aGUgcHJvamVjdCBpbiBhbiBpbnRlcmFjdGl2ZSB0ZXJtaW5hbApNb3JlOiBqZXQtbGFuZy5kZXYvZS9FMTgwMwoKMSBwcm9ibGVtIGZvdW5kCnJ1biBgamV0IGV4cGxhaW4gRTE4MDNgIHRvIGxlYXJuIG1vcmUK",
+          "exit": 1,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f",
+          "bundle_digest": "sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f"
+        }
+      ]
+    },
+    {
+      "id": "c0f0hweo",
+      "num": 2836,
+      "title": "Red-team hardening finding: lane-8/json-datetime-interpreter-empty",
+      "body": "Hardening finding: lane-8/json-datetime-interpreter-empty\nMinimized reproducer:\nuse core.encoding.json as json\n\n#Codable\nstruct Event {\n    at: DateTime\n}\n\nfn run() {\n    raw :: \"{{\\\"at\\\":\\\"2024-03-15T12:30:45Z\\\"}}\"\n    event :: json.decode<Event>(raw) ?? return\n    print(event.at.to_unix_ms())\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"\nExpected relation: \"1710505845000\\n\"\nActual relation: \"\"\nSeed: c23-datetime-json-ice-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:2f80205ba128bc758fe7f0dd5ef55f734145dfa64b6fd8e43a7061b9ef06fa54\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening updated: lane-8/json-datetime-interpreter-empty (sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-8/json-datetime-interpreter-empty (sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:23:57.148Z",
+      "updated": "2026-09-03T08:27:04.770Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"1710505845000\\n\"",
+      "hardeningWrongTierMask": [
+        "aot",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%221710505845000%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-8/json-datetime-interpreter-empty",
+      "hardeningSeverity": "P0",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-8/json-datetime-interpreter-empty",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%221710505845000%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten",
+          "source": "use core.encoding.json as json\n\n#Codable\nstruct Event {\n    at: DateTime\n}\n\nfn run() {\n    raw :: \"{{\\\"at\\\":\\\"2024-03-15T12:30:45Z\\\"}}\"\n    event :: json.decode<Event>(raw) ?? return\n    print(event.at.to_unix_ms())\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--interpret\" \"{source}\""
+          ],
+          "expected_relation": "\"1710505845000\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c23-datetime-json-ice-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "silent-wrong-data",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:",
+          "exit": 0,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0",
+          "bundle_digest": "sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0"
+        }
+      ]
+    },
+    {
+      "id": "c0g24y35",
+      "num": 2837,
+      "title": "Red-team hardening finding: lane-3/closure-aot-ice",
+      "body": "Hardening finding: lane-3/closure-aot-ice\nMinimized reproducer:\nfn run() {\n    count := 0\n    next :: () -> {\n        count += 1\n        count\n    }\n    print(next())\n    print(count)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"1\\n1\\n\"\nActual relation: \"\"\nSeed: c11-closure-ice-consumed\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:7c4e6993f14fe6f9cb5b60fca9f1cf1652c14d4e4802bfb14339b9d29748b2ac\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:fa32a3398884e91203fa4be2530c83d751841302d31bae6b0e07269c703b0113\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-3/closure-aot-ice (sha256:7c4e6993f14fe6f9cb5b60fca9f1cf1652c14d4e4802bfb14339b9d29748b2ac)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:26:57.884Z",
+      "updated": "2026-09-03T08:26:57.884Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"1\\n1\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%221%5Cn1%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-3/closure-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-3/closure-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%221%5Cn1%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    count := 0\n    next :: () -> {\n        count += 1\n        count\n    }\n    print(next())\n    print(count)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"1\\n1\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c11-closure-ice-consumed",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0Ly5jbGF1ZGUvd29ya3RyZWVzL3JlZHRlYW0vYnVpbGQvY2FzZS5ycwo=",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:7c4e6993f14fe6f9cb5b60fca9f1cf1652c14d4e4802bfb14339b9d29748b2ac",
+          "bundle_digest": "sha256:7c4e6993f14fe6f9cb5b60fca9f1cf1652c14d4e4802bfb14339b9d29748b2ac"
+        }
+      ]
+    },
+    {
+      "id": "c0mx6nee",
+      "num": 2838,
+      "title": "Red-team hardening finding: lane-3/float-nan-aot-ice",
+      "body": "Hardening finding: lane-3/float-nan-aot-ice\nMinimized reproducer:\nfn run() {\n    value :: Float.NAN\n    print(value.is_nan())\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"true\\n\"\nActual relation: \"\"\nSeed: c18-nan-aot-ice\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:45040516f02582ce86f3715a5c1e8a0f4cbd27bd1cda8e9a5ed6ef38a37dc061\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:ae8db71a3fa4255db707107f22a76b25fa7d90b4f3d929ab2f9e931e1e241dc0\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-3/float-nan-aot-ice (sha256:45040516f02582ce86f3715a5c1e8a0f4cbd27bd1cda8e9a5ed6ef38a37dc061)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:26:58.299Z",
+      "updated": "2026-09-03T08:26:58.299Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"true\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%22true%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-3/float-nan-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-3/float-nan-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%22true%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    value :: Float.NAN\n    print(value.is_nan())\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"true\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c18-nan-aot-ice",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0Ly5jbGF1ZGUvd29ya3RyZWVzL3JlZHRlYW0vYnVpbGQvY2FzZS5ycwo=",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:45040516f02582ce86f3715a5c1e8a0f4cbd27bd1cda8e9a5ed6ef38a37dc061",
+          "bundle_digest": "sha256:45040516f02582ce86f3715a5c1e8a0f4cbd27bd1cda8e9a5ed6ef38a37dc061"
+        }
+      ]
+    },
+    {
+      "id": "c0221iw4",
+      "num": 2839,
+      "title": "Red-team hardening finding: lane-3/trait-dispatch-aot-ice",
+      "body": "Hardening finding: lane-3/trait-dispatch-aot-ice\nMinimized reproducer:\npackage {\n    name: \"trait-probe\"\n    version: \"0.1.0\"\n    authority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n}\n\ntrait Shape {\n    fn area(self) Float\n}\n\nstruct Circle {\n    radius: Float\n\n    impl Shape {\n        fn area(self) Float -> self.radius * self.radius\n    }\n}\n\nstruct Square {\n    side: Float\n}\n\nimpl Square.Shape {\n    fn area(self) Float -> self.side * self.side\n}\n\nfn run() {\n    shapes :: [Shape]{Circle{radius: 2.0}, Square{side: 3.0}}\n    loop shape in shapes -> print(shape.area())\n    print(shapes.len())\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"4.0\\n9.0\\n2\\n\"\nActual relation: \"\"\nSeed: c30-trait-dispatch-ice-consumed\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:857b30901779bb6814265a4bea3dd6c5d7e220d652c461dc707ca1fc60f30684\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:210c67dac4e8fee5a108638e4d41bd2265f455cb021f7b90b18b76d72432bc96\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-3/trait-dispatch-aot-ice (sha256:857b30901779bb6814265a4bea3dd6c5d7e220d652c461dc707ca1fc60f30684)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:26:59.214Z",
+      "updated": "2026-09-03T08:26:59.214Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"4.0\\n9.0\\n2\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%224.0%5Cn9.0%5Cn2%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-3/trait-dispatch-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-3/trait-dispatch-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%224.0%5Cn9.0%5Cn2%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "package {\n    name: \"trait-probe\"\n    version: \"0.1.0\"\n    authority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n}\n\ntrait Shape {\n    fn area(self) Float\n}\n\nstruct Circle {\n    radius: Float\n\n    impl Shape {\n        fn area(self) Float -> self.radius * self.radius\n    }\n}\n\nstruct Square {\n    side: Float\n}\n\nimpl Square.Shape {\n    fn area(self) Float -> self.side * self.side\n}\n\nfn run() {\n    shapes :: [Shape]{Circle{radius: 2.0}, Square{side: 3.0}}\n    loop shape in shapes -> print(shape.area())\n    print(shapes.len())\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"4.0\\n9.0\\n2\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c30-trait-dispatch-ice-consumed",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0Ly5jbGF1ZGUvd29ya3RyZWVzL3JlZHRlYW0vYnVpbGQvY2FzZS5ycwo=",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:857b30901779bb6814265a4bea3dd6c5d7e220d652c461dc707ca1fc60f30684",
+          "bundle_digest": "sha256:857b30901779bb6814265a4bea3dd6c5d7e220d652c461dc707ca1fc60f30684"
+        }
+      ]
+    },
+    {
+      "id": "c0ymreix",
+      "num": 2840,
+      "title": "Red-team hardening finding: lane-6/aot-owned-join-helper-ice",
+      "body": "Hardening finding: lane-6/aot-owned-join-helper-ice\nMinimized reproducer:\nfn boom() Int -> {\n    panic(\"x\")\n    return 0\n}\n\nfn joined(handle: ^Task<Int>) Int -> handle.join() ?? 91\n\nfn run() {\n    task.group g {\n        handle :: task boom()\n        print(joined(^handle))\n    }\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"91\\n\"\nActual relation: \"\"\nSeed: c62-owned-join-helper\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:15e034933939857b8bd164a2281558c5628e8a56feac2336dcc06651ef4c2d19\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:cd0d96a36b2163858d8b4d5ecf3eac6f566bf81687c4cc70670a9a73257a4002\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-6/aot-owned-join-helper-ice (sha256:15e034933939857b8bd164a2281558c5628e8a56feac2336dcc06651ef4c2d19)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:27:01.184Z",
+      "updated": "2026-09-03T08:27:01.184Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"91\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2291%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-6/aot-owned-join-helper-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-6/aot-owned-join-helper-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2291%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn boom() Int -> {\n    panic(\"x\")\n    return 0\n}\n\nfn joined(handle: ^Task<Int>) Int -> handle.join() ?? 91\n\nfn run() {\n    task.group g {\n        handle :: task boom()\n        print(joined(^handle))\n    }\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"91\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c62-owned-join-helper",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0Ly5jbGF1ZGUvd29ya3RyZWVzL3JlZHRlYW0vYnVpbGQvY2FzZS5ycwo=",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:15e034933939857b8bd164a2281558c5628e8a56feac2336dcc06651ef4c2d19",
+          "bundle_digest": "sha256:15e034933939857b8bd164a2281558c5628e8a56feac2336dcc06651ef4c2d19"
+        }
+      ]
+    },
+    {
+      "id": "c06velrf",
+      "num": 2841,
+      "title": "Red-team hardening finding: lane-7/labeled-break-aot-ice",
+      "body": "Hardening finding: lane-7/labeled-break-aot-ice\nMinimized reproducer:\nfn run() {\n    outer :: loop {\n        loop {\n            break(outer, 7)\n        }\n    }\n    answer :: outer ?? 0\n    print(answer)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"7\\n\"\nActual relation: \"\"\nSeed: c44-labeled-break-ice-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:4f4bf329faf989a98c1b2fa667faf50b4b66a660ea69372335a51a4dab8ca7a9\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:283776193378bf1d9eead45344276d737d90eca4111c266a8a27d5fad592a019\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-7/labeled-break-aot-ice (sha256:4f4bf329faf989a98c1b2fa667faf50b4b66a660ea69372335a51a4dab8ca7a9)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:27:01.682Z",
+      "updated": "2026-09-03T08:27:01.682Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"7\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%227%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-7/labeled-break-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-7/labeled-break-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%227%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    outer :: loop {\n        loop {\n            break(outer, 7)\n        }\n    }\n    answer :: outer ?? 0\n    print(answer)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"7\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c44-labeled-break-ice-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0Ly5jbGF1ZGUvd29ya3RyZWVzL3JlZHRlYW0vYnVpbGQvY2FzZS5ycwo=",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:4f4bf329faf989a98c1b2fa667faf50b4b66a660ea69372335a51a4dab8ca7a9",
+          "bundle_digest": "sha256:4f4bf329faf989a98c1b2fa667faf50b4b66a660ea69372335a51a4dab8ca7a9"
+        }
+      ]
+    },
+    {
+      "id": "c0exquqy",
+      "num": 2842,
+      "title": "Red-team hardening finding: lane-7/lambda-call-aot-ice",
+      "body": "Hardening finding: lane-7/lambda-call-aot-ice\nMinimized reproducer:\nfn run() {\n    double :: (x: Int) Int -> x * 2\n    result :: double.call(21)\n    print(result)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"42\\n\"\nActual relation: \"\"\nSeed: c46-lambda-call-ice-min\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:2a247d769fb7d4b30f580d2ca8da3979454c7f5e8d31170dfee058c29cee3d14\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:90e45c7ff302fe0802b52ce2a6b059a4776f5216255afa8dd41791e3b3d1eef6\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-7/lambda-call-aot-ice (sha256:2a247d769fb7d4b30f580d2ca8da3979454c7f5e8d31170dfee058c29cee3d14)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:27:02.170Z",
+      "updated": "2026-09-03T08:27:02.170Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"42\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2242%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-7/lambda-call-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-7/lambda-call-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2242%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "fn run() {\n    double :: (x: Int) Int -> x * 2\n    result :: double.call(21)\n    print(result)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"42\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c46-lambda-call-ice-min",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0Ly5jbGF1ZGUvd29ya3RyZWVzL3JlZHRlYW0vYnVpbGQvY2FzZS5ycwo=",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:2a247d769fb7d4b30f580d2ca8da3979454c7f5e8d31170dfee058c29cee3d14",
+          "bundle_digest": "sha256:2a247d769fb7d4b30f580d2ca8da3979454c7f5e8d31170dfee058c29cee3d14"
+        }
+      ]
+    },
+    {
+      "id": "c0x50j6i",
+      "num": 2843,
+      "title": "Red-team hardening finding: lane-7/computed-field-aot-ice",
+      "body": "Hardening finding: lane-7/computed-field-aot-ice\nMinimized reproducer:\nstruct Stats {\n    strength: Int\n    gear_mod: Int\n    attack: Int -> strength * 2 + gear_mod\n    threat: Int -> attack + gear_mod\n}\n\nfn run() {\n    stats :: Stats{strength: 10, gear_mod: 3}\n    print(stats.attack)\n    print(stats.threat)\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"23\\n26\\n\"\nActual relation: \"\"\nSeed: c66-computed-field\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:9e0371571d6ccd26b6032036e7bf44dfd526c37e5f75bdc64ed72c39ebe6380e\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:cd9239726dbcd1c62d8e0fbabdc59b573a1d0d4cccdd7bcc82783758d180b413\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-7/computed-field-aot-ice (sha256:9e0371571d6ccd26b6032036e7bf44dfd526c37e5f75bdc64ed72c39ebe6380e)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:27:03.270Z",
+      "updated": "2026-09-03T08:27:03.270Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"23\\n26\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2223%5Cn26%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-7/computed-field-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-7/computed-field-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2223%5Cn26%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "struct Stats {\n    strength: Int\n    gear_mod: Int\n    attack: Int -> strength * 2 + gear_mod\n    threat: Int -> attack + gear_mod\n}\n\nfn run() {\n    stats :: Stats{strength: 10, gear_mod: 3}\n    print(stats.attack)\n    print(stats.threat)\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"23\\n26\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c66-computed-field",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0Ly5jbGF1ZGUvd29ya3RyZWVzL3JlZHRlYW0vYnVpbGQvY2FzZS5ycwo=",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:9e0371571d6ccd26b6032036e7bf44dfd526c37e5f75bdc64ed72c39ebe6380e",
+          "bundle_digest": "sha256:9e0371571d6ccd26b6032036e7bf44dfd526c37e5f75bdc64ed72c39ebe6380e"
+        }
+      ]
+    },
+    {
+      "id": "c0do7sgj",
+      "num": 2844,
+      "title": "Red-team hardening finding: lane-8/map-key-set-aot-ice",
+      "body": "Hardening finding: lane-8/map-key-set-aot-ice\nMinimized reproducer:\nstruct CacheKey {\n    user: String\n    resource: String\n}\n\nfn run() {\n    scores := [CacheKey:Int]{}\n    print(scores.add(CacheKey{user: \"ada\", resource: \"profile\"}, 7) ?? -1)\n    keys :: scores.keys().to_list()\n    key_set :: Set.from(keys)\n    print(keys.len())\n    print(key_set.len())\n    print(key_set.has(CacheKey{user: \"ada\", resource: \"profile\"}))\n}\nExact commands:\n  aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\n  interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"\nExpected relation: \"-1\\n1\\n1\\ntrue\\n\"\nActual relation: \"\"\nSeed: c08-map-set-ice\nTarget commit: 8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32\nBundle digest: sha256:408cd74ed3442462f554566bf539407af24b71944bb4d58a1cdaa6183305423d\n\nConfirmed by the bounded fresh-context red-team protocol.\nSession: red-team-1788411290527-3118947\nBundle identity: sha256:b7fa83b5b174692fdbe21d9e10618dd7d61c3487f8b015fc0ed4f29abced2a99\nAssimilation route: #2338 root-seam dedup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-09-03",
+          "by": "hardening-rig",
+          "text": "Hardening added: lane-8/map-key-set-aot-ice (sha256:408cd74ed3442462f554566bf539407af24b71944bb4d58a1cdaa6183305423d)"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-03T08:27:04.270Z",
+      "updated": "2026-09-03T08:27:04.270Z",
+      "updatedBy": "hardening-rig",
+      "hardeningSchemaVersion": 1,
+      "hardeningSeam": "unclassified.semantic-primitive",
+      "hardeningRelation": "\"-1\\n1\\n1\\ntrue\\n\"",
+      "hardeningWrongTierMask": [
+        "interpreter",
+        "jet_run"
+      ],
+      "hardeningInputPartition": "red-team-handwritten",
+      "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%22-1%5Cn1%5Cn1%5Cntrue%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+      "hardeningDedupAliases": [],
+      "hardeningFindingId": "lane-8/map-key-set-aot-ice",
+      "hardeningSeverity": "P1",
+      "hardeningState": "open",
+      "hardeningEvidence": [
+        {
+          "schema_version": 1,
+          "repro_schema": "jet.hardening.repro.v1",
+          "finding_id": "lane-8/map-key-set-aot-ice",
+          "stable_key": "hardening:v1|seam=unclassified.semantic-primitive|relation=%22-1%5Cn1%5Cn1%5Cntrue%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten",
+          "source": "struct CacheKey {\n    user: String\n    resource: String\n}\n\nfn run() {\n    scores := [CacheKey:Int]{}\n    print(scores.add(CacheKey{user: \"ada\", resource: \"profile\"}, 7) ?? -1)\n    keys :: scores.keys().to_list()\n    key_set :: Set.from(keys)\n    print(keys.len())\n    print(key_set.len())\n    print(key_set.has(CacheKey{user: \"ada\", resource: \"profile\"}))\n}",
+          "commands": [
+            "aot: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "jet_run: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\"",
+            "interpreter: scripts/agent/jet-env \"jet\" \"run\" \"--release\" \"{source}\""
+          ],
+          "expected_relation": "\"-1\\n1\\n1\\ntrue\\n\"",
+          "actual_relation": "\"\"",
+          "seed": "c08-map-set-ice",
+          "target_commit": "8d246d48d9e0f37c06bab8ff4c5f85ffaa719e32",
+          "classification": "ice",
+          "stdout_bytes": "base64:",
+          "stderr_bytes": "base64:aW50ZXJuYWwgY29tcGlsZXIgZXJyb3I6IHRoZSBnZW5lcmF0ZWQgUnVzdCBkaWQgbm90IGNvbXBpbGUuClRoaXMgaXMgYSBidWcgaW4gamV0LCBOT1QgaW4geW91ciBwcm9ncmFtLiBQbGVhc2UgcmVwb3J0IGl0LAphdHRhY2hpbmcgeW91ciBzb3VyY2UgZmlsZSBhbmQgdGhlIGdlbmVyYXRlZCBmaWxlIGJlbG93LgogIGdlbmVyYXRlZDogL2hvbWUvbmF0ZS9Qcm9qZWN0cy9HaXRodWIvamV0Ly5jbGF1ZGUvd29ya3RyZWVzL3JlZHRlYW0vYnVpbGQvY2FzZS5ycwo=",
+          "exit": 101,
+          "signal": null,
+          "timeout": false,
+          "normalization": [],
+          "bundleDigest": "sha256:408cd74ed3442462f554566bf539407af24b71944bb4d58a1cdaa6183305423d",
+          "bundle_digest": "sha256:408cd74ed3442462f554566bf539407af24b71944bb4d58a1cdaa6183305423d"
+        }
+      ]
     }
   ],
   "decisions": [
@@ -250463,6 +252509,748 @@
   ],
   "events": [
     {
+      "at": "2026-09-03T08:28:29.233Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0p17tvy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T08:28:28.368Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0p17tvy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-09-03T08:28:27.733Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p17tvy",
+      "note": "#6"
+    },
+    {
+      "at": "2026-09-03T08:28:27.071Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p17tvy",
+      "note": "#5"
+    },
+    {
+      "at": "2026-09-03T08:28:26.413Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p17tvy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-03T08:28:25.767Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p17tvy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-03T08:27:04.770Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0f0hweo",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%221710505845000%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:04.770Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0f0hweo",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:27:04.270Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0do7sgj",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%22-1%5Cn1%5Cn1%5Cntrue%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:04.270Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0do7sgj",
+      "note": "Red-team hardening finding: lane-8/map-key-set-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:27:03.756Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c027resd",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:03.756Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c027resd",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:27:03.270Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0x50j6i",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%2223%5Cn26%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:03.270Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0x50j6i",
+      "note": "Red-team hardening finding: lane-7/computed-field-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:27:02.769Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0ounca2",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:02.769Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0ounca2",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:27:02.170Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0exquqy",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%2242%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:02.170Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0exquqy",
+      "note": "Red-team hardening finding: lane-7/lambda-call-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:27:01.682Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c06velrf",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%227%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:01.682Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c06velrf",
+      "note": "Red-team hardening finding: lane-7/labeled-break-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:27:01.184Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0ymreix",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%2291%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:01.184Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0ymreix",
+      "note": "Red-team hardening finding: lane-6/aot-owned-join-helper-ice"
+    },
+    {
+      "at": "2026-09-03T08:27:00.674Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0d7kt95",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%2229%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:00.673Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0d7kt95",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:27:00.182Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c02shwob",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%229223372036854775808%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:27:00.182Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c02shwob",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:59.702Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0v7ffqn",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=aot%2Cinterpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:59.702Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0v7ffqn",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:59.214Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0221iw4",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%224.0%5Cn9.0%5Cn2%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:59.214Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0221iw4",
+      "note": "Red-team hardening finding: lane-3/trait-dispatch-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:26:58.731Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0o62eme",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%223.0%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:58.730Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0o62eme",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:58.299Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0mx6nee",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%22true%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:58.299Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0mx6nee",
+      "note": "Red-team hardening finding: lane-3/float-nan-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:26:57.884Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0g24y35",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%221%5Cn1%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:57.884Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0g24y35",
+      "note": "Red-team hardening finding: lane-3/closure-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:26:57.478Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0gxtorg",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%221%5Cn%22|tiers=interpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:57.477Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0gxtorg",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:57.046Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c09lbkr7",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%229223372036854775808%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:57.046Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c09lbkr7",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:56.619Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c026waut",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=interpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:56.619Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c026waut",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:56.216Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0sppg1f",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn12%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:56.216Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0sppg1f",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:55.794Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0intq69",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%222%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:55.794Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0intq69",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:55.365Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0bj4dpy",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:55.365Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0bj4dpy",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:54.930Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c02jhcit",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn12%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:54.930Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c02jhcit",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:54.413Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0rj48lc",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn9%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:54.412Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0rj48lc",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:53.983Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0dc9zdf",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn1%5Cn%22|tiers=aot%2Cinterpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:53.982Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0dc9zdf",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:26:53.574Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0wgk4fm",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%2217%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:26:53.574Z",
+      "by": "hardening-rig",
+      "action": "card.update",
+      "ref": "c0wgk4fm",
+      "note": "priority,title,phase"
+    },
+    {
+      "at": "2026-09-03T08:23:57.148Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0f0hweo",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%221710505845000%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:57.148Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0f0hweo",
+      "note": "Red-team hardening finding: lane-8/json-datetime-interpreter-empty"
+    },
+    {
+      "at": "2026-09-03T08:23:56.374Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c027resd",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:56.374Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c027resd",
+      "note": "Red-team hardening finding: lane-7/generic-trait-authority-tier-drift"
+    },
+    {
+      "at": "2026-09-03T08:23:55.566Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0ounca2",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:55.566Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0ounca2",
+      "note": "Red-team hardening finding: lane-7/negative-range-stride-aot-drift"
+    },
+    {
+      "at": "2026-09-03T08:23:54.862Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0d7kt95",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%2229%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:54.862Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0d7kt95",
+      "note": "Red-team hardening finding: lane-5/core-time-calendar-misclassified"
+    },
+    {
+      "at": "2026-09-03T08:23:54.232Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c02shwob",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%229223372036854775808%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:54.232Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c02shwob",
+      "note": "Red-team hardening finding: lane-5/core-int-checked-add-aot-wrap"
+    },
+    {
+      "at": "2026-09-03T08:23:53.773Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0v7ffqn",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=aot%2Cinterpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:53.773Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0v7ffqn",
+      "note": "Red-team hardening finding: lane-4/process-output-limit-error-display"
+    },
+    {
+      "at": "2026-09-03T08:23:53.348Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0o62eme",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%223.0%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:53.348Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0o62eme",
+      "note": "Red-team hardening finding: lane-3/float-sum-interpreter-gap"
+    },
+    {
+      "at": "2026-09-03T08:23:52.911Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0gxtorg",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%221%5Cn%22|tiers=interpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:52.911Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0gxtorg",
+      "note": "Red-team hardening finding: lane-2/interpreter-u64-bit-count-unsupported"
+    },
+    {
+      "at": "2026-09-03T08:23:52.467Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c09lbkr7",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%229223372036854775808%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:52.466Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c09lbkr7",
+      "note": "Red-team hardening finding: lane-2/interpreter-u64-high-bit-shift-signs"
+    },
+    {
+      "at": "2026-09-03T08:23:52.019Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c026waut",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=interpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:52.019Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c026waut",
+      "note": "Red-team hardening finding: lane-2/interpreter-u64-to-int-large"
+    },
+    {
+      "at": "2026-09-03T08:23:51.446Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0sppg1f",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn12%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:51.446Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0sppg1f",
+      "note": "Red-team hardening finding: lane-1/nested-scalar-window-shape-drift"
+    },
+    {
+      "at": "2026-09-03T08:23:50.838Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0intq69",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%222%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:50.838Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0intq69",
+      "note": "Red-team hardening finding: lane-1/nested-range-view-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:23:50.407Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0bj4dpy",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:50.407Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0bj4dpy",
+      "note": "Red-team hardening finding: lane-1/map-index-field-write-tier-gap"
+    },
+    {
+      "at": "2026-09-03T08:23:49.863Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c02jhcit",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%2212%5Cn12%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:49.863Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c02jhcit",
+      "note": "Red-team hardening finding: lane-1/indexed-field-write-window-detaches"
+    },
+    {
+      "at": "2026-09-03T08:23:49.198Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0rj48lc",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn9%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:49.198Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0rj48lc",
+      "note": "Red-team hardening finding: lane-1/nested-write-window-jit-tier-gap"
+    },
+    {
+      "at": "2026-09-03T08:23:48.340Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0dc9zdf",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn1%5Cn%22|tiers=aot%2Cinterpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:48.340Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0dc9zdf",
+      "note": "Red-team hardening finding: lane-1/nested-place-copy-jet-run-alias"
+    },
+    {
+      "at": "2026-09-03T08:23:47.742Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c03gpy03",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn5%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:47.742Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c03gpy03",
+      "note": "Red-team hardening finding: lane-1/captured-nested-place-aot-ice"
+    },
+    {
+      "at": "2026-09-03T08:23:47.319Z",
+      "by": "hardening-rig",
+      "action": "hardening.card-upsert",
+      "ref": "c0wgk4fm",
+      "note": "added hardening:v1|seam=unclassified.semantic-primitive|relation=%2217%5Cn%22|tiers=interpreter%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T08:23:47.319Z",
+      "by": "hardening-rig",
+      "action": "card.add",
+      "ref": "c0wgk4fm",
+      "note": "Red-team hardening finding: lane-1/nested-list-struct-aot-write"
+    },
+    {
+      "at": "2026-09-03T07:18:11.861Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0jd3f3y",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T07:18:10.930Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jd3f3y",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-03T07:18:09.929Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jd3f3y",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-03T07:18:09.224Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0jd3f3y",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T06:54:17.194Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0r0vc6w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-09-03T06:53:37.476Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0njqjid",
+      "note": "AOT emits an empty typed list literal `[U8]{}` as Vec<i64>, so `bytes == [U8]{}` fails rustc (I2)"
+    },
+    {
+      "at": "2026-09-03T06:46:19.690Z",
+      "by": "fable-orchestrator",
+      "action": "card.add",
+      "ref": "c0jd3f3y",
+      "note": "Sema defaults an uninferred binding to Int: `recovered :: list.sort_by(cmp) ?? fallback` types Unit as Int"
+    },
+    {
+      "at": "2026-09-03T06:32:22.059Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-09-03T06:32:22.059Z"
+    },
+    {
+      "at": "2026-09-03T05:35:34.943Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0hdolxh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-09-03T05:34:53.863Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ehrhiq",
+      "note": "#5"
+    },
+    {
+      "at": "2026-09-03T05:34:52.994Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0ehrhiq",
+      "note": "#4"
+    },
+    {
+      "at": "2026-09-03T05:31:41.521Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c02ak3kc",
+      "note": "#2"
+    },
+    {
+      "at": "2026-09-03T05:31:40.859Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0615ffl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-09-03T05:29:11.186Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p48658",
+      "note": "#4"
+    },
+    {
       "at": "2026-09-03T04:50:35.189Z",
       "by": "fable-orchestrator",
       "action": "card.update",
@@ -253219,748 +256007,6 @@
       "action": "card.delete",
       "ref": "c0g2sjwh",
       "note": "Geoscience and seismology: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:57.941Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c037pxap",
-      "note": "Climate and weather: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:55.885Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0p5o672",
-      "note": "Astronomy and astrophysics: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:55.340Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0cd3rsn",
-      "note": "Systems biology: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:54.633Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0zolcxv",
-      "note": "Neuroscience: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:48.805Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0jsalti",
-      "note": "Medical imaging: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:47.953Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c06cahs4",
-      "note": "Health records and interoperability: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:47.037Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0vcmraz",
-      "note": "Epidemiology and public health: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:46.218Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0lrmhvk",
-      "note": "Cheminformatics and computational chemistry: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:45.220Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c09mmrlg",
-      "note": "Bioinformatics and genomics: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:41.016Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0t8e3sk",
-      "note": "Signal processing: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:40.231Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c056xda4",
-      "note": "RF, wireless, and communications: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:39.394Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0raisyo",
-      "note": "Power and energy systems: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:37.237Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0cz3ecx",
-      "note": "Mechanical CAD and computational design: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:34.829Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0xcrx6x",
-      "note": "Instrumentation and lab automation: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:33.943Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0j0u5kc",
-      "note": "Finite element analysis: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:33.025Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c03n6zig",
-      "note": "Electromagnetics and antennas: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:32.172Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0kf49w9",
-      "note": "Electrical design and circuit simulation: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:31.333Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c08s4zze",
-      "note": "Control systems: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:30.663Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c00p9yjb",
-      "note": "Civil, structural, and BIM: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:30.044Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0mbrkuq",
-      "note": "Chemical and process engineering: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:27.668Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c07wv3ff",
-      "note": "Computational fluid dynamics: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:26.702Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0apj4v4",
-      "note": "Automotive and aerospace systems engineering: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:25.911Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0u4lt0g",
-      "note": "Acoustics and audio engineering: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:24.999Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0lalyas",
-      "note": "Symbolic mathematics: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:24.007Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c05uewxk",
-      "note": "Statistics: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:23.021Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0u5r6lz",
-      "note": "Simulation and modeling: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:21.273Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c02cvjhy",
-      "note": "Quantum computing: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:20.374Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0hxp8cf",
-      "note": "Proof assistants and formal verification: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:19.480Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0zywt57",
-      "note": "Probabilistic programming and Bayesian inference: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:18.616Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0icisas",
-      "note": "PDE solvers and finite elements: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:17.833Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0a1z4d2",
-      "note": "Optimization and operations research: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:17.061Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0uffwvx",
-      "note": "Numerical computing: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:16.548Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c08swxl0",
-      "note": "Logic and constraint programming: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:15.943Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0rkunvb",
-      "note": "High-performance and parallel computing: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:13.754Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0fz9agr",
-      "note": "GPU compute: stock day-one loop"
-    },
-    {
-      "at": "2026-09-02T21:30:12.927Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0kuy8q5",
-      "note": "M-WORKFLOW-DAG: Inspectable workflow graphs and execution plans"
-    },
-    {
-      "at": "2026-09-02T21:30:11.823Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c05m1bvq",
-      "note": "M-WORKBOOK-FORMULAS: Workbook dependency graphs, formulas, and calculation receipts"
-    },
-    {
-      "at": "2026-09-02T21:30:10.962Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0u9ng8d",
-      "note": "M-WCET: Target-bound timing, jitter, WCET, and deadline evidence"
-    },
-    {
-      "at": "2026-09-02T21:30:10.266Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0md0c28",
-      "note": "M-TYPED-MODEL-RESULT: Typed model, fit, and result records"
-    },
-    {
-      "at": "2026-09-02T21:30:09.519Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0axej3o",
-      "note": "M-TIMELINE: Typed timelines, time bases, keyframes, and editorial interchange"
-    },
-    {
-      "at": "2026-09-02T21:30:08.580Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0uesod4",
-      "note": "M-SYNTAX-TREE: Incremental lossless syntax trees and structural queries"
-    },
-    {
-      "at": "2026-09-02T21:30:07.813Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0g32glh",
-      "note": "M-SYMBOLIC: Typed symbolic AST, assumptions, equations, and rewrite calculus"
-    },
-    {
-      "at": "2026-09-02T21:30:07.037Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0zb5ta8",
-      "note": "M-STRUCTURED-FILTER: Structured filter programs over bounded streams"
-    },
-    {
-      "at": "2026-09-02T21:30:06.094Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0m8zqiw",
-      "note": "M-STORAGE: Durable scientific stores and caches"
-    },
-    {
-      "at": "2026-09-02T21:30:05.318Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0mcms0r",
-      "note": "M-SPATIAL-INDEX: Spatial indexes, spherical cells, and indexed joins"
-    },
-    {
-      "at": "2026-09-02T21:30:04.624Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0x92f9k",
-      "note": "M-SPARSE-SOLVERS: Sparse assembly, Krylov methods, and AMG/preconditioners"
-    },
-    {
-      "at": "2026-09-02T21:30:03.659Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0muc3rn",
-      "note": "M-SIMULATION: Reproducible domain simulation lifecycle"
-    },
-    {
-      "at": "2026-09-02T21:30:02.806Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0t71gcg",
-      "note": "M-SEMANTIC-LAYER: Dashboard semantic metrics, components, and interaction state"
-    },
-    {
-      "at": "2026-09-02T21:30:02.003Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0ebto46",
-      "note": "M-SCI-FORMATS: Standard scientific formats and interchange"
-    },
-    {
-      "at": "2026-09-02T21:30:01.175Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0yk5k6t",
-      "note": "M-SCENE-GRAPH: Typed scene graphs, transforms, assets, and graph identity"
-    },
-    {
-      "at": "2026-09-02T21:29:59.051Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0f08sgg",
-      "note": "M-SAMPLE-SAFETY: Malware and dangerous-sample capability boundary"
-    },
-    {
-      "at": "2026-09-02T21:29:58.461Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c03q9g22",
-      "note": "M-SAFETY-EVIDENCE: Safety, proof, qualification, and traceability evidence"
-    },
-    {
-      "at": "2026-09-02T21:29:57.925Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0pltt6g",
-      "note": "M-RULES-DECISIONS: Declarative rules, decisions, and policy execution"
-    },
-    {
-      "at": "2026-09-02T21:29:57.202Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0e5glz6",
-      "note": "M-ROBOT-BUS: Typed robot message buses, QoS, and command lifecycles"
-    },
-    {
-      "at": "2026-09-02T21:29:56.486Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c02ydhfe",
-      "note": "M-RETRIEVAL-INDEX: Vector and lexical retrieval indexes"
-    },
-    {
-      "at": "2026-09-02T21:29:55.833Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0obic2y",
-      "note": "M-REMOTE-CACHE: Content-addressed remote cache and capability-matched execution"
-    },
-    {
-      "at": "2026-09-02T21:29:55.287Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c09q5rf3",
-      "note": "M-RASTER: First-class raster/image values and bounded pixel storage"
-    },
-    {
-      "at": "2026-09-02T21:29:54.829Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0nho9na",
-      "note": "M-PLUGIN-CAPS: Explicit capability imports, limits, and authority-scoped extensions"
-    },
-    {
-      "at": "2026-09-02T21:29:53.723Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0b49402",
-      "note": "M-PLUGIN-ABI: Capability-scoped media/audio plugin ABI and lifecycle"
-    },
-    {
-      "at": "2026-09-02T21:29:52.235Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c021i0fs",
-      "note": "M-ORBIT-DYNAMICS: Celestial and mission dynamics: orbit states, propagation, force models, and events"
-    },
-    {
-      "at": "2026-09-02T21:29:51.552Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0sewdg1",
-      "note": "M-OBJECT-PIPELINE: Typed object pipelines and remote session handles"
-    },
-    {
-      "at": "2026-09-02T21:29:50.842Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0j1645n",
-      "note": "M-NOTEBOOK: Notebook/REPL evaluation and reactive inspection"
-    },
-    {
-      "at": "2026-09-02T21:29:50.109Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c099nzfn",
-      "note": "M-NLP-PIPELINE: Tokenizer, document, alignment, and text annotation pipeline"
-    },
-    {
-      "at": "2026-09-02T21:29:49.321Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c02k7er1",
-      "note": "M-MPI-LAUNCH: Distributed execution, MPI collectives, and allocation-aware job launch"
-    },
-    {
-      "at": "2026-09-02T21:29:48.544Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0vn9qvm",
-      "note": "M-MESH-STENCILS: Meshes, stencils, and discretized field operators"
-    },
-    {
-      "at": "2026-09-02T21:29:47.909Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0ozbnxa",
-      "note": "M-MEDIA-PIPELINE: Media codec, demux/decode/filter/encode/mux pipeline"
-    },
-    {
-      "at": "2026-09-02T21:29:47.429Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0i7qq07",
-      "note": "M-FINDINGS-RULES: Portable security rules, dataflow findings, and SARIF publication"
-    },
-    {
-      "at": "2026-09-02T21:29:45.735Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0bhjjk7",
-      "note": "M-DOUBLE-ENTRY-LEDGER: Balanced double-entry ledger and immutable posting"
-    },
-    {
-      "at": "2026-09-02T21:29:42.690Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c04quz0s",
-      "note": "M-CONTROL-MODELS: State-space, transfer, and typed model graphs"
-    },
-    {
-      "at": "2026-09-02T21:29:42.020Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0y4mztw",
-      "note": "M-CHUNKED-LAZY-ARRAYS: Chunked lazy arrays and overlap-aware plans"
-    },
-    {
-      "at": "2026-09-02T21:29:41.294Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0lon9qv",
-      "note": "security: register 6 gauntlet cells"
-    },
-    {
-      "at": "2026-09-02T21:29:40.635Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0rtasu6",
-      "note": "M-MAP-RENDERING: Map, raster, tile, and scenario rendering"
-    },
-    {
-      "at": "2026-09-02T21:29:39.991Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0swm4lx",
-      "note": "M-LOAD-RUNNER: Scenario load runners with deterministic thresholds"
-    },
-    {
-      "at": "2026-09-02T21:29:39.097Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0yogyxl",
-      "note": "M-LINALG: Generic typed tensor and linear-algebra substrate"
-    },
-    {
-      "at": "2026-09-02T21:29:37.409Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0rb1edw",
-      "note": "M-LABELED-ARRAYS: Labeled N-D arrays, coordinates, and CF metadata"
-    },
-    {
-      "at": "2026-09-02T21:29:36.560Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c05l9k9i",
-      "note": "M-INTERRUPTS: Interrupt vectors, priority, and bounded handoff"
-    },
-    {
-      "at": "2026-09-02T21:29:35.625Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c095a0hk",
-      "note": "M-HEADLESS-REPLAY: Headless deterministic scene replay and performance probes"
-    },
-    {
-      "at": "2026-09-02T21:29:34.531Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0f58qqm",
-      "note": "M-HARDWARE-IO: Authority-safe hardware and instrument I/O"
-    },
-    {
-      "at": "2026-09-02T21:29:33.890Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0ci4ze7",
-      "note": "M-GPU-KERNELS: GPU kernels, fusion, placement, and backend receipts"
-    },
-    {
-      "at": "2026-09-02T21:29:33.285Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0oayzno",
-      "note": "M-GPU-GRAPHICS: Portable graphics devices, shaders, pipelines, and frame resources"
-    },
-    {
-      "at": "2026-09-02T21:29:32.775Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c003q3hg",
-      "note": "M-GEOMETRY-CRS: Geometry, CRS, geodesics, and spatial validity"
-    },
-    {
-      "at": "2026-09-02T21:29:29.731Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c07xrfda",
-      "note": "M-FIELDBUS: Industrial and vehicle fieldbus models"
-    },
-    {
-      "at": "2026-09-02T21:29:28.913Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0de32yx",
-      "note": "M-FHIR-HL7: FHIR and HL7 clinical record models and transactions"
-    },
-    {
-      "at": "2026-09-02T21:29:27.818Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0xlwpuo",
-      "note": "M-EXPERIMENT-LEDGER: Asset, lineage, run, artifact, and reproducible evidence ledger"
-    },
-    {
-      "at": "2026-09-02T21:29:26.453Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0hk5ocb",
-      "note": "M-EDGE-BINDINGS: Typed edge handlers, deployment bindings, and invocation context"
-    },
-    {
-      "at": "2026-09-02T21:29:25.373Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c04vg36n",
-      "note": "M-DURABLE-STREAMS: Durable streams, consumer ownership, and delivery recovery"
-    },
-    {
-      "at": "2026-09-02T21:29:23.827Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0rcmnpd",
-      "note": "M-DSP-FILTERS: Typed filter design and multirate DSP"
-    },
-    {
-      "at": "2026-09-02T21:29:22.625Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c09jo3jm",
-      "note": "M-DMA: DMA ownership, mapping, queues, and completion"
-    },
-    {
-      "at": "2026-09-02T21:29:22.103Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0b58mhl",
-      "note": "M-DISTRIBUTIONS: Probability distributions, samplers, and Bayesian inference"
-    },
-    {
-      "at": "2026-09-02T21:29:21.525Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0afkc2q",
-      "note": "M-CORPUS-SEARCH: Ignore-aware corpus search and replacement"
-    },
-    {
-      "at": "2026-09-02T21:29:20.975Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c014rmtg",
-      "note": "M-COLOR: Color spaces, transfer functions, gamut, and display transforms"
-    },
-    {
-      "at": "2026-09-02T21:29:20.218Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c06aolox",
-      "note": "M-CALENDARS-BUSINESS-DATES: Civil calendars, exchange sessions, and business-date arithmetic"
-    },
-    {
-      "at": "2026-09-02T21:29:19.387Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c024aae1",
-      "note": "M-BUS-TXN: Bounded typed device and protocol transactions"
-    },
-    {
-      "at": "2026-09-02T21:29:18.592Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0mqmloy",
-      "note": "M-BREP-GEOMETRY: Exact BRep topology and geometry kernels"
-    },
-    {
-      "at": "2026-09-02T21:29:17.931Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c09ssp9w",
-      "note": "M-BOARD-BSP: Typed board, target, BSP, and HAL facts"
-    },
-    {
-      "at": "2026-09-02T21:29:17.164Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0y5nr3g",
-      "note": "M-AUTODIFF: Automatic differentiation and derivative propagation"
-    },
-    {
-      "at": "2026-09-02T21:29:16.416Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0tp430l",
-      "note": "M-MODEL-STATE: Typed model/module state, parameter registries, artifacts, and checkpoints"
-    },
-    {
-      "at": "2026-09-02T21:29:15.750Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c09asgfk",
-      "note": "M-CONTRACT-MUTATION: Contract verification and mutation feedback"
-    },
-    {
-      "at": "2026-09-02T21:29:15.070Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0xjq9f0",
-      "note": "M-UNITS: Typed physical units and dimensional analysis"
-    },
-    {
-      "at": "2026-09-02T21:29:12.593Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c01um5iw",
-      "note": "M-OTA: Signed update images, slots, rollback, and recovery"
-    },
-    {
-      "at": "2026-09-02T21:29:06.633Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0cgqi3a",
-      "note": "M-CANVAS-2D: Portable 2D canvas and creative frame loop"
-    },
-    {
-      "at": "2026-09-02T21:29:01.577Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c02mxd73",
-      "note": "M-OPTIMIZATION: Optimization model surface and LP/MILP/NLP/CP-SAT backends"
-    },
-    {
-      "at": "2026-09-02T21:28:59.565Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0pf7h8m",
-      "note": "M-DATALOADER: Typed datasets, data loaders, batching, and feature schemas"
-    },
-    {
-      "at": "2026-09-02T21:28:58.972Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c08xbrxz",
-      "note": "M-REFERENCE-FRAMES: Astronomical and mission time scales and reference frames"
-    },
-    {
-      "at": "2026-09-02T21:28:58.498Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0v09u55",
-      "note": "M-OS-SERVICES: Authority-bound operating-system services"
-    },
-    {
-      "at": "2026-09-02T21:28:53.128Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0h85s6a",
-      "note": "M-VALIDATION-RECEIPTS: Cross-tier validation, reproducibility, and evidence receipts"
     }
   ],
   "nextNum": 368,
