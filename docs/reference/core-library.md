@@ -435,6 +435,7 @@ Whole-file helpers:
 | `canonicalize(path)` | `String !IOError` | Existing path, absolute and symlink-resolved |
 | `absolute(path)` | `String !IOError` | Absolute path without requiring it to exist |
 | `walk(path)` | `[WalkEntry] !IOError` | Recursive entries below `path`, sorted per directory |
+| `walk_parallel(path)` | `[WalkEntry] !IOError` | Same entries, errors, and no-follow symlink policy as `walk`, traversed by a shared directory queue and finally sorted by path |
 | `walk_files(path)` | `[WalkEntry] !IOError` | The same traversal, ordering, errors, and no-follow symlink policy as `walk`, yielding regular files only |
 | `glob(pattern)` | `[String] !IOError` | Recursive `*`/`?` path match |
 | `symlink(from, to)` | `!IOError` | Create a symbolic link |

@@ -1,0 +1,33 @@
+// D-FS-WALK-PARALLEL1: parallel directory queue with a text scan.
+use core.files as fs
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("parallel-grep")
+    src :: Path.from(root).join("src")
+    fs.create_dir_all(src)
+    fs.write(Path.from(root).join("notes.txt"), "needle in notes\n")
+    fs.write(src.join("alpha.txt"), "needle in alpha\n")
+    fs.write(src.join("beta.txt"), "no match\n")
+
+    parallel :: fs.walk_parallel(root)
+    sequential :: fs.walk(root)
+    parallel_set := [String]{}
+    sequential_set := [String]{}
+    loop entry in parallel -> parallel_set.push("{entry.relative}:{entry.is_dir}")
+    loop entry in sequential -> sequential_set.push("{entry.relative}:{entry.is_dir}")
+    parallel_set.sort()
+    sequential_set.sort()
+
+    matches := [String]{}
+    loop entry in parallel {
+        if !entry.is_dir {
+            text :: fs.read(entry.path)
+            if text.contains("needle") -> matches.push("{entry.relative}: needle")
+        }
+    }
+    matches.sort()
+    print("matches: {matches.len()}")
+    loop line in matches -> print(line)
+    print("same: {parallel_set == sequential_set}")
+}
