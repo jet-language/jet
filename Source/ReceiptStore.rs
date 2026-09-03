@@ -100,6 +100,13 @@ impl ReceiptStore {
         mut identity: Vec<u8>,
         input_paths: &[PathBuf],
     ) -> Result<ReceiptClaim, String> {
+        // A check claim includes the authority and entry-selection state even
+        // when a candidate or generated input is absent.  Existing files are
+        // also carried below as ordinary inputs so stale claims can name the
+        // exact file that changed.
+        if verb == "check" {
+            append_check_context_identity(&mut identity);
+        }
         let mut inputs = Vec::new();
         let mut seen = BTreeSet::new();
         for path in input_paths {
@@ -198,9 +205,10 @@ impl ReceiptStore {
                         .iter()
                         .map(|input| input.path.clone())
                         .collect::<BTreeSet<_>>();
-                    // Keep the stored WatchGraph closure cheap to validate, but
-                    // rediscover authority paths so a newly-created workspace,
-                    // lock, or generated input cannot hide behind an old claim.
+                    // Keep the stored WatchGraph closure cheap to validate,
+                    // but rediscover authority paths so a newly-created
+                    // workspace, lock, generated input, or entry candidate
+                    // cannot hide behind an old claim.
                     if let Some(target) = target_path(verb, argv, cwd) {
                         add_project_inputs(&target, &mut paths);
                     }
@@ -212,10 +220,31 @@ impl ReceiptStore {
             Ok(claim) => claim,
             Err(_) => return Ok(None),
         };
-        if claim != receipt.claim
-            || !inputs_current(&claim.inputs)
-            || receipt.digest != receipt_digest(&receipt)
-        {
+        if claim != receipt.claim {
+            let changes = changed_receipt_inputs(&receipt.claim.inputs, &claim.inputs);
+            if changes.is_empty() {
+                eprintln!(
+                    "receipt: {verb} invalidated (entry candidates or authority context changed)"
+                );
+            } else {
+                for path in changes {
+                    eprintln!(
+                        "receipt: {verb} invalidated (input changed: `{}`)",
+                        path.display()
+                    );
+                }
+            }
+            return Ok(None);
+        }
+        if let Some(path) = stale_receipt_input(&claim.inputs) {
+            eprintln!(
+                "receipt: {verb} invalidated (input changed: `{}`)",
+                path.display()
+            );
+            return Ok(None);
+        }
+        if receipt.digest != receipt_digest(&receipt) {
+            eprintln!("receipt: {verb} invalidated (receipt authentication changed)");
             return Ok(None);
         }
         Ok(Some(receipt))
@@ -935,9 +964,137 @@ fn add_project_inputs(entry: &Path, out: &mut BTreeSet<PathBuf>) {
         if regular_file(&lock) {
             out.insert(lock);
         }
+        for candidate in check_entry_candidates(&root) {
+            if regular_file(&candidate) {
+                out.insert(candidate);
+            }
+        }
         collect_tree_inputs(&root.join(".jet").join("generated"), "check", out);
     }
 }
+fn append_check_context_identity(identity: &mut Vec<u8>) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    frame(identity, b"check-context-v2");
+    append_context_path(identity, b"working-directory", &cwd);
+
+    let roots = receipt_authority_roots(&cwd);
+    if roots.is_empty() {
+        frame(identity, b"authority-roots");
+        frame(identity, b"none");
+        return;
+    }
+    for root in roots {
+        append_context_path(identity, b"package-root", &root);
+        for (priority, candidate) in check_entry_candidates(&root).into_iter().enumerate() {
+            frame(identity, b"entry-candidate");
+            frame(identity, priority.to_string().as_bytes());
+            append_context_path(identity, b"path", &candidate);
+        }
+        for name in [
+            crate::Syntax::PACKAGE_FILE,
+            crate::Syntax::PAYLOAD_FILE,
+            "workspace.jet",
+            crate::Syntax::UNIFIED_LOCK_FILE,
+        ] {
+            append_context_path(identity, name.as_bytes(), &root.join(name));
+        }
+        append_context_tree(identity, &root.join(".jet").join("generated"));
+    }
+}
+
+fn check_entry_candidates(root: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![
+        root.join(crate::Syntax::DEFAULT_ENTRY_FILE),
+        root.join("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
+        root.join(crate::Syntax::LEGACY_ENTRY_FILE),
+    ];
+    if let Ok(Some(facts)) = crate::Loader::package_facts_for_root(root) {
+        if !facts.name.is_empty() {
+            candidates.push(root.join(format!("{}.{}", facts.name, crate::Syntax::FILE_EXT)));
+        }
+    }
+    candidates.dedup();
+    candidates
+}
+
+fn append_context_tree(identity: &mut Vec<u8>, root: &Path) {
+    frame(identity, b"generated-inputs");
+    append_context_path(identity, b"root", root);
+    let mut files = BTreeSet::new();
+    collect_tree_inputs(root, "check", &mut files);
+    for path in files {
+        append_context_path(identity, b"file", &path);
+    }
+}
+
+fn append_context_path(identity: &mut Vec<u8>, label: &[u8], path: &Path) {
+    frame(identity, label);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let display = fs::canonicalize(&absolute).unwrap_or(absolute);
+    frame(identity, display.to_string_lossy().as_bytes());
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => frame(identity, b"symlink"),
+        Ok(metadata) if metadata.is_file() => {
+            frame(identity, b"file");
+            frame(
+                identity,
+                file_digest(path)
+                    .unwrap_or_else(|_| "unreadable".to_string())
+                    .as_bytes(),
+            );
+        }
+        Ok(metadata) if metadata.is_dir() => frame(identity, b"directory"),
+        Ok(_) => frame(identity, b"other"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            frame(identity, b"missing")
+        }
+        Err(error) => {
+            frame(identity, b"unreadable");
+            frame(identity, error.kind().to_string().as_bytes());
+        }
+    }
+}
+
+fn changed_receipt_inputs(old: &[ReceiptInput], new: &[ReceiptInput]) -> Vec<PathBuf> {
+    let mut changed = Vec::new();
+    for input in old {
+        if new
+            .iter()
+            .find(|candidate| candidate.path == input.path)
+            .is_none_or(|candidate| candidate.digest != input.digest)
+        {
+            changed.push(input.path.clone());
+        }
+    }
+    for input in new {
+        if old
+            .iter()
+            .all(|candidate| candidate.path != input.path)
+        {
+            changed.push(input.path.clone());
+        }
+    }
+    changed.sort();
+    changed.dedup();
+    changed
+}
+
+fn stale_receipt_input(inputs: &[ReceiptInput]) -> Option<PathBuf> {
+    inputs.iter().find_map(|input| {
+        file_digest(&input.path)
+            .ok()
+            .filter(|digest| digest == &input.digest)
+            .is_none()
+            .then(|| input.path.clone())
+    })
+}
+
 
 fn canonical_path(path: &Path) -> Result<PathBuf, String> {
     let metadata = fs::symlink_metadata(path)
@@ -957,12 +1114,13 @@ fn file_digest(path: &Path) -> Result<String, String> {
     crate::SHA256::sha256_file_hex(path)
         .map_err(|error| format!("could not read input {}: {error}", path.display()))
 }
-
 fn inputs_current(inputs: &[ReceiptInput]) -> bool {
     inputs
         .iter()
         .all(|input| file_digest(&input.path).is_ok_and(|digest| digest == input.digest))
 }
+
+
 
 fn regular_file(path: &Path) -> bool {
     fs::symlink_metadata(path)

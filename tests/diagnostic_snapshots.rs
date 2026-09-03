@@ -232,6 +232,10 @@ fn ui_snapshots() {
         // I4: `// @all_diags` and workspace fixtures run `check_with_path`.
         let all_diags = src.lines().any(|l| l.trim() == "// @all_diags")
             || path.file_name().and_then(|name| name.to_str()) == Some(jet::Syntax::WORKSPACE_FILE);
+        // Card #2389: a marked fixture drives the real `jet check <file>`
+        // command so ownership diagnostics and successful in-package checks
+        // use the user-facing CLI renderer, not a lookalike direct API.
+        let check_cli = src.lines().any(|l| l.trim() == "// @check_cli");
         // D-ONCE-GATE1=A: files marked with the invocation gate exercise the
         // same audited policy path as the CLI.
         let gates = src.lines().any(|l| l.trim() == "// @gate impure=allow");
@@ -545,6 +549,8 @@ fn ui_snapshots() {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
+        } else if check_cli {
+            run_check_cli_snapshot(&path)
         } else if all_diags {
             let diags = jet::check_with_path(&file_arg);
             if diags.is_empty() {
@@ -987,6 +993,30 @@ fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {
         .expect("real hangar verify must emit E1315");
     stderr[start..].to_string()
 }
+fn run_check_cli_snapshot(path: &Path) -> String {
+    let parent = path.parent().expect("check CLI fixture parent");
+    let entry = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("check CLI fixture filename");
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", entry])
+        .current_dir(parent)
+        .env("JET_RECEIPT_BYPASS", "1")
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .output()
+        .expect("run check CLI diagnostic fixture");
+    if output.status.success() {
+        return "(no errors)\n".to_string();
+    }
+    let mut rendered = String::from_utf8(output.stdout).expect("check CLI stdout is UTF-8");
+    rendered.push_str(
+        &String::from_utf8(output.stderr).expect("check CLI stderr is UTF-8"),
+    );
+    rendered
+}
+
 
 fn normalize_volatile_ui_snapshot(shown_path: &str, actual: String) -> String {
     // A snapshot must not depend on where the repository is checked out. A

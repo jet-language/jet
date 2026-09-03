@@ -356,7 +356,7 @@ fn explicit_file_without_owning_project_context_teaches_missing_context() {
     let stderr = stderr_snapshot(&output, &root);
     assert!(stderr.contains("Error [E2393]"), "missing E2393:\n{stderr}");
     assert!(
-        stderr.contains("use project.<module>"),
+        stderr.contains("Use project.<module>"),
         "missing canonical import teaching:\n{stderr}"
     );
     assert_snapshot("missing_context", "stderr", &stderr);

@@ -140,6 +140,60 @@ fn status_never_promotes_stale_receipt_to_proven() {
     assert!(!json.contains("\"state\":\"proven\""), "{json}");
     assert!(json.contains("\"action\":\"jet prove run.jet\""), "{json}");
 }
+#[test]
+fn check_receipt_invalidates_when_higher_priority_entry_appears() {
+    let dir = isolated_cwd("check_receipt_entry_candidate");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"entry-candidate\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/run.jet"), "fn run() { }\n").unwrap();
+    let receipt_dir = dir.join(".jet/receipts");
+    let run_check = || {
+        Command::new(jet())
+            .args(["check"])
+            .current_dir(&dir)
+            .env("JET_RECEIPT_DIR", &receipt_dir)
+            .env_remove("JET_RECEIPT_BYPASS")
+            .env("NO_COLOR", "1")
+            .env("TERM", "dumb")
+            .output()
+            .unwrap()
+    };
+
+    let first = run_check();
+    assert!(
+        first.status.success(),
+        "initial check failed:\n{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let second = run_check();
+    let second_stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        second.status.success() && second_stderr.contains("ok: check current"),
+        "unchanged check did not replay:\n{second_stderr}"
+    );
+
+    fs::write(dir.join("run.jet"), "fn run() { }\n").unwrap();
+    let third = run_check();
+    let third_stderr = String::from_utf8_lossy(&third.stderr);
+    assert!(
+        third.status.success(),
+        "check after adding a higher-priority entry failed:\n{third_stderr}"
+    );
+    assert!(
+        !third_stderr.contains("ok: check current"),
+        "stale receipt replayed after higher-priority entry appeared:\n{third_stderr}"
+    );
+    assert!(
+        third_stderr.contains("receipt: check invalidated")
+            && third_stderr.contains("input changed"),
+        "entry-candidate invalidation was not reported:\n{third_stderr}"
+    );
+}
+
 
 #[test]
 fn inspect_provenance_human_and_json_agree() {
