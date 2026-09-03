@@ -1,5 +1,6 @@
 // core-conformance: core.net.tls_connect
 use core.net as net
+use core.time as time
 
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
@@ -7,9 +8,7 @@ fn run() {
     client :: net.tcp_connect(address) ?? panic("connect")
     server :: net.tcp_accept(listener) ?? panic("accept")
     net.tcp_close(&server) ?? panic("close")
-    result :: net.tls_connect(^client, "localhost")
-    print(result == {
-        .Ok(_) -> false
-        .Err(_) -> true
-    })
+    #Context(deadline: time.now() + 100) {
+        print(net.tls_connect(^client, "localhost") ? stream -> false ! connect_error -> true)
+    }
 }

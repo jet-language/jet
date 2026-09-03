@@ -1,5 +1,6 @@
 // core-conformance: core.net.tls_read
 use core.net as net
+use core.time as time
 
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
@@ -7,12 +8,9 @@ fn run() {
     client :: net.tcp_connect(address) ?? panic("connect")
     server :: net.tcp_accept(listener) ?? panic("accept")
     net.tcp_close(&server) ?? panic("close")
-    result :: net.tls_connect(^client, "localhost")
-    print(result == {
-        .Ok(stream) -> net.tls_read(&stream) == {
-            .Ok(_) -> true
-            .Err(_) -> false
-        }
-        .Err(_) -> true
-    })
+    #Context(deadline: time.now() + 100) {
+        print(net.tls_connect(^client, "localhost") ? stream ->
+            net.tls_read(&stream) ? bytes -> true ! read_error -> false
+            ! connect_error -> true)
+    }
 }

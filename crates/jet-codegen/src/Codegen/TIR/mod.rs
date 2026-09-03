@@ -4052,6 +4052,11 @@ pub struct TPattern {
     /// The owning enum, when the subject is a user/foreign/core enum.
     pub enum_type: Option<String>,
     pub position: TPatternPosition,
+    /// Whether payload bindings need mutable Rust pattern slots.
+    ///
+    /// This is the same lowering fact carried by the corresponding `TLocal`.
+    /// Engines must not infer it from a type name or source spelling.
+    pub mutable: bool,
 }
 
 /// Where a `TPattern` is tested. The position decides how much a match binds,
@@ -4078,6 +4083,7 @@ impl TPattern {
             pattern,
             enum_type,
             position: TPatternPosition::Arm,
+            mutable: false,
         }
     }
 
@@ -4087,6 +4093,7 @@ impl TPattern {
             pattern,
             enum_type: None,
             position: TPatternPosition::Binding,
+            mutable: false,
         }
     }
 
@@ -4096,7 +4103,14 @@ impl TPattern {
             pattern,
             enum_type: None,
             position: TPatternPosition::OptionBinding,
+            mutable: false,
         }
+    }
+
+    /// Carry the local mutability fact into the Rust pattern slot.
+    pub fn with_mutability(mut self, mutable: bool) -> TPattern {
+        self.mutable = mutable;
+        self
     }
 
     /// The variant this pattern tests, when it tests one.

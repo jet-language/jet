@@ -264,6 +264,7 @@ pub(super) fn lower_binding_free_variant_pattern_test(
                 pattern: pattern.clone(),
                 enum_type,
                 position,
+                mutable: false,
             },
         },
     }
@@ -693,6 +694,7 @@ fn lower_if_cond_atom(
                                 pattern: pattern.clone(),
                                 enum_type: None,
                                 position: TPatternPosition::DataEntries { temp: obj_tmp },
+                                mutable: false,
                             },
                             subj,
                         },
@@ -753,6 +755,7 @@ fn lower_if_cond_atom(
                             pattern: pattern.clone(),
                             enum_type,
                             position: TPatternPosition::Binding,
+                            mutable: false,
                         },
                         subj,
                     },
@@ -769,6 +772,7 @@ fn lower_if_cond_atom(
                             pattern: pattern.clone(),
                             enum_type,
                             position: TPatternPosition::Binding,
+                            mutable: false,
                         },
                         subj,
                     },
@@ -989,16 +993,32 @@ fn lower_if_cond_atom(
                 _ => unreachable!("checked above"),
             };
             let (name, ty) = binding;
+            // Fallible payloads are ordinary locals in the selected branch. A
+            // close-type payload can be passed to a mutating Prelude operation,
+            // so carry the same mutable-place fact into both its TLocal and the
+            // Rust `if let` pattern binding.
+            let mutable = ty.as_ref().is_some_and(|ty| match ty {
+                Type::Named(name) | Type::Apply { name, .. } => {
+                    cx.close_types.contains(name) || name == "TLSStream"
+                }
+                _ => false,
+            });
             let place = if ty.as_ref().is_some_and(Type::is_allocator_view) {
                 TLocal::user(&name).through_ref()
             } else {
                 TLocal::user(&name)
             };
+            let place = if mutable {
+                place.as_mutable()
+            } else {
+                place
+            };
             let pattern = if matches!(&subj.ty, Type::Option(_)) {
                 TPattern::option_binding(pattern.clone())
             } else {
                 TPattern::binding(pattern.clone())
-            };
+            }
+            .with_mutability(mutable);
             return (
                 TIfCond::IfLet { pattern, subj },
                 vec![(name, place, ty)],

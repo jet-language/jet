@@ -1,6 +1,7 @@
 // core-conformance: core.net.tls.read_text
 use core.net as net
 use core.net.tls as tls
+use core.time as time
 
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
@@ -8,7 +9,9 @@ fn run() {
     client :: net.tcp_connect(address) ?? panic("connect")
     server :: net.tcp_accept(listener) ?? panic("accept")
     net.tcp_close(&server) ?? panic("close")
-    print(net.tls_connect(^client, "localhost") ? stream ->
-        tls.read_text(&stream, 1) ? text -> true ! read_error -> false
-        ! connect_error -> true)
+    #Context(deadline: time.now() + 100) {
+        print(net.tls_connect(^client, "localhost") ? stream ->
+            tls.read_text(&stream, 1) ? text -> true ! read_error -> false
+            ! connect_error -> true)
+    }
 }

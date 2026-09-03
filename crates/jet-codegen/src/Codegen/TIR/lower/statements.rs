@@ -3292,7 +3292,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             || n == "XMLReader" || n == "XMLWriter"
                             || n == "CBORReader" || n == "CBORWriter"
                             || n == "Stdout" || n == "Stderr"
-                            || n == "TcpStream" || n == "UnixStream" || n == "HTTPRouter"
+                            || n == "TcpStream" || n == "TLSStream" || n == "UnixStream" || n == "HTTPRouter"
                             || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
                             || n == "Mailer"
                     )

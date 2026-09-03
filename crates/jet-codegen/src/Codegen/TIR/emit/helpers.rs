@@ -154,27 +154,38 @@ pub(crate) fn emit_tir_stopping_display(recv: &TExpr, cx: &Cx) -> Option<String>
     ))
 }
 
-/// The Rust pattern a `TPattern` spells. The position decides which of codegen's
-/// three pattern shapes applies; the pattern and its owning enum are the only
-/// other facts, both already resolved at lowering.
+/// Emit a TIR if-let pattern, carrying the lowered mutability fact into a
+/// fallible payload binding.
 pub(crate) fn emit_tir_pattern(pattern: &TPattern, cx: &Cx) -> String {
     match &pattern.position {
-        TPatternPosition::Binding => crate::Codegen::emit_if_let_pattern(
-            cx,
-            &pattern.pattern,
-            pattern.enum_type.as_deref(),
-        ),
-        TPatternPosition::OptionBinding => match &pattern.pattern {
-            crate::AST::Pattern::Present { binding, .. } => {
-                format!("Ok({})", mangle(binding))
+        TPatternPosition::Binding => {
+            if pattern.mutable {
+                emit_mutable_fallible_pattern(pattern, cx)
+            } else {
+                crate::Codegen::emit_if_let_pattern(
+                    cx,
+                    &pattern.pattern,
+                    pattern.enum_type.as_deref(),
+                )
             }
-            crate::AST::Pattern::Absent(_) => "Err(_)".to_string(),
-            _ => crate::Codegen::emit_if_let_pattern(
-                cx,
-                &pattern.pattern,
-                pattern.enum_type.as_deref(),
-            ),
-        },
+        }
+        TPatternPosition::OptionBinding => {
+            if pattern.mutable {
+                emit_mutable_fallible_pattern(pattern, cx)
+            } else {
+                match &pattern.pattern {
+                    crate::AST::Pattern::Present { binding, .. } => {
+                        format!("Ok({})", mangle(binding))
+                    }
+                    crate::AST::Pattern::Absent(_) => "Err(_)".to_string(),
+                    _ => crate::Codegen::emit_if_let_pattern(
+                        cx,
+                        &pattern.pattern,
+                        pattern.enum_type.as_deref(),
+                    ),
+                }
+            }
+        }
         TPatternPosition::Arm => {
             crate::Codegen::emit_match_pattern(cx, &pattern.pattern, pattern.enum_type.as_deref())
         }
@@ -190,6 +201,22 @@ pub(crate) fn emit_tir_pattern(pattern: &TPattern, cx: &Cx) -> String {
         TPatternPosition::DataEntries { temp } => {
             format!("{}jet_std::DataTree::Object({})", cx.root_prefix, temp)
         }
+    }
+}
+
+fn emit_mutable_fallible_pattern(pattern: &TPattern, _cx: &Cx) -> String {
+    match &pattern.pattern {
+        crate::AST::Pattern::Present { binding, .. }
+        | crate::AST::Pattern::Ok { binding, .. }
+        | crate::AST::Pattern::Err { binding, .. } => {
+            let variant = if matches!(&pattern.pattern, crate::AST::Pattern::Present { .. } | crate::AST::Pattern::Ok { .. }) {
+                "Ok"
+            } else {
+                "Err"
+            };
+            format!("{variant}(mut {})", mangle(binding))
+        }
+        _ => panic!("mutable TIR pattern must bind a fallible payload"),
     }
 }
 
