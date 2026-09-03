@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2875,
-    "rev": 50228,
+    "rev": 50255,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2046,7 +2046,7 @@
       "title": "M16 · CPU compute",
       "goal": "core.compute ML training/inference/serialization and the CPU SIMD backend. XL umbrellas: split before building. Depends on M09.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:05.229Z"
     },
     {
@@ -139473,12 +139473,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m16-compute",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nThe core.regex runtime in Prelude/CoreLib/JetStd/Open.rs is replaced with a grep-class linear engine: one-pass byte-level Pike-VM/lazy-DFA simulation with no per-position restart, a memchr/Teddy-class literal prefilter with std-only SIMD runtime dispatch, span-based matches with lazy group extraction, and zero allocation on the scan hot path. The card's own 4MB-corpus probe (`re.find_all(.{\"struct\"}, text)`) completes under default `jet run` within a stated multiple of GNU grep with the same match count, and output is byte-identical across AOT, default JIT, and interpreter.\n\n## Law\n- D-REGEXENGINE1=A — core.regex is RE2-class and linear by default (captures, named groups, replace, split, flags, Unicode classes); std-only in the generated prelude; no backtracking/backreferences. The semantics are ratified and unchanged — this card fixes only the runtime.\n- I9 structural — the engine lives in the Prelude; every tier marshals to the same `jet_regex_*` entries; byte-identical output.\n- I5 — existing regex goldens must stay green; the probe recipe is recorded.\n- No new user-typeable syntax → no I7 decision. No new diagnostics expected → I4 untouched unless an error message changes (then re-snapshot).\n\n## Work\n1. Trace the hot path in `crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs`: `matches:399` → `find_from:483` → `regex_search_positions:1263` (iterates EVERY char index — the quadratic restart), `run_at:496` (fresh `Vec` + full `caps` vec per position), `add_thread:534` (`caps.clone()` per transition), `JetRegexMatch:149` (`text: String` — clones the whole haystack per match). Parser (`RegexParser:698`) and compiler (`RegexCompiler:987`) largely stay; the simulation and match carrier are the rewrite.\n2. Byte-level program: recompile `RegexProgram` matchers to byte-oriented instructions (UTF-8 class lowering to byte ranges/alternations, or char-decode only inside class steps), preserving current match semantics exactly — leftmost start, greedy `last_match` extension as `run_at` implements today; the existing goldens are the semantic oracle.\n3. One-pass simulation: replace per-position restart with the standard unanchored Pike VM — inject the start thread at each input byte while no match has begun; dedup threads with two preallocated sparse sets sized by instruction count (no `BTreeSet`, no per-position `Vec` growth); run capture slots ONLY when the program has groups and the caller asks for them.\n4. Lazy captures + span matches: `find_all`/`matches`/`is_match` first run the capture-free VM for spans; `JetRegexMatch` stores a shared haystack (`Arc<str>`, one refcount bump per match, never a String clone) plus spans; `group(n)`/named groups re-run the full-capture VM over the matched window on demand. Public API (`group`, `named`, replace expansion `expand_regex_replacement:1281`) is unchanged in shape and output.\n5. Literal prefilter: derive a required prefix/inner literal from the compiled program; scan with a std-only memchr-class routine — chunked u64 SWAR baseline plus vetted-unsafe AVX2/SSE2 with runtime feature dispatch, mirroring the invariant-clean precedent in `Top/Compute.rs` `jet_compute_simd_backend:4011`. The prefilter only proposes candidate positions; the VM remains the semantic authority (a prefilter bug can cost speed, never correctness).\n6. Wire `matches`, `replace`/`replace_impl`, `split`, `is_match`, `match_value` through the new engine and DELETE the old `regex_search_positions`/per-position `run_at` path (greenfield — no dual engine, no fallback flag).\n7. Keep the whole engine in Open.rs (Prelude) so AOT/JIT/interpreter share it structurally; no engine-host code changes should be needed — verify none exist.\n\n## Not building\n- No backreferences, lookaround, or PCRE compatibility (excluded by D-REGEXENGINE1).\n- No external crates (regex/memchr/aho-corasick) — std-only is law.\n- No full lazy-DFA cache if the one-pass NFA + prefilter already meets the stated multiple — simplest engine that clears criterion 4.\n- No parallel file scanning — that is #2057 (which depends on this card).\n\n## Proof\n- Criterion 4 (the real exit bar; rows 1–3 are blank placeholder rows per the card log — close them with evidence \"empty placeholder row — superseded by the appended criterion\"):\n  - Rebuild, regenerate the 4MB corpus exactly as the card probe did (concatenate repo sources to ~4MB), run `re.find_all(.{\"struct\"}, text)` under default `jet run`: completes, match count agrees with `grep -c` on the same corpus, wall time recorded on the card as a stated multiple of GNU grep.\n  - Scale sanity: 40KB / 400KB / 4MB timings show linear growth (kills the 0.7s→15.4s→never curve).\n  - Zero hot-path allocation: sparse sets and caps buffers preallocated at compile of the program; assert by code inspection in review + a debug counter in a unit test if cheap.\n  - I9: byte-identical output for `examples/features/text/regex.jet` and the probe across default `jet run`, `jet run --release` (AOT), and the interpreter.\n- Existing goldens green: `examples/features/text/regex.jet` vs its expected out; `tests/ui/regex_interpolation` snapshot unchanged.\n- Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — semantics ratified, seam isolated to Open.rs, SIMD-dispatch precedent already in-tree.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Closed on implementation evidence; measurement criterion moved to #2858."
+        },
         {
           "at": "2026-09-03",
           "by": "fable-orchestrator",
@@ -139540,11 +139545,11 @@
         {
           "n": 5,
           "text": "A fresh matched regex scan measures Rust and every declared non-Rust peer for every comparable metric; Jet/non-Rust < 1.00 and Jet/Rust <= 1.05 at worst, with no missing/aggregate pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-01T20:49:17.709Z"
+          "evidence": "Moved to testing card #2858 per owner instruction 2026-09-03: remaining criterion is a matched peer measurement run; failures found by that run are fixed under #2858 or re-carded.",
+          "at": "2026-09-03T12:19:11.889Z"
         }
       ],
       "refs": [],
@@ -139555,8 +139560,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:44:41.135Z",
-      "updated": "2026-09-03T10:57:46.809Z",
-      "updatedBy": "fable-orchestrator"
+      "updated": "2026-09-03T12:19:12.751Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T12:19:12.751Z"
     },
     {
       "id": "c0p48658",
@@ -139567,7 +139573,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m16-compute",
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\ncore.files gains a parallel walk/scan path implementing the video-proven shared-queue-of-directories architecture (workers pop a directory, enumerate it, push subdirectories, process that directory's files sequentially, with batched result writes), plus a grep-style flagship example whose golden output equals the sequential walk result set, and a measured 200k-file-fixture throughput number recorded on the card.\n\n## Law\nNo decision dependencies — mechanical/performance work extending the existing `fs.walk` contract; binding constraints are structural: I9 (traversal semantics in Prelude only; engines marshal), I5 (flagship example + golden), greenfield (no duplicate walk semantics — one traversal contract, two schedules).\n\n## Work\n1. Trace the baseline: `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs` `walk_dir:161-195` — single-threaded recursion, per-directory sort, root-relative shown paths, its depth/symlink/error policy. That contract is the semantic oracle: the parallel path must produce the SAME result set (order normalized by one final sort).\n2. Implement `jet_std_fs_walk_parallel` next to `walk_dir` (Prelude, std-only): a `Mutex<VecDeque<PathBuf>>` shared directory queue with an active-worker count + condvar for termination (queue empty AND no worker mid-directory ends the walk); `std::thread::available_parallelism()` workers; each worker pops one directory, reads its entries once, pushes discovered subdirectories, and handles that directory's files sequentially; per-directory result batches append to a locked sink in one lock take (the video's write-batching lesson); one final sort yields deterministic output identical to the sequential contract.\n3. Explicitly NOT io_uring and NOT mmap — the card body records both as losing architectures (queue exhaustion/complexity; page-fault cost on sequential scans). Plain `read` + threads is the design.\n4. Surface: keep beginner `fs.walk` untouched; expose the parallel path through the same registration/arity tables as the existing fs verbs (as the walk's parallel sibling — same row shape, same error type). AOT, Cranelift hosts, and interpreter ambient all marshal to the one Prelude fn; zero traversal logic in engines (I9).\n5. Grep-style flagship: `examples/features/io/grep_scan.jet` + `examples/features/expected/io/grep_scan.out` — builds a small fixture tree under a temp dir, walks it with the parallel path, scans files with core.regex (the #2056 engine) for a pattern, prints a sorted match summary AND an in-example equality check against sequential `fs.walk`'s result set (prints `walks agree: true`), so the golden itself proves criterion 4's set-equality clause.\n6. Throughput measurement: script-generated 200k-file fixture in a temp dir (recipe recorded in the card log, fixture not committed); measure parallel vs sequential walk wall time on it and record the numbers on the card via `card update --log` (criterion 4 requires the measurement ON the card).\n7. Blank criterion rows 1–3: per the card log, close them with evidence \"empty placeholder row — superseded by the appended criterion\".\n\n## Not building\n- io_uring, mmap, or splice-based zero-copy sinks — the card body defers sink-aware zero-copy explicitly (\"expert notes for later, not this card\").\n- No changes to `fs.glob` or the sequential `fs.walk` semantics (per-directory sort, shown paths, error policy stay).\n- No general thread-pool/executor abstraction — one queue, one function; TaskGroup/scheduler planes untouched.\n- No matcher work — the regex engine is #2056's scope.\n\n## Proof\n- Criterion 4: `jet run examples/features/io/grep_scan.jet` matches its golden (which embeds the parallel-vs-sequential set-equality check) on default `jet run` AND `jet run --release` (AOT); measured 200k-file fixture throughput (parallel vs sequential, wall seconds) logged on the card.\n- Regression: `examples/features/io/files_depth.jet` golden unchanged (sequential walk untouched).\n- Determinism: two consecutive parallel runs produce byte-identical output (the final sort is the determinism guarantee).\n- Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nc0615ffl (#2056) — the flagship's matcher is the rewritten regex engine; with today's quadratic engine the grep-scan example cannot finish. The parallel walk itself (steps 2–4) has no dependency and can be built while #2056 lands.",
       "blockedBy": [
@@ -139575,6 +139581,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Closed on implementation evidence; measurement criterion moved to #2858."
+        },
         {
           "at": "2026-09-01",
           "by": "Main",
@@ -139626,11 +139637,11 @@
         {
           "n": 5,
           "text": "A fresh 200k-file matched run records every comparable metric against Rust and all declared non-Rust peers; Jet/non-Rust < 1.00 and Jet/Rust <= 1.05 at worst.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-01T20:49:23.591Z"
+          "evidence": "Moved to testing card #2858 per owner instruction 2026-09-03: remaining criterion is a matched peer measurement run; failures found by that run are fixed under #2858 or re-carded.",
+          "at": "2026-09-03T12:19:13.200Z"
         }
       ],
       "refs": [],
@@ -139641,8 +139652,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:08.410Z",
-      "updated": "2026-09-03T05:29:11.185Z",
-      "updatedBy": "fable-orchestrator"
+      "updated": "2026-09-03T12:19:14.044Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T12:19:14.044Z"
     },
     {
       "id": "c0y3llif",
@@ -162060,7 +162072,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Finish the tagged denominator and #2286, integrate every hardening layer on the one bounded runner, close the repeatable red-team protocol in #2340, and preserve #2287's closed admission ratchet. Validate countability, root-card dedup, permanent fixtures, status derivation, and resource cleanup. Do not run or simulate the elapsed qualification; #2420 owns 14 days, 10M cases, mutation floors, the final red-team quota, zero-P0 outcome, and READY receipt.",
       "checkSteps": "tagged denominator and #2286 green on applicable tiers;bounded runner produces reconstructible bundles without residue;auto-carding updates one root-seam card and regression-locks fixed finds;dashboard derives every gate and stays RED without qualification;repeatable red-team protocol implemented;frozen #2420 preserves the full professional-handoff gate",
@@ -162069,6 +162081,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "All six criteria met with evidence. Measurement remainder lives on #2858. Owner goal 2026-09-03: close cards whose work landed."
+        },
         {
           "at": "2026-09-03",
           "by": "fable-orchestrator",
@@ -162170,8 +162187,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T02:58:27.591Z",
-      "updated": "2026-09-03T10:48:26.740Z",
-      "updatedBy": "fable-orchestrator"
+      "updated": "2026-09-03T12:19:15.219Z",
+      "updatedBy": "fable-orchestrator",
+      "completedAt": "2026-09-03T12:19:15.219Z"
     },
     {
       "id": "c0dv6wwu",
@@ -182154,13 +182172,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Hardening updated: lane-1/nested-place-copy-jet-run-alias (sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30)"
+        },
         {
           "at": "2026-09-03",
           "by": "hardening-rig",
@@ -182172,14 +182195,24 @@
           "text": "Hardening added: lane-1/nested-place-copy-jet-run-alias (sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30)"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The minimized reproducer prints the ratified value byte-identically on AOT (jet run --release), default jet run, and --interpret, and a tier-parity regression test guards it.",
+          "status": "met",
+          "metBy": "fable-orchestrator",
+          "verifiedBy": null,
+          "evidence": "Root cause: resident JIT TStmt::Let bound an Index into a list by handle while AOT jet_index_vec copies the element; crates/jet-jit/src/jit/lower_ctx.rs now lower_clone-s non-scalar list index initializers. tests/tir_place_window_lifetimes.rs card_2821_nested_copy_binding_tier_parity: test result: ok, 1 passed, 0 failed. lane-check -p jet-jit CHECK OK.",
+          "at": "2026-09-03T11:01:00.880Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T08:23:48.339Z",
-      "updated": "2026-09-03T08:26:53.983Z",
-      "updatedBy": "hardening-rig",
+      "updated": "2026-09-03T11:01:15.286Z",
+      "updatedBy": "fable-orchestrator",
       "hardeningSchemaVersion": 1,
       "hardeningSeam": "unclassified.semantic-primitive",
       "hardeningRelation": "\"9\\n1\\n\"",
@@ -182192,7 +182225,7 @@
       "hardeningDedupAliases": [],
       "hardeningFindingId": "lane-1/nested-place-copy-jet-run-alias",
       "hardeningSeverity": "P0",
-      "hardeningState": "open",
+      "hardeningState": "fixed",
       "hardeningEvidence": [
         {
           "schema_version": 1,
@@ -182219,7 +182252,12 @@
           "bundleDigest": "sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30",
           "bundle_digest": "sha256:aa66a93e60983a410ebc7beca624fa736365d51cb91d463af4cb650b2ed0de30"
         }
-      ]
+      ],
+      "hardeningFixture": {
+        "path": "tests/tir_place_window_lifetimes.rs",
+        "findingId": "lane-1/nested-place-copy-jet-run-alias"
+      },
+      "completedAt": "2026-09-03T11:01:15.286Z"
     },
     {
       "id": "c0rj48lc",
@@ -183137,13 +183175,23 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Hardening updated: lane-4/process-output-limit-error-display (sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Hardening updated: lane-4/process-output-limit-error-display (sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5)"
+        },
         {
           "at": "2026-09-03",
           "by": "hardening-rig",
@@ -183155,14 +183203,24 @@
           "text": "Hardening added: lane-4/process-output-limit-error-display (sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5)"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A process output-limit error displays the same canonical text on AOT (jet run --release), default jet run, and --interpret, and a tier-parity regression test guards it.",
+          "status": "met",
+          "metBy": "fable-orchestrator",
+          "verifiedBy": null,
+          "evidence": "Root cause: the interpreter and the generic JIT host displayed the nested ProcessResourceLimit payload instead of the Prelude canonical text. One renderer now lives in crates/jet-comptime/src/Comptime/CorePureParity.rs (shared by TIR eval), the JIT Process error host/lower route (crates/jet-jit/src/Process.rs, Collections.rs, jit/lower_ctx.rs) and the AOT JetShow in CommonTypes.rs delegate to it. tests/tir_patterns_and_fields.rs card_2831_process_limit_error_display_tier_parity: test result: ok, 1 passed, 0 failed. lane-check jet-sema/jet-codegen/jet-jit CHECK OK.",
+          "at": "2026-09-03T11:02:27.339Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T08:23:53.773Z",
-      "updated": "2026-09-03T08:26:59.702Z",
-      "updatedBy": "hardening-rig",
+      "updated": "2026-09-03T11:03:09.855Z",
+      "updatedBy": "fable-orchestrator",
       "hardeningSchemaVersion": 1,
       "hardeningSeam": "unclassified.semantic-primitive",
       "hardeningRelation": "tier-self-diff:aot-vs-jet_run-vs-interpreter",
@@ -183175,7 +183233,7 @@
       "hardeningDedupAliases": [],
       "hardeningFindingId": "lane-4/process-output-limit-error-display",
       "hardeningSeverity": "P0",
-      "hardeningState": "open",
+      "hardeningState": "fixed",
       "hardeningEvidence": [
         {
           "schema_version": 1,
@@ -183202,7 +183260,12 @@
           "bundleDigest": "sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5",
           "bundle_digest": "sha256:5f55fd33c23cc62b078f20e88970849feec3136135bc8a23aa30c9ec167a07c5"
         }
-      ]
+      ],
+      "hardeningFixture": {
+        "path": "tests/tir_unsafe_and_runtime.rs",
+        "findingId": "lane-4/process-output-limit-error-display"
+      },
+      "completedAt": "2026-09-03T11:03:09.855Z"
     },
     {
       "id": "c02shwob",
@@ -183314,13 +183377,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
-      "priority": "P1",
+      "phase": "done",
+      "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Hardening updated: lane-5/core-time-calendar-misclassified (sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19)"
+        },
         {
           "at": "2026-09-03",
           "by": "hardening-rig",
@@ -183332,14 +183400,24 @@
           "text": "Hardening added: lane-5/core-time-calendar-misclassified (sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19)"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "core.time.days_in_month(2024, 2) yields 29 on AOT, default jet run, and --interpret without any authority declaration, and a tier-parity regression test guards it.",
+          "status": "met",
+          "metBy": "fable-orchestrator",
+          "verifiedBy": null,
+          "evidence": "Row core_calls.rs core.time days_in_month already carries with_pure_route(Time) with a pure effect list; all three tiers print 29. Added tests/tir_operators_and_runtime.rs card_2833_calendar_arithmetic_is_pure_tier_parity: test result: ok, 1 passed, 0 failed.",
+          "at": "2026-09-03T11:01:02.509Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T08:23:54.862Z",
-      "updated": "2026-09-03T08:27:00.674Z",
-      "updatedBy": "hardening-rig",
+      "updated": "2026-09-03T11:01:18.823Z",
+      "updatedBy": "fable-orchestrator",
       "hardeningSchemaVersion": 1,
       "hardeningSeam": "unclassified.semantic-primitive",
       "hardeningRelation": "\"29\\n\"",
@@ -183350,8 +183428,8 @@
       "hardeningDedupKey": "hardening:v1|seam=unclassified.semantic-primitive|relation=%2229%5Cn%22|tiers=aot|partition=red-team-handwritten",
       "hardeningDedupAliases": [],
       "hardeningFindingId": "lane-5/core-time-calendar-misclassified",
-      "hardeningSeverity": "P1",
-      "hardeningState": "open",
+      "hardeningSeverity": "P0",
+      "hardeningState": "fixed",
       "hardeningEvidence": [
         {
           "schema_version": 1,
@@ -183378,7 +183456,12 @@
           "bundleDigest": "sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19",
           "bundle_digest": "sha256:7bbf26c135a235c92330361594c669f892957bdf22ec246ce4e135b6546d5c19"
         }
-      ]
+      ],
+      "hardeningFixture": {
+        "path": "tests/tir_operators_and_runtime.rs",
+        "findingId": "lane-5/core-time-calendar-misclassified"
+      },
+      "completedAt": "2026-09-03T11:01:18.823Z"
     },
     {
       "id": "c0ounca2",
@@ -183490,13 +183573,23 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Hardening updated: lane-7/generic-trait-authority-tier-drift (sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f)"
+        },
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Hardening updated: lane-7/generic-trait-authority-tier-drift (sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f)"
+        },
         {
           "at": "2026-09-03",
           "by": "hardening-rig",
@@ -183508,14 +183601,24 @@
           "text": "Hardening added: lane-7/generic-trait-authority-tier-drift (sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f)"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A bare single-file program calling a pure generic trait method through monomorphic dispatch prints the same value on AOT, default jet run, and --interpret without any package authority, and an effectful impl still reports E1803 identically on all three tiers; a tier-parity regression test guards both.",
+          "status": "met",
+          "metBy": "fable-orchestrator",
+          "verifiedBy": null,
+          "evidence": "Root cause: crates/jet-sema/src/Sema/Effects.rs seed_trait_dispatch_effects marked every unannotated trait dispatch maximal, including statically resolved generic impl calls, so the resident tiers demanded authority AOT never needed. Sema now records implementation-aware <static> summaries (method_calls.rs static generic edge) while dynamic trait objects stay maximal. tests/tir_unsafe_and_runtime.rs card_2835_generic_trait_authority_tier_parity: test result: ok, 1 passed, 0 failed (bare pure generic prints 5 on three tiers; limited-authority effectful Env impl reports E1803 on three tiers).",
+          "at": "2026-09-03T11:02:29.468Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T08:23:56.374Z",
-      "updated": "2026-09-03T08:27:03.756Z",
-      "updatedBy": "hardening-rig",
+      "updated": "2026-09-03T11:03:11.540Z",
+      "updatedBy": "fable-orchestrator",
       "hardeningSchemaVersion": 1,
       "hardeningSeam": "unclassified.semantic-primitive",
       "hardeningRelation": "\"5\\n\"",
@@ -183527,7 +183630,7 @@
       "hardeningDedupAliases": [],
       "hardeningFindingId": "lane-7/generic-trait-authority-tier-drift",
       "hardeningSeverity": "P0",
-      "hardeningState": "open",
+      "hardeningState": "fixed",
       "hardeningEvidence": [
         {
           "schema_version": 1,
@@ -183554,7 +183657,12 @@
           "bundleDigest": "sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f",
           "bundle_digest": "sha256:00ceefaf9f72377013635bd6947755ffd5f00da736826877ee165669d0f1904f"
         }
-      ]
+      ],
+      "hardeningFixture": {
+        "path": "tests/tir_patterns_and_fields.rs",
+        "findingId": "lane-7/generic-trait-authority-tier-drift"
+      },
+      "completedAt": "2026-09-03T11:03:11.540Z"
     },
     {
       "id": "c0f0hweo",
@@ -183565,13 +183673,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Hardening updated: lane-8/json-datetime-interpreter-empty (sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0)"
+        },
         {
           "at": "2026-09-03",
           "by": "hardening-rig",
@@ -183583,14 +183696,24 @@
           "text": "Hardening added: lane-8/json-datetime-interpreter-empty (sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0)"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A typed JSON DateTime field decodes to the RFC3339 timestamp on AOT, default jet run, and --interpret with byte-identical output, and a tier-parity regression test guards it.",
+          "status": "met",
+          "metBy": "fable-orchestrator",
+          "verifiedBy": null,
+          "evidence": "Root cause: the typed JSON parser tags string leaves TypedText while the interpreter DateTime decoder accepted only Text (empty output on --interpret). crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs now accepts both tags and calls the same canonical RFC3339 decoder. tests/tir_core_and_closures.rs card_2836_json_datetime_field_tier_parity: test result: ok, 1 passed, 0 failed.",
+          "at": "2026-09-03T11:01:04.202Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T08:23:57.148Z",
-      "updated": "2026-09-03T08:27:04.770Z",
-      "updatedBy": "hardening-rig",
+      "updated": "2026-09-03T11:01:22.449Z",
+      "updatedBy": "fable-orchestrator",
       "hardeningSchemaVersion": 1,
       "hardeningSeam": "unclassified.semantic-primitive",
       "hardeningRelation": "\"1710505845000\\n\"",
@@ -183603,7 +183726,7 @@
       "hardeningDedupAliases": [],
       "hardeningFindingId": "lane-8/json-datetime-interpreter-empty",
       "hardeningSeverity": "P0",
-      "hardeningState": "open",
+      "hardeningState": "fixed",
       "hardeningEvidence": [
         {
           "schema_version": 1,
@@ -183630,7 +183753,12 @@
           "bundleDigest": "sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0",
           "bundle_digest": "sha256:1cab71d01afc1a25554ed095ff883614238b098ba5b948d9358ac3df131a50a0"
         }
-      ]
+      ],
+      "hardeningFixture": {
+        "path": "tests/tir_core_and_closures.rs",
+        "findingId": "lane-8/json-datetime-interpreter-empty"
+      },
+      "completedAt": "2026-09-03T11:01:22.449Z"
     },
     {
       "id": "c0g24y35",
@@ -255395,6 +255523,244 @@
   ],
   "events": [
     {
+      "at": "2026-09-03T12:19:15.219Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0lnb7zq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-09-03T12:19:14.044Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0p48658",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-09-03T12:19:13.200Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p48658",
+      "note": "#5"
+    },
+    {
+      "at": "2026-09-03T12:19:12.751Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0615ffl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-09-03T12:19:11.889Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0615ffl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-09-03T11:03:11.540Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c027resd",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T11:03:10.564Z",
+      "by": "fable-orchestrator",
+      "action": "hardening.card-upsert",
+      "ref": "c027resd",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T11:03:10.564Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c027resd",
+      "note": "priority,hardeningFixture"
+    },
+    {
+      "at": "2026-09-03T11:03:09.855Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0v7ffqn",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T11:03:08.748Z",
+      "by": "fable-orchestrator",
+      "action": "hardening.card-upsert",
+      "ref": "c0v7ffqn",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=aot%2Cinterpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T11:03:08.748Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0v7ffqn",
+      "note": "priority,hardeningFixture"
+    },
+    {
+      "at": "2026-09-03T11:02:29.878Z",
+      "by": "fable-orchestrator",
+      "action": "hardening.card-upsert",
+      "ref": "c027resd",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%225%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T11:02:29.878Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c027resd",
+      "note": "priority,hardeningFixture"
+    },
+    {
+      "at": "2026-09-03T11:02:29.468Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c027resd",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T11:02:29.053Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c027resd",
+      "note": "#1 A bare single-file program calling a pure generic trait meth"
+    },
+    {
+      "at": "2026-09-03T11:02:27.770Z",
+      "by": "fable-orchestrator",
+      "action": "hardening.card-upsert",
+      "ref": "c0v7ffqn",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=tier-self-diff%3Aaot-vs-jet_run-vs-interpreter|tiers=aot%2Cinterpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T11:02:27.770Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0v7ffqn",
+      "note": "priority,hardeningFixture"
+    },
+    {
+      "at": "2026-09-03T11:02:27.339Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0v7ffqn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T11:02:26.919Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0v7ffqn",
+      "note": "#1 A process output-limit error displays the same canonical tex"
+    },
+    {
+      "at": "2026-09-03T11:01:22.449Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0f0hweo",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T11:01:20.512Z",
+      "by": "fable-orchestrator",
+      "action": "hardening.card-upsert",
+      "ref": "c0f0hweo",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%221710505845000%5Cn%22|tiers=aot%2Cjet_run|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T11:01:20.512Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0f0hweo",
+      "note": "priority,hardeningFixture"
+    },
+    {
+      "at": "2026-09-03T11:01:18.823Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0d7kt95",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T11:01:16.756Z",
+      "by": "fable-orchestrator",
+      "action": "hardening.card-upsert",
+      "ref": "c0d7kt95",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%2229%5Cn%22|tiers=aot|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T11:01:16.756Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0d7kt95",
+      "note": "priority,hardeningFixture"
+    },
+    {
+      "at": "2026-09-03T11:01:15.286Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0dc9zdf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-09-03T11:01:13.991Z",
+      "by": "fable-orchestrator",
+      "action": "hardening.card-upsert",
+      "ref": "c0dc9zdf",
+      "note": "updated hardening:v1|seam=unclassified.semantic-primitive|relation=%229%5Cn1%5Cn%22|tiers=aot%2Cinterpreter|partition=red-team-handwritten"
+    },
+    {
+      "at": "2026-09-03T11:01:13.991Z",
+      "by": "fable-orchestrator",
+      "action": "card.update",
+      "ref": "c0dc9zdf",
+      "note": "priority,hardeningFixture"
+    },
+    {
+      "at": "2026-09-03T11:01:04.203Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0f0hweo",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T11:01:03.752Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0f0hweo",
+      "note": "#1 A typed JSON DateTime field decodes to the RFC3339 timestamp"
+    },
+    {
+      "at": "2026-09-03T11:01:02.509Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0d7kt95",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T11:01:01.953Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0d7kt95",
+      "note": "#1 core.time.days_in_month(2024, 2) yields 29 on AOT, default j"
+    },
+    {
+      "at": "2026-09-03T11:01:00.880Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0dc9zdf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-09-03T11:01:00.473Z",
+      "by": "fable-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0dc9zdf",
+      "note": "#1 The minimized reproducer prints the ratified value byte-iden"
+    },
+    {
       "at": "2026-09-03T10:58:07.438Z",
       "by": "fable-orchestrator",
       "action": "card.update",
@@ -258655,244 +259021,6 @@
       "action": "decision.ratify",
       "ref": "D-FOUND-REALTIME1",
       "note": "A"
-    },
-    {
-      "at": "2026-09-03T01:10:45.661Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-09-03T01:10:45.661Z"
-    },
-    {
-      "at": "2026-09-03T01:07:10.009Z",
-      "by": "fable-orchestrator",
-      "action": "card.update",
-      "ref": "c054tv3j",
-      "note": "phase"
-    },
-    {
-      "at": "2026-09-03T01:07:08.786Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054tv3j",
-      "note": "#5"
-    },
-    {
-      "at": "2026-09-03T01:07:07.900Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054tv3j",
-      "note": "#4"
-    },
-    {
-      "at": "2026-09-03T01:07:06.987Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054tv3j",
-      "note": "#3"
-    },
-    {
-      "at": "2026-09-03T01:07:06.036Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054tv3j",
-      "note": "#2"
-    },
-    {
-      "at": "2026-09-03T01:07:05.189Z",
-      "by": "fable-orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c054tv3j",
-      "note": "#1"
-    },
-    {
-      "at": "2026-09-03T00:51:23.405Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0hhqx98",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-09-03T00:51:21.988Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0hhqx98",
-      "note": "#3"
-    },
-    {
-      "at": "2026-09-03T00:51:20.871Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0hhqx98",
-      "note": "#2"
-    },
-    {
-      "at": "2026-09-03T00:51:19.859Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0hhqx98",
-      "note": "#1"
-    },
-    {
-      "at": "2026-09-03T00:49:30.925Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0egba9s",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:29.617Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c01mdc9b",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:28.320Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0n8lhsg",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:26.781Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09chlnk",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:25.292Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0q2nwf0",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:22.794Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c05mghzy",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:21.448Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0smsq7y",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:19.998Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0engjyq",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:18.724Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0tkg53k",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:16.530Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0dekv7i",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:14.072Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ok2wud",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:12.544Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c043j4y0",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:09.523Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0mkxy1l",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:07.384Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0bxw3sc",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:04.193Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0o6tf7k",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:02.824Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c05h30kf",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:01.375Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rwv5rx",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:49:00.052Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04uwvvr",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:48:58.508Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ijnkip",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:48:55.509Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06msdln",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:48:50.118Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gn02wt",
-      "note": "body"
-    },
-    {
-      "at": "2026-09-03T00:47:21.219Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0wtc4n2",
-      "note": "plan"
-    },
-    {
-      "at": "2026-09-03T00:47:18.800Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c069gy54",
-      "note": "plan"
     }
   ],
   "nextNum": 368,
