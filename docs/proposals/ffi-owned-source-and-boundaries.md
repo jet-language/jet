@@ -113,14 +113,14 @@ Here is the existing C++ call:
 
 ```cpp
 #include "rules.hpp"
-int next_tick(int tick) { return rules::on_tick(tick); }
+int64_t next_tick(int64_t tick) { return rules::on_tick(tick); }
 ```
 
 The first migration is an eligible function boundary whose native argument, result, symbol, error, and execution contracts can be preserved. The existing guest example supplies a small, real Jet export shape:
 
 ```jet
 #Export(c)
-pub fn on_tick(dt: Int) Int -> dt + 1
+pub fn on_tick(dt: I64) I64 -> dt + 1
 ```
 
 ```cmake
@@ -167,7 +167,7 @@ jet build
 
 The preview must show action dependencies, toolchains, inputs, outputs, environment assumptions, custom commands, and any unsupported edge. Jet can assume execution ownership only for an established action model. The CMake file API supplies structured project/build metadata, but does not by itself prove that every custom action is modeled. [CMake file API](https://cmake.org/cmake/help/latest/manual/cmake-file-api.7.html). A compilation database is not a full build graph. An opaque script cannot be declared equivalent merely because one observed run produced the expected files.
 
-For unsupported build logic, the plan may keep the original foreign build as an explicit action with declared inputs and outputs. The preview must say that this preserves an inner foreign build owner. It must not call that partial arrangement a complete build-system replacement. Acceptance is explicit and digest-bound, just like binding updates.
+For unsupported build logic, the plan may keep the original foreign build as an explicit action with declared inputs and outputs. The preview must say that this preserves an inner foreign build owner. It must not call that partial arrangement a complete build-system replacement. Acceptance is explicit and digest-bound, just like binding updates. D-FFI-BUILD1 on #2961 decides this optional build-ownership surface separately from host facade design.
 
 ### The capabilities worth building the system around
 
@@ -318,7 +318,7 @@ This is a best-in-class target because it removes avoidable work while refusing 
 
 ## Owner decisions
 
-[Complete decision dossier](ffi-binding-ballots.md). Four full drafts are filed in Tower. Independent beginner review passed after repairs. The owner authorized the Anthropic review, but both direct Claude attempts timed out without returning reviewer analysis. That required review remains incomplete, so the ballots are not marked ready or ratified.
+[Complete decision dossier](ffi-binding-ballots.md). Five full ballots separate contract evidence, automatic adaptations, native projections, retained callbacks, and optional build ownership. The owner permits independent reviewers from the same model family. Fresh beginner and Sol adversarial reviews passed after repairs; all five ballots are ready in Tower and await owner ratification.
 
 The owner has already selected binding generation, both directions, existing-build compatibility, automatic behavior when proven equal, expert opt-out, and all seven languages. Those are requirements, not questions being reopened.
 
@@ -328,6 +328,7 @@ The owner has already selected binding generation, both directions, existing-bui
 | D-FFI-AUTO1 | Which evidence permits a generated ergonomic API, and how is it controlled? | Established local adaptation rules plus enforced preconditions; inspect/native/freeze/refuse ladder. | Extends the public tooling surface; preserves D-FFI-CAP1 and raw C restrictions in D-CABI-RESULT1. |
 | D-FFI-GUEST1 | Which common boundary should host-language facades share? | Native ABI plus runtime adapters, all driven by the same export contract; use components where appropriate. | Extends D-ADOPT-GUEST1 and D-LIB-EXPORT1 projections; preserves D-FFI-CPP1, D-FFI-PY1, D-FFI-JS1, D-FFI-GO1 defaults. |
 | D-FFI-CALLBACK2 | How do retained, captured, and asynchronous callbacks cross the boundary? | Managed registration with explicit lifetime, scheduling, cleanup, and effect obligations. | Explicit amendment to D-CABI-CALLBACK1; no relaxation before ratification. |
+| D-FFI-BUILD1 | How should an already-approved optional build import become active? | Optional digest-bound preview and acceptance of modeled build actions. | Preserves D-BUILDLEGACY1; explicit command acceptance versus declarative activation is a separate owner choice on #2961. |
 
 Exact proposed CLI spelling and generated API behavior are part of the ballots. No new parser syntax is needed for ordinary imports or calls. New language roots, manifest target names, public APIs, commands, dependencies, and any tier exception still need their applicable owner gate. No new external dependency or tier exception is approved by this proposal.
 
@@ -348,6 +349,30 @@ Implement the accepted evidence contract, automatic adaptation rules and control
 Each feature needs a full program and golden output, registered Jet diagnostics and snapshots, and the same behavior on AOT, default `jet run`, interpreter, and applicable web paths. A native OS library is not made available in a browser by renaming its tier. Any inapplicable tier requires an owner-ratified exception naming the feature and reason; no “JIT later” parking.
 
 The acceptance corpus must include empty and oversized buffers, partial reads, null returns, wrong allocator release, retained loans, late callbacks, concurrent callbacks, reentrancy, cancellation after a committed effect, stale artifacts, dynamic-library replacement, worker death, and forged or incomplete contracts. It must also exercise a real host project for each language and collect matched performance evidence. Evidence absence stays an open criterion.
+
+The following package.jet fields are PROPOSED public configuration under this ballot. They extend the existing package model and D-TEAMPOLICY1; no second plan store is introduced.
+
+```jet
+bindings: .{
+    sums: .{ shape: .Native, frozen: true }
+}
+policy: .{ bindings: .Frozen }
+```
+
+The shape field is .Automatic by default; .Native requests native arity. A binding defaults to frozen: false. The project binding policy is .Automatic by default; .Frozen requires recorded plans for every reached binding. Omitted fields use those defaults. These fields merge into the existing package records rather than replacing other policy entries.
+
+The --shape native command writes bindings.sums.shape; --freeze writes bindings.sums.frozen and the resolved .jet/lock plan. The --policy frozen command writes policy.bindings. Manual edits and commands are equivalent and use the same validator. The lock contains resolved evidence, not another user policy.
+
+This explicitly extends D-PACKAGE-POLICY-SCOPE1: binding-plan controls are package/artifact facts, with no lexical #Policy mirror. Single-file use keeps the same lock and needs no manifest:
+
+```sh
+jet bind script.jet --freeze
+jet run script.jet --bind-policy frozen
+```
+
+Here bind records that script's reached plans in .jet/lock without creating package.jet. The run flag is invocation-only; missing plans or drift fail before execution. Project and single-file forms use the same plan and refusal law.
+
+The png.Image.open spelling is an illustrative generated package API, not a universal reserved name. This ballot approves the established-protocol lifting rule and its guarantees, not one global image API.
 
 ## Technical annex A: requirements and the semantic contract
 
@@ -393,7 +418,9 @@ The contract must distinguish the allocation base from a borrowed subrange, leng
 
 ### A.2.1 Deterministic admission and fallback
 
-The proposed generator first honors the project's pinned runtime and policy. It then checks each obligation for the requested safe interface. Proof or complete enforcement may establish a native obligation. Isolation may establish protection of the host when the API permits that boundary. Vetted standard-library implementations retain their approved trust scope. Other native trust requires a user-authored audited `#Unsafe("reason")` use; generated code cannot create that approval.
+Generated compiler-vetted bindings remain directly callable under D-FFI-UNIFY1 and D-FFI-CAP1. An asserted native contract remains visibly TRUSTED; it is not implementation proof. Raw symbols outside bindings and unsupported capability escapes still require user-written #Unsafe. Under D-MEM-GUARANTEE1 and D-HARDENED1, hardening cannot leave a dependency TRUSTED; missing required containment rejects that profile.
+
+The proposed generator honors the project's pinned runtime and policy. It checks each obligation for the requested interface. Proof or complete enforcement may establish a native obligation. Isolation may establish host protection when the API permits that boundary. A directly callable generated wrapper is not a claim that arbitrary native code is proved safe.
 
 If a missing fact affects only an ergonomic adaptation, Jet may keep a native-shaped interface whose remaining safety obligations are already satisfied. If retention, lifetime, valid representation, thread safety, or required authority coverage is unknown, it rejects the safe projection. It may still emit a clearly unsafe expert binding. It neither runs the foreign call nor silently changes placement to resolve that error.
 
@@ -420,6 +447,10 @@ For an operation `f`, let `Requires(f)` be the obligations needed for its advert
 Composition includes callbacks, virtual dispatch, destructors, allocator hooks, lazy initialization, plugins, and the foreign runtime. A proof of `f` that calls an unchecked `g` must retain the assumptions about `g`. Recursive calls and mutually dependent modules need a consistent contract solution, not an arbitrary traversal order.
 
 Dynamic loading requires a load-time compatibility check against the pinned contract. A replacement artifact cannot inherit an old certificate solely because its exported symbol names match. Loading must avoid a check/use race: the verified artifact must be the artifact actually loaded. Already-loaded modules, symbol interposition, and loader search paths belong to that identity check.
+
+Preserve D-EFF4/D-EFF5 and each binder's language leaf. Every reached foreign call retains FFI.<Lang>, even when its native body is proved pure. The descriptor also includes established reachable callback and cleanup effects. Unknown native behavior remains marked as foreign and unverified; a declared row alone does not enforce native authority.
+
+The existing guarantee display remains proven, watched, fenced, or TRUSTED. Evidence attaches to individual obligations; a proved count never upgrades an unchecked body. Hardened execution rejects remaining TRUSTED dependency coverage.
 
 ## Technical annex B: exactly what “proven equal” means
 
@@ -609,7 +640,9 @@ Hardware capabilities, stronger compiler proofs, or future runtime facilities ca
 
 ## Technical annex E: native experience for every language
 
-The scalar migration example gives a small common baseline. The following are proposed generated-facing calls to the same Jet `on_tick` export, which returns its input plus one. They are snippets within ordinary host projects; the package/import declarations belong to the generated projection. The JavaScript facade uses `bigint` for a full-width Jet integer, avoiding an implicit loss through JavaScript `number`.
+The scalar smoke exports `on_tick(dt: I64) I64`, with input 41 and output 42. These are proposed snippets within ordinary host projects. Python `int` and Node `bigint` inputs are checked against I64 before entry. I64 overflow follows Jet's existing checked arithmetic and native-boundary panic policy; it never silently wraps or unwinds across an incompatible ABI.
+
+Exact Jet `Int` needs a lossless BigInt/JetInt facade or an unsupported-projection diagnostic. An explicitly selected narrowing adapter returns a tagged/fallible result for input or result overflow. A plain fixed-width return cannot silently represent arbitrary exact `Int`.
 
 | Host | Proposed generated use | Result |
 |---|---|---|
@@ -622,6 +655,111 @@ The scalar migration example gives a small common baseline. The following are pr
 | JavaScript / Node | `const answer = gameRules.onTick(41n);` | `42n` |
 
 Naming conventions are generated host projections, not alternative Jet function names. Full native width and failure behavior must be checked for every target. A scalar smoke is the first shared test, not the completion criterion.
+
+PROPOSED host test bodies for the same resource protocol follow. Generated package imports and the host test function supply their normal context. Every fixture observes 20, ExpiredView, then 50, and closes the owner. All generated names here remain proposal API.
+
+**C**
+
+```c
+uint8_t input[] = {10,20,30}, next[] = {40,50}, out;
+RulesDocument d; RulesView v, fresh;
+assert(rules_document_open(input,3,&d) == RULES_OK);
+assert(rules_document_bytes(&d,&v) == RULES_OK);
+assert(rules_view_at(&v,1,&out) == RULES_OK && out == 20);
+assert(rules_document_replace(&d,next,2) == RULES_OK);
+assert(rules_view_at(&v,1,&out) == RULES_EXPIRED_VIEW);
+assert(rules_document_bytes(&d,&fresh) == RULES_OK);
+assert(rules_view_at(&fresh,1,&out) == RULES_OK && out == 50);
+assert(rules_document_close(&d) == RULES_OK);
+```
+
+**C++**
+
+```cpp
+#include "rules.hpp"
+#include <cassert>
+int main() {
+    auto d = rules::Document::open({10,20,30}).value();
+    auto v = d.bytes();
+    assert(v.at(1).value() == 20);
+    d.replace({40,50}).value();
+    assert(v.at(1).error() == rules::Error::ExpiredView);
+    assert(d.bytes().at(1).value() == 50);
+    d.close().value();
+}
+```
+
+**Rust**
+
+```rust
+let mut d = rules::Document::open([10,20,30])?;
+let v = d.bytes();
+assert_eq!(v.at(1)?, 20);
+d.replace([40,50])?;
+assert_eq!(v.at(1), Err(rules::Error::ExpiredView));
+assert_eq!(d.bytes().at(1)?, 50);
+d.close()?;
+```
+
+**Zig**
+
+```zig
+var d = try rules.Document.open(&.{10,20,30});
+const v = d.bytes();
+try std.testing.expectEqual(@as(u8,20), try v.at(1));
+try d.replace(&.{40,50});
+try std.testing.expectError(error.ExpiredView, v.at(1));
+try std.testing.expectEqual(@as(u8,50), try d.bytes().at(1));
+try d.close();
+```
+
+**Go**
+
+```go
+d, err := rules.OpenDocument([]byte{10,20,30}); if err != nil { panic(err) }
+v := d.Bytes()
+x, err := v.At(1); if err != nil || x != 20 { panic("first view") }
+if err = d.Replace([]byte{40,50}); err != nil { panic(err) }
+_, err = v.At(1); if !errors.Is(err, rules.ErrExpiredView) { panic("expiry") }
+x, err = d.Bytes().At(1); if err != nil || x != 50 { panic("fresh view") }
+if err = d.Close(); err != nil { panic(err) }
+```
+
+**Python**
+
+```python
+with rules.Document.open(bytes([10,20,30])) as d:
+    v = d.bytes()
+    assert v.at(1) == 20
+    d.replace(bytes([40,50]))
+    try:
+        v.at(1)
+    except rules.ExpiredView:
+        pass
+    else:
+        raise AssertionError("view should expire")
+    assert d.bytes().at(1) == 50
+# Context exit closes exactly once.
+```
+
+**Node**
+
+```js
+const d = await rules.Document.open(Buffer.from([10,20,30]));
+try {
+  const v = d.bytes();
+  assert.equal(await v.at(1), 20);
+  await d.replace(Buffer.from([40,50]));
+  await assert.rejects(v.at(1), rules.ExpiredView);
+  assert.equal(await d.bytes().at(1), 50);
+} finally {
+  await d.close();
+}
+```
+
+These fixtures select generation-checked view handles, not raw pointers. Replace or close changes the owner generation; stale access returns ExpiredView before touching freed storage. Views do not own foreign storage and need no separate foreign close. Host-managed handle bookkeeping is released by each facade; C view tokens are non-owning values.
+
+Rust may instead select a true borrow projection that rejects replace while the borrow remains live. That stronger static shape is explicit because it changes which source programs compile. C, C++, Zig, Go, Python, and Node use the stated runtime invalidation checks in this fixture. Go and Python close reuse is checked; Rust ownership can reject consumed-owner reuse statically. Node shows an explicitly selected asynchronous facade; scheduling is recorded, never silently changed.
 
 ### E.1 C and C++
 
@@ -660,7 +798,7 @@ fn run() {
     sub :: source.on_data(event -> print("{prefix}: {event.value}"))
     source.emit(7)
     stopped :: source.unsubscribe(^sub)
-    stopped.join() ?? panic("unsubscribe failed")
+    (stopped.join() ?? panic("task failed")) ?? panic("unsubscribe failed")
 }
 // Output: byte: 7
 ```
@@ -682,9 +820,9 @@ fn run() {
         event.stop()
     })
     emitted :: source.emit_async(7)
-    emitted.join() ?? panic("emission failed")
+    (emitted.join() ?? panic("task failed")) ?? panic("emission failed")
     stopped :: source.unsubscribe(^sub)
-    stopped.join() ?? panic("unsubscribe failed")
+    (stopped.join() ?? panic("task failed")) ?? panic("unsubscribe failed")
     print("stopped")
 }
 ```
@@ -696,7 +834,7 @@ fn run() {
 | `event.stop()` | A nonblocking request to enter Stopping. It returns immediately and never waits for the current callback. Native deregistration follows its established protocol. |
 | `unsubscribe(^sub)` | Consumes the owning registration, requests stop if needed, and returns a task. It is idempotent with an earlier event stop, not with reuse of the consumed handle. |
 | Stop task completion | Native acknowledgment guarantees no future trampoline entries, and the in-flight count is zero. Only then may the retained captures and trampoline storage be released. |
-| Close from callback | Request stop through the event. A callback must not join a task whose completion depends on that invocation; known cases are rejected, dynamic cases return a defined task failure. |
+| Close from callback | Request stop through the event. The event cannot access the owning registration or completion tasks. Capturing or publishing those handles into that callback's reachable state is rejected; no new TaskFailure variant is added. |
 | Failed native acknowledgment | The stop task reports a boundary failure and the module is quarantined. New calls and registrations are refused. Existing wrapper state remains retained until the protected worker or host exits; it cannot grow through new admitted registrations. |
 | Callback failure | For a supported failure channel, record the failure and stop admission. Correlated emission and stop tasks report it; an uncorrelated notification reports through the stop task. Do not unwind across an incompatible boundary. |
 
@@ -707,6 +845,16 @@ Quarantine recovery is an explicit isolated-worker restart or host termination/r
 The fixture defines `emit_async(7)` as completing after its one accepted notification finishes. If stop wins before admission, completion returns the defined stopped outcome and no notification runs. If admission wins, the event may run once and its effects are retained. Cancellation never claims to erase a print, write, or other effect already performed.
 
 The ballot's queue alternative uses a capacity of one owned event, FIFO order, and explicit rejection on overflow for a source that supports backpressure. It never blocks this fixture's synchronous producer and never silently drops an event. Stop closes admission, acknowledges native shutdown, then allows accepted events to drain before end-of-stream. Sources unable to support that policy require another explicit contract; the queue cannot be substituted automatically.
+
+Registration is charged the retained callback's effects. For this C byte source, registration includes FFI.C and IO.Write. D-AUTHORITY-SCOPE1 and D-SCAP1 remain unchanged: Authority handles are lexical and cannot be stored, captured, or transferred into the registration.
+
+An existing authority-holding scope must cover registration, every callback, cleanup, and stop completion. Sema rejects registration escape and requires owner consumption and drain before that scope exits. An existing application or process scope qualifies when it outlives the registration. Foreign notifications use the registration's checked effect set within that live scope, never the emitter's ambient authority. Emit and stop retain their reachable effects.
+
+A wait deadline or quarantine does not permit that authority scope to exit while callbacks remain live. Scope completion still requires quiescence. A terminable isolated boundary can establish quiescence; otherwise forced shutdown requires host termination. No owned Authority transfer or new capability surface is proposed.
+
+An admitted callback may never return. Default stop completion then remains pending and captures stay retained. A configured wait deadline may produce the existing TaskFailure.DeadlineBlown without freeing live state. No in-process timeout can safely reclaim executing captures. Bounded shutdown requires an explicitly selected terminable isolation boundary, or host termination.
+
+Completion tasks return ordinary operation results. Their join keeps only the existing TaskFailure variants: Cancelled, DeadlineBlown, and Panicked. Stopped and native boundary failures belong to the operation result inside the task, not new TaskFailure variants. Both rails must be handled. No completion task or owning registration may become reachable from its own retained callback.
 
 ## Technical annex F: enterprise operation and migration
 
@@ -842,7 +990,7 @@ Primary sources informed the proposed design, not claims that Jet already implem
 | The recorded fresh compiler build failed before FFI probes. | card | #2919. Exact command and error recorded with the existing integration repair owner. |
 | Scalar-only binders, sidecar restrictions, and external build-host limitations remain. | card | #2958 and #2961; reuse #1347 and #1348. Require explicit supported shapes and focused proof. |
 | Universal zero-cost safe execution of arbitrary native binaries cannot be promised. | no-action | No universal guarantee is proposed. Wrappers cannot control unseen writes, and isolation can change process-dependent observations. |
-| The required independent adversarial review did not complete. | card | #2933. Both authorized direct Claude attempts timed out without reviewer analysis; full ballots remain drafts. |
+| Independent review found contract, effect, projection, callback, and build-choice gaps. | card | #2933. Fresh beginner and Sol adversarial reviews passed after repairs; all five ballots are ready. Prior Claude timeouts remain historical tool evidence. |
 <!-- /audit-dispositions -->
 
 The report and examples were revised after owner feedback to foreground the four project arrangements and their larger capabilities. The light visual walkthrough is an entry point; this document contains the architecture, semantic model, language contracts, and acceptance evidence.

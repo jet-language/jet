@@ -362,10 +362,10 @@ fn run() {
       <div class="block unlock"><h3>What changes</h3><ul><li>Native call sites stay unchanged when an eligible module is replaced with Jet.</li><li>The host gets native headers, types, package outputs, debug locations, and errors from the same export contract.</li><li>Later resource-owning modules can use generated RAII in C++, ownership wrappers in Rust, and checked host objects in dynamic languages.</li></ul></div>
       <div class="block write"><h3>What you write</h3><div class="code-stack">
         <figure class="code-figure"><figcaption><span>rules.cpp · existing native caller</span><strong>AS WRITTEN</strong></figcaption><pre data-highlight>#include "rules.hpp"
-int next_tick(int tick) { return rules::on_tick(tick); }</pre></figure>
+int64_t next_tick(int64_t tick) { return rules::on_tick(tick); }</pre></figure>
         <div class="code-pair">
           <figure class="code-figure"><figcaption><span>library.jet · selected export</span><strong>AS WRITTEN</strong></figcaption><pre data-highlight>#Export(c)
-pub fn on_tick(dt: Int) Int -&gt; dt + 1</pre></figure>
+pub fn on_tick(dt: I64) I64 -&gt; dt + 1</pre></figure>
           <figure class="code-figure"><figcaption><span>CMakeLists.txt · existing host build</span><strong>AS WRITTEN</strong></figcaption><pre data-highlight># Existing host-build design; CMake remains in charge.
 find_package(Jet REQUIRED)
 jet_library(rules_jet ENTRY library.jet OUTPUT core LIBRARY rules LOADABLE)
@@ -408,12 +408,13 @@ jet build</pre></figure>
   </section>
 
   <section id="decisions" class="reveal">
-    <div class="section-head"><h2>Four choices keep generated convenience honest by naming each evidence and limit.</h2><p class="decision-intro">These are the design choices that shape the journeys. The recommended path reuses one contract and keeps a concrete expert escape; each alternative is viable only with its stated trade-off.</p></div>
+    <div class="section-head"><h2>Five choices define the generated APIs and optional build ownership.</h2><p class="decision-intro">These are separate owner decisions. Generated bindings remain directly callable as TRUSTED outside hardening when they rely on an accepted native promise. That label is not implementation proof; hardening rejects remaining TRUSTED coverage.</p></div>
     <div class="decision-list">
       <article class="decision-row"><h3>Contract evidence</h3><div><strong>Recommended · per-obligation evidence</strong><p>Extend the existing descriptor so ownership, lifetime, effects, failures, and artifact coverage each name their evidence.</p></div><div><strong>Alternative · Contract B: whole-module admission (same contract)</strong><p>Accept one complete module profile on the same contract. An uncovered operation can block other operations that already have evidence.</p></div></article>
       <article class="decision-row"><h3>Automatic shape</h3><div><strong>Recommended · local adaptation proof</strong><p>Generate an ergonomic shape only when a local rule and enforced preconditions preserve the stated observations.</p></div><div><strong>Alternative · complete body threshold</strong><p>Require complete foreign-body proof before any reshaping. The threshold is stronger, but blocks local adaptations when only the relevant operation is provable.</p></div></article>
       <article class="decision-row"><h3>Guest boundary</h3><div><strong>Recommended · native facades over stable bridges</strong><p>Generate idiomatic host faces from the same export contract and keep the bridge's identity, lifetime, and failure rules.</p></div><div><strong>Alternative · component-shaped all hosts</strong><p>Use one component-shaped model for every host. It provides a common portable model. Native views may need resource operations or an explicit adapter; it must not silently lose identity or change scheduling.</p></div></article>
       <article class="decision-row"><h3>Callbacks</h3><div><strong>Recommended · managed event/registration Task completion</strong><p>Make admission, retained state, stop, cleanup, effects, and completion explicit through the existing task mechanism.</p></div><div><strong>Alternative · explicit bounded notification queue</strong><p>Use an owned FIFO queue with capacity, overflow, backpressure, and shutdown rules. It fits retained notifications only when the source supports those limits.</p></div></article>
+      <article class="decision-row"><h3>Build ownership</h3><div><strong>Recommended · optional inspected import</strong><p>Let Jet execute modeled build actions after explicit preview and digest-bound acceptance. Keep existing host builds supported.</p></div><div><strong>Alternative · declarative activation</strong><p>Keep optional graph import. Declare its source and reviewed digest in package configuration; the next build validates and activates that intent.</p></div></article>
     </div>
   </section>
 
