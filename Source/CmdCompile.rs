@@ -2872,7 +2872,6 @@ fn run_native_lens(
             file,
             source_closure,
             &args,
-            mode.json,
             gates,
             profile.budget_name(),
             setting_overrides,

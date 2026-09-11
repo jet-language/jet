@@ -10,10 +10,8 @@ use jet_devserver::WatchService::{PathStamp, RootKind, WatchGraph};
 use jet_foundation::MIR::MirArtifactId;
 use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 static PARSE: AtomicU64 = AtomicU64::new(0);
 static CHECK: AtomicU64 = AtomicU64::new(0);
@@ -22,7 +20,6 @@ static CODEGEN: AtomicU64 = AtomicU64::new(0);
 static LINK: AtomicU64 = AtomicU64::new(0);
 static CACHE_HIT: AtomicU64 = AtomicU64::new(0);
 static CACHE_MISS: AtomicU64 = AtomicU64::new(0);
-static SIGNPOST_SHOWN: AtomicBool = AtomicBool::new(false);
 
 /// Phase counters for trace proof (tests + `JET_RUN_TRACE=1`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -258,50 +255,4 @@ pub fn store_after_miss(entry: &Path, program_args: &[&str]) {
     if std::env::var_os("JET_RUN_TRACE").is_some() {
         eprintln!("[run-cache] store key={key} bytes={}", artifact.len());
     }
-}
-
-/// Clear the once-per-workflow signpost latch (tests).
-pub fn reset_signpost_for_test() {
-    SIGNPOST_SHOWN.store(false, Ordering::Relaxed);
-}
-
-/// Exact signpost line (stderr only; never program stdout).
-pub fn signpost_line() -> &'static str {
-    "tip: for a faster edit loop, use `jet dev` (watches and reuses the resident JIT)"
-}
-
-/// Whether a slow-run tip would print (does not consume the once-guard).
-pub fn signpost_eligible(started: Instant, is_tty: bool) -> bool {
-    if SIGNPOST_SHOWN.load(Ordering::Relaxed) {
-        return false;
-    }
-    if !is_tty {
-        return false;
-    }
-    if std::env::var_os("NO_COLOR").is_some() {
-        return false;
-    }
-    if std::env::var_os("JET_JSON").is_some() {
-        return false;
-    }
-    started.elapsed().as_millis() >= 200
-}
-
-/// One-line `jet dev` tip when a cold compile was slow. Once per process.
-///
-/// Conditions are checked before the once-latch so a silent non-TTY / NO_COLOR
-/// probe does not burn the tip for a later useful slow run.
-pub fn maybe_signpost(started: Instant, is_tty: bool) {
-    if !signpost_eligible(started, is_tty) {
-        return;
-    }
-    if SIGNPOST_SHOWN.swap(true, Ordering::Relaxed) {
-        return;
-    }
-    let _ = writeln!(std::io::stderr(), "{}", signpost_line());
-}
-
-pub fn stderr_is_tty() -> bool {
-    use std::io::IsTerminal;
-    std::io::stderr().is_terminal()
 }

@@ -270,7 +270,6 @@ pub(crate) fn run_generate(args: &[String], json: bool) {
     let run = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
         &staged_entry_text,
         &run_args,
-        machine,
         jet_foundation::Policy::GateSet::default(),
         &BTreeMap::new(),
         None,

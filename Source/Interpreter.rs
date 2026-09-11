@@ -603,12 +603,11 @@ pub fn run_jit_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
     run_jit_once_with_args_and_settings(file, program_args, &BTreeMap::new())
 }
 
-/// Like [`run_jit_once_with_args`], with `json` suppressing the jet-dev signpost.
-pub fn run_jit_once_with_args_opts(file: &str, program_args: &[&str], json: bool) -> RunOutcome {
+/// Run the strict Cranelift tier with explicit gate policy.
+pub fn run_jit_once_with_args_opts(file: &str, program_args: &[&str]) -> RunOutcome {
     run_jit_once_with_args_opts_and_gates(
         file,
         program_args,
-        json,
         jet_foundation::Policy::GateSet::default(),
     )
 }
@@ -616,13 +615,11 @@ pub fn run_jit_once_with_args_opts(file: &str, program_args: &[&str], json: bool
 pub fn run_jit_once_with_args_opts_and_gates(
     file: &str,
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
 ) -> RunOutcome {
     run_jit_once_with_args_opts_and_gates_and_settings(
         file,
         program_args,
-        json,
         gates,
         &BTreeMap::new(),
     )
@@ -636,7 +633,6 @@ pub fn run_jit_once_with_args_and_settings(
     run_jit_once_with_args_opts_and_gates_and_settings(
         file,
         program_args,
-        false,
         jet_foundation::Policy::GateSet::default(),
         setting_overrides,
     )
@@ -645,7 +641,6 @@ pub fn run_jit_once_with_args_and_settings(
 pub fn run_jit_once_with_args_opts_and_gates_and_settings(
     file: &str,
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunOutcome {
@@ -656,7 +651,6 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings(
         run_jit_once_on_compiler_stack(
             file,
             program_args,
-            json,
             gates,
             setting_overrides,
             "dev",
@@ -674,14 +668,12 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings(
 pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints(
     file: &str,
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunWithLints {
     run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
         file,
         program_args,
-        json,
         gates,
         setting_overrides,
         None,
@@ -694,7 +686,6 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints(
 pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
     file: &str,
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
@@ -702,7 +693,6 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authori
     run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
         file,
         program_args,
-        json,
         gates,
         setting_overrides,
         application_authority,
@@ -713,7 +703,6 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authori
 pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
     file: &str,
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
@@ -723,7 +712,6 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authori
         run_jit_once_on_compiler_stack(
             file,
             program_args,
-            json,
             gates,
             setting_overrides,
             "dev",
@@ -798,7 +786,6 @@ pub fn run_jit_once_with_source_closure(
     file: &str,
     source_closure: &[(std::path::PathBuf, String)],
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
@@ -813,7 +800,6 @@ pub fn run_jit_once_with_source_closure(
         run_jit_once_on_compiler_stack_with_overlays(
             file,
             program_args,
-            json,
             gates,
             profile,
             setting_overrides,
@@ -829,7 +815,6 @@ pub fn run_jit_once_with_source(
     file: &str,
     source: &str,
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
@@ -840,7 +825,6 @@ pub fn run_jit_once_with_source(
         file,
         &[(std::path::PathBuf::from(file), source.to_owned())],
         program_args,
-        json,
         gates,
         profile,
         setting_overrides,
@@ -851,7 +835,6 @@ pub fn run_jit_once_with_source(
 fn run_jit_once_on_compiler_stack(
     file: &str,
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
     profile: &str,
@@ -862,7 +845,6 @@ fn run_jit_once_on_compiler_stack(
     run_jit_once_on_compiler_stack_with_overlays(
         file,
         program_args,
-        json,
         gates,
         profile,
         setting_overrides,
@@ -876,7 +858,6 @@ fn run_jit_once_on_compiler_stack(
 fn run_jit_once_on_compiler_stack_with_overlays(
     file: &str,
     program_args: &[&str],
-    json: bool,
     gates: jet_foundation::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
@@ -886,7 +867,6 @@ fn run_jit_once_on_compiler_stack_with_overlays(
     overlays: &[(&std::path::Path, &str)],
 ) -> RunWithLints {
     crate::RunCache::reset_phases();
-    let started = std::time::Instant::now();
     let entry = std::path::Path::new(file);
     if let Some(result) = job_help_if_requested(
         file,
@@ -978,9 +958,6 @@ fn run_jit_once_on_compiler_stack_with_overlays(
                 && matches!(outcome, RunOutcome::Ran { .. })
             {
                 crate::RunCache::store_after_miss(entry, program_args);
-            }
-            if !json {
-                crate::RunCache::maybe_signpost(started, crate::RunCache::stderr_is_tty());
             }
             RunWithLints {
                 outcome,
