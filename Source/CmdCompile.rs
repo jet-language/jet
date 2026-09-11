@@ -5543,7 +5543,10 @@ fn test_result_cache_key(path: &Path, opts: &TestRunOpts, package: bool) -> Opti
         } else {
             "dev"
         });
-    let profile_tag = format!("{profile};aot-target=native");
+    let profile_tag = format!(
+        "{profile};{};aot-target=native",
+        setting_overrides_tag(&opts.setting_overrides)
+    );
     let mode_tag = if opts.coverage { "testcov" } else { "test" };
     let native_identity = native_cache_key(entry.as_ref(), profile, &profile_tag, mode_tag, None)?;
     append_test_cache_field(&mut identity, b"native-identity");
@@ -6742,7 +6745,11 @@ fn run_test_target(
     } else {
         BuildProfile::Default
     };
-    let profile_tag = format!("{};aot-target=native", profile.cache_tag());
+    let profile_tag = format!(
+        "{};{};aot-target=native",
+        profile.cache_tag(),
+        setting_overrides_tag(&opts.setting_overrides)
+    );
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -6840,6 +6847,7 @@ fn run_test_target(
                 &src,
                 update_snapshots,
                 &profile,
+                &opts.setting_overrides,
                 opts.capture,
                 mode,
             )
@@ -7758,6 +7766,7 @@ fn run_doctests(
     src: &str,
     update_snapshots: bool,
     profile: &BuildProfile,
+    setting_overrides: &BTreeMap<String, String>,
     capture: TestCapturePolicy,
     mode: OutputMode,
 ) -> bool {
@@ -7794,12 +7803,13 @@ fn run_doctests(
             continue;
         }
         let tmp_shown = tmp.to_string_lossy().into_owned();
-        let compiled = jet::compile_with_target_and_gates_and_profile(
+        let compiled = jet::compile_with_target_and_gates_and_profile_and_settings(
             &program,
             &tmp_shown,
             jet::Policy::GateSet::default(),
             None,
             profile.budget_name(),
+            setting_overrides,
         );
         let (rust_code, ffi_link) = match compiled {
             Ok(out) => (out.rust, out.ffi),
@@ -10465,7 +10475,7 @@ pub(crate) fn run_dev_web(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    if rebuild_dev_web(file, mode, verbose, false, &host, setting_overrides).is_err() {
+    if rebuild_dev_web(file, profile, mode, verbose, false, &host, setting_overrides).is_err() {
         exit(ExitCodes::USER_ERROR);
     }
     if canvas {
@@ -10495,7 +10505,7 @@ pub(crate) fn run_dev_web(
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
                 continue;
             }
-            let _ = rebuild_dev_web(file, mode, verbose, true, &host, setting_overrides);
+            let _ = rebuild_dev_web(file, profile, mode, verbose, true, &host, setting_overrides);
             if let Err(diagnostic) = watch.acknowledge(&receipt) {
                 write_mode_diagnostic(
                     mode,
@@ -10506,7 +10516,8 @@ pub(crate) fn run_dev_web(
         }
         match resident_session.take_project_rebuild() {
             Ok(Some(request)) => {
-                let result = rebuild_dev_web(file, mode, verbose, true, &host, setting_overrides);
+                let result =
+                    rebuild_dev_web(file, profile, mode, verbose, true, &host, setting_overrides);
                 if let Err(error) = resident_session.finish_project_rebuild(&request, result) {
                     write_mode_diagnostic(mode, &format!("{error}\n"));
                 }
@@ -10521,6 +10532,7 @@ pub(crate) fn run_dev_web(
 
 fn rebuild_dev_web(
     file: &str,
+    profile: &BuildProfile,
     mode: OutputMode,
     verbose: bool,
     is_rebuild: bool,
@@ -10531,9 +10543,10 @@ fn rebuild_dev_web(
     let started = Instant::now();
     host.mark_building();
     let src = fs::read_to_string(file).unwrap_or_default();
-    let out = match jet::compile_web_with_gates_and_settings(
+    let out = match jet::compile_web_with_gates_and_profile_and_settings(
         file,
         jet::Policy::GateSet::default(),
+        profile.budget_name(),
         setting_overrides,
     ) {
         Ok(out) => out,
