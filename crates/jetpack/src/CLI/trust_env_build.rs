@@ -935,7 +935,12 @@ pub(super) fn compose_env_scoped_with_warm(
             return Err(1);
         }
     }
-    ready_stats.canonicalize(roots);
+    // Warm reuse already carries the exact entries selected under the Hangar
+    // lock; re-listing to canonicalize repeats that read-only scan. Cold
+    // realizations still refresh selections after publication.
+    if !warm_path {
+        ready_stats.canonicalize(roots);
+    }
     Ok((
         Env {
             bin_dirs,

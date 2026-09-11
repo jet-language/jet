@@ -1116,7 +1116,7 @@ pub(crate) fn find_verified_user_profile_by_reference(
     roots: &Roots,
     reference: &str,
 ) -> std::io::Result<Option<VerifiedRealization>> {
-    let Some(candidate) = find_by_reference(roots, reference) else {
+    let Some(candidate) = find_by_reference_read_only(roots, reference) else {
         return Ok(None);
     };
     let expectation = CacheExpectation {
