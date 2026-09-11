@@ -2718,7 +2718,9 @@ fn derived_stmt_escape(
             *aliases = saved;
             found
         }
-        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => None,
+        Stmt::Switched { marker, .. }
+            if crate::AST::switched_off(marker)
+                || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => None,
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
@@ -2822,8 +2824,11 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
                 step.as_ref()
                     .and_then(|step| stmt_handle_escape(step, handle))
             }),
-        // D-CANVASSTATE1=D: an `#Off` body never runs, so nothing escapes it.
-        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => None,
+        // D-CANVASSTATE1=D: an `#Off` or `#DebugOnly` body never reaches the
+        // release runtime, so nothing escapes it.
+        Stmt::Switched { marker, .. }
+            if crate::AST::switched_off(marker)
+                || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => None,
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }

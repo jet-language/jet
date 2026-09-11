@@ -2829,7 +2829,9 @@ impl<'a> Checker<'a> {
                 self.check_block(body, true);
                 self.inferred_lambda_mut_captures = enclosing_mut_captures;
             }
-            Stmt::Switched { marker, body, .. } if crate::AST::switched_off(marker) => {
+            Stmt::Switched { marker, body, .. }
+                if crate::AST::switched_off(marker)
+                    || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => {
                 let flow = self.flow.clone();
                 let fx_direct = self.fx_direct.clone();
                 let fx_direct_spans = self.fx_direct_spans.clone();
