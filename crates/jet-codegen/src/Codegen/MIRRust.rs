@@ -2455,6 +2455,14 @@ impl<'a> RustEmitter<'a> {
         if let Some(service_name) = crate::Codegen::service_handle_rust_type(&name.name) {
             return self.rust_root_prelude_type(service_name, args);
         }
+        // `Pool` is both the allocator sentinel and the generic collection
+        // family.  A bare `Pool` is the allocator handle; `Pool<T>` remains
+        // the collection runtime type.
+        if args.is_empty() {
+            if let Some(allocator) = crate::Codegen::alloc_handle_rust_type(&name.name) {
+                return format!("{}{}", self.config.root_prefix, allocator);
+            }
+        }
         if let Some(core_name) = crate::Codegen::core_rust_type_name(&name.name) {
             // D-CONC-FAIL1=A: TaskFailure is Foundation's root carrier, unlike
             // the other core names that live below `jet_std`.
