@@ -696,12 +696,13 @@ pub fn assert_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) 
         assert_eq!(result.1, baseline.1, "{mode} stdout disagreed");
     }
 }
-/// Run a bare single-file source through release AOT, resident JIT, and the
-/// forced interpreter. Unlike `assert_tiers_agree`, this intentionally writes
-/// no `package.jet`, so the source exercises the driver's standalone path.
+/// Run a single-file source through release AOT, resident JIT, and the
+/// forced interpreter. The source is passed by path; a minimal local package
+/// keeps authority discovery inside this fixture.
 pub fn assert_bare_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
     let dir = unique_tmp(&format!("jet_bare_tiers_{name}"));
     fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, "name: \"tir_bare_tiers\"\nversion: \"0.1.0\"\n");
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
     let path = path.to_string_lossy().into_owned();
@@ -755,7 +756,7 @@ pub fn assert_release_tier_error_with_application_policy(
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
-    fs::write(dir.join("package.jet"), package_source).unwrap();
+    write_test_package(&dir, package_source);
     let path = path.to_string_lossy().into_owned();
     let modes = [
         ("release AOT", vec!["run", "--release", path.as_str()]),

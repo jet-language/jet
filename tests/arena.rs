@@ -6,19 +6,15 @@
 //!   * an explicit `#Region(r) { … }` may span two allocators.
 
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 mod common;
 
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-/// Unique temp dir per call. Keying only on PID let parallel tests clobber a
-/// shared `fixture.jet`, so a test compiled another's source — flaky races.
-static SEQ: AtomicU64 = AtomicU64::new(0);
+/// Unique fixture directory under the configured test scratch root.
 fn unique_tmp() -> std::path::PathBuf {
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("jet_arena_{}_{}", std::process::id(), n))
+    common::unique_tmp("arena")
 }
 
 /// Write the fixture to a real temp file so `use core.mem` resolves like a
@@ -26,6 +22,7 @@ fn unique_tmp() -> std::path::PathBuf {
 fn error_codes(src: &str) -> Vec<String> {
     let dir = unique_tmp();
     std::fs::create_dir_all(&dir).unwrap();
+    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
     let path = dir.join("fixture.jet");
     std::fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy();
@@ -41,6 +38,7 @@ fn error_codes(src: &str) -> Vec<String> {
 fn build_and_run(name: &str, src: &str) -> Option<String> {
     let dir0 = unique_tmp();
     std::fs::create_dir_all(&dir0).unwrap();
+    tir_support::write_test_package(&dir0, tir_support::TIR_TEST_PACKAGE);
     let fpath = dir0.join("fixture.jet");
     std::fs::write(&fpath, src).unwrap();
     let out = jet::compile_with_path(src, &fpath.to_string_lossy()).unwrap_or_else(|d| {
