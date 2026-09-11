@@ -31,7 +31,7 @@ use crate::Codegen::TIR::lower_panic_stop;
 use crate::Codegen::TIR::lower_require_eq_stop;
 use crate::Codegen::TIR::lower_require_stop;
 use crate::Codegen::TIR::lower_stmts;
-use crate::Codegen::TIR::module_call_source_return_type_with_args;
+use crate::Codegen::TIR::module_call_source_return_type;
 use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_address_lifetime;
@@ -5384,12 +5384,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 &call.type_args,
                                 &args,
                             );
-                            let ret = module_call_source_return_type_with_args(
+                            let ret = match module_call_source_return_type(
                                 cx,
                                 &mangled_key,
-                                &call.type_args,
-                                &args,
-                            );
+                                call.resolved_ret.as_ref(),
+                            ) {
+                                Ok(ret) => ret,
+                                Err(error) => {
+                                    return invariant_violation_expr(call.name_span, error);
+                                }
+                            };
                             let lowered = TExpr {
                                 ty: ret,
                                 kind: TExprKind::ModuleCall {
@@ -5456,14 +5460,27 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     lower_one_call_arg(a, conv, env, cx)
                                 })
                                 .collect();
-                            let target_return =
-                                imported_module_call_target_return(cx, &call.name, &fn_name);
-                            let ret = cx
-                                .import_rets
-                                .get(&(call.name.clone(), fn_name.clone()))
-                                .cloned()
-                                .flatten()
-                                .unwrap_or_else(unit_type);
+                            let target_return = match imported_module_call_target_return(
+                                cx,
+                                &call.name,
+                                &fn_name,
+                                call.resolved_ret.as_ref(),
+                            ) {
+                                Ok(target_return) => target_return,
+                                Err(error) => {
+                                    return invariant_violation_expr(call.name_span, error);
+                                }
+                            };
+                            let ret = match module_call_source_return_type(
+                                cx,
+                                &format!("{}.{}", call.name, fn_name),
+                                call.resolved_ret.as_ref(),
+                            ) {
+                                Ok(ret) => ret,
+                                Err(error) => {
+                                    return invariant_violation_expr(call.name_span, error);
+                                }
+                            };
                             let lowered = TExpr {
                                 ty: ret,
                                 kind: TExprKind::ModuleCall {

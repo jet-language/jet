@@ -791,37 +791,52 @@ pub(crate) fn extern_call_return_type(cx: &Cx, name: &str) -> Type {
     }
 }
 
-/// The return carrier of a cross-module target, matching the `TFunc::ret` that
-/// lowering gives the emitted function. The source-visible module-call type is
-/// kept separately on `TExpr`; this fact is only for the hidden-result ABI seam.
-pub(crate) fn module_call_target_return(cx: &Cx, declared: Option<&Type>) -> Type {
+/// Project a checked cross-module return fact onto the emitted callable's
+/// hidden carrier.  The checked fact is authoritative: a plain source return
+/// becomes the shared default `Result`, while explicit `Result`/`Option` and
+/// `Never` retain their declared carrier.
+pub(crate) fn module_call_target_return(
+    cx: &Cx,
+    resolved_ret: Option<&Type>,
+) -> Result<Type, String> {
+    let Some(resolved_ret) = resolved_ret else {
+        return Err("checked module call has no resolved return type".to_string());
+    };
+    let resolved_ret = cx.expand_type_aliases(resolved_ret);
     // `lower_func_with_web_boundary` keeps a source-declared Stream raw rather
     // than lifting it into the ordinary failure carrier. Mirror that existing
     // TFunc rule before expanding aliases.
     if matches!(
-        declared,
-        Some(Type::Apply { name, args })
+        &resolved_ret,
+        Type::Apply { name, args }
             if name == crate::Syntax::TYPE_STREAM && args.len() == 1
     ) {
-        return declared
-            .map(|ty| cx.expand_type_aliases(ty))
-            .unwrap_or_else(unit_type);
+        return Ok(resolved_ret);
     }
-    let declared = declared.map(|ty| cx.expand_type_aliases(ty));
-    jet_foundation::AST::FailureContract::from_return_type(declared.as_ref()).effective_type()
+    Ok(
+        jet_foundation::AST::FailureContract::from_return_type(Some(&resolved_ret))
+            .effective_type(),
+    )
 }
 
 /// Resolve the effective return contract recorded for a source-module import.
-/// The outer `Option` distinguishes missing metadata from a target whose source
-/// declaration has no explicit return type.
+/// The outer `Option` distinguishes missing import metadata from a target whose
+/// source declaration has no explicit return type. Jet module calls must still
+/// use the checked call fact for the inner carrier projection.
 pub(crate) fn imported_module_call_target_return(
     cx: &Cx,
     alias: &str,
     method: &str,
-) -> Option<Type> {
-    let declared = cx
+    resolved_ret: Option<&Type>,
+) -> Result<Option<Type>, String> {
+    let Some(declared) = cx
         .import_rets
-        .get(&(alias.to_string(), method.to_string()))?;
+        .get(&(alias.to_string(), method.to_string()))
+    else {
+        return Err(format!(
+            "checked module call `{alias}.{method}` has no import return fact"
+        ));
+    };
     let direct_c_function = cx.import_mods.get(alias).is_some_and(|module| {
         cx.direct_c_functions
             .contains(&format!("{module}::{method}"))
@@ -829,30 +844,26 @@ pub(crate) fn imported_module_call_target_return(
     if direct_c_function {
         // CModule wrappers are emitted with the binding's declared C ABI return
         // type. They are not Jet callables and must not acquire a hidden `?`.
-        return Some(declared.clone().unwrap_or_else(unit_type));
+        return Ok(Some(declared.clone().unwrap_or_else(unit_type)));
     }
-    Some(module_call_target_return(cx, declared.as_ref()))
+    module_call_target_return(cx, resolved_ret).map(Some)
 }
 
-/// Resolve the source-visible return type of a cross-module target. The
-/// generated callable has the effective Result carrier, but a module call's
-/// `TExpr.ty` is the type the caller wrote and therefore must stay on the
-/// success side until the web/native emitter applies the carrier seam.
-pub(crate) fn module_call_source_return_type_with_args(
+/// Resolve the source-visible return type of a cross-module target from sema's
+/// checked call fact.  The generated callable has the effective carrier, but
+/// a module call's `TExpr.ty` stays on the source side until MIR applies the
+/// carrier seam.
+pub(crate) fn module_call_source_return_type(
     cx: &Cx,
     name: &str,
-    type_args: &[Type],
-    args: &[crate::Codegen::TIR::TCallArg],
-) -> Type {
-    let declared = match cx.fn_types.get(name) {
-        Some(Type::Fn { ret, .. }) => ret
-            .as_deref()
-            .map(|ty| cx.expand_type_aliases(ty))
-            .unwrap_or_else(unit_type),
-        _ if cx.distinct_types.contains_key(name) => Type::Named(name.to_string()),
-        _ => unit_type(),
+    resolved_ret: Option<&Type>,
+) -> Result<Type, String> {
+    let Some(resolved_ret) = resolved_ret else {
+        return Err(format!(
+            "checked module call `{name}` has no resolved return type"
+        ));
     };
-    substitute_call_type(cx, name, declared, type_args, args)
+    Ok(cx.expand_type_aliases(resolved_ret))
 }
 
 /// Resolve a generic call's result using the explicit arguments first, then

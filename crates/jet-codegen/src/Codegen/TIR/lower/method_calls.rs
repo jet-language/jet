@@ -33,7 +33,7 @@ use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::lower_debug_text;
 use crate::Codegen::TIR::lower_extern_call_arg;
-use crate::Codegen::TIR::module_call_source_return_type_with_args;
+use crate::Codegen::TIR::module_call_source_return_type;
 use crate::Codegen::TIR::module_call_target_return;
 use crate::Codegen::TIR::preserve_typed_list_shape;
 use crate::Codegen::TIR::TFailureCarrier;
@@ -1285,7 +1285,10 @@ fn lower_archive_source_call(
             format!("archive call `core.archive.{method}` has no resolved return type"),
         ));
     };
-    let target_return = Some(module_call_target_return(cx, Some(&ty)));
+    let target_return = match module_call_target_return(cx, Some(&ty)) {
+        Ok(target_return) => Some(target_return),
+        Err(error) => return Some(invariant_method_expr(method_span, error)),
+    };
     Some(TExpr {
         ty,
         kind: TExprKind::ModuleCall {
@@ -3371,6 +3374,15 @@ fn lower_method_call_impl(
                             "root import without a codegen target",
                         );
                     };
+                    let target_return = match imported_module_call_target_return(
+                        cx,
+                        &alias,
+                        &root_name,
+                        resolved_ret,
+                    ) {
+                        Ok(target_return) => target_return,
+                        Err(error) => return invariant_method_expr(method_span, error),
+                    };
                     return TExpr {
                         ty: ret,
                         kind: TExprKind::ModuleCall {
@@ -3378,9 +3390,7 @@ fn lower_method_call_impl(
                                 rust_mod,
                                 rust_fn: mangle(&rust_fn).to_string(),
                             },
-                            target_return: imported_module_call_target_return(
-                                cx, &alias, &root_name,
-                            ),
+                            target_return,
                             type_args: type_args.to_vec(),
                             args: lowered_args,
                         },
@@ -5465,9 +5475,15 @@ fn lower_method_call_impl(
                                     cx.import_return_for_function(&env.fn_name, leaf, method)
                                 })
                                 .flatten();
-                            let target_return = declared_ret
-                                .as_ref()
-                                .map(|declared| module_call_target_return(cx, Some(declared)));
+                            let target_return = match declared_ret.as_ref() {
+                                Some(declared) => match module_call_target_return(cx, Some(declared)) {
+                                    Ok(target_return) => Some(target_return),
+                                    Err(error) => {
+                                        return invariant_method_expr(method_span, error);
+                                    }
+                                },
+                                None => None,
+                            };
                             let ret = declared_ret.clone().unwrap_or_else(unit_type);
                             // C foreign namespaces mounted through an inline module
                             // still have a generated wrapper. Keep this branch on the
@@ -5558,12 +5574,14 @@ fn lower_method_call_impl(
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let target_return =
                             call_return_type_with_args(cx, &mangled_key, type_args, &targs);
-                        let ret = module_call_source_return_type_with_args(
+                        let ret = match module_call_source_return_type(
                             cx,
                             &mangled_key,
-                            type_args,
-                            &targs,
-                        );
+                            resolved_ret,
+                        ) {
+                            Ok(ret) => ret,
+                            Err(error) => return invariant_method_expr(method_span, error),
+                        };
                         return TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
@@ -5598,13 +5616,23 @@ fn lower_method_call_impl(
                             .get(&(alias.clone(), method.to_string()))
                             .cloned();
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
-                        let target_return = imported_module_call_target_return(cx, alias, method);
-                        let ret = cx
-                            .import_rets
-                            .get(&(alias.clone(), method.to_string()))
-                            .cloned()
-                            .flatten()
-                            .unwrap_or_else(unit_type);
+                        let target_return = match imported_module_call_target_return(
+                            cx,
+                            alias,
+                            method,
+                            resolved_ret,
+                        ) {
+                            Ok(target_return) => target_return,
+                            Err(error) => return invariant_method_expr(method_span, error),
+                        };
+                        let ret = match module_call_source_return_type(
+                            cx,
+                            &format!("{alias}.{method}"),
+                            resolved_ret,
+                        ) {
+                            Ok(ret) => ret,
+                            Err(error) => return invariant_method_expr(method_span, error),
+                        };
                         let lowered = TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
@@ -5679,13 +5707,23 @@ fn lower_method_call_impl(
                             });
                         }
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
-                        let target_return = imported_module_call_target_return(cx, alias, method);
-                        let ret = cx
-                            .import_rets
-                            .get(&(alias.clone(), method.to_string()))
-                            .cloned()
-                            .flatten()
-                            .unwrap_or_else(unit_type);
+                        let target_return = match imported_module_call_target_return(
+                            cx,
+                            alias,
+                            method,
+                            resolved_ret,
+                        ) {
+                            Ok(target_return) => target_return,
+                            Err(error) => return invariant_method_expr(method_span, error),
+                        };
+                        let ret = match module_call_source_return_type(
+                            cx,
+                            &format!("{alias}.{method}"),
+                            resolved_ret,
+                        ) {
+                            Ok(ret) => ret,
+                            Err(error) => return invariant_method_expr(method_span, error),
+                        };
                         let lowered = TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
@@ -5760,17 +5798,25 @@ fn lower_method_call_impl(
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let declared_ret =
                             cx.import_return_for_function(&env.fn_name, alias, method);
-                        let target_return = declared_ret.as_ref().map(|declared| {
-                            if cx
-                                .direct_c_functions
-                                .contains(&format!("{mod_name}::{method}"))
-                            {
-                                declared.clone().unwrap_or_else(unit_type)
-                            } else {
-                                module_call_target_return(cx, declared.as_ref())
+                        let direct_c_function = cx
+                            .direct_c_functions
+                            .contains(&format!("{mod_name}::{method}"));
+                        let target_return = if direct_c_function {
+                            declared_ret.clone().map(|declared| declared.unwrap_or_else(unit_type))
+                        } else {
+                            match module_call_target_return(cx, resolved_ret) {
+                                Ok(target_return) => Some(target_return),
+                                Err(error) => return invariant_method_expr(method_span, error),
                             }
-                        });
-                        let ret = declared_ret.flatten().unwrap_or_else(unit_type);
+                        };
+                        let ret = match module_call_source_return_type(
+                            cx,
+                            &format!("{alias}.{method}"),
+                            resolved_ret,
+                        ) {
+                            Ok(ret) => ret,
+                            Err(error) => return invariant_method_expr(method_span, error),
+                        };
                         let lowered = TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
@@ -5797,12 +5843,14 @@ fn lower_method_call_impl(
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
                         let target_return =
                             call_return_type_with_args(cx, &mangled_key, type_args, &targs);
-                        let ret = module_call_source_return_type_with_args(
+                        let ret = match module_call_source_return_type(
                             cx,
                             &mangled_key,
-                            type_args,
-                            &targs,
-                        );
+                            resolved_ret,
+                        ) {
+                            Ok(ret) => ret,
+                            Err(error) => return invariant_method_expr(method_span, error),
+                        };
                         let lowered = TExpr {
                             ty: ret,
                             kind: TExprKind::ModuleCall {
