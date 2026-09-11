@@ -2,8 +2,20 @@
     """int64_t add(int64_t a, int64_t b) { return a + b; }"""
 }
 
+fn jet_add(a: Int, b: Int) Int -> (a + b)
+
 fn run() {
     #Unsafe("call the audited inline C contract") {
         print(add(20, 22))
+    }
+}
+
+#Test("inline C Int comparisons") {
+    #Unsafe("call the audited inline C contract") {
+        assert_eq(add(20, 22), jet_add(20, 22))
+        assert((add(20, 22) == jet_add(20, 22)))
+        .expect_fail {
+            assert_eq(add(20, 22), jet_add(20, 23))
+        }
     }
 }

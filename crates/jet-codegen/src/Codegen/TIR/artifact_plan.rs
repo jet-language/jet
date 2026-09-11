@@ -1232,6 +1232,44 @@ fn lower_c_foreign(
     }
 }
 
+/// Lower a top-level `#FFI(c)` function to the native bridge symbol emitted
+/// by the prepared FFI crate. The call expression retains the wrapper identity
+/// (`jet_ffi_<name>`); MIR uses this row to resolve that identity to the
+/// checked C symbol (`jet_inline_jet_ffi_<name>`).
+fn lower_inline_c_foreign(
+    function: &Func,
+    module: &str,
+    target: TirArtifactTarget,
+) -> Option<TirForeignFact> {
+    let inline = function.inline_foreign.as_ref()?;
+    if !inline.lang.eq_ignore_ascii_case("c") {
+        return None;
+    }
+    let wrapper = format!("jet_ffi_{}", function.name);
+    Some(TirForeignFact {
+        key: wrapper.clone(),
+        module: module.to_string(),
+        name: function.name.clone(),
+        span: function.span,
+        symbol: format!("jet_inline_{wrapper}"),
+        path: wrapper,
+        params: lower_params(&function.params),
+        return_type: function.return_type.clone(),
+        abi: "C".to_string(),
+        language: "c".to_string(),
+        applicability: target_applicability_for(target),
+        effect_root: None,
+        callback_transport: None,
+        callback_plan_digest: None,
+        callback_identity: None,
+        link_key: None,
+        callback_key: None,
+        handle_key: None,
+        close_function_key: None,
+        undo_function_key: None,
+    })
+}
+
 fn push_function(facts: &mut TirArtifactFacts, module: &str, function: &Func, name: String) {
     facts.functions.push(TirFunctionFact {
         reference: function_ref(module, &name, function.span, function_visibility(function)),
@@ -1257,6 +1295,9 @@ fn collect_items(
         let reference = item_ref(module, item);
         match item {
             Item::Func(function) => {
+                if let Some(foreign) = lower_inline_c_foreign(function, module, target) {
+                    facts.foreign.push(foreign);
+                }
                 push_function(facts, module, function, function.name.clone());
                 if let Some(test) = lower_contract_test(function, module, contract_rows) {
                     facts.tests.push(test);

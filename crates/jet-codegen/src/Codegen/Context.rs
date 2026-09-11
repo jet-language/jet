@@ -5260,6 +5260,22 @@ pub(crate) fn build_cx_items(
     }
     cx.cloneable.insert(Syntax::TYPE_REMOVE_BY.to_string());
 
+    // Inline foreign declarations keep their source return as the bridge ABI.
+    // Ordinary Jet functions use the implicit failure carrier instead.
+    fn callable_return_type(function: &Func) -> Type {
+        function
+            .inline_foreign
+            .as_ref()
+            .and_then(|_| function.return_type.clone())
+            .unwrap_or_else(|| {
+                if function.inline_foreign.is_some() {
+                    Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+                } else {
+                    function.effective_return_type()
+                }
+            })
+    }
+
     for item in items {
         match item {
             Item::Func(f) => {
@@ -5310,7 +5326,7 @@ pub(crate) fn build_cx_items(
                                 ty.with_effective_fn_returns()
                             })
                             .collect(),
-                        ret: Some(Box::new(f.effective_return_type())),
+                        ret: Some(Box::new(callable_return_type(f))),
                         effect_bound: None,
                         param_contract: (!f.params.is_empty()).then(|| {
                             f.params
@@ -5801,7 +5817,7 @@ pub(crate) fn build_cx_items(
                                             ty.with_effective_fn_returns()
                                         })
                                         .collect(),
-                                    ret: Some(Box::new(f.effective_return_type())),
+                                    ret: Some(Box::new(callable_return_type(f))),
                                     effect_bound: None,
                                     return_view_provenance: f.return_view_provenance.clone(),
                                     param_contract: (!f.params.is_empty()).then(|| {
