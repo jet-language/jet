@@ -4059,9 +4059,34 @@ fn verify_facts(
             );
             let valid_condition = match row.rule {
                 MirVectorRule::Reduction => reduction.condition.is_none(),
-                MirVectorRule::ConditionalAccumulate => reduction.condition.is_some(),
+                MirVectorRule::ConditionalAccumulate => reduction
+                    .condition
+                    .is_some_and(|condition| defs.get(&condition).is_some_and(|(_, _, ty, _)| ty.is_bool())),
                 _ => reduction.condition.is_none(),
             };
+            let seed_read = function.blocks.iter().any(|block| {
+                block.instructions.iter().any(|instruction| {
+                    instruction.result == Some(reduction.seed)
+                        && matches!(
+                            &instruction.operation,
+                            MirOperation::ReadPlace(place) if *place == reduction.accumulator
+                        )
+                })
+            });
+            let source_operations_valid = !reduction.source_operations.is_empty()
+                && reduction
+                    .source_operations
+                    .iter()
+                    .enumerate()
+                    .all(|(index, operation)| {
+                        !reduction.source_operations[..index].contains(operation)
+                            && function.blocks.iter().any(|block| {
+                                row.body_blocks.contains(&block.id)
+                                    && block.instructions.iter().any(|instruction| {
+                                        instruction.id == *operation
+                                    })
+                            })
+                    });
             !valid_rule
                 || !reduction.order.is_canonical()
                 || !valid_condition
@@ -4071,14 +4096,9 @@ fn verify_facts(
                     .any(|place| place.id == reduction.accumulator)
                 || !defs.contains_key(&reduction.addend)
                 || !defs.contains_key(&reduction.seed)
-                || reduction
-                    .condition
-                    .is_some_and(|condition| !defs.contains_key(&condition))
+                || !seed_read
                 || !block_ids.contains(&reduction.exit)
-                || reduction
-                    .source_operations
-                    .iter()
-                    .any(|operation| !instruction_ids.contains(operation))
+                || !source_operations_valid
         });
         if !block_ids.contains(&row.loop_header)
             || row.cursor.is_some_and(|value| !defs.contains_key(&value))
@@ -4150,6 +4170,38 @@ fn verify_facts(
                 span: row.span,
             });
         }
+    }
+    let has_eligible = facts
+        .vector_facts
+        .iter()
+        .any(|fact| fact.decision.is_eligible());
+    let expected_no_aliasing = has_eligible
+        && facts
+            .vector_facts
+            .iter()
+            .filter(|fact| fact.decision.is_eligible())
+            .all(|fact| fact.no_aliasing);
+    let expected_no_early_exit = has_eligible
+        && facts
+            .vector_facts
+            .iter()
+            .filter(|fact| fact.decision.is_eligible())
+            .all(|fact| fact.no_early_exit);
+    let expected_no_cross_iteration_dependencies = has_eligible
+        && facts
+            .vector_facts
+            .iter()
+            .filter(|fact| fact.decision.is_eligible())
+            .all(|fact| fact.no_cross_iteration_dependencies);
+    if facts.auto_vectorizable != has_eligible
+        || facts.no_aliasing != expected_no_aliasing
+        || facts.no_early_exit != expected_no_early_exit
+        || facts.no_cross_iteration_dependencies != expected_no_cross_iteration_dependencies
+    {
+        return Err(MirLegalityError::InvalidFact {
+            function: function.id,
+            span: function.span,
+        });
     }
     for row in &facts.fusion_facts {
         if !block_ids.contains(&row.first_loop)
@@ -4324,6 +4376,7 @@ pub fn optimize_mir_program(
     }
     let mut optimized = program.clone();
     clear_derived_facts(&mut optimized);
+    denormalize_fixed_reduction_loops(&mut optimized);
     // Checked #Inline(Always) is expanded here, before any target-neutral
     // proof pass. Keeping it in this one MIR pipeline means every execution
     // adapter consumes the same CFG, while the completed pass fingerprint
@@ -4396,6 +4449,11 @@ pub fn optimize_mir_program(
         &mut optimized,
         normalize_fixed_reduction_loops,
     );
+    // The reducer rewrites the CFG. Rebuild all loop-dependent facts from the
+    // generated shape before sealing the pass, then restore the source
+    // reduction row without applying the rewrite a second time.
+    derive_loop_and_vector_facts(&mut optimized);
+    normalize_fixed_reduction_loops(&mut optimized);
     mark_pass(&mut optimized, MirOptimizationPassId::CanonicalLoopFacts);
     validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
 
@@ -6427,6 +6485,7 @@ fn inline_type(ty: &MirType, substitutions: &HashMap<String, MirType>) -> MirTyp
             MirTypeKind::Fn(signature)
         }
         MirTypeKind::SendFn { params, ret } => MirTypeKind::SendFn {
+
             params: params
                 .iter()
                 .map(|ty| inline_type(ty, substitutions))
@@ -6482,10 +6541,191 @@ fn inline_type(ty: &MirType, substitutions: &HashMap<String, MirType>) -> MirTyp
         )))
     }
 }
+fn denormalize_fixed_reduction_loops(program: &mut MirProgram) {
+    for function in &mut program.functions {
+        let candidates = function
+            .blocks
+            .iter()
+            .filter_map(|block| {
+                let MirTerminator::Branch {
+                    then_target,
+                    else_target,
+                    ..
+                } = &block.terminator
+                else {
+                    return None;
+                };
+                normalized_fixed_reduction_shape(
+                    function,
+                    block.id,
+                    *then_target,
+                    *else_target,
+                )
+                .map(|shape| (block.id, shape))
+            })
+            .collect::<Vec<_>>();
+        for (header, shape) in candidates {
+            let Some(cursor) = shape.cursor else {
+                continue;
+            };
+            let Some(advance) = shape.advance else {
+                continue;
+            };
+            let Some(exit) = shape.exit else {
+                continue;
+            };
+            let continuation =
+                normalized_fixed_reduction_block_id(function, header, "continuation");
+            let Some(continuation_block) = function
+                .blocks
+                .iter()
+                .find(|block| block.id == continuation)
+                .cloned()
+            else {
+                continue;
+            };
+            let Some(preheader) = function.blocks.iter().find(|block| {
+                block.instructions.iter().any(|instruction| {
+                    instruction.result == Some(cursor)
+                        && matches!(&instruction.operation, MirOperation::LoopRangeInit { .. })
+                })
+            }) else {
+                continue;
+            };
+            let preheader = preheader.id;
+            let Some(generated_blocks) =
+                normalized_fixed_reduction_generated_blocks(function, header)
+            else {
+                continue;
+            };
+            let order = crate::MIROptimization::Acceleration::D_FRED1_FIXED_ORDER;
+            let mut generated_preheader_ops = HashSet::new();
+            for role in [
+                "constant-zero",
+                "constant-seen-false",
+                "constant-seen-true",
+                "seed-read",
+                "seed-seen",
+            ] {
+                generated_preheader_ops.insert(normalized_fixed_reduction_op_id(
+                    function, header, role,
+                ));
+            }
+            for lane in 0..order.lanes {
+                generated_preheader_ops.insert(normalized_fixed_reduction_op_id(
+                    function,
+                    header,
+                    &format!("seed-lane-{lane}"),
+                ));
+            }
+            let mut generated_values = HashSet::new();
+            for block in &function.blocks {
+                if generated_blocks.contains(&block.id) {
+                    generated_values.extend(
+                        block
+                            .instructions
+                            .iter()
+                            .filter_map(|instruction| instruction.result),
+                    );
+                } else if block.id == preheader {
+                    generated_values.extend(
+                        block
+                            .instructions
+                            .iter()
+                            .filter(|instruction| generated_preheader_ops.contains(&instruction.id))
+                            .filter_map(|instruction| instruction.result),
+                    );
+                }
+            }
+            let body_blocks = shape
+                .blocks
+                .iter()
+                .copied()
+                .filter(|block_id| *block_id != advance)
+                .collect::<Vec<_>>();
+            let post_entry =
+                normalized_fixed_reduction_block_id(function, header, "post-entry");
+            for block_id in &body_blocks {
+                if let Some(block) = function.blocks.iter_mut().find(|block| block.id == *block_id) {
+                    match &mut block.terminator {
+                        MirTerminator::Jump { target } if *target == post_entry => {
+                            *target = advance;
+                        }
+                        MirTerminator::Branch {
+                            then_target,
+                            else_target,
+                            ..
+                        } => {
+                            if *then_target == post_entry {
+                                *then_target = advance;
+                            }
+                            if *else_target == post_entry {
+                                *else_target = advance;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if let Some(block) = function.blocks.iter_mut().find(|block| block.id == header) {
+                if let MirTerminator::Branch { then_target, .. } = &mut block.terminator {
+                    *then_target = shape.body;
+                }
+            }
+            if let Some(block) = function.blocks.iter_mut().find(|block| block.id == exit) {
+                block.instructions = continuation_block.instructions.clone();
+                block.terminator = continuation_block.terminator.clone();
+            }
+            if let Some(block) = function.blocks.iter_mut().find(|block| block.id == preheader) {
+                block
+                    .instructions
+                    .retain(|instruction| !generated_preheader_ops.contains(&instruction.id));
+            }
+            function
+                .blocks
+                .retain(|block| !generated_blocks.contains(&block.id));
+            let mut generated_locals = HashSet::new();
+            let mut generated_places = HashSet::new();
+            for lane in 0..order.lanes {
+                generated_locals.insert(normalized_fixed_reduction_local_id(
+                    function,
+                    header,
+                    &format!("lane-place-{lane}"),
+                ));
+                generated_places.insert(normalized_fixed_reduction_place_id(
+                    function,
+                    header,
+                    &format!("lane-place-{lane}"),
+                ));
+            }
+            generated_locals.insert(normalized_fixed_reduction_local_id(
+                function,
+                header,
+                "seen-place",
+            ));
+            generated_places.insert(normalized_fixed_reduction_place_id(
+                function,
+                header,
+                "seen-place",
+            ));
+            function
+                .locals
+                .retain(|local| !generated_locals.contains(&local.id));
+            function
+                .places
+                .retain(|place| !generated_places.contains(&place.id));
+            function
+                .values
+                .retain(|(value, ..)| !generated_values.contains(value));
+            function.optimization.derived_from_digest = None;
+        }
+    }
+}
 /// may still consume the retained `fixed_reduction` source row for packing,
 /// but it must not replace the semantic result with a second policy.
 fn normalize_fixed_reduction_loops(program: &mut MirProgram) {
     for function in &mut program.functions {
+        let mut changed = false;
         let candidates = function
             .optimization
             .vector_facts
@@ -6509,6 +6749,7 @@ fn normalize_fixed_reduction_loops(program: &mut MirProgram) {
                     row.decision = MirOptimizationDecision::Rejected(
                         MirOptimizationRejection::UnsupportedOperation,
                     );
+                    changed = true;
                 }
                 continue;
             };
@@ -6519,9 +6760,13 @@ fn normalize_fixed_reduction_loops(program: &mut MirProgram) {
                 .find(|candidate| candidate.loop_header == fact.loop_header)
             {
                 row.fixed_reduction = Some(fixed);
+                changed = true;
             }
         }
         refresh_loop_summaries(function);
+        if changed {
+            function.optimization.derived_from_digest = None;
+        }
     }
 }
 
@@ -6535,6 +6780,9 @@ fn normalize_fixed_reduction_loop(
     let order = crate::MIROptimization::Acceleration::D_FRED1_FIXED_ORDER;
     if !order.is_canonical() {
         return None;
+    }
+    if let Some(fixed) = normalized_fixed_reduction_fact(function, fact) {
+        return Some(fixed);
     }
     let lanes = order.lanes;
     let cursor = fact.cursor?;
@@ -7825,30 +8073,86 @@ struct CanonicalLoopShape {
 }
 
 fn refresh_loop_summaries(function: &mut MirFunction) {
-    let auto_vectorizable = function
+    let has_eligible = function
         .optimization
         .vector_facts
         .iter()
         .any(|fact| fact.decision.is_eligible());
-    let no_aliasing = function
-        .optimization
-        .vector_facts
-        .iter()
-        .any(|fact| fact.no_aliasing);
-    let no_early_exit = function
-        .optimization
-        .vector_facts
-        .iter()
-        .any(|fact| fact.no_early_exit);
-    let no_cross_iteration_dependencies = function
-        .optimization
-        .vector_facts
-        .iter()
-        .any(|fact| fact.no_cross_iteration_dependencies);
-    function.optimization.auto_vectorizable = auto_vectorizable;
+    let no_aliasing = has_eligible
+        && function
+            .optimization
+            .vector_facts
+            .iter()
+            .filter(|fact| fact.decision.is_eligible())
+            .all(|fact| fact.no_aliasing);
+    let no_early_exit = has_eligible
+        && function
+            .optimization
+            .vector_facts
+            .iter()
+            .filter(|fact| fact.decision.is_eligible())
+            .all(|fact| fact.no_early_exit);
+    let no_cross_iteration_dependencies = has_eligible
+        && function
+            .optimization
+            .vector_facts
+            .iter()
+            .filter(|fact| fact.decision.is_eligible())
+            .all(|fact| fact.no_cross_iteration_dependencies);
+    function.optimization.auto_vectorizable = has_eligible;
     function.optimization.no_aliasing = no_aliasing;
     function.optimization.no_early_exit = no_early_exit;
     function.optimization.no_cross_iteration_dependencies = no_cross_iteration_dependencies;
+}
+
+
+fn fusion_facts_for_rows(rows: &[MirLoopFact], vectors: &[MirVectorFact]) -> Vec<MirFusionFact> {
+    let mut facts = Vec::new();
+    for pair in rows.windows(2) {
+        let first = &pair[0];
+        let second = &pair[1];
+        let first_vector = vectors.iter().find(|vector| vector.loop_header == first.header);
+        let second_vector = vectors.iter().find(|vector| vector.loop_header == second.header);
+        let same_domain = first.trip_count.is_some() && first.trip_count == second.trip_count;
+        let adjacent = first.exit == Some(second.header);
+        let packed = first_vector.is_some_and(|fact| fact.packed)
+            && second_vector.is_some_and(|fact| fact.packed);
+        let no_aliasing = first_vector.is_some_and(|fact| fact.no_aliasing)
+            && second_vector.is_some_and(|fact| fact.no_aliasing);
+        let effect_free = first_vector.is_some_and(|fact| fact.effect_free_body)
+            && second_vector.is_some_and(|fact| fact.effect_free_body);
+        let no_cross = first_vector
+            .is_some_and(|fact| fact.no_cross_iteration_dependencies)
+            && second_vector.is_some_and(|fact| fact.no_cross_iteration_dependencies);
+        let decision = if !same_domain || !adjacent {
+            MirOptimizationDecision::Rejected(MirOptimizationRejection::DynamicTripCount)
+        } else if !packed {
+            MirOptimizationDecision::Rejected(MirOptimizationRejection::ScalarBoundary)
+        } else if !no_aliasing {
+            MirOptimizationDecision::Rejected(MirOptimizationRejection::MayAlias)
+        } else if !effect_free {
+            MirOptimizationDecision::Rejected(MirOptimizationRejection::HasEffects)
+        } else if !no_cross {
+            MirOptimizationDecision::Rejected(
+                MirOptimizationRejection::CrossIterationDependency,
+            )
+        } else {
+            MirOptimizationDecision::Eligible
+        };
+        facts.push(MirFusionFact {
+            first_loop: first.header,
+            second_loop: second.header,
+            packed,
+            same_iteration_domain: same_domain,
+            no_aliasing,
+            effect_free,
+            no_cross_iteration_dependencies: no_cross,
+            span: first.span,
+            decision,
+        });
+    }
+    facts.sort_by_key(|fact| (fact.first_loop, fact.second_loop));
+    facts
 }
 
 fn derive_loop_and_vector_facts(program: &mut MirProgram) {
@@ -7939,50 +8243,7 @@ fn derive_loop_and_vector_facts(program: &mut MirProgram) {
                     .extend(acceleration_facts_for_vector(row, vector));
             }
         }
-        for pair in rows.windows(2) {
-            let first = &pair[0];
-            let second = &pair[1];
-            let first_vector = vectors.iter().find(|vector| vector.loop_header == first.header);
-            let second_vector = vectors.iter().find(|vector| vector.loop_header == second.header);
-            let same_domain =
-                first.trip_count.is_some() && first.trip_count == second.trip_count;
-            let adjacent = first.exit == Some(second.header);
-            let packed = first_vector.is_some_and(|fact| fact.packed)
-                && second_vector.is_some_and(|fact| fact.packed);
-            let no_aliasing = first_vector.is_some_and(|fact| fact.no_aliasing)
-                && second_vector.is_some_and(|fact| fact.no_aliasing);
-            let effect_free = first_vector.is_some_and(|fact| fact.effect_free_body)
-                && second_vector.is_some_and(|fact| fact.effect_free_body);
-            let no_cross = first_vector
-                .is_some_and(|fact| fact.no_cross_iteration_dependencies)
-                && second_vector.is_some_and(|fact| fact.no_cross_iteration_dependencies);
-            let decision = if !same_domain || !adjacent {
-                MirOptimizationDecision::Rejected(MirOptimizationRejection::DynamicTripCount)
-            } else if !packed {
-                MirOptimizationDecision::Rejected(MirOptimizationRejection::ScalarBoundary)
-            } else if !no_aliasing {
-                MirOptimizationDecision::Rejected(MirOptimizationRejection::MayAlias)
-            } else if !effect_free {
-                MirOptimizationDecision::Rejected(MirOptimizationRejection::HasEffects)
-            } else if !no_cross {
-                MirOptimizationDecision::Rejected(
-                    MirOptimizationRejection::CrossIterationDependency,
-                )
-            } else {
-                MirOptimizationDecision::Eligible
-            };
-            function.optimization.fusion_facts.push(MirFusionFact {
-                first_loop: first.header,
-                second_loop: second.header,
-                packed,
-                same_iteration_domain: same_domain,
-                no_aliasing,
-                effect_free,
-                no_cross_iteration_dependencies: no_cross,
-                span: first.span,
-                decision,
-            });
-        }
+        function.optimization.fusion_facts = fusion_facts_for_rows(&rows, &vectors);
         function.optimization.loop_facts.sort_by_key(|fact| fact.header);
         function
             .optimization
@@ -8074,12 +8335,371 @@ fn refresh_acceleration_facts(program: &mut MirProgram) {
     }
 }
 
+fn normalized_fixed_reduction_identity(
+    function: &MirFunction,
+    header: MirBlockId,
+    role: &str,
+) -> String {
+    format!("{}:{}:{}", function.id.0, header.0, role)
+}
+
+fn normalized_fixed_reduction_block_id(
+    function: &MirFunction,
+    header: MirBlockId,
+    role: &str,
+) -> MirBlockId {
+    MirBlockId(stable_id(
+        "mir-fixed-reduction-block",
+        &normalized_fixed_reduction_identity(function, header, role),
+    ))
+}
+
+fn normalized_fixed_reduction_op_id(
+    function: &MirFunction,
+    header: MirBlockId,
+    role: &str,
+) -> MirOpId {
+    MirOpId(stable_id(
+        "mir-fixed-reduction-op",
+        &normalized_fixed_reduction_identity(function, header, role),
+    ))
+}
+
+fn normalized_fixed_reduction_value_id(
+    function: &MirFunction,
+    header: MirBlockId,
+    role: &str,
+) -> MirValueId {
+    MirValueId(stable_id(
+        "mir-fixed-reduction-value",
+        &normalized_fixed_reduction_identity(function, header, role),
+    ))
+}
+
+fn normalized_fixed_reduction_shape(
+    function: &MirFunction,
+    header: MirBlockId,
+    then_target: MirBlockId,
+    else_target: MirBlockId,
+) -> Option<CanonicalLoopShape> {
+    let dispatch_entry =
+        normalized_fixed_reduction_block_id(function, header, "dispatch-entry");
+    if then_target != dispatch_entry {
+        return None;
+    }
+    let header_block = function.blocks.iter().find(|block| block.id == header)?;
+    let cursor = header_block.instructions.iter().find_map(|instruction| {
+        matches!(
+            &instruction.operation,
+            MirOperation::LoopRangeHasNext { cursor, .. } if instruction.result.is_some()
+        )
+        .then(|| match &instruction.operation {
+            MirOperation::LoopRangeHasNext { cursor, .. } => *cursor,
+            _ => unreachable!(),
+        })
+    })?;
+    let range = canonical_range_for_cursor(function, cursor)?;
+    let lane_dispatch =
+        normalized_fixed_reduction_block_id(function, header, "lane-dispatch-0");
+    let lane_pre = normalized_fixed_reduction_block_id(function, header, "lane-pre-0");
+    let post_entry = normalized_fixed_reduction_block_id(function, header, "post-entry");
+    let post_seen_entry =
+        normalized_fixed_reduction_block_id(function, header, "post-seen-entry");
+    let post_unseen_entry =
+        normalized_fixed_reduction_block_id(function, header, "post-unseen-entry");
+    let tree = normalized_fixed_reduction_block_id(function, header, "tree");
+    let continuation = normalized_fixed_reduction_block_id(function, header, "continuation");
+    let dispatch = function.blocks.iter().find(|block| block.id == dispatch_entry)?;
+    if !matches!(
+        &dispatch.terminator,
+        MirTerminator::Jump { target } if *target == lane_dispatch
+    ) {
+        return None;
+    }
+    let lane_dispatch_block = function.blocks.iter().find(|block| block.id == lane_dispatch)?;
+    let MirTerminator::Branch { then_target, .. } = &lane_dispatch_block.terminator else {
+        return None;
+    };
+    if *then_target != lane_pre {
+        return None;
+    }
+    let lane_pre_block = function.blocks.iter().find(|block| block.id == lane_pre)?;
+    let MirTerminator::Jump { target: body } = &lane_pre_block.terminator else {
+        return None;
+    };
+    let body = *body;
+    if body == header || body == else_target || body == dispatch_entry {
+        return None;
+    }
+    let post_entry_block = function.blocks.iter().find(|block| block.id == post_entry)?;
+    if !matches!(
+        &post_entry_block.terminator,
+        MirTerminator::Jump { target } if *target == post_seen_entry
+    ) {
+        return None;
+    }
+    let post_seen_block = function
+        .blocks
+        .iter()
+        .find(|block| block.id == post_seen_entry)?;
+    if !matches!(
+        &post_seen_block.terminator,
+        MirTerminator::Jump { target } if *target == normalized_fixed_reduction_block_id(function, header, "lane-seen-dispatch-0")
+    ) {
+        return None;
+    }
+    let post_unseen_block = function
+        .blocks
+        .iter()
+        .find(|block| block.id == post_unseen_entry)?;
+    if !matches!(
+        &post_unseen_block.terminator,
+        MirTerminator::Jump { target } if *target == normalized_fixed_reduction_block_id(function, header, "lane-unseen-dispatch-0")
+    ) {
+        return None;
+    }
+    let generated_blocks = normalized_fixed_reduction_generated_blocks(function, header)?;
+    if generated_blocks.contains(&else_target) {
+        return None;
+    }
+    let tree_block = function.blocks.iter().find(|block| block.id == tree)?;
+    if !matches!(
+        &tree_block.terminator,
+        MirTerminator::Jump { target } if *target == continuation
+    ) {
+        return None;
+    }
+    let exit_block = function.blocks.iter().find(|block| block.id == else_target)?;
+    if !matches!(
+        &exit_block.terminator,
+        MirTerminator::Branch {
+            then_target: gate_then,
+            else_target: gate_else,
+            ..
+        } if *gate_then == tree && *gate_else == continuation
+    ) {
+        return None;
+    }
+    let advances = function
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.instructions.iter().any(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    MirOperation::LoopRangeAdvance { cursor: value, .. } if *value == cursor
+                )
+            }) && matches!(
+                &block.terminator,
+                MirTerminator::Jump { target } if *target == header
+            )
+        })
+        .map(|block| block.id)
+        .collect::<Vec<_>>();
+    if advances.len() != 1 {
+        return None;
+    }
+    let advance = advances[0];
+    let mut body_blocks = collect_loop_region(function, header, body, Some(post_entry));
+    body_blocks.retain(|block_id| *block_id != advance);
+    if body_blocks.is_empty()
+        || !body_blocks.iter().any(|block_id| {
+            function
+                .blocks
+                .iter()
+                .find(|block| block.id == *block_id)
+                .is_some_and(|block| block.terminator.targets().contains(&post_entry))
+        })
+    {
+        return None;
+    }
+    body_blocks.push(advance);
+    body_blocks.sort_unstable();
+    Some(CanonicalLoopShape {
+        form: MirLoopForm::Counted,
+        cursor: Some(cursor),
+        cursor_place: None,
+        range: Some(range),
+        body,
+        exit: Some(else_target),
+        advance: Some(advance),
+        blocks: body_blocks,
+    })
+}
+fn normalized_fixed_reduction_local_id(
+    function: &MirFunction,
+    header: MirBlockId,
+    role: &str,
+) -> MirLocalId {
+    MirLocalId(stable_id(
+        "mir-fixed-reduction-local",
+        &normalized_fixed_reduction_identity(function, header, role),
+    ))
+}
+
+fn normalized_fixed_reduction_place_id(
+    function: &MirFunction,
+    header: MirBlockId,
+    role: &str,
+) -> MirPlaceId {
+    MirPlaceId(stable_id(
+        "mir-fixed-reduction-place",
+        &normalized_fixed_reduction_identity(function, header, role),
+    ))
+}
+fn normalized_fixed_reduction_generated_blocks(
+    function: &MirFunction,
+    header: MirBlockId,
+) -> Option<HashSet<MirBlockId>> {
+    let order = crate::MIROptimization::Acceleration::D_FRED1_FIXED_ORDER;
+    if !order.is_canonical() {
+        return None;
+    }
+    let mut generated = HashSet::from([
+        normalized_fixed_reduction_block_id(function, header, "dispatch-entry"),
+        normalized_fixed_reduction_block_id(function, header, "post-entry"),
+        normalized_fixed_reduction_block_id(function, header, "post-seen-entry"),
+        normalized_fixed_reduction_block_id(function, header, "post-unseen-entry"),
+        normalized_fixed_reduction_block_id(function, header, "tree"),
+        normalized_fixed_reduction_block_id(function, header, "continuation"),
+    ]);
+    for lane in 0..order.lanes {
+        generated.insert(normalized_fixed_reduction_block_id(
+            function,
+            header,
+            &format!("lane-pre-{lane}"),
+        ));
+        generated.insert(normalized_fixed_reduction_block_id(
+            function,
+            header,
+            &format!("lane-seen-post-{lane}"),
+        ));
+        generated.insert(normalized_fixed_reduction_block_id(
+            function,
+            header,
+            &format!("lane-unseen-post-{lane}"),
+        ));
+        if lane + 1 < order.lanes {
+            generated.insert(normalized_fixed_reduction_block_id(
+                function,
+                header,
+                &format!("lane-dispatch-{lane}"),
+            ));
+            generated.insert(normalized_fixed_reduction_block_id(
+                function,
+                header,
+                &format!("lane-seen-dispatch-{lane}"),
+            ));
+            generated.insert(normalized_fixed_reduction_block_id(
+                function,
+                header,
+                &format!("lane-unseen-dispatch-{lane}"),
+            ));
+        }
+    }
+    generated
+        .iter()
+        .all(|block_id| function.blocks.iter().any(|block| block.id == *block_id))
+        .then_some(generated)
+}
+
+fn normalized_fixed_reduction_fact(
+    function: &MirFunction,
+    fact: &MirVectorFact,
+) -> Option<MirFixedReductionFact> {
+    if fact.rule != MirVectorRule::Reduction || fact.fixed_reduction.is_some() {
+        return None;
+    }
+    let header_block = function
+        .blocks
+        .iter()
+        .find(|block| block.id == fact.loop_header)?;
+    let MirTerminator::Branch {
+        then_target,
+        else_target,
+        ..
+    } = &header_block.terminator
+    else {
+        return None;
+    };
+    let (then_target, else_target) = (*then_target, *else_target);
+    let shape =
+        normalized_fixed_reduction_shape(function, fact.loop_header, then_target, else_target)?;
+    let Some(advance) = shape.advance else {
+        return None;
+    };
+    if fact.body_blocks
+        != shape
+            .blocks
+            .iter()
+            .copied()
+            .filter(|block_id| *block_id != advance)
+            .collect::<Vec<_>>()
+    {
+        return None;
+    }
+    let instructions = fact
+        .body_blocks
+        .iter()
+        .flat_map(|block_id| {
+            function
+                .blocks
+                .iter()
+                .find(|block| block.id == *block_id)
+                .into_iter()
+                .flat_map(|block| block.instructions.iter())
+        })
+        .collect::<Vec<_>>();
+    let (accumulator, addend, _) = fixed_reduction_plan(function, &instructions)?;
+    let seed_op = normalized_fixed_reduction_op_id(function, fact.loop_header, "seed-read");
+    let expected_seed_value =
+        normalized_fixed_reduction_value_id(function, fact.loop_header, "seed-read");
+    let seed_value = function
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+        .find(|instruction| {
+            instruction.id == seed_op && instruction.result == Some(expected_seed_value)
+        })
+        .and_then(|instruction| match &instruction.operation {
+            MirOperation::ReadPlace(place) if *place == accumulator => instruction.result,
+            _ => None,
+        })?;
+    let continuation =
+        normalized_fixed_reduction_block_id(function, fact.loop_header, "continuation");
+    let tree = normalized_fixed_reduction_block_id(function, fact.loop_header, "tree");
+    let tree_block = function.blocks.iter().find(|block| block.id == tree)?;
+    if !tree_block.instructions.iter().any(|instruction| {
+        matches!(
+            &instruction.operation,
+            MirOperation::WritePlace { place, .. } if *place == accumulator
+        )
+    }) {
+        return None;
+    }
+    let source_operations = instructions.iter().map(|instruction| instruction.id).collect();
+    Some(MirFixedReductionFact {
+        accumulator,
+        addend,
+        seed: seed_value,
+        condition: None,
+        source_operations,
+        exit: continuation,
+        order: crate::MIROptimization::Acceleration::D_FRED1_FIXED_ORDER,
+    })
+}
+
 fn counted_shape(
     function: &MirFunction,
     header: MirBlockId,
     then_target: MirBlockId,
     else_target: MirBlockId,
 ) -> Option<CanonicalLoopShape> {
+    if let Some(shape) =
+        normalized_fixed_reduction_shape(function, header, then_target, else_target)
+    {
+        return Some(shape);
+    }
     let header_block = function.blocks.iter().find(|block| block.id == header)?;
     let cursor_form = header_block
         .instructions
