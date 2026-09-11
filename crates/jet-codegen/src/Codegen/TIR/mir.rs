@@ -5883,8 +5883,15 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn lower_call_arg(&mut self, arg: &TCallArg) -> Result<MirCallArg, LowerError> {
+        // A checked concrete-to-trait coercion transfers the concrete value to
+        // the box even when the trait parameter's convention is Read. Keep the
+        // ordinary borrow path for already-boxed or genuinely borrowed values.
+        let consumes_trait_box =
+            arg.box_as_trait.is_some() && arg.borrow && !arg.mut_borrow && !arg.clone && !arg.arc_clone;
         let access = if arg.mut_borrow {
             MirAccess::Write
+        } else if consumes_trait_box {
+            MirAccess::Move
         } else if arg.borrow {
             MirAccess::Read
         } else if arg.clone || arg.arc_clone {
@@ -5911,11 +5918,12 @@ impl<'a> LowerCtx<'a> {
             None
         };
         let value = if let Some(place) = place {
-            self.emit(
-                "call-place",
-                Some(arg.value.ty.clone()),
-                MirOperation::ReadPlace(place),
-            )?
+            let operation = if consumes_trait_box {
+                MirOperation::MovePlace { place }
+            } else {
+                MirOperation::ReadPlace(place)
+            };
+            self.emit("call-place", Some(arg.value.ty.clone()), operation)?
         } else {
             self.lower_child(&arg.value)?
         };
