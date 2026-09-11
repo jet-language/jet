@@ -5,6 +5,7 @@ use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda_expecting;
 use crate::Codegen::TIR::lower_lambda_expecting_callable;
+use crate::Codegen::TIR::lower_lambda_expecting_host_borrow_with_return;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::with_lambda_body_expr_cache;
 use crate::Codegen::TIR::LowerEnv;
@@ -745,11 +746,75 @@ fn lower_template_items(
     }
 }
 
-/// Lower a named function for a collection adapter's callback ABI.
-///
-/// Ordinary function values carry their effective failure result. Collection
-/// adapters choose either that carrier or the source-success callback shape;
-/// this helper selects the requested view and emits the one boundary wrapper.
+/// Recognize the raw `Ordering` forms accepted by a binary sort comparator.
+fn is_ordering_comparator_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner, _) => is_ordering_comparator_expr(inner),
+        Expr::Binary(crate::AST::BinOp::Compare, ..) => true,
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if method == "compare" && args.len() == 1 => {
+            let _ = receiver;
+            true
+        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if method == "then" && args.len() == 1 => {
+            is_ordering_comparator_expr(receiver)
+        }
+        _ => false,
+    }
+}
+
+fn is_ordering_comparator_lambda(lam: &Lambda) -> bool {
+    if lam.params.len() != 2 {
+        return false;
+    }
+    let tail = match &lam.body {
+        LambdaBody::Expr(expr) => Some(expr.as_ref()),
+        LambdaBody::Block(stmts) => stmts.iter().rev().find_map(|stmt| match stmt {
+            Stmt::Return(Some(expr), _) | Stmt::Expr(expr) => Some(expr),
+            _ => None,
+        }),
+    };
+    tail.is_some_and(is_ordering_comparator_expr)
+}
+
+/// Lower an inline binary Ordering comparator through the same host-borrow
+/// lambda boundary as named collection callbacks. This keeps the checked raw
+/// return slot visible to TIR instead of allowing the ambient failure carrier
+/// to turn the callback into a fallible adapter.
+fn lower_ordering_comparator_callback(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    params: &[Type],
+) -> TExpr {
+    let ordering = Type::Named(crate::Syntax::TYPE_ORDERING.to_string());
+    let lowered =
+        lower_lambda_expecting_host_borrow_with_return(lam, cx, env, params, false, &ordering);
+    TExpr {
+        ty: Type::Fn {
+            params: params.to_vec(),
+            ret: Some(Box::new(ordering)),
+            effect_bound: None,
+            param_contract: None,
+            call_metadata: None,
+            return_view_provenance: None,
+        },
+        kind: TExprKind::Lambda(Box::new(lowered)),
+    }
+}
+
+/// Lower a named function, or an inline binary comparator, for a collection
+/// adapter's callback ABI. Ordinary function values carry their effective
+/// failure result; raw comparator slots keep their checked return shape.
 pub(crate) fn lower_named_collection_callback(
     expr: &Expr,
     cx: &Cx,
@@ -757,6 +822,12 @@ pub(crate) fn lower_named_collection_callback(
     effective: bool,
     params: Option<&[Type]>,
 ) -> Option<TExpr> {
+    if let (Expr::Lambda(lam), Some(params)) = (expr, params) {
+        if is_ordering_comparator_lambda(lam) {
+            return Some(lower_ordering_comparator_callback(lam, cx, env, params));
+        }
+        return None;
+    }
     let Expr::Ident(name, _) = expr else {
         return None;
     };

@@ -209,6 +209,29 @@ pub(crate) fn lower_lambda_expecting_host_borrow(
         None,
     )
 }
+/// Lower a collection comparator whose host callback has an explicit raw return.
+/// The comparator is lent `&T` inputs like the ordinary collection callback, but
+/// its return slot is part of the helper ABI and must not inherit Jet's ambient
+/// failure carrier.
+pub(crate) fn lower_lambda_expecting_host_borrow_with_return(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: &[Type],
+    write: bool,
+    expected_return: &Type,
+) -> TLambda {
+    lower_lambda_expecting_with_host_borrow(
+        lam,
+        cx,
+        env,
+        Some(expected_params),
+        Some(write),
+        false,
+        None,
+        Some(expected_return),
+    )
+}
 
 /// D-FAILURE-FOUNDATION1: mirror sema's implicit `Error` carrier for a lambda
 /// that writes a success/error annotation. The AST keeps those two source
