@@ -29,6 +29,7 @@ enum Packet {
     Data(Int)
     Retry(Int)
     Empty
+    Ignore(Int)
 }
 
 fn packet_value(packet: Packet) Int -> {
@@ -38,6 +39,7 @@ fn packet_value(packet: Packet) Int -> {
             if value == 0 -> return 9
             if value > 0 -> { value + 1 } else -> { -1 }
         }
+        .Ignore(_) -> 0
         .Empty -> { 0 }
         else -> -2
     }
@@ -51,6 +53,7 @@ fn packet_value(packet: Packet) Int -> {
 @expected_or :: packet_value(Packet.Retry(2))
 @expected_nested_return :: packet_value(Packet.Data(0))
 @expected_empty :: packet_value(Packet.Empty)
+@expected_wildcard :: packet_value(Packet.Ignore(17))
 
 fn run() {
     print(@expected_one)
@@ -65,10 +68,12 @@ fn run() {
     print(@expected_or)
     print(@expected_nested_return)
     print(@expected_empty)
+    print(@expected_wildcard)
     print(packet_value(Packet.Data(12)))
     print(packet_value(Packet.Retry(2)))
     print(packet_value(Packet.Data(0)))
     print(packet_value(Packet.Empty))
+    print(packet_value(Packet.Ignore(17)))
 }
 "#;
 
@@ -100,6 +105,7 @@ enum Packet {
     Data(Int)
     Retry(Int)
     Empty
+    Ignore(Int)
 }
 
 #Target(JS)
@@ -110,6 +116,7 @@ fn packet_value(packet: Packet) Int -[]> {
             if value == 0 -> return 9
             if value > 0 -> { value + 1 } else -> { -1 }
         }
+        .Ignore(_) -> 0
         .Empty -> { 0 }
         else -> -2
     }
@@ -143,6 +150,7 @@ fn run() {
     print(packet_value(Packet.Data(12)))
     print(packet_value(Packet.Retry(2)))
     print(packet_value(Packet.Data(0)))
+    print(packet_value(Packet.Ignore(17)))
     print(packet_value(Packet.Empty))
     print(wasm_block(true))
     print(wasm_arm(2))
@@ -155,14 +163,14 @@ fn run() {
 fn block_values_arm_tables_and_early_returns_match_comptime_and_hosted_tiers() {
     assert_packaged_cli_tiers_agree(
         COMPTIME_SOURCE,
-        "one\nother\nearly\nlate\none\nother\nearly\nlate\n100\n3\n9\n0\n100\n3\n9\n0\n",
+        "one\nother\nearly\nlate\none\nother\nearly\nlate\n100\n3\n9\n0\n0\n100\n3\n9\n0\n0\n",
     );
 }
 
 #[test]
 fn block_values_arm_tables_and_early_returns_match_web_runtime() {
-    if !have_tool("node") {
-        eprintln!("note: skipping tail-return web test (need node)");
+    if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
+        eprintln!("note: skipping tail-return web test (need rustc, wasm32 target, and node)");
         return;
     }
 
@@ -170,13 +178,13 @@ fn block_values_arm_tables_and_early_returns_match_web_runtime() {
         .expect("tail-return web source must compile");
     let web = out.web.expect("web compile must return web artifacts");
 
-    let dir = common::unique_tmp("jet_tail_return_web");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("app.js"), &web.js_app).unwrap();
-    fs::write(dir.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
-    fs::write(dir.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+    let scratch = common::Scratch::new("jet_tail_return_web");
+    fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+    fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+    fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
     let wasm = Command::new("rustc")
-        .current_dir(&dir)
+        .current_dir(&scratch.path)
         .args([
             "--edition", "2021", "--target", "wasm32-unknown-unknown",
             "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm",
@@ -189,11 +197,10 @@ fn block_values_arm_tables_and_early_returns_match_web_runtime() {
         String::from_utf8_lossy(&wasm.stderr)
     );
     let output = Command::new("node")
-        .current_dir(&dir)
+        .current_dir(&scratch.path)
         .arg("app.js")
         .output()
         .expect("node must run the generated web app");
-    let _ = fs::remove_dir_all(&dir);
     assert!(
         output.status.success(),
         "generated web app failed:\n{}",
@@ -201,12 +208,24 @@ fn block_values_arm_tables_and_early_returns_match_web_runtime() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "7\n20\n30\n40\n100\n3\n9\n0\n7\n20\n30\n40\n"
+        "7\n20\n30\n40\n100\n3\n9\n0\n0\n7\n20\n30\n40\n"
     );
 }
 
 fn have_tool(name: &str) -> bool {
     Command::new(name).arg("--version").output().is_ok()
+}
+fn have_wasm_target() -> bool {
+    Command::new("rustc")
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn assert_packaged_cli_tiers_agree(src: &str, expected_stdout: &str) {
