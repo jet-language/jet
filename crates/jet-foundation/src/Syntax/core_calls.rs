@@ -1262,7 +1262,7 @@ const fn sema_web_call(
 
 // BEGIN GENERATED CORE CALLS
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 05686767670432ec8a8c13b33daf9748555142d14a261910a25e15cfe625a0b3
+// Source SHA-256: b9c22870ec62d57d9c30fc3a4149efd231f6a894e050ed4fd7d02351c3097b21
 // Dispatcher rows and ambient routes are generated from Core.jet.
 pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
     ("core.crypto.uuid", "v7"),
@@ -1907,23 +1907,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.crypto", "__vault_wrapped_bytes", "jet_vault_wrapped_bytes_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_vault_wrapped_bytes"),
     CoreCallRecord::new("core.crypto", "__vault_unlock_recipient", "jet_vault_unlock_recipient_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_vault_unlock_recipient"),
     CoreCallRecord::new("core.crypto", "__vault_unlock_passphrase", "jet_vault_unlock_passphrase_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_vault_unlock_passphrase"),
-    CoreCallRecord::new("core.archive", "zip_compress", "jet_archive_zip_compress", false, &[true, true]).with_jit_symbol("jet_jit_zip_compress"),
-    CoreCallRecord::new("core.archive", "zip_decompress", "jet_archive_zip_decompress", false, &[true]).with_jit_symbol("jet_jit_zip_decompress"),
-    CoreCallRecord::new("core.archive", "crc32", "jet_archive_crc32", false, &[true]).with_jit_symbol("jet_jit_archive_crc32"),
-    CoreCallRecord::new("core.archive", "adler32", "jet_archive_adler32", false, &[true]).with_jit_symbol("jet_jit_archive_adler32"),
-    CoreCallRecord::new("core.archive", "deflate", "jet_archive_deflate", false, &[true]).with_jit_symbol("jet_jit_archive_deflate"),
-    CoreCallRecord::new("core.archive", "inflate", "jet_archive_inflate", false, &[true]).with_jit_symbol("jet_jit_archive_inflate"),
-    CoreCallRecord::new("core.archive", "zip_names_json", "jet_archive_zip_names_json", false, &[true]).with_jit_symbol("jet_jit_archive_zip_names_json"),
-    CoreCallRecord::new("core.archive", "zip_open", "jet_archive_zip_open", false, &[true]).with_jit_symbol("jet_jit_archive_zip_open"),
-    CoreCallRecord::new("core.archive", "zip_next", "jet_archive_zip_next", false, &[true, true]).with_jit_symbol("jet_jit_zip_next"),
-    CoreCallRecord::new("core.archive", "zip_read", "jet_archive_zip_read", false, &[true, true]).with_jit_symbol("jet_jit_zip_read"),
-    CoreCallRecord::new("core.archive", "zip_write", "jet_archive_zip_write", false, &[true, true, true]).with_jit_symbol("jet_jit_zip_write"),
-    CoreCallRecord::new("core.archive", "zip_close", "jet_archive_zip_close", false, &[true]).with_jit_symbol("jet_jit_zip_close"),
-    CoreCallRecord::new("core.archive", "zip_extract", "jet_archive_zip_extract", false, &[true, true]).with_jit_symbol("jet_jit_zip_extract"),
-    CoreCallRecord::new("core.archive", "unzip", "jet_archive_unzip", false, &[true, true]).with_jit_symbol("jet_jit_unzip"),
-    CoreCallRecord::new("core.archive", "tar_add", "jet_archive_tar_add", false, &[true, true, true]).with_jit_symbol("jet_jit_tar_add"),
-    CoreCallRecord::new("core.archive", "tar_get", "jet_archive_tar_get", false, &[true, true]).with_jit_symbol("jet_jit_tar_get"),
-    CoreCallRecord::new("core.archive", "tar_names_json", "jet_archive_tar_names_json", false, &[true]).with_jit_symbol("jet_jit_tar_names_json"),
     CoreCallRecord::new( "core.web.storage.session", "get", "jet_web_storage_get", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .without_direct_jit(),
     CoreCallRecord::new( "core.web.storage.session", "remove", "jet_web_storage_remove", true, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .without_direct_jit(),
     CoreCallRecord::new("core.data", "count", "jet_data_count", true, &[true]) .with_jit_symbol("jet_jit_data_count"),
@@ -2177,12 +2160,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.log", "set_trace_id", "jet_ring_log_set_trace_id", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.log", "setup", "jet_ring_log_setup", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.crypto", "sha1", "jet_crypto_sha1_hex", true, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
-    CoreCallRecord::new("core.crypto", "seal", "jet_crypto_seal_typed_impl", false, &[true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_seal"),
-    CoreCallRecord::new("core.crypto", "open", "jet_crypto_open_typed_impl", false, &[true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_open"),
-    CoreCallRecord::new("core.crypto", "sign", "jet_crypto_sign_typed_impl", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_sign"),
-    CoreCallRecord::new("core.crypto", "verify", "jet_crypto_verify_typed_impl", false, &[true, true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_verify"),
-    CoreCallRecord::new("core.crypto", "password_hash", "jet_crypto_password_hash_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_password_hash"),
-    CoreCallRecord::new("core.crypto", "password_verify", "jet_crypto_password_verify_typed_impl", false, &[true, true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_password_verify"),
     CoreCallRecord::new("core.crypto", "sha256", "jet_crypto_sha256_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_sha256"),
     CoreCallRecord::new("core.crypto", "blake3", "jet_crypto_blake3_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_blake3"),
     CoreCallRecord::new("core.crypto", "sha512", "jet_crypto_sha512_typed_impl", false, &[true]).with_interpreter_route(CoreCallInterpreterRoute::Ambient).without_direct_aot().with_jit_symbol("jet_jit_crypto_sha512"),
@@ -2309,7 +2286,10 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.game.raylib", "gamepad_axis", "jet_raylib_gamepad_axis", true, &[false, true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.game.raylib", "load_texture_atlas", "jet_raylib_load_texture_atlas", true, &[true], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new( "core.game.raylib", "draw_sprite", "jet_raylib_draw_sprite", true, &[true, true, false, false], ).with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new( "core.db", "open", "jet_db_open", true, &[true], ) .with_jit_symbol("jet_jit_db_open"),
+    CoreCallRecord::new( "core.db", "open_memory", "jet_db_open_memory", true, &[], ) .with_jit_symbol("jet_jit_db_open_memory"),
     CoreCallRecord::new( "core.db", "pool", "jet_db_pool_new", true, &[true, false], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .with_jit_symbol("jet_jit_db_pool_new"),
+    CoreCallRecord::new( "core.db", "policy", "jet_db_policy_new", true, &[true, true], ) .with_jit_symbol("jet_jit_db_policy"),
     CoreCallRecord::new( "core.jobs", "queue", "jet_job_queue_default", true, &[], ) .with_jit_symbol("jet_jit_job_queue_default").with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "enqueue", "jet_job_queue_enqueue", true, &[true, true, true], ) .with_max_arity(4) .with_jit_symbol("jet_jit_job_queue_enqueue"),
     CoreCallRecord::receiver_with_symbol( &["JobQueue"], "delay", "jet_job_queue_delay", true, &[true, false, false, false], ) .with_jit_symbol("jet_jit_job_queue_delay"),
@@ -2685,13 +2665,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new( "core.crypto.expert", "signing_key_bytes", "jet_crypto_expert_signing_key_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .without_direct_jit(),
     CoreCallRecord::new( "core.crypto.expert", "x25519_secret_bytes", "jet_crypto_expert_x25519_secret_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .without_direct_jit(),
     CoreCallRecord::new( "core.crypto.expert", "shared_secret_bytes", "jet_crypto_expert_shared_secret_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .without_direct_jit(),
-    CoreCallRecord::new( "core.crypto", "__x25519_generate", "jet_crypto_x25519_generate_impl", false, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_x25519_generate"),
-    CoreCallRecord::new( "core.crypto", "__x25519_public", "jet_crypto_x25519_public_typed_impl", false, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_x25519_public"),
-    CoreCallRecord::new( "core.crypto", "__x25519_public_text", "jet_crypto_x25519_public_text_impl", false, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_x25519_public_text"),
-    CoreCallRecord::new( "core.crypto", "__x25519_public_from_text", "jet_crypto_x25519_public_from_text_impl", false, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_x25519_public_from_text"),
-    CoreCallRecord::new( "core.crypto", "__signing_generate", "jet_crypto_signing_generate_impl", false, &[], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_signing_generate"),
-    CoreCallRecord::new( "core.crypto", "__signing_public", "jet_crypto_signing_public_impl", false, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_signing_public"),
-    CoreCallRecord::new( "core.crypto", "__secret_from_text", "jet_crypto_secret_from_text_impl", false, &[true], ) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_secret_from_text"),
     CoreCallRecord::new( "core.crypto", "__signature_bytes", "jet_crypto_signature_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_signature_bytes"),
     CoreCallRecord::new( "core.crypto", "__verify_key_bytes", "jet_crypto_verify_key_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_verify_key_bytes"),
     CoreCallRecord::new( "core.crypto", "__wrapped_bytes", "jet_crypto_wrapped_bytes_impl", false, &[true], ) .with_pure_route(CoreCallPureRoute::Crypto) .with_interpreter_route(CoreCallInterpreterRoute::Ambient) .without_direct_aot() .with_jit_symbol("jet_jit_crypto_wrapped_bytes"),
@@ -2953,7 +2926,6 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.data.arrow", "import", "jet_data_arrow_import", true, &[false]).without_direct_jit(),
     CoreCallRecord::new("core.data.arrow", "query", "jet_data_query_arrow", true, &[false]).without_direct_jit(),
 ];
-// END GENERATED CORE CALLS
 // END GENERATED CORE CALLS
 
 
