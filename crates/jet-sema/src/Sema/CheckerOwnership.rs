@@ -1563,8 +1563,11 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                // D-CANVASSTATE1=D: an `#Off` body never reaches runtime.
-                Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => {}
+                // D-CANVASSTATE1=D: an `#Off` or `#DebugOnly` body never
+                // reaches the release runtime.
+                Stmt::Switched { marker, .. }
+                    if crate::AST::switched_off(marker)
+                        || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => {}
                 Stmt::Loop { body, .. }
                 | Stmt::Unsafe { body, .. }
                 | Stmt::Impure { body, .. }

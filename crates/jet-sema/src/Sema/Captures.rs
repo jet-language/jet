@@ -543,7 +543,9 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
                 || body.iter().any(|s| stmt_refs_name(s, name))
                 || step.as_ref().is_some_and(|step| stmt_refs_name(step, name))
         }
-        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => false,
+        Stmt::Switched { marker, .. }
+            if crate::AST::switched_off(marker)
+                || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => false,
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
@@ -1223,7 +1225,9 @@ pub(crate) fn stmt_collect_captures(
                 stmt_collect_captures(step, bound, read, mut_cap, called);
             }
         }
-        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => {}
+        Stmt::Switched { marker, .. }
+            if crate::AST::switched_off(marker)
+                || marker.name == crate::Syntax::MARKER_DEBUG_ONLY => {}
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
