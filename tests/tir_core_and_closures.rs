@@ -1423,3 +1423,44 @@ fn run() {
 "#;
     assert_tiers_agree("command_entry_associated_run", src, "99\n");
 }
+/// Card #2860: handled map failures are infallible, real fallible map callbacks
+/// use one carrier projection, and arrow-bodied explicit Ok arms are not wrapped
+/// twice. Every witness must agree across AOT, default run, and interpretation.
+#[test]
+fn card_2860_fallible_carrier_projection_tier_parity() {
+    let handled_map = "\
+fn run() {
+    pattern :: Regex{\"^IMG_([0-9]+)\\\\.jpeg$\"}
+    values := [\"IMG_1.jpeg\", \"IMG_2.jpeg\"].map(line -> {
+        found :: pattern.match(line) ?? panic(\"bad\")
+        Int.parse(found.group(1) ?? panic(\"bad\")) ?? panic(\"bad\")
+    })
+    print(values)
+}
+";
+    assert_tiers_agree("tir_card_2860_handled_map", handled_map, "[1, 2]\n");
+
+    let fallible_map = "\
+fn parse(n: Int) Int !Err -> {
+    if n == 0 { return Err(\"bad\") }
+    return n
+}
+fn run() {
+    values := [1, 0].map((n: Int) -> parse(n)) ?? {
+        print(err.message)
+        []
+    }
+    print(values)
+}
+";
+    assert_tiers_agree("tir_card_2860_fallible_map", fallible_map, "bad\n[]\n");
+
+    let explicit_ok_arms = "\
+fn choose(first: Bool) Int !Err -> if first -> Ok(1) else -> Ok(2)
+fn run() {
+    print(choose(true) ?? 0)
+    print(choose(false) ?? 0)
+}
+";
+    assert_tiers_agree("tir_card_2860_explicit_ok_arms", explicit_ok_arms, "1\n2\n");
+}

@@ -950,17 +950,26 @@ impl<'a> Checker<'a> {
             value.as_ref().without_parens(),
             Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
         );
-        if suppress_auto {
-            self.failure_auto_depth += 1;
-        }
+        // A locally handled carrier must not publish callback fallibility. The
+        // subject is inferred with automatic propagation suppressed so
+        // `infer_or_fallback` can inspect its Result/Option, but carrier
+        // inference still records the temporary route on a callback. Restore
+        // the enclosing facts after inspecting the subject; propagation in the
+        // fallback branch below remains visible.
+        let saved_failure_carrier = self.failure_carrier.clone();
+        let saved_task_body_propagates = self.task_body_propagates;
+        let saved_ret = self.ret.clone();
         let mut val_ty = if suppress_auto {
-            self.infer_without_auto_propagation(value)
+            self.failure_auto_depth += 1;
+            let ty = self.infer_without_auto_propagation(value);
+            self.failure_auto_depth -= 1;
+            ty
         } else {
             self.infer(value)
         };
-        if suppress_auto {
-            self.failure_auto_depth -= 1;
-        }
+        self.failure_carrier = saved_failure_carrier;
+        self.task_body_propagates = saved_task_body_propagates;
+        self.ret = saved_ret;
         // Collection methods with a callback have a void source return, but a
         // fallible callback gives the operation a `Result<Unit, E>` carrier.
         // Recover that carrier here so `??` checks its fallback against Unit
