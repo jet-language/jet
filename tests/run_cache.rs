@@ -1,4 +1,4 @@
-//! #741 — tier-boundary warm run cache: hit/miss, invalidation, phases, signpost, budget.
+//! #741 — tier-boundary warm run cache: hit/miss, invalidation, phases, budget.
 
 mod common;
 
@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Process-global env / phase counters — serialize in-process tests.
 fn lock_run_cache_tests() -> std::sync::MutexGuard<'static, ()> {
@@ -351,29 +351,46 @@ fn phases_zero_on_inprocess_warm_hit() {
     std::env::remove_var("JET_RUN_CACHE_DIR");
 }
 
+#[cfg(unix)]
 #[test]
-fn signpost_respects_tty_nocolor_json_and_once() {
+fn tty_run_does_not_promote_to_dev() {
     let _guard = lock_run_cache_tests();
-    jet::RunCache::reset_signpost_for_test();
-    let started = Instant::now() - Duration::from_millis(500);
-    assert!(
-        !jet::RunCache::signpost_eligible(started, false),
-        "non-tty must stay silent"
+    let root = common::test_scratch_root("run_cache")
+        .join(format!("tty_{}", unique()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("tty.jet");
+    std::fs::write(
+        &file,
+        "use core.time as time\nfn run() {\n    time.sleep(250ms)\n    print(\"tty\")\n}\n",
+    )
+    .unwrap();
+    let cache = root.join("cache");
+    let jet = jet_bin();
+    let shell_line = format!(
+        "exec '{}' run '{}'",
+        jet.replace('\'', "'\\''"),
+        file.display().to_string().replace('\'', "'\\''"),
     );
-    std::env::set_var("NO_COLOR", "1");
-    assert!(!jet::RunCache::signpost_eligible(started, true));
-    std::env::remove_var("NO_COLOR");
-    std::env::set_var("JET_JSON", "1");
-    assert!(!jet::RunCache::signpost_eligible(started, true));
-    std::env::remove_var("JET_JSON");
-    assert!(jet::RunCache::signpost_eligible(started, true));
-    jet::RunCache::maybe_signpost(started, true);
-    assert!(
-        !jet::RunCache::signpost_eligible(started, true),
-        "once-guard must block repeat"
+    let out = Command::new("script")
+        .args(["-qfec", &shell_line, "/dev/null"])
+        .env("JET_RUN_CACHE_DIR", &cache)
+        .env_remove("NO_COLOR")
+        .env_remove("FORCE_COLOR")
+        .env_remove("JET_JSON")
+        .output()
+        .expect("util-linux script must allocate a real PTY");
+    let transcript = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
-    assert!(jet::RunCache::signpost_line().contains("`jet dev`"));
-    jet::RunCache::reset_signpost_for_test();
+    assert!(out.status.success(), "{transcript}");
+    assert!(transcript.contains("tty"), "{transcript}");
+    assert!(
+        !transcript.contains("tip: for a faster edit loop"),
+        "normal TTY run emitted an automatic promotion: {transcript}"
+    );
 }
 
 #[test]
