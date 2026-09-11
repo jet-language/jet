@@ -6129,11 +6129,13 @@ fn inline_semantic(
             receiver,
             receiver_place,
             args,
+            aggregate_fields,
         } => MirSemanticOp::BuiltinMethod {
             call: *call,
             receiver: inline_value(ids, *receiver),
             receiver_place: receiver_place.map(|place| inline_place(ids, place)),
             args: args.iter().map(|value| inline_value(ids, *value)).collect(),
+            aggregate_fields: aggregate_fields.clone(),
         },
         MirSemanticOp::OptionLift2 {
             call,
@@ -13141,12 +13143,20 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
             receiver,
             receiver_place,
             args,
+            aggregate_fields,
         } => {
             writer.tag("builtin-method");
             writer.u64(call.0);
             writer.u64(receiver.0);
             writer.option_u64(receiver_place.map(|place| place.0));
             encode_values(writer, args);
+            match aggregate_fields {
+                Some(fields) => {
+                    writer.bool(true);
+                    encode_field_path(writer, fields);
+                }
+                None => writer.bool(false),
+            }
         }
         MirSemanticOp::OptionLift2 {
             call,

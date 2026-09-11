@@ -182,6 +182,7 @@ fn lower_unzip(
                 receiver,
                 receiver_place: Some(*place),
                 args: vec![value],
+                aggregate_fields: None,
             }),
         )?;
     }
@@ -272,6 +273,7 @@ fn lower_zip(
                 Some(iter_ty.clone()),
                 MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
                     call, receiver: value, receiver_place: None, args: Vec::new(),
+                    aggregate_fields: None,
                 }),
             )?
         };
@@ -683,6 +685,71 @@ fn lower_builtin_receiver(
     )?;
     Ok((receiver, Some(place)))
 }
+fn untagged_type(ty: &Type) -> &Type {
+    match ty {
+        Type::Tagged { inner, .. } => untagged_type(inner),
+        _ => ty,
+    }
+}
+
+fn lower_list_min_max(
+    ctx: &mut LowerCtx,
+    expr: &TExpr,
+    recv: &TExpr,
+    op: &TBuiltinOp,
+    args: &[TExpr],
+    carrier: &TFailureCarrier,
+) -> Result<jet_foundation::MIR::MirValueId, LowerError> {
+    if !args.is_empty() {
+        return Err(ctx.error(
+            ctx.span(),
+            "checked List.min_max operation received unexpected arguments",
+        ));
+    }
+    let Type::Option(inner) = untagged_type(&expr.ty) else {
+        return Err(ctx.error(
+            ctx.span(),
+            "checked List.min_max result is not optional",
+        ));
+    };
+    let tuple_ty = untagged_type(inner);
+    let Type::Tuple(fields) = tuple_ty else {
+        return Err(ctx.error(
+            ctx.span(),
+            "checked List.min_max result has no named tuple fields",
+        ));
+    };
+    if fields.len() != 2
+        || !fields.iter().any(|(name, _)| name == "min")
+        || !fields.iter().any(|(name, _)| name == "max")
+    {
+        return Err(ctx.error(
+            ctx.span(),
+            "checked List.min_max result must contain exactly min and max fields",
+        ));
+    }
+    let aggregate_fields = ["min", "max"]
+        .into_iter()
+        .map(|name| ctx.field_id_for_type(tuple_ty, name))
+        .collect::<Result<Vec<_>, LowerError>>()?;
+    let (receiver, receiver_place) = lower_builtin_receiver(ctx, recv, false)?;
+    let route = op.prelude_route(&recv.ty, &expr.ty, carrier).map_err(|error| {
+        ctx.error(ctx.span(), format!("builtin method {op:?}: {error:?}"))
+    })?;
+    let call = ctx.intern_prelude_route(route)?;
+    ctx.emit(
+        "list-min-max",
+        Some(expr.ty.clone()),
+        MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
+            call,
+            receiver,
+            receiver_place,
+            args: Vec::new(),
+            aggregate_fields: Some(aggregate_fields),
+        }),
+    )
+}
+
 
 fn lower_consuming_task_value(
     ctx: &mut LowerCtx,
@@ -2110,6 +2177,9 @@ pub(super) fn lower_expr(
             if matches!(op, TBuiltinOp::Indexed { .. } | TBuiltinOp::IterSplit { .. }) {
                 return lower_tuple_builtin(ctx, expr, recv, op, args, &carrier);
             }
+            if matches!(op, TBuiltinOp::ListMinMax { .. }) {
+                return lower_list_min_max(ctx, expr, recv, op, args, &carrier);
+            }
             let (mut receiver, receiver_place) =
                 lower_builtin_receiver(ctx, recv, op.needs_mut_receiver_place())?;
             let mut lowered_args = lower_values(ctx, args)?;
@@ -2157,6 +2227,7 @@ pub(super) fn lower_expr(
                     receiver,
                     receiver_place,
                     args: lowered_args,
+                    aggregate_fields: None,
                 }),
             )
         }

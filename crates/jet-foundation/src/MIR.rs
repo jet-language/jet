@@ -4490,6 +4490,12 @@ pub enum MirSemanticOp {
         /// operation is value-based and does not write through a receiver.
         receiver_place: Option<MirPlaceId>,
         args: Vec<MirValueId>,
+        /// Checked named fields used by aggregate Prelude builders.
+        ///
+        /// `None` keeps ordinary builtin methods on the existing value ABI.
+        /// Aggregate methods carry field identities from sema/TIR instead of
+        /// making an adapter rediscover the result shape from a rendered type.
+        aggregate_fields: Option<Vec<MirFieldId>>,
     },
     OptionLift2 {
         call: MirPreludeCallId,
@@ -4786,6 +4792,10 @@ impl MirSemanticOp {
                 .map(|(field, _)| *field)
                 .chain(boxed_fields.iter().copied())
                 .collect(),
+            Self::BuiltinMethod {
+                aggregate_fields: Some(fields),
+                ..
+            } => fields.clone(),
             Self::CellGuardProject { paths, .. } => {
                 paths.iter().flatten().copied().collect()
             }
