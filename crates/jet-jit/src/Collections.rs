@@ -898,6 +898,42 @@ pub(crate) mod collection_semantics {
             |min, max| (min, max),
         )
     }
+    #[derive(Clone, Copy)]
+    struct FloatOrderKey(f64);
+
+    impl PartialEq for FloatOrderKey {
+        fn eq(&self, other: &Self) -> bool {
+            super::float_ordering::jet_float_sort_cmp(self.0, other.0)
+                == std::cmp::Ordering::Equal
+        }
+    }
+
+    impl Eq for FloatOrderKey {}
+
+    impl PartialOrd for FloatOrderKey {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for FloatOrderKey {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            super::float_ordering::jet_float_sort_cmp(self.0, other.0)
+        }
+    }
+
+    pub(super) fn list_min_max_float(xs: &[f64]) -> JetOutcome<(f64, f64), JetAbsent> {
+        jet_list_min_max_by(
+            xs,
+            |value| FloatOrderKey(*value),
+            |min, max| (min, max),
+        )
+    }
+
+    pub(super) fn list_min_max_string(xs: &[String]) -> JetOutcome<(String, String), JetAbsent> {
+        jet_list_min_max(xs, |min, max| (min, max))
+    }
+
 
     pub(super) fn list_replace<T: Clone>(xs: &[T], index: i64, new: T) -> Vec<T> {
         jet_list_replace(xs, index, new)
@@ -6451,13 +6487,47 @@ fn jet_jit_list_random(list: i64) -> i64 {
 fn jet_jit_list_min_max(list: i64) -> i64 {
     let values = clone_list_ints(list);
     let Some((min, max)) = collection_semantics::list_min_max_int(&values).ok() else {
-        return 0;
+        return Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::alloc_jit_result(rt, false, 0)
+        });
     };
     Concurrency::with_runtime_mut(|rt| {
         let pair = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_int(pair, 0, min);
         let _ = rt.heap.record_set_int(pair, 1, max);
-        pair + 1
+        crate::runtime_host::alloc_jit_result(rt, true, pair as u64)
+    })
+}
+
+fn jet_jit_list_min_max_f64(list: i64) -> i64 {
+    let values = clone_list_floats(list);
+    let Some((min, max)) = collection_semantics::list_min_max_float(&values).ok() else {
+        return Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::alloc_jit_result(rt, false, 0)
+        });
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let pair = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_float(pair, 0, min);
+        let _ = rt.heap.record_set_float(pair, 1, max);
+        crate::runtime_host::alloc_jit_result(rt, true, pair as u64)
+    })
+}
+
+fn jet_jit_list_min_max_str(list: i64) -> i64 {
+    let values = clone_list_strings(list);
+    let Some((min, max)) = collection_semantics::list_min_max_string(&values).ok() else {
+        return Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::alloc_jit_result(rt, false, 0)
+        });
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let pair = rt.heap.alloc_record(2);
+        let min = rt.heap.alloc_string(min);
+        let max = rt.heap.alloc_string(max);
+        let _ = rt.heap.record_set_string(pair, 0, min);
+        let _ = rt.heap.record_set_string(pair, 1, max);
+        crate::runtime_host::alloc_jit_result(rt, true, pair as u64)
     })
 }
 
@@ -9400,6 +9470,8 @@ host_fns! {
     list_difference: "jet_jit_list_difference" => jet_jit_list_difference: sig_get_opt;
     list_random: "jet_jit_list_random" => jet_jit_list_random: sig_len;
     list_min_max: "jet_jit_list_min_max" => jet_jit_list_min_max: sig_len;
+    list_min_max_f64: "jet_jit_list_min_max_f64" => jet_jit_list_min_max_f64: sig_len;
+    list_min_max_str: "jet_jit_list_min_max_str" => jet_jit_list_min_max_str: sig_len;
     list_replace: "jet_jit_list_replace" => jet_jit_list_replace: sig_three_ret;
     list_range_end: "jet_jit_list_range_end" => jet_jit_list_range_end: sig_range_end;
     split_write: "jet_jit_split_write" => jet_jit_split_write: sig_disjoint;

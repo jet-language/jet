@@ -1427,7 +1427,7 @@ impl THandleOp {
                     AllocReset => ("reset", 1, &[true]),
                     _ => unreachable!(),
                 };
-                h(&format!("{allocator}.{method}"), &format!("Jet{allocator}::{method}"), arity, arity, borrow_mask, Some(Effect::Mem), carrier)
+                h(&format!("{allocator}.{method}"), &format!("jet_mem::Jet{allocator}::{method}"), arity, arity, borrow_mask, Some(Effect::Mem), carrier)
             }
             TaskPause => h("task.pause", "jet_std::JetTask::pause", 1, 1, &[true], None, carrier),
             TaskResume => h("task.resume", "jet_std::JetTask::resume", 1, 1, &[true], None, carrier),
@@ -3094,8 +3094,8 @@ pub(super) fn alloc_new_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let (member, symbol) = match kind {
-        MirAllocatorKind::Fixed => ("fixed.new", "JetFixed::new"),
-        MirAllocatorKind::General => ("arena.new", "JetArena::new"),
+        MirAllocatorKind::Fixed => ("fixed.new", "jet_mem::JetFixed::new"),
+        MirAllocatorKind::General => ("arena.new", "jet_mem::JetArena::new"),
     };
     prelude_route_row(
         MirPreludeFamily::StaticPrelude,

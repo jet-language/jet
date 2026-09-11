@@ -10,10 +10,10 @@ use jet_foundation::MIR::{
     MirBinaryOp, MirCallArg, MirCallee, MirCaptureOperand, MirConstKey, MirConstReport,
     MirConstant, MirCoreClosureKind, MirDropKind, MirFailureCarrier, MirFieldId, MirFieldRow,
     MirFunction, MirFunctionForm, MirFunctionId, MirGcEditKind, MirInstruction, MirOperation,
-    MirOwnershipMode, MirPanicContext, MirPanicLoc, MirPlace, MirPlaceBase, MirPlaceId,
-    MirPreludeTypeArg, MirProgram, MirRequireKind, MirScalarKind, MirSemanticOp, MirStringPart,
-    MirTerminator, MirType, MirTypeDefKind, MirTypeId, MirTypeKind, MirUnaryOp, MirUnionCoercion,
-    MirValueId,
+    MirInternalTag, MirOwnershipMode, MirPanicContext, MirPanicLoc, MirPlace, MirPlaceBase,
+    MirPlaceId, MirPreludeTypeArg, MirProgram, MirRequireKind, MirScalarKind, MirSemanticOp,
+    MirStringPart, MirTagMarker, MirTerminator, MirType, MirTypeDefKind, MirTypeId, MirTypeKind,
+    MirUnaryOp, MirUnionCoercion, MirValueId,
 };
 use jet_rt::{
     RECORD_FIELD_ADDRESS_BOOL, RECORD_FIELD_ADDRESS_CHAR, RECORD_FIELD_ADDRESS_F64,
@@ -115,6 +115,25 @@ fn is_exact_int_type(ty: &MirType) -> bool {
         | MirTypeKind::Tagged { inner: base, .. }
         | MirTypeKind::Quantity { base, .. } => is_exact_int_type(base),
         _ => false,
+    }
+}
+
+fn is_allocator_view_type(ty: &MirType) -> bool {
+    matches!(
+        ty.kind(),
+        MirTypeKind::Tagged {
+            marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+            ..
+        }
+    )
+}
+
+fn allocator_requested_bytes(ty: &MirType) -> i64 {
+    match ty.layout.size {
+        jet_foundation::MIR::MirSize::Static(size) => {
+            i64::try_from(size).unwrap_or(i64::MAX).max(1)
+        }
+        jet_foundation::MIR::MirSize::Dynamic => 8,
     }
 }
 
@@ -2994,8 +3013,9 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 None
             }
             MirOperation::WritePlace { place, value } => {
-                let value = self.value(*value)?;
-                self.write_place(builder, *place, value)?;
+                let value_id = *value;
+                let value = self.value(value_id)?;
+                self.write_place(builder, *place, value_id, value)?;
                 self.observe_live_place(builder, *place)?;
                 None
             }
@@ -3286,10 +3306,22 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
             MirOperation::PtrFromAddr { addr, .. } => Some(self.value(*addr)?),
             MirOperation::Deref { value: addr } => {
-                let ty =
-                    expected.ok_or_else(|| "MIR dereference has no pointee ABI".to_string())?;
+                let addr_ty = self.mir_value_type(*addr)?;
                 let addr = self.cast(builder, self.value(*addr)?, types::I64)?;
-                Some(builder.ins().load(ty, MemFlags::new(), addr, 0))
+                if is_allocator_view_type(&addr_ty) {
+                    Some(
+                        self.call_host(builder, self.host.memory.allocator_view_read, &[addr])?
+                            .first()
+                            .copied()
+                            .ok_or_else(|| {
+                                "MIR allocator view reader returned no value".to_string()
+                            })?,
+                    )
+                } else {
+                    let ty =
+                        expected.ok_or_else(|| "MIR dereference has no pointee ABI".to_string())?;
+                    Some(builder.ins().load(ty, MemFlags::new(), addr, 0))
+                }
             }
             MirOperation::RawAddressOf { place } => Some(self.address_of(builder, *place)?),
             MirOperation::AddressOf {
@@ -3436,20 +3468,30 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             }
             MirOperation::ScopeEnter { .. } | MirOperation::ScopeExit { .. } => None,
             MirOperation::Drop { value, kind } => {
+                let value_ty = self.mir_value_type(*value)?;
                 if matches!(kind, MirDropKind::ForeignHandle) {
-                    let handle_ty = self.mir_value_type(*value)?;
                     if !self.program.handles.iter().any(|handle| {
-                        handle.ty.same_checked_type(&handle_ty)
+                        handle.ty.same_checked_type(&value_ty)
                             || (handle.ty.nominal_name().is_some()
-                                && handle.ty.nominal_name() == handle_ty.nominal_name())
+                                && handle.ty.nominal_name() == value_ty.nominal_name())
                     }) {
                         return Err("MIR foreign-handle drop has no lifecycle row".to_string());
                     }
                     let token = self.cast(builder, self.value(*value)?, types::I64)?;
                     let _ = self.call_host(builder, self.host.ffi.drop_handle, &[token])?;
-                } else if self.mir_value_type(*value)?.nominal_name() == Some("DbLease") {
+                } else if value_ty.nominal_name() == Some("DbLease") {
                     let handle = self.cast(builder, self.value(*value)?, types::I64)?;
                     let _ = self.call_host(builder, self.host.db.pool_lease_close, &[handle])?;
+                } else if matches!(
+                    value_ty.nominal_name(),
+                    Some("Arena" | "Bump" | "Pool" | "Fixed")
+                ) {
+                    let handle = self.cast(builder, self.value(*value)?, types::I64)?;
+                    let _ = self.call_host(
+                        builder,
+                        self.host.memory.allocator_close,
+                        &[handle],
+                    )?;
                 }
                 instruction
                     .result
@@ -4442,6 +4484,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         value: Value,
         packed_optional: bool,
     ) -> Result<Value, String> {
+        if is_allocator_view_type(ty) {
+            let view = self.cast(builder, value, types::I64)?;
+            let value = self
+                .call_host(builder, self.host.memory.allocator_view_read, &[view])?
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR allocator view reader returned no value".to_string())?;
+            let inner = match ty.kind() {
+                MirTypeKind::Tagged { inner, .. } => inner.as_ref(),
+                _ => unreachable!("allocator view predicate must match a tagged MIR type"),
+            };
+            return self.display_value_of_type(builder, inner, value, packed_optional);
+        }
         if matches!(
             ty.kind(),
             MirTypeKind::Apply { name, args }
@@ -5244,12 +5299,23 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 }
                 jet_foundation::MIR::MirProjection::Deref { .. } => {
                     let address = self.cast(builder, current, types::I64)?;
-                    let target = if final_projection {
-                        result_ty
+                    if is_allocator_view_type(&current_type) {
+                        self.call_host(
+                            builder,
+                            self.host.memory.allocator_view_read,
+                            &[address],
+                        )?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| "MIR allocator view reader returned no value".to_string())?
                     } else {
-                        types::I64
-                    };
-                    builder.ins().load(target, MemFlags::new(), address, 0)
+                        let target = if final_projection {
+                            result_ty
+                        } else {
+                            types::I64
+                        };
+                        builder.ins().load(target, MemFlags::new(), address, 0)
+                    }
                 }
             };
         }
@@ -5260,6 +5326,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
         &mut self,
         builder: &mut FunctionBuilder<'_>,
         id: jet_foundation::MIR::MirPlaceId,
+        value_id: MirValueId,
         value: Value,
     ) -> Result<(), String> {
         let place = self
@@ -5270,6 +5337,19 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
             .cloned()
             .ok_or_else(|| format!("MIR place {:?} is missing", id))?;
         if place.projections.is_empty() {
+            let base_type = self.place_base_type(&place)?;
+            let value_type = self.mir_value_type(value_id)?;
+            if is_allocator_view_type(&base_type) && !is_allocator_view_type(&value_type) {
+                let current = self.place_base_value(builder, &place)?;
+                let view = self.cast(builder, current, types::I64)?;
+                let value = self.cast(builder, value, types::I64)?;
+                let _ = self.call_host(
+                    builder,
+                    self.host.memory.allocator_view_write,
+                    &[view, value],
+                )?;
+                return Ok(());
+            }
             return self.write_place_base(builder, &place, value);
         }
         let persistent_root = matches!(&place.base, MirPlaceBase::Static(_))
@@ -5313,8 +5393,17 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     }
                     jet_foundation::MIR::MirProjection::Deref { .. } => {
                         let address = self.cast(builder, current, types::I64)?;
-                        let value = self.cast(builder, value, result_ty)?;
-                        builder.ins().store(MemFlags::new(), value, address, 0);
+                        let value = self.cast(builder, value, types::I64)?;
+                        if is_allocator_view_type(&current_type) {
+                            let _ = self.call_host(
+                                builder,
+                                self.host.memory.allocator_view_write,
+                                &[address, value],
+                            )?;
+                        } else {
+                            let value = self.cast(builder, value, result_ty)?;
+                            builder.ins().store(MemFlags::new(), value, address, 0);
+                        }
                     }
                 }
                 if let Some(root) = persistent_root.as_ref() {
@@ -12093,7 +12182,52 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 receiver,
                 receiver_place,
                 args,
+                ..
             } => {
+                let list_min_max = self
+                    .program
+                    .prelude_calls
+                    .iter()
+                    .find(|row| row.id == *call)
+                    .is_some_and(|row| {
+                        row.family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
+                            && row.module == "core.list"
+                            && row.member == "min_max"
+                    });
+                if list_min_max {
+                    if !args.is_empty() {
+                        return Err("MIR List.min_max expects no value arguments".to_string());
+                    }
+                    let receiver_ty = self.mir_value_type(*receiver)?;
+                    let element = sequence_element_type(&receiver_ty)
+                        .and_then(comparison_element_kind)
+                        .ok_or_else(|| {
+                            format!(
+                                "MIR List.min_max receiver `{}` has no supported element carrier",
+                                receiver_ty.display_name()
+                            )
+                        })?;
+                    let host = match element {
+                        ComparisonElementKind::Integer => self.host.coll.list_min_max,
+                        ComparisonElementKind::Float => self.host.coll.list_min_max_f64,
+                        ComparisonElementKind::String => self.host.coll.list_min_max_str,
+                        ComparisonElementKind::Date => {
+                            return Err(
+                                "MIR List.min_max has no resident Date ordering host".to_string()
+                            );
+                        }
+                    };
+                    let receiver =
+                        self.collection_receiver_value(builder, *receiver, *receiver_place)?;
+                    let value = self
+                        .call_host(builder, host, &[receiver])?
+                        .first()
+                        .copied()
+                        .ok_or_else(|| "MIR List.min_max host returned no value".to_string())?;
+                    return expected
+                        .map_or(Ok(value), |ty| self.cast(builder, value, ty))
+                        .map(Some);
+                }
                 if let Some(value) =
                     self.iterator_builtin_call(builder, *call, *receiver, args, expected)?
                 {
@@ -12191,6 +12325,68 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 frame_schedule,
                 frame_schedule_derivation,
             } => {
+                let allocator_method = self
+                    .program
+                    .prelude_calls
+                    .iter()
+                    .find(|row| row.id == *call)
+                    .and_then(|row| {
+                        if row.module != "core.handle" {
+                            return None;
+                        }
+                        let (owner, method) = row.member.split_once('.')?;
+                        matches!(owner, "Arena" | "Bump" | "Pool" | "Fixed")
+                            .then_some(method.to_owned())
+                    });
+                if let Some(method) = allocator_method {
+                    let receiver = self.handle_method_value(builder, *receiver, true)?;
+                    match method.as_str() {
+                        "alloc" | "try_alloc" => {
+                            let [value_id] = args.as_slice() else {
+                                return Err(format!(
+                                    "MIR allocator `{method}` expects one checked value"
+                                ));
+                            };
+                            let value = self.value(*value_id)?;
+                            let requested = builder.ins().iconst(
+                                types::I64,
+                                allocator_requested_bytes(&self.mir_value_type(*value_id)?),
+                            );
+                            let host = if method == "alloc" {
+                                self.host.memory.allocator_alloc
+                            } else {
+                                self.host.memory.allocator_try_alloc
+                            };
+                            let result = self
+                                .call_host(builder, host, &[receiver, value, requested])?
+                                .first()
+                                .copied()
+                                .ok_or_else(|| {
+                                    format!("MIR allocator `{method}` host returned no value")
+                                })?;
+                            return expected
+                                .map_or(Ok(result), |ty| self.cast(builder, result, ty))
+                                .map(Some);
+                        }
+                        "reset" => {
+                            if !args.is_empty() {
+                                return Err(
+                                    "MIR allocator reset received unexpected arguments".to_string()
+                                );
+                            }
+                            let _ = self.call_host(
+                                builder,
+                                self.host.memory.allocator_reset,
+                                &[receiver],
+                            )?;
+                            let unit = builder.ins().iconst(types::I64, 0);
+                            return expected
+                                .map_or(Ok(unit), |ty| self.cast(builder, unit, ty))
+                                .map(Some);
+                        }
+                        _ => {}
+                    }
+                }
                 let callback_event_stop = self
                     .program
                     .prelude_calls

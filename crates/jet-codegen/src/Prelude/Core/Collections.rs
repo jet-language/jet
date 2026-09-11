@@ -2521,6 +2521,34 @@ pub(crate) fn jet_list_min_max<T: Ord + Clone, R>(
         _ => Err(JetAbsent),
     }
 }
+fn jet_collection_float_sort_cmp(left: f64, right: f64) -> std::cmp::Ordering {
+    match left.partial_cmp(&right) {
+        Some(ordering) => ordering,
+        None if left.is_nan() && right.is_nan() => std::cmp::Ordering::Equal,
+        None if left.is_nan() => std::cmp::Ordering::Greater,
+        None => std::cmp::Ordering::Less,
+    }
+}
+
+pub(crate) fn jet_list_min_max_float<R>(
+    xs: &[f64],
+    build: impl FnOnce(f64, f64) -> R,
+) -> JetOutcome<R, JetAbsent> {
+    let Some(&first) = xs.first() else {
+        return Err(JetAbsent);
+    };
+    let (mut min, mut max) = (first, first);
+    for &value in &xs[1..] {
+        if jet_collection_float_sort_cmp(value, min) == std::cmp::Ordering::Less {
+            min = value;
+        }
+        if jet_collection_float_sort_cmp(value, max) != std::cmp::Ordering::Less {
+            max = value;
+        }
+    }
+    Ok(build(min, max))
+}
+
 pub(crate) fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(
     xs: &[T],
     mut f: F,

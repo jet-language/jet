@@ -3766,6 +3766,7 @@ fn js_semantic_expression(
             receiver,
             receiver_place,
             args,
+            ..
         } => {
             let receiver = match receiver_place {
                 Some(place) => {

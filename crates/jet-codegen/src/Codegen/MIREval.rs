@@ -45,9 +45,10 @@ use jet_foundation::MIR::{
     MirHardwareSetup, MirHarnessId, MirIndexKind, MirInstruction, MirJobId, MirLinkUnitId,
     MirLoopSourceKind, MirOperation, MirOwnershipMode, MirPanicContext, MirPanicLoc, MirPlaceBase,
     MirPlaceId, MirPreludeCall, MirPreludeCallId, MirProjection, MirRequireKind, MirScopeId,
-    MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSourceFileId, MirStringPart, MirTaskGroupKind,
-    MirTerminator, MirTestScopeMember, MirTextHoleKind, MirTextPatternPart, MirTraitMethodId, MirTraitRef, MirType,
-    MirTypeDefKind, MirTypeKind, MirUnaryOp, MirValueId, MirVariantPayload,
+    MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSourceFileId, MirStringPart, MirTagMarker,
+    MirInternalTag, MirTaskGroupKind, MirTerminator, MirTestScopeMember, MirTextHoleKind,
+    MirTextPatternPart, MirTraitMethodId, MirTraitRef, MirType, MirTypeDefKind, MirTypeKind,
+    MirUnaryOp, MirValueId, MirVariantPayload,
 };
 #[allow(dead_code, unused_imports)]
 mod mir_ui_kernel {
@@ -8472,6 +8473,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 receiver,
                 receiver_place,
                 args,
+                ..
             } => {
                 if let Some(value) = self.eval_atomic_builtin(
                     frame_index,
@@ -8860,6 +8862,32 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     }
                     let flatten_result = route.symbol.name() == "jet_std::jet_task_join_result";
                     return self.eval_task_join(receiver_value, flatten_result, span);
+                }
+                if route.family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+                    && route.module == "core.handle"
+                    && matches!(
+                        route.member.as_str(),
+                        "Arena.alloc"
+                            | "Arena.try_alloc"
+                            | "Arena.reset"
+                            | "Bump.alloc"
+                            | "Bump.try_alloc"
+                            | "Bump.reset"
+                            | "Pool.alloc"
+                            | "Pool.try_alloc"
+                            | "Pool.reset"
+                            | "Fixed.alloc"
+                            | "Fixed.try_alloc"
+                            | "Fixed.reset"
+                    )
+                {
+                    let mut values = vec![receiver_value];
+                    values.extend(
+                        args.iter()
+                            .map(|value| self.value(frame_index, *value, span))
+                            .collect::<Result<Vec<_>, Diagnostic>>()?,
+                    );
+                    return self.eval_allocator_runtime(&route.member, values, result_ty, span);
                 }
                 if let RuntimeValue::Ambient(value) = &receiver_value {
                     let values = args
@@ -11255,6 +11283,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let value = self.materialize_runtime(value, span)?;
         let value = match value {
             RuntimeValue::Data(value) => value,
+            RuntimeValue::Ambient(owner)
+                if matches!(
+                    ty.kind(),
+                    MirTypeKind::Tagged {
+                        marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+                        ..
+                    }
+                ) =>
+            {
+                runtime_to_data(RuntimeValue::Ambient(owner), span)?
+            }
             RuntimeValue::Aggregate(fields) => {
                 let fields = fields
                     .into_iter()
@@ -11303,6 +11342,10 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             MirTypeKind::Tuple(fields) => fields
                 .iter()
                 .any(|(_, field)| self.native_print_shape(field, substitutions)),
+            MirTypeKind::Tagged {
+                marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+                ..
+            } => true,
             MirTypeKind::InlineRange { base, .. }
             | MirTypeKind::Tagged { inner: base, .. }
             | MirTypeKind::Quantity { base, .. } => self.native_print_shape(base, substitutions),
@@ -12494,13 +12537,20 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
         let (receiver, values) = args
             .split_first()
             .ok_or_else(|| mir_error_at("MIR allocator method has no receiver", span))?;
+        let receiver = match receiver {
+            RuntimeValue::Address(address) => {
+                require_address_access(address, MirAccess::Read, span)?;
+                self.read_place(address.frame, address.place, span)?
+            }
+            receiver => receiver.clone(),
+        };
         let RuntimeValue::Ambient(receiver) = receiver else {
             return Err(mir_error_at(
                 "MIR allocator receiver has no native owner",
                 span,
             ));
         };
-        let owner = mir_runtime_owner::<MirAllocatorOwner>(receiver)
+        let owner = mir_runtime_owner::<MirAllocatorOwner>(&receiver)
             .ok_or_else(|| mir_error_at("MIR allocator receiver has no native owner", span))?;
         let mut state = owner
             .state
@@ -12829,7 +12879,8 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?;
         if family == jet_foundation::MIR::MirPreludeFamily::BuiltinMethod
-            && module == "core.builtin"
+            && (module == "core.builtin"
+                || (module == "core.list" && member_name == "min_max"))
         {
             let static_method = match member_name.as_str() {
                 "int_parse" => Some(("Int", "parse")),
@@ -12864,6 +12915,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 "iter_average_int" | "iter_average_float" => Some("average"),
                 "iter_compare" => Some("compare"),
                 "iter_split" => Some("split"),
+                "min_max" => Some("min_max"),
                 "map_min" => Some("min"),
                 "map_max" => Some("max"),
                 "map_top_n" => Some("top_n"),

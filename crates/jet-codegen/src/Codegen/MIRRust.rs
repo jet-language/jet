@@ -36,6 +36,18 @@ fn quote_rust_string(value: &str) -> String {
     crate::Codegen::escape_rust_str(value)
 }
 
+fn allocator_view_inner(ty: &MirType) -> Option<&MirType> {
+    match ty.kind() {
+        MirTypeKind::Tagged {
+            marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+            inner,
+        } => Some(inner),
+        _ => None,
+    }
+}
+
+
+
 #[derive(Debug)]
 enum ModelDimensionFact {
     Static(u64),
@@ -1604,6 +1616,7 @@ impl<'a> RustEmitter<'a> {
         if crate::Codegen::core_rust_type_name(name).is_some()
             || crate::Codegen::root_prelude_rust_type_name(name).is_some()
             || crate::Codegen::compute_handle_rust_type(name).is_some()
+            || crate::Codegen::alloc_handle_rust_type(name).is_some()
         {
             return self.rust_apply_type(&MirNominalRef::from_name(name), &[]);
         }
@@ -2257,9 +2270,14 @@ impl<'a> RustEmitter<'a> {
             MirTypeKind::IntN { signed, bits } => {
                 format!("{}{}", if *signed { 'i' } else { 'u' }, bits)
             }
+            MirTypeKind::Tagged {
+                marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+                inner,
+            } => format!("&mut {}", self.rust_type(inner)),
             MirTypeKind::InlineRange { base, .. }
             | MirTypeKind::Tagged { inner: base, .. }
             | MirTypeKind::Quantity { base, .. } => self.rust_type(base),
+
             MirTypeKind::Float32 => "f32".to_string(),
             MirTypeKind::Union(_) => ty
                 .identity
@@ -2511,6 +2529,9 @@ impl<'a> RustEmitter<'a> {
                 self.config.root_prefix,
                 self.rust_type(&args[0])
             );
+        }
+        if let Some(allocator) = crate::Codegen::alloc_handle_rust_type(&name.name) {
+            return format!("{}{}", self.config.root_prefix, allocator);
         }
         let head = self.nominal_name(&name.name);
         if args.is_empty() {
@@ -10589,7 +10610,7 @@ impl<'a> RustEmitter<'a> {
             let _ = writeln!(
                 out,
                 "{pad}{};",
-                self.write_place_expr(function, place, "__jet_vec_result")
+                self.write_place_expr(function, place, None, "__jet_vec_result")
             );
         }
         self.set_pc(fact.loop_header, exit, &mut out, indent);
@@ -11774,6 +11795,16 @@ impl<'a> RustEmitter<'a> {
     }
 
     fn value_transfer(&self, value: MirValueId) -> String {
+        if self.history_binding(value).is_none()
+            && self
+                .history_current_function
+                .get()
+                .is_some_and(|id| {
+                    allocator_view_inner(self.value_type(self.function_row(id), value)).is_some()
+                })
+        {
+            return self.value_move(value);
+        }
         match self.value_ownership(value).mode {
             MirOwnershipMode::Owned | MirOwnershipMode::Move => self.value_move(value),
             MirOwnershipMode::Copy
@@ -11794,6 +11825,15 @@ impl<'a> RustEmitter<'a> {
     fn local_storage(&self, _function: &MirFunction, local: MirLocalId) -> String {
         local_slot(local)
     }
+
+    fn local_allocator_view(&self, function: &MirFunction, local: MirLocalId) -> bool {
+        function
+            .locals
+            .iter()
+            .find(|candidate| candidate.id == local)
+            .is_some_and(|candidate| allocator_view_inner(&candidate.ty).is_some())
+    }
+
 
     fn local_direct_move_storage(&self, function: &MirFunction, local: MirLocalId) -> bool {
         // A field move needs an owning root so Rust can retain the unmoved
@@ -11881,7 +11921,13 @@ impl<'a> RustEmitter<'a> {
             }
         }
     }
-    fn write_place_expr(&self, function: &MirFunction, id: MirPlaceId, value: &str) -> String {
+    fn write_place_expr(
+        &self,
+        function: &MirFunction,
+        id: MirPlaceId,
+        value_id: Option<MirValueId>,
+        value: &str,
+    ) -> String {
         let place = function
             .places
             .iter()
@@ -11896,6 +11942,20 @@ impl<'a> RustEmitter<'a> {
                         "{} = Some({}jet_mem::JetUninitFixed::from_array({value}))",
                         self.local_storage(function, *local),
                         self.config.root_prefix,
+                    );
+                }
+                MirPlaceBase::Local(local)
+                    if self.local_allocator_view(function, *local) =>
+                {
+                    if value_id
+                        .and_then(|value| allocator_view_inner(self.value_type(function, value)))
+                        .is_some()
+                    {
+                        return format!("{} = Some({value})", self.local_storage(function, *local));
+                    }
+                    return format!(
+                        "**{}.as_mut().expect(\"MIR local\") = {value}",
+                        self.local_storage(function, *local)
                     );
                 }
                 MirPlaceBase::Local(local) if !self.local_direct_move_storage(function, *local) => {
@@ -11917,6 +11977,7 @@ impl<'a> RustEmitter<'a> {
                 MirPlaceBase::Local(_) | MirPlaceBase::Parameter(_) | MirPlaceBase::Capture(_) => {}
             }
         }
+
         if let Some(MirProjection::Index {
             index,
             write_call,
@@ -12072,11 +12133,12 @@ impl<'a> RustEmitter<'a> {
                 );
             }
             MirOperation::WritePlace { place, value } => {
-                let value = self.value_transfer(*value);
+                let value_id = *value;
+                let value = self.value_transfer(value_id);
                 let _ = writeln!(
                     out,
                     "{pad}{};",
-                    self.write_place_expr(function, *place, &value)
+                    self.write_place_expr(function, *place, Some(value_id), &value)
                 );
                 if let Some(update) = self.persist_value_update(function, *place) {
                     let _ = writeln!(out, "{pad}{update};");
@@ -14750,6 +14812,10 @@ impl<'a> RustEmitter<'a> {
 
     fn native_int_result(&self, value: &str, ty: &MirType) -> Option<String> {
         match ty.kind() {
+            MirTypeKind::Tagged {
+                marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
+                ..
+            } => None,
             MirTypeKind::Int => Some(format!(
                 "{}jet_std::jet_int_owned_from_native_result({value})",
                 self.config.root_prefix,
@@ -17836,6 +17902,7 @@ impl<'a> RustEmitter<'a> {
                 receiver,
                 receiver_place,
                 args,
+                ..
             } => {
                 let emitted = self.prelude_values_with_receiver(
                     function,
@@ -18751,9 +18818,18 @@ impl<'a> RustEmitter<'a> {
             && row.member == "min_max"
         {
             assert!(args.is_empty(), "MIR List.min_max route has unexpected arguments");
+            let symbol = if self
+                .value_type(function, receiver_value)
+                .list_element()
+                .is_some_and(|element| matches!(element.kind(), MirTypeKind::Float))
+            {
+                format!("{}jet_list_min_max_float", self.config.root_prefix)
+            } else {
+                self.prelude_symbol(call)
+            };
             return format!(
                 "{}({receiver}, {})",
-                self.prelude_symbol(call),
+                symbol,
                 self.list_aggregate_builder(function, receiver_value, result),
             );
         }
@@ -18980,6 +19056,12 @@ impl<'a> RustEmitter<'a> {
                             self.local_storage(function, *local)
                         );
                     }
+                    if self.local_allocator_view(function, *local) {
+                        return format!(
+                            "&mut **{}.as_mut().expect(\"MIR local\")",
+                            self.local_storage(function, *local)
+                        );
+                    }
                     if self.local_direct_move_storage(function, *local) {
                         return format!("{}.clone()", self.local_storage(function, *local));
                     }
@@ -18995,6 +19077,7 @@ impl<'a> RustEmitter<'a> {
                 MirPlaceBase::Parameter(_) | MirPlaceBase::Capture(_) => {}
             }
         }
+
         let value = self.place_base(function, &place.base, false, &place.projections);
         if matches!(
             place.projections.last(),
@@ -19197,6 +19280,12 @@ impl<'a> RustEmitter<'a> {
             .unwrap_or_else(|| panic!("MIR place ID {:?} has no row", id));
         if place.projections.is_empty() {
             match &place.base {
+                MirPlaceBase::Local(local) if self.local_allocator_view(function, *local) => {
+                    return format!(
+                        "**{}.as_mut().expect(\"MIR local\")",
+                        self.local_storage(function, *local)
+                    );
+                }
                 MirPlaceBase::Local(local) => return self.local_storage(function, *local),
                 MirPlaceBase::Temporary(value) => return value_slot(*value),
                 MirPlaceBase::Parameter(_) | MirPlaceBase::Capture(_) => {
@@ -19209,6 +19298,7 @@ impl<'a> RustEmitter<'a> {
         }
         self.place_base(function, &place.base, true, &place.projections)
     }
+
     fn place_base(
         &self,
         function: &MirFunction,
@@ -19230,8 +19320,19 @@ impl<'a> RustEmitter<'a> {
                             self.local_storage(function, *local)
                         )
                     }
-                } else
-                if self.local_direct_move_storage(function, *local) {
+                } else if self.local_allocator_view(function, *local) {
+                    if mutable {
+                        format!(
+                            "**{}.as_mut().expect(\"MIR local\")",
+                            self.local_storage(function, *local)
+                        )
+                    } else {
+                        format!(
+                            "**{}.as_ref().expect(\"MIR local\")",
+                            self.local_storage(function, *local)
+                        )
+                    }
+                } else if self.local_direct_move_storage(function, *local) {
                     self.local_storage(function, *local)
                 } else if mutable {
                     format!(
@@ -19261,6 +19362,7 @@ impl<'a> RustEmitter<'a> {
                 format!("({}{}).get()", self.config.root_prefix, mangle_path(name))
             }
         };
+
         for projection in projections {
             match projection {
                 MirProjection::Field { field, .. } => {
@@ -19573,6 +19675,16 @@ impl<'a> RustEmitter<'a> {
                 &base,
             );
         }
+        if self
+            .history_current_function
+            .get()
+            .is_some_and(|id| {
+                allocator_view_inner(self.value_type(self.function_row(id), value)).is_some()
+            })
+        {
+            return format!("{}.take().expect(\"MIR value\")", value_slot(value));
+        }
+
         if self
             .history_current_function
             .get()
