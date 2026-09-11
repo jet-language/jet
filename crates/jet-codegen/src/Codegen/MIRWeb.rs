@@ -7,7 +7,7 @@
 use jet_foundation::SHA256::sha256_hex;
 use jet_foundation::Layout::TargetLayout;
 use jet_foundation::MIR::{
-    MirAllocatorKind, MirAccess, MirArtifactKind, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirBinaryDispatch,
+    MirAccess, MirArtifactKind, MirArtifactPlan, MirArtifactTarget, MirBasicBlock, MirBinaryDispatch,
     MirBinaryOp, MirBinaryPatternPart, MirCallee, MirCaptureOperand, MirConstant, MirConstKey,
     MirConstReport, MirCoreClosureKind, MirEntrySpec, MirFunction, MirFunctionForm, MirFunctionKind, MirGcEditKind,
     MirConversion, MirJob, MirLayoutCompareOp, MirOperation, MirPlaceBase, MirPreludeAbi, MirPreludeCallId,

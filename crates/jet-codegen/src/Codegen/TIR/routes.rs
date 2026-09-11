@@ -15,7 +15,7 @@ use crate::AST::{BinOp, Type};
 use jet_foundation::Diagnostics::Span;
 use jet_foundation::Effects::Effect;
 use jet_foundation::MIR::{
-    MirAccess, MirAllocatorKind, MirAuthorityDecision, MirCallSignature, MirCoreClosureKind,
+    MirAccess, MirAuthorityDecision, MirCallSignature, MirCoreClosureKind,
     MirIndexKind, MirLayoutCompareOp, MirPreludeAbi, MirPreludeFamily, MirSymbol,
 };
 use jet_foundation::UnitRoundingMode;
