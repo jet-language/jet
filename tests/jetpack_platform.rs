@@ -65,9 +65,14 @@ fn platform_tier_audit_ci_has_native_lane_scaffold() {
         workflow.contains("cargo test --test jetpack_platform"),
         "platform lanes must run the focused U25 audit test"
     );
+    assert!(
+        workflow.contains("platform_tier_gate_accepts_data_only_output_without_executable_service"),
+        "non-Linux lanes must run the data-only lease proof"
+    );
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
     let root = Scratch::new("platform-gate-root");
     let fixtures = Scratch::new("platform-gate-fixtures");
@@ -127,7 +132,71 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
     );
 }
 
+#[cfg(not(target_os = "linux"))]
 #[test]
+fn platform_tier_gate_accepts_data_only_output_without_executable_service() {
+    // Non-Linux hosts keep data-only packages usable while executable
+    // handoff waits for the protected native lease service. This drives the
+    // normal core-provider -> Store realization path with no `bin/`.
+    let base = Scratch::new("platform-data-only");
+    let repo = base.join("jet-pkgs");
+    let project = base.join("project");
+    let root = base.join("root");
+    let package = repo.join("lib/mathlib");
+    fs::create_dir_all(&package).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        repo.join("package.jet"),
+        "name: \"jet-pkgs\"\nversion: \"0.1.0\"\npackages: {\n    mathlib: library,\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        package.join("mathlib.jet"),
+        "module mathlib {\n    pub fn add(a: Int, b: Int) Int { return a + b }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("env.jet"),
+        format!(
+            "module dev {{\n    sources: {{ mine: {} }}\n    env.dev: Env{{\n        packages: [mine.mathlib],\n    }}\n}}\n",
+            repo.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let output = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "data-only realization failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("built 1 package(s)"),
+        "expected one data-only package, got: {stderr}"
+    );
+    assert!(
+        fs::read_dir(root.join("leases"))
+            .map(|entries| entries.flatten().next().is_none())
+            .unwrap_or(true),
+        "data-only realization left a lease container"
+    );
+    assert!(
+        fs::read_dir(root.join("lease-service/leases"))
+            .map(|entries| entries.flatten().next().is_none())
+            .unwrap_or(true),
+        "data-only realization left an authenticated lease record"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn platform_gate_reaches_store_authenticated_lease_service() {
     let root = Scratch::new("platform-authenticated-lease-root");
     let fixtures = Scratch::new("platform-authenticated-lease-fixtures");
@@ -279,6 +348,7 @@ fn platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output(
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn platform_tier_gate_exercises_native_lease_diagnostics_and_audit() {
     let root = Scratch::new("platform-diagnostics-root");
     let fixtures = Scratch::new("platform-diagnostics-fixtures");

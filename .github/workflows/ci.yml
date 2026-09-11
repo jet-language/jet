@@ -99,6 +99,14 @@ jobs:
         if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         run: cargo test --test jetpack_platform
 
+      - name: Non-Linux data-only executable lease proof (macOS)
+        if: ${{ !cancelled() && matrix.os == 'macos-latest' }}
+        run: nix develop .#full -c cargo test --test jetpack_platform platform_tier_gate_accepts_data_only_output_without_executable_service -- --nocapture
+
+      - name: Non-Linux data-only executable lease proof (Windows)
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
+        run: cargo test --test jetpack_platform platform_tier_gate_accepts_data_only_output_without_executable_service -- --nocapture
+
       - name: Native core.os facts and interrupt lifecycle (Unix)
         if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
         run: nix develop .#full -c cargo test --test os_native -- --nocapture
