@@ -9224,44 +9224,39 @@ fn lower_method_call_impl(
                         _ => unreachable!("database metadata only applies to database queries"),
                     }
                 }
-                // c109 Phase 19: an arena `alloc(v)` returns a `&mut T` view whose VALUE type is
-                // the arg's type (sema's `alloc_method_return` returns a `__alloc_infer__`
-                // sentinel, resolved from the arg). The result `ty` is rarely load-bearing (an
-                // `arena_view` binding emits no type annotation), but kept total per the design —
-                // recovered from the LOWERED arg's total `ty`, never re-inferred (I3).
-                let ty = in_own_frame(|| match &op {
-                    THandleOp::AllocAlloc => targs
-                        .first()
-                        .map(|a| a.ty.clone())
-                        .unwrap_or_else(unit_type),
-                    THandleOp::AllocTryAlloc => {
-                        resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-                            ok: Box::new(Type::allocator_view(
-                                targs
-                                    .first()
-                                    .map(|a| a.ty.clone())
-                                    .unwrap_or_else(unit_type),
-                            )),
-                            err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
-                        })
-                    }
-                    THandleOp::AllocReset => unit_type(),
-                    THandleOp::DataStreamNext => {
-                        resolved_ret.cloned().unwrap_or_else(|| Type::Result {
-                            ok: Box::new(Type::Option(Box::new(Type::Named(
-                                "Unknown".to_string(),
-                            )))),
-                            err: Box::new(Type::Named("DataError".to_string())),
-                        })
-                    }
-                    _ => handle_method_return_ty(
-                        handle,
-                        method,
-                        args.len(),
-                        &recv_t.ty,
-                        resolved_ret,
-                    ),
-                });
+                // c109 Phase 19: allocator result types are checked semantic facts.
+                // Never rebuild an allocator view/result from lowered arguments when
+                // sema did not attach the return row.
+                let ty = if matches!(
+                    &op,
+                    THandleOp::AllocAlloc | THandleOp::AllocTryAlloc | THandleOp::AllocReset
+                ) {
+                    let Some(ty) = resolved_ret.cloned() else {
+                        return invariant_method_expr(
+                            method_span,
+                            "allocator method without a resolved return type",
+                        );
+                    };
+                    ty
+                } else {
+                    in_own_frame(|| match &op {
+                        THandleOp::DataStreamNext => {
+                            resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                                ok: Box::new(Type::Option(Box::new(Type::Named(
+                                    "Unknown".to_string(),
+                                )))),
+                                err: Box::new(Type::Named("DataError".to_string())),
+                            })
+                        }
+                        _ => handle_method_return_ty(
+                            handle,
+                            method,
+                            args.len(),
+                            &recv_t.ty,
+                            resolved_ret,
+                        ),
+                    })
+                };
                 return TExpr {
                     ty,
                     kind: TExprKind::HandleMethod {

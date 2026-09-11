@@ -6650,6 +6650,17 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                             {
                                 self.close_foreign_handle(token, span)?;
                             }
+                            RuntimeValue::Ambient(value) => {
+                                if let Some(owner) =
+                                    mir_runtime_owner::<MirAllocatorOwner>(&value)
+                                {
+                                    owner
+                                        .state
+                                        .lock()
+                                        .unwrap_or_else(|error| error.into_inner())
+                                        .closed = true;
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -8147,7 +8158,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 )
                 .map(RuntimeValue::Data)
             }
-            MirSemanticOp::AllocNew { call, kind: _ } => {
+            MirSemanticOp::AllocNew { call, kind } => {
                 let row = self.prelude_row(*call, span)?;
                 if row.abi != jet_foundation::MIR::MirPreludeAbi::Value {
                     return Err(mir_error_at(
@@ -8155,11 +8166,19 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     ));
                 }
-                Ok(RuntimeValue::GcRoot(Rc::new(RefCell::new(MirGcRoot {
-                    value: MirEvalValue::Unit,
-                    edges: Vec::new(),
-                    edge_slots: BTreeMap::new(),
-                }))))
+                let expected_member = match kind {
+                    jet_foundation::MIR::MirAllocatorKind::General => "arena.new",
+                    jet_foundation::MIR::MirAllocatorKind::Fixed => "fixed.new",
+                };
+                if row.member != expected_member {
+                    return Err(mir_error_at(
+                        "MIR AllocNew route does not match its checked allocator kind",
+                        span,
+                    ));
+                }
+                Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
+                    MirAllocatorOwner::new(),
+                )))
             }
             MirSemanticOp::ColumnarRead {
                 base,
@@ -12451,12 +12470,81 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .ok_or_else(|| mir_error_at("MIR HTTP text route receiver has no body bytes", span))?;
         let result = crate::Comptime::AppLite::http_text_from_bytes(bytes, limit);
         let result = match result {
+
             Ok(text) => MirEvalValue::Present(Box::new(MirEvalValue::String(text))),
             Err(error) => MirEvalValue::FailedTold(Box::new(
                 crate::Comptime::MirBridge::ct_to_mir_value(error, span)?,
             )),
         };
         Ok(RuntimeValue::Data(result))
+    }
+    fn eval_allocator_runtime(
+        &mut self,
+        member: &str,
+        args: Vec<RuntimeValue>,
+        _result_ty: Option<&MirType>,
+        span: Span,
+    ) -> Result<RuntimeValue, Diagnostic> {
+        let Some((allocator, operation)) = member.split_once('.') else {
+            return Err(mir_error_at("MIR allocator route has no checked owner", span));
+        };
+        if !matches!(allocator, "Arena" | "Bump" | "Pool" | "Fixed") {
+            return Err(mir_error_at("MIR allocator route has an unknown owner", span));
+        }
+        let (receiver, values) = args
+            .split_first()
+            .ok_or_else(|| mir_error_at("MIR allocator method has no receiver", span))?;
+        let RuntimeValue::Ambient(receiver) = receiver else {
+            return Err(mir_error_at(
+                "MIR allocator receiver has no native owner",
+                span,
+            ));
+        };
+        let owner = mir_runtime_owner::<MirAllocatorOwner>(receiver)
+            .ok_or_else(|| mir_error_at("MIR allocator receiver has no native owner", span))?;
+        let mut state = owner
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if state.closed {
+            return Err(mir_error_at("MIR allocator is closed", span));
+        }
+        match operation {
+            "alloc" | "try_alloc" => {
+                let [value] = values else {
+                    return Err(mir_error_at(
+                        "MIR allocator allocation requires one value",
+                        span,
+                    ));
+                };
+                let value = runtime_to_data(value.clone(), span)?;
+                let view = RuntimeValue::Ambient(mir_runtime_owner_value(MirAllocatorView {
+                    state: owner.state.clone(),
+                    generation: state.generation,
+                    value,
+                }));
+                if operation == "try_alloc" {
+                    Ok(RuntimeValue::Result {
+                        ok: true,
+                        value: Box::new(view),
+                    })
+                } else {
+                    Ok(view)
+                }
+            }
+            "reset" if values.is_empty() => {
+                state.generation = state.generation.wrapping_add(1);
+                Ok(RuntimeValue::Data(MirEvalValue::Unit))
+            }
+            "reset" => Err(mir_error_at(
+                "MIR allocator reset received unexpected arguments",
+                span,
+            )),
+            _ => Err(mir_error_at(
+                "MIR allocator route has no interpreter implementation",
+                span,
+            )),
+        }
     }
 
     fn eval_prelude_runtime(
@@ -12513,6 +12601,26 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             return Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
                 MirClock::new(clock),
             )));
+        }
+        if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
+            && module == "core.handle"
+            && matches!(
+                member_name.as_str(),
+                "Arena.alloc"
+                    | "Arena.try_alloc"
+                    | "Arena.reset"
+                    | "Bump.alloc"
+                    | "Bump.try_alloc"
+                    | "Bump.reset"
+                    | "Pool.alloc"
+                    | "Pool.try_alloc"
+                    | "Pool.reset"
+                    | "Fixed.alloc"
+                    | "Fixed.try_alloc"
+                    | "Fixed.reset"
+            )
+        {
+            return self.eval_allocator_runtime(&member_name, args, result_ty, span);
         }
         if family == jet_foundation::MIR::MirPreludeFamily::HandleMethod
             && module == "core.http"
@@ -20388,6 +20496,35 @@ fn mir_atomic_compare_exchange(
         )),
     }
 }
+#[derive(Debug)]
+struct MirAllocatorState {
+    closed: bool,
+    generation: u64,
+}
+
+#[derive(Debug, Clone)]
+struct MirAllocatorOwner {
+    state: Arc<std::sync::Mutex<MirAllocatorState>>,
+}
+
+impl MirAllocatorOwner {
+    fn new() -> Self {
+        Self {
+            state: Arc::new(std::sync::Mutex::new(MirAllocatorState {
+                closed: false,
+                generation: 0,
+            })),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MirAllocatorView {
+    state: Arc<std::sync::Mutex<MirAllocatorState>>,
+    generation: u64,
+    value: MirEvalValue,
+}
+
 #[derive(Debug, Clone)]
 enum RuntimeValue {
     Moved,
@@ -20431,6 +20568,7 @@ enum RuntimeValue {
     SharedSnapshot(Rc<MirSharedSnapshot>),
     SharedTransaction(Rc<MirSharedTransaction>),
     CellGuard(Rc<MirCellGuard>),
+    #[allow(dead_code)]
     GcRoot(Rc<RefCell<MirGcRoot>>),
 }
 type MirClock = std::sync::Mutex<crate::Comptime::ClockRuntime::jet_std::Clock>;
@@ -22318,6 +22456,22 @@ fn runtime_to_data(value: RuntimeValue, span: Span) -> Result<MirEvalValue, Diag
         }
         RuntimeValue::Data(value) => Ok(value),
         RuntimeValue::Absent { element } => Ok(MirEvalValue::Absent { element }),
+        RuntimeValue::Ambient(value) => {
+            let Some(view) = mir_runtime_owner::<MirAllocatorView>(&value) else {
+                return Err(mir_error_at(
+                    "MIR value contains a private adapter handle and is not materializable",
+                    span,
+                ));
+            };
+            let state = view
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if state.closed || state.generation != view.generation {
+                return Err(mir_error_at("MIR allocator view is no longer live", span));
+            }
+            Ok(view.value.clone())
+        }
         RuntimeValue::Closure(closure) => closure
             .captures
             .iter()
@@ -22347,7 +22501,6 @@ fn runtime_to_data(value: RuntimeValue, span: Span) -> Result<MirEvalValue, Diag
         }),
         RuntimeValue::Stream(_)
         | RuntimeValue::App(_)
-        | RuntimeValue::Ambient(_)
         | RuntimeValue::Atomic(_)
         | RuntimeValue::StreamCursor(_)
         | RuntimeValue::ForeignHandle { .. }

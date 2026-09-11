@@ -1590,6 +1590,25 @@ impl<'a> Checker<'a> {
                             leaf.clone()
                         };
                         **receiver = Expr::Ident(type_name.clone(), span);
+                        // `core.mem` allocator fields are constructor sentinels, not
+                        // ordinary static types. Preserve the checked return fact on
+                        // the call node before the generic static-method fallback.
+                        if matches!(type_name.as_str(), "Arena" | "Bump" | "Pool" | "Fixed") {
+                            if let Some(ret) = alloc_method_return(
+                                &type_name,
+                                method,
+                                args,
+                                span,
+                                &mut self.diags,
+                            ) {
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                                *recv_type_out = Some(type_name.clone());
+                                *resolved_ret_out = ret.clone();
+                                return ret;
+                            }
+                        }
                         if matches!(type_name.as_str(), "SigningKey" | "X25519SecretKey")
                             && method == "generate"
                         {

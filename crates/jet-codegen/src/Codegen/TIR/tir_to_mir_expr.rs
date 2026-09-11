@@ -1099,6 +1099,21 @@ pub(super) fn lower_expr(
             )
         }
         TExprKind::Close(inner) => {
+            // Allocator close is the terminal ownership operation. Lower it to
+            // the same MIR drop edge used by native/AOT values; the interpreter
+            // adapter marks only this consumed owner closed.
+            if matches!(
+                inner.ty.name().as_str(),
+                "Arena" | "Bump" | "Pool" | "Fixed"
+            ) {
+                let value = ctx.lower_child(inner)?;
+                let kind = ctx.ownership_for(&inner.ty).drop;
+                return ctx.emit(
+                    "allocator-close",
+                    Some(expr.ty.clone()),
+                    MirOperation::Drop { value, kind },
+                );
+            }
             if inner.ty.name() == "DbLease" {
                 let receiver = ctx.lower_child(inner)?;
                 let call = ctx.intern_prelude_route(
