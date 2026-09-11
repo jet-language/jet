@@ -7720,6 +7720,9 @@ fn collect_cost_expr_with_state_and_context(
         | TExprKind::ModuleCall { args, .. } => {
             collect_cost_call_args(args, function, expr_span, loop_depth, sites);
         }
+        TExprKind::AllocNew { args, .. } => {
+            collect_cost_call_args(args, function, expr_span, loop_depth, sites);
+        }
         TExprKind::DistinctCtor { arg, .. }
         | TExprKind::RangeCheckedCtor { arg, .. }
         | TExprKind::DistinctConvert { arg, .. }
@@ -9116,8 +9119,12 @@ pub fn view_copy_owned_type(source: &Type) -> Option<Type> {
 /// allocation operation. No backend constructor spelling crosses this seam.
 #[derive(Clone)]
 pub enum TAllocCtor {
+    Arena,
+    Bump,
+    Pool,
     Fixed,
-    General,
+    /// `Fixed.over` borrows an existing mutable fixed byte buffer.
+    FixedOver,
 }
 #[derive(Clone)]
 pub enum TExprKind {
@@ -9372,18 +9379,12 @@ pub enum TExprKind {
     /// Forming a pointer is safe Rust; *using* it needs the surrounding `#Unsafe`
     /// region. Gated by E0208 in sema (raw-of only legal inside `#Unsafe`).
     RawOf(Box<TExpr>),
-    /// Allocator constructor. Ordinary families carry the rendered runtime call;
-    /// Fixed.new carries its comptime byte count to statement emission so the
-    /// backing array can be declared immediately before the handle.
+    /// Allocator constructor. The constructor family and checked arguments
+    /// remain structured until each target consumes the shared MIR fact.
     AllocNew {
         ctor: TAllocCtor,
+        args: Vec<TCallArg>,
     },
-    /// c109 Phase 4: an enum literal `Enum.Variant`, `Variant(args)`, or a
-    /// named-payload `Variant { f: v, … }`. The Rust head (`__jet_Enum::__jet_Variant`)
-    /// is resolved at lowering. `payload` carries the resolved arg form. The subset
-    /// admits only scalar/Char payload values, so no clone/box decision is ever
-    /// needed (a scalar arg is never borrowed-in-env, never a boxed edge — the AST
-    /// path's `emit_boxed_enum_arg` is a no-op for these), keeping emit decision-free.
     EnumLit {
         /// Jet enum type name. Emit spells the Rust path via `tir_enum_lit_prefix`.
         enum_type: String,

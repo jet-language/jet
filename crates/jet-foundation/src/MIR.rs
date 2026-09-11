@@ -4256,7 +4256,10 @@ pub struct MirPanicContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MirAllocatorKind {
-    General,
+    /// Legacy General was the Arena constructor; retain its canonical code.
+    Arena,
+    Bump,
+    Pool,
     Fixed,
 }
 
@@ -4456,6 +4459,7 @@ pub enum MirSemanticOp {
     AllocNew {
         call: MirPreludeCallId,
         kind: MirAllocatorKind,
+        args: Vec<MirCallArg>,
     },
     ColumnarRead {
         base: MirValueId,
@@ -4660,7 +4664,7 @@ impl MirSemanticOp {
                 guard, condition, ..
             } => vec![*guard, *condition],
             Self::ConditionNotify { condition, .. } => vec![*condition],
-            Self::AllocNew { .. } => Vec::new(),
+            Self::AllocNew { args, .. } => args.iter().map(|arg| arg.value).collect(),
             Self::ColumnarRead { base, index, .. } => vec![*base, *index],
             Self::StaticPreludeCall { args, .. } | Self::HostCall { args, .. } => {
                 args.iter().map(|arg| arg.value).collect()

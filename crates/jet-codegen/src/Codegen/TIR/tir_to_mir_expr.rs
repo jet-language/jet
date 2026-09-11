@@ -1525,19 +1525,25 @@ pub(super) fn lower_expr(
                 MirOperation::RawAddressOf { place },
             )
         }
-        TExprKind::AllocNew { ctor } => {
+        TExprKind::AllocNew { ctor, args } => {
             let kind = match ctor {
-                TAllocCtor::Fixed => MirAllocatorKind::Fixed,
-                TAllocCtor::General => MirAllocatorKind::General,
+                TAllocCtor::Arena => MirAllocatorKind::Arena,
+                TAllocCtor::Bump => MirAllocatorKind::Bump,
+                TAllocCtor::Pool => MirAllocatorKind::Pool,
+                TAllocCtor::Fixed | TAllocCtor::FixedOver => MirAllocatorKind::Fixed,
             };
-            let call = ctx.intern_prelude_route(super::alloc_new_route(
-                kind,
-                &expr.ty,
-                &carrier,
-            )?)?;
-            ctx.emit("alloc-new", 
+            let route = super::alloc_new_route(ctor, &expr.ty, args.len(), &carrier)?;
+            let mut lowered_args = lower_call_args(ctx, args)?;
+            apply_route_access(ctx, &route, &mut lowered_args)?;
+            let call = ctx.intern_prelude_route(route)?;
+            ctx.emit(
+                "alloc-new",
                 Some(expr.ty.clone()),
-                MirOperation::Semantic(MirSemanticOp::AllocNew { call, kind }),
+                MirOperation::Semantic(MirSemanticOp::AllocNew {
+                    call,
+                    kind,
+                    args: lowered_args,
+                }),
             )
         }
         TExprKind::EnumLit {

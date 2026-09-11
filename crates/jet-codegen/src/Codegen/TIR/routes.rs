@@ -3089,22 +3089,73 @@ pub(super) fn condition_notify_route(
 }
 
 pub(super) fn alloc_new_route(
-    kind: MirAllocatorKind,
+    ctor: &super::TAllocCtor,
     _result: &Type,
+    arg_count: usize,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
-    let (member, symbol) = match kind {
-        MirAllocatorKind::Fixed => ("fixed.new", "jet_mem::JetFixed::new"),
-        MirAllocatorKind::General => ("arena.new", "jet_mem::JetArena::new"),
+    let (member, symbol, arity, max_arity, borrow_mask) = match ctor {
+        super::TAllocCtor::Arena => (
+            "arena.new",
+            if arg_count == 0 {
+                "jet_mem::JetArena::new"
+            } else {
+                "jet_mem::JetArena::with_capacity"
+            },
+            0,
+            1,
+            &[false][..],
+        ),
+        super::TAllocCtor::Bump => (
+            "bump.new",
+            if arg_count == 0 {
+                "jet_mem::JetBump::new"
+            } else {
+                "jet_mem::JetBump::with_capacity"
+            },
+            0,
+            1,
+            &[false][..],
+        ),
+        super::TAllocCtor::Pool => (
+            "pool.new",
+            if arg_count == 0 {
+                "jet_mem::JetPool::new"
+            } else {
+                "jet_mem::JetPool::with_slots"
+            },
+            0,
+            1,
+            &[false][..],
+        ),
+        super::TAllocCtor::Fixed => (
+            "fixed.new",
+            "jet_mem::JetFixed::new",
+            1,
+            1,
+            &[false][..],
+        ),
+        super::TAllocCtor::FixedOver => (
+            "fixed.over",
+            "jet_mem::JetFixed::over",
+            1,
+            1,
+            &[true][..],
+        ),
     };
+    if arg_count < arity || arg_count > max_arity {
+        return Err(route_error(format!(
+            "allocator constructor route `{member}` accepts {arity}..={max_arity} argument(s), got {arg_count}"
+        )));
+    }
     prelude_route_row(
         MirPreludeFamily::StaticPrelude,
         "core.mem",
         member,
         symbol,
-        0,
-        0,
-        &[],
+        arity,
+        max_arity,
+        borrow_mask,
         None,
         carrier,
         MirPreludeAbi::Value,

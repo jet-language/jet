@@ -4839,9 +4839,12 @@ fn lower_method_call_impl(
                         "allocator constructor without a resolved return type",
                     );
                 };
-                let ctor = match alloc_type {
-                    "Fixed" => TAllocCtor::Fixed,
-                    "Arena" | "Bump" | "Pool" => TAllocCtor::General,
+                let ctor = match (alloc_type, method) {
+                    ("Arena", "new") => TAllocCtor::Arena,
+                    ("Bump", "new") => TAllocCtor::Bump,
+                    ("Pool", "new") => TAllocCtor::Pool,
+                    ("Fixed", "new") => TAllocCtor::Fixed,
+                    ("Fixed", "over") => TAllocCtor::FixedOver,
                     _ => {
                         return invariant_method_expr(
                             method_span,
@@ -4849,9 +4852,22 @@ fn lower_method_call_impl(
                         );
                     }
                 };
+                let mut ctor_args = args
+                    .iter()
+                    .map(|arg| lower_one_call_arg(arg, None, env, cx))
+                    .collect::<Vec<_>>();
+                if matches!(ctor, TAllocCtor::FixedOver) {
+                    for arg in &mut ctor_args {
+                        arg.borrow = false;
+                        arg.mut_borrow = true;
+                    }
+                }
                 TExpr {
                     ty,
-                    kind: TExprKind::AllocNew { ctor },
+                    kind: TExprKind::AllocNew {
+                        ctor,
+                        args: ctor_args,
+                    },
                 }
             });
         }

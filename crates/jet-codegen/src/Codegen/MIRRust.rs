@@ -17971,8 +17971,41 @@ impl<'a> RustEmitter<'a> {
                 condition,
                 all,
             } => self.prelude_call_args(*call, &[self.value_move(*condition), all.to_string()]),
-            MirSemanticOp::AllocNew { call, kind } => {
-                let emitted = self.prelude_call_args(*call, &[]);
+            MirSemanticOp::AllocNew { call, kind, args } => {
+                let row = self.prelude_row(*call);
+                let expected = match kind {
+                    MirAllocatorKind::Arena => matches!(
+                        row.member.as_str(),
+                        "arena.new"
+                    ),
+                    MirAllocatorKind::Bump => matches!(
+                        row.member.as_str(),
+                        "bump.new"
+                    ),
+                    MirAllocatorKind::Pool => matches!(
+                        row.member.as_str(),
+                        "pool.new"
+                    ),
+                    MirAllocatorKind::Fixed => {
+                        matches!(row.member.as_str(), "fixed.new" | "fixed.over")
+                    }
+                };
+                if !expected {
+                    panic!("MIR allocator constructor route does not match its kind");
+                }
+                self.validate_prelude_count(row, args.len());
+                let values = args
+                    .iter()
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        self.call_arg_for_function(
+                            function,
+                            arg,
+                            row.signature.borrow_mask.get(index).copied().unwrap_or(false),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let emitted = self.prelude_call_args(*call, &values);
                 format!("{emitted} /* allocator={kind:?} */")
             }
             MirSemanticOp::ColumnarRead {

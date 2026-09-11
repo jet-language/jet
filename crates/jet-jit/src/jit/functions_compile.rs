@@ -12913,11 +12913,7 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                     .map_or(Ok(unit), |ty| self.cast(builder, unit, ty))
                     .map(Some)
             }
-            MirSemanticOp::AllocNew { call, kind } => {
-                // AOT `JetArena::new()` / `JetFixed::new()`: the resident
-                // allocator table opens one arena-class allocator; the fixed
-                // form is the same allocator with its fixed flag set, which is
-                // what `allocator_new_capacity(bytes, fixed)` records.
+            MirSemanticOp::AllocNew { call, kind, args } => {
                 let row = self
                     .program
                     .prelude_calls
@@ -12927,27 +12923,57 @@ impl<'a, 'm> FunctionLower<'a, 'm> {
                 if row.abi != jet_foundation::MIR::MirPreludeAbi::Value {
                     return Err("MIR AllocNew route has unsupported Prelude ABI".to_string());
                 }
-                let allocator = match kind {
-                    jet_foundation::MIR::MirAllocatorKind::General => self
-                        .call_host(builder, self.host.memory.allocator_new, &[])?
-                        .first()
-                        .copied()
-                        .ok_or_else(|| "MIR allocator constructor returned no value".to_string())?,
-                    jet_foundation::MIR::MirAllocatorKind::Fixed => {
-                        let bytes = builder.ins().iconst(types::I64, 0);
-                        let fixed = builder.ins().iconst(types::I64, 1);
-                        self.call_host(
-                            builder,
-                            self.host.memory.allocator_new_capacity,
-                            &[bytes, fixed],
-                        )?
-                        .first()
-                        .copied()
-                        .ok_or_else(|| {
-                            "MIR fixed allocator constructor returned no value".to_string()
-                        })?
+                let expected_member = match kind {
+                    jet_foundation::MIR::MirAllocatorKind::Arena => "arena.new",
+                    jet_foundation::MIR::MirAllocatorKind::Bump => "bump.new",
+                    jet_foundation::MIR::MirAllocatorKind::Pool => "pool.new",
+                    jet_foundation::MIR::MirAllocatorKind::Fixed
+                        if row.member == "fixed.over" =>
+                    {
+                        "fixed.over"
                     }
+                    jet_foundation::MIR::MirAllocatorKind::Fixed => "fixed.new",
                 };
+                if row.member != expected_member {
+                    return Err("MIR AllocNew route does not match its checked kind".to_string());
+                }
+                let kind_code = match kind {
+                    jet_foundation::MIR::MirAllocatorKind::Arena => 0,
+                    jet_foundation::MIR::MirAllocatorKind::Bump => 1,
+                    jet_foundation::MIR::MirAllocatorKind::Pool => 2,
+                    jet_foundation::MIR::MirAllocatorKind::Fixed => 1,
+                };
+                let allocator = if matches!(
+                    kind,
+                    jet_foundation::MIR::MirAllocatorKind::Arena
+                        | jet_foundation::MIR::MirAllocatorKind::Bump
+                        | jet_foundation::MIR::MirAllocatorKind::Pool
+                ) && args.is_empty()
+                {
+                    let code = builder.ins().iconst(types::I64, kind_code);
+                    self.call_host(builder, self.host.memory.allocator_new_named, &[code])?
+                } else {
+                    let bytes = args
+                        .first()
+                        .map(|arg| self.cast(builder, self.value(arg.value)?, types::I64))
+                        .transpose()?
+                        .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+                    let capacity_kind = match kind {
+                        jet_foundation::MIR::MirAllocatorKind::Arena => 0,
+                        jet_foundation::MIR::MirAllocatorKind::Bump => 2,
+                        jet_foundation::MIR::MirAllocatorKind::Pool => 3,
+                        jet_foundation::MIR::MirAllocatorKind::Fixed => 1,
+                    };
+                    let fixed = builder.ins().iconst(types::I64, capacity_kind);
+                    self.call_host(
+                        builder,
+                        self.host.memory.allocator_new_capacity,
+                        &[bytes, fixed],
+                    )?
+                }
+                .first()
+                .copied()
+                .ok_or_else(|| "MIR allocator constructor returned no value".to_string())?;
                 expected
                     .map_or(Ok(allocator), |ty| self.cast(builder, allocator, ty))
                     .map(Some)

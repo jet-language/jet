@@ -6057,9 +6057,13 @@ fn inline_semantic(
                 all: *all,
             }
         }
-        MirSemanticOp::AllocNew { call, kind } => MirSemanticOp::AllocNew {
+        MirSemanticOp::AllocNew { call, kind, args } => MirSemanticOp::AllocNew {
             call: *call,
             kind: *kind,
+            args: args
+                .iter()
+                .map(|argument| inline_call_arg(argument, ids, substitutions))
+                .collect(),
         },
         MirSemanticOp::ColumnarRead {
             base,
@@ -11635,9 +11639,13 @@ fn encode_struct_extra(writer: &mut CanonicalWriter, extra: Option<crate::MIR::M
 }
 
 fn encode_allocator_kind(writer: &mut CanonicalWriter, kind: crate::MIR::MirAllocatorKind) {
+    // Preserve General's historical code as Arena and Fixed's code as Fixed;
+    // append the newly distinguished allocator families.
     writer.u64(match kind {
-        crate::MIR::MirAllocatorKind::General => 1,
+        crate::MIR::MirAllocatorKind::Arena => 1,
         crate::MIR::MirAllocatorKind::Fixed => 2,
+        crate::MIR::MirAllocatorKind::Bump => 3,
+        crate::MIR::MirAllocatorKind::Pool => 4,
     });
 }
 
@@ -13073,10 +13081,11 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
             writer.u64(condition.0);
             writer.bool(*all);
         }
-        MirSemanticOp::AllocNew { call, kind } => {
+        MirSemanticOp::AllocNew { call, kind, args } => {
             writer.tag("alloc-new");
             writer.u64(call.0);
             encode_allocator_kind(writer, *kind);
+            encode_call_args(writer, args);
         }
         MirSemanticOp::ColumnarRead {
             base,

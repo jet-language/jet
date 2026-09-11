@@ -8159,7 +8159,7 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                 )
                 .map(RuntimeValue::Data)
             }
-            MirSemanticOp::AllocNew { call, kind } => {
+            MirSemanticOp::AllocNew { call, kind, args } => {
                 let row = self.prelude_row(*call, span)?;
                 if row.abi != jet_foundation::MIR::MirPreludeAbi::Value {
                     return Err(mir_error_at(
@@ -8168,7 +8168,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                     ));
                 }
                 let expected_member = match kind {
-                    jet_foundation::MIR::MirAllocatorKind::General => "arena.new",
+                    jet_foundation::MIR::MirAllocatorKind::Arena => "arena.new",
+                    jet_foundation::MIR::MirAllocatorKind::Bump => "bump.new",
+                    jet_foundation::MIR::MirAllocatorKind::Pool => "pool.new",
+                    jet_foundation::MIR::MirAllocatorKind::Fixed
+                        if row.member == "fixed.over" =>
+                    {
+                        "fixed.over"
+                    }
                     jet_foundation::MIR::MirAllocatorKind::Fixed => "fixed.new",
                 };
                 if row.member != expected_member {
@@ -8177,8 +8184,14 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
                         span,
                     ));
                 }
+                // Constructor arguments are checked TIR/MIR values. Evaluate
+                // them even when this interpreter backend does not need their
+                // native backing storage, so no side effect is discarded.
+                for arg in args {
+                    let _ = self.value(frame_index, arg.value, span)?;
+                }
                 Ok(RuntimeValue::Ambient(mir_runtime_owner_value(
-                    MirAllocatorOwner::new(),
+                    MirAllocatorOwner::new(*kind),
                 )))
             }
             MirSemanticOp::ColumnarRead {
@@ -12556,6 +12569,19 @@ impl<'a, 'state, 'debug> Machine<'a, 'state, 'debug> {
             .state
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        let expected_kind = match allocator {
+            "Arena" => jet_foundation::MIR::MirAllocatorKind::Arena,
+            "Bump" => jet_foundation::MIR::MirAllocatorKind::Bump,
+            "Pool" => jet_foundation::MIR::MirAllocatorKind::Pool,
+            "Fixed" => jet_foundation::MIR::MirAllocatorKind::Fixed,
+            _ => unreachable!("allocator owner checked above"),
+        };
+        if state.kind != expected_kind {
+            return Err(mir_error_at(
+                "MIR allocator receiver kind does not match its checked owner",
+                span,
+            ));
+        }
         if state.closed {
             return Err(mir_error_at("MIR allocator is closed", span));
         }
@@ -20550,6 +20576,7 @@ fn mir_atomic_compare_exchange(
 }
 #[derive(Debug)]
 struct MirAllocatorState {
+    kind: jet_foundation::MIR::MirAllocatorKind,
     closed: bool,
     generation: u64,
 }
@@ -20560,9 +20587,10 @@ struct MirAllocatorOwner {
 }
 
 impl MirAllocatorOwner {
-    fn new() -> Self {
+    fn new(kind: jet_foundation::MIR::MirAllocatorKind) -> Self {
         Self {
             state: Arc::new(std::sync::Mutex::new(MirAllocatorState {
+                kind,
                 closed: false,
                 generation: 0,
             })),

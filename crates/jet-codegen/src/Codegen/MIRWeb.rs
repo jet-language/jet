@@ -3699,8 +3699,8 @@ fn js_semantic_expression(
         MirSemanticOp::ConditionNotify { call, condition, all } => {
             prelude(*call, vec![value(*condition), all.to_string()])?
         }
-        MirSemanticOp::AllocNew { call, kind } => {
-            prelude(*call, vec![allocator_code(*kind).to_string()])?
+        MirSemanticOp::AllocNew { call, kind: _, args } => {
+            prelude(*call, js_call_values(program, function, args, false)?)?
         }
         MirSemanticOp::ColumnarRead { base, index, column, column_index, accessor } => {
             let _ = js_field_name(program, *column)?;
@@ -7778,9 +7778,6 @@ fn layout_compare_code(op: MirLayoutCompareOp) -> u8 {
     match op { MirLayoutCompareOp::Equal => 0, MirLayoutCompareOp::LessEqual => 1, MirLayoutCompareOp::GreaterEqual => 2 }
 }
 
-fn allocator_code(kind: MirAllocatorKind) -> u8 {
-    match kind { MirAllocatorKind::General => 0, MirAllocatorKind::Fixed => 1 }
-}
 
 
 
