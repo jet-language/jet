@@ -277,19 +277,6 @@ fn lower_lambda_expecting_with_host_borrow(
         .as_ref()
         .map(|body| lowered_block_return_ty(body))
         .unwrap_or_else(|| lambda_body_ty_expecting(lam, cx, env, expected_params));
-    // HTTP handlers cross the server boundary as owned requests. Their public
-    // callback type is `Fn(HTTPRequest)`, never Jet's ordinary read-borrowed
-    // function convention.
-    let http_handler = lam.meta.escapes
-        && lam.params.len() == 1
-        && matches!(
-            lam.params[0]
-                .ty
-                .as_ref()
-                .or_else(|| expected_params.and_then(|params| params.first())),
-            Some(Type::Named(name)) if name == "HTTPRequest"
-        );
-    let by_value = by_value || http_handler;
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
     // does not leak its own bindings into the enclosing function. The lambda's return
@@ -534,11 +521,10 @@ fn lower_lambda_expecting_with_host_borrow(
         boxed: lam.meta.escapes && !direct_fallible,
         rc: lam.meta.escapes
             && !lam.meta.needs_fn_mut
-            && !http_handler
             && !by_value
             && host_borrow.is_none()
             && !direct_fallible,
-        arc: http_handler,
+        arc: false,
         captures,
         materialized_captures: lam.meta.materialized_captures.clone(),
         frozen_captures: lam.meta.frozen_captures.clone(),

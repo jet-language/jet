@@ -340,23 +340,6 @@ impl<'a> Checker<'a> {
                 let Some((cap_ty, cap_conv)) = cap else {
                     continue;
                 };
-                if self.http_handler_depth > 0 {
-                    if let Some(problem) = self.crossing_problem_for_name(
-                        name,
-                        &cap_ty,
-                        SendCrossing::HttpHandler,
-                        true,
-                    ) {
-                        self.report_unsendable(
-                            name,
-                            &cap_ty,
-                            problem,
-                            SendCrossing::HttpHandler,
-                            lam.span,
-                        );
-                        continue;
-                    }
-                }
                 if self.interrupt_callback_depth > 0 {
                     let problem = if matches!(&cap_ty, Type::Fn { .. }) {
                         let callback_safe = self
@@ -436,7 +419,11 @@ impl<'a> Checker<'a> {
                 // so it may borrow places the owner still holds. Reads are free;
                 // writes need proven-disjoint places. Detached tasks, channels,
                 // and detached tasks keep the ownership-only rules below.
-                if self.in_taskgroup_spawn && !taken && frozen_site.is_none() {
+                if self.in_taskgroup_spawn
+                    && self.http_handler_depth == 0
+                    && !taken
+                    && frozen_site.is_none()
+                {
                     let fallback = match cap_conv {
                         Some(AccessConvention::Write) => Some(ViewAccess::Write),
                         Some(AccessConvention::Read) => Some(ViewAccess::Read),
@@ -459,7 +446,8 @@ impl<'a> Checker<'a> {
                         None => {}
                     }
                 }
-                if !cap_ty.is_scalar()
+                if self.http_handler_depth == 0
+                    && !cap_ty.is_scalar()
                     && !cloneable
                     && matches!(
                         cap_conv,
@@ -488,6 +476,28 @@ impl<'a> Checker<'a> {
                         Some(lam.span),
                     ));
                     continue;
+                }
+                if self.is_task_spawn || self.http_handler_depth > 0 {
+                    let crossing = if self.http_handler_depth > 0 {
+                        SendCrossing::HttpHandler
+                    } else {
+                        SendCrossing::TaskCapture
+                    };
+                    let closure_taken = if self.http_handler_depth > 0 {
+                        true
+                    } else {
+                        taken || !cloneable
+                    };
+                    let problem = self.crossing_problem_for_name(
+                        name,
+                        &cap_ty,
+                        crossing,
+                        closure_taken,
+                    );
+                    if let Some(problem) = problem {
+                        self.report_unsendable(name, &cap_ty, problem, crossing, lam.span);
+                        continue;
+                    }
                 }
                 if self.is_view(name) {
                     let read_only = self
@@ -528,21 +538,7 @@ impl<'a> Checker<'a> {
                         }
                         continue;
                     }
-                    if self.is_task_spawn {
-                        self.report_unsendable(
-                            name,
-                            &cap_ty,
-                            SendabilityProblem {
-                                root: None,
-                                path: Vec::new(),
-                                kind: SendProblemKind::ViewBorrow,
-                            },
-                            SendCrossing::TaskCapture,
-                            lam.span,
-                        );
-                    } else {
-                        self.report_view_escape(name, "be captured by a stored lambda", lam.span);
-                    }
+                    self.report_view_escape(name, "be captured by a stored lambda", lam.span);
                     continue;
                 }
                 // D-CONC-FREEZE1=A: a bare mutable capture is rejected by
@@ -575,34 +571,6 @@ impl<'a> Checker<'a> {
                 {
                     self.report_concurrent_write(name, "task capture", lam.span);
                     continue;
-                }
-                if self.is_task_spawn {
-                    // D-MEM1 stage S5: a string view (`Binding.string_view`)
-                    // is `Type::String` at the type level — the general
-                    // sendability check above sees a plain `String` and finds
-                    // nothing wrong, unlike `View<T>` (a distinct type it
-                    // already flags). Check the NAME here instead, mirroring
-                    // the same `ViewBorrow` verdict `View<T>` gets, so a view
-                    // can't cross into a spawned task's `'static` closure any
-                    // more than a `View<T>` can (I2: this must be caught here,
-                    // never surface as a real rustc lifetime rejection).
-                    let moves_capture = taken || !cloneable;
-                    let problem = self.crossing_problem_for_name(
-                        name,
-                        &cap_ty,
-                        SendCrossing::TaskCapture,
-                        moves_capture,
-                    );
-                    if let Some(problem) = problem {
-                        self.report_unsendable(
-                            name,
-                            &cap_ty,
-                            problem,
-                            SendCrossing::TaskCapture,
-                            lam.span,
-                        );
-                        continue;
-                    }
                 }
                 if self.is_resource_type(&cap_ty) || !cloneable {
                     // D-ARROW-CONTROL1: escaping closures infer ownership.

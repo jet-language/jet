@@ -1,0 +1,8 @@
+Error [E1102]: `version` can't be captured by an HTTP handler because `Cell<Int>` isn't sendable
+  --> tests/ui/http_route_unsendable_capture.jet:6:19
+    |
+  6 |     mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
+    |                   ^
+ Why: HTTP handlers are retained by the server and invoked on request workers, so their captured state must be owned and thread-safe
+ Fix: capture only owned sendable values in the HTTP handler, or use `Shared<T>` for synchronized state
+More: jet-lang.dev/e/E1102

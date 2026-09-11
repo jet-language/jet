@@ -8569,7 +8569,26 @@ fn lower_method_call_impl(
             };
             let recv_t = lower_expr(receiver, cx, env);
             let path_t = lower_expr(&args[0].expr, cx, env);
-            let lowered_handler = lower_expr(&args[1].expr, cx, env);
+            // Sema has checked this lambda at the HTTP Send + Sync boundary;
+            // lower the route callback with owned parameters explicitly rather
+            // than inferring an HTTP representation from its syntax.
+            let lowered_handler = match route_strip_parens(&args[1].expr) {
+                Expr::Lambda(lam) => {
+                    let lowered = lower_lambda_expecting_value(lam, cx, env, &[]);
+                    TExpr {
+                        ty: Type::Fn {
+                            params: lowered.param_types.clone(),
+                            ret: lowered.ret.clone().map(Box::new),
+                            effect_bound: None,
+                            return_view_provenance: None,
+                            param_contract: None,
+                            call_metadata: None,
+                        },
+                        kind: TExprKind::Lambda(Box::new(lowered)),
+                    }
+                }
+                _ => lower_expr(&args[1].expr, cx, env),
+            };
             let handler = Box::new(TExpr {
                 ty: lowered_handler.ty.clone(),
                 kind: TExprKind::FnValue {
