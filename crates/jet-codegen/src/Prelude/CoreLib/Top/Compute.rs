@@ -7261,6 +7261,110 @@ fn jet_compute_contiguous_broadcast_layout(
     Ok(Some((offset, effective_strides)))
 }
 
+fn jet_compute_broadcast_strided_layout(
+    tensor: &JetTensor,
+    output_shape: &[i64],
+) -> Result<Option<(usize, Vec<i64>)>, JetComputeError> {
+    if tensor.shape.len() > output_shape.len() {
+        return Ok(None);
+    }
+    let (source_strides, offset) = jet_compute_view_metadata(tensor)?;
+    let rank_delta = output_shape.len() - tensor.shape.len();
+    let mut effective_strides = Vec::with_capacity(output_shape.len());
+    for axis in 0..output_shape.len() {
+        if axis < rank_delta {
+            effective_strides.push(0);
+            continue;
+        }
+        let source_axis = axis - rank_delta;
+        effective_strides.push(if tensor.shape[source_axis] == 1 {
+            0
+        } else {
+            source_strides[source_axis]
+        });
+    }
+    Ok(Some((offset, effective_strides)))
+}
+
+fn jet_compute_binary_strided(
+    op: &str,
+    a: &JetTensor,
+    b: &JetTensor,
+    shape: &[i64],
+    f32_profile: bool,
+) -> Result<Vec<f64>, JetComputeError> {
+    let (left_offset, left_strides) =
+        jet_compute_broadcast_strided_layout(a, shape)?
+            .ok_or_else(|| {
+                JetComputeError::RankMismatch(
+                    "left tensor rank exceeds broadcast output rank".to_string(),
+                )
+            })?;
+    let (right_offset, right_strides) =
+        jet_compute_broadcast_strided_layout(b, shape)?
+            .ok_or_else(|| {
+                JetComputeError::RankMismatch(
+                    "right tensor rank exceeds broadcast output rank".to_string(),
+                )
+            })?;
+    let n = jet_compute_storage_len(shape)?;
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let row_width = usize::try_from(*shape.last().ok_or_else(|| {
+        JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+    })?)
+    .map_err(|_| JetComputeError::InvalidShape("Tensor row width is too large".to_string()))?;
+    if row_width == 0 {
+        return Ok(Vec::new());
+    }
+    let row_count = n / row_width;
+    let left_column_stride = usize::try_from(
+        *left_strides.last().ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+        })?,
+    )
+    .map_err(|_| {
+        JetComputeError::InvalidShape(
+            "Tensor view strides must be non-negative and representable".to_string(),
+        )
+    })?;
+    let right_column_stride = usize::try_from(
+        *right_strides.last().ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+        })?,
+    )
+    .map_err(|_| {
+        JetComputeError::InvalidShape(
+            "Tensor view strides must be non-negative and representable".to_string(),
+        )
+    })?;
+    let mut data = Vec::with_capacity(n);
+    for row in 0..row_count {
+        let mut left_index =
+            jet_compute_contiguous_row_offset(row, shape, &left_strides, left_offset)?;
+        let mut right_index =
+            jet_compute_contiguous_row_offset(row, shape, &right_strides, right_offset)?;
+        for _ in 0..row_width {
+            let x = a.data.get(left_index).copied().ok_or_else(|| {
+                JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
+            })?;
+            let y = b.data.get(right_index).copied().ok_or_else(|| {
+                JetComputeError::OutOfBounds("tensor index is outside storage".to_string())
+            })?;
+            data.push(jet_compute_binary_element(op, x, y, f32_profile)?);
+            left_index = left_index.checked_add(left_column_stride).ok_or_else(|| {
+                JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+            })?;
+            right_index = right_index.checked_add(right_column_stride).ok_or_else(|| {
+                JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+            })?;
+        }
+    }
+    Ok(data)
+}
+
+
 fn jet_compute_contiguous_row_offset(
     row: usize,
     shape: &[i64],
@@ -7447,48 +7551,10 @@ fn jet_compute_binary(
         );
     }
     let f32_profile = a.last_placement.profile == CPU_ORACLE_F32_PROFILE;
-    let n = jet_compute_storage_len(&shape)?;
+
     let data = match jet_compute_binary_contiguous(op, a, b, &shape, f32_profile)? {
         Some(data) => data,
-        None => {
-            let mut data = Vec::with_capacity(n);
-            let rank = shape.len();
-            let left_rank_delta = rank - a.shape.len();
-            let right_rank_delta = rank - b.shape.len();
-            for flat in 0..n {
-                let mut rem = i64::try_from(flat).map_err(|_| {
-                    JetComputeError::InvalidShape("broadcast index is too large".to_string())
-                })?;
-                let mut output_coords = vec![0i64; rank];
-                for axis in (0..rank).rev() {
-                    let dim = shape[axis];
-                    output_coords[axis] = if dim == 0 { 0 } else { rem % dim };
-                    rem = if dim == 0 { 0 } else { rem / dim };
-                }
-                let left_coords = (0..a.shape.len())
-                    .map(|axis| {
-                        if a.shape[axis] == 1 {
-                            0
-                        } else {
-                            output_coords[left_rank_delta + axis]
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let right_coords = (0..b.shape.len())
-                    .map(|axis| {
-                        if b.shape[axis] == 1 {
-                            0
-                        } else {
-                            output_coords[right_rank_delta + axis]
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let x = jet_compute_get_raw(a, &left_coords)?;
-                let y = jet_compute_get_raw(b, &right_coords)?;
-                data.push(jet_compute_binary_element(op, x, y, f32_profile)?);
-            }
-            data
-        }
+        None => jet_compute_binary_strided(op, a, b, &shape, f32_profile)?,
     };
     let strides = jet_compute_row_major_strides(&shape)?;
     let mut output = jet_compute_tensor_from_shape_like(a, shape, 0.0)?;
