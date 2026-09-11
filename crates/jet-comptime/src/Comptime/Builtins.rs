@@ -846,6 +846,33 @@ mod tests {
     }
 
     #[test]
+    fn map_top_n_uses_typed_values_and_key_ties() {
+        let span = Span::new(0, 0);
+        let values = CtValue::Map(
+            [("z", 10), ("a", 10), ("b", 2)]
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        CtKey::from_value(CtValue::Str(key.into())).unwrap(),
+                        CtValue::Int(value),
+                    )
+                })
+                .collect(),
+        );
+        let row = |key: &str, value| CtValue::Struct {
+            type_name: String::new(),
+            fields: vec![
+                ("key".into(), CtValue::Str(key.into())),
+                ("value".into(), CtValue::Int(value)),
+            ],
+        };
+        assert_eq!(
+            apply_method(&values, "top_n", vec![CtValue::Int(2)], span).unwrap(),
+            CtValue::List(vec![row("a", 10), row("z", 10)]),
+        );
+    }
+
+    #[test]
     fn ordering_reverse_swaps_less_and_greater() {
         let span = Span::new(0, 0);
         for (input, expected) in [("Less", "Greater"), ("Equal", "Equal"), ("Greater", "Less")] {
@@ -928,16 +955,24 @@ fn extreme_ref<'a>(
     Ok(Some(best))
 }
 
-/// Collection sorting has a total Float comparator even though ordinary Float
-/// relational operators retain IEEE partial-order behavior for NaN.
-pub fn cmp_for_sort(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
-    if let (CtValue::Float(left), CtValue::Float(right)) = (&a, &b) {
+fn cmp_for_sort_ref(
+    a: &CtValue,
+    b: &CtValue,
+    span: Span,
+) -> Result<std::cmp::Ordering, Diagnostic> {
+    if let (CtValue::Float(left), CtValue::Float(right)) = (a, b) {
         return Ok(float_ordering::jet_float_sort_cmp(
             left.as_f64(),
             right.as_f64(),
         ));
     }
-    cmp(a, b, span)
+    cmp_ref(a, b, span)
+}
+
+/// Collection sorting has a total Float comparator even though ordinary Float
+/// relational operators retain IEEE partial-order behavior for NaN.
+pub fn cmp_for_sort(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
+    cmp_for_sort_ref(&a, &b, span)
 }
 
 /// c97/D-STRPARSE1: static method dispatch for built-in types (`Int.parse`,
@@ -2402,14 +2437,14 @@ pub fn apply_method(
             }
             let mut entries = m.iter().collect::<Vec<_>>();
             if let Some((_, first_value)) = entries.first() {
-                cmp_ref(first_value, first_value, span)?;
+                cmp_for_sort_ref(first_value, first_value, span)?;
                 for (_, value) in entries.iter().skip(1) {
-                    cmp_ref(first_value, value, span)?;
+                    cmp_for_sort_ref(first_value, value, span)?;
                 }
             }
             let mut sort_error = None;
             entries.sort_by(|(left_key, left_value), (right_key, right_value)| {
-                match cmp_ref(right_value, left_value, span) {
+                match cmp_for_sort_ref(right_value, left_value, span) {
                     Ok(order) => order.then_with(|| left_key.cmp(right_key)),
                     Err(error) => {
                         sort_error.get_or_insert(error);
