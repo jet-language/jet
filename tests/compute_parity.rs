@@ -6,7 +6,7 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_tiers_agree, build_and_run, have_rustc, jit_run_traced, run_default_multi,
+    assert_tiers_agree, build_and_run, compile_source, have_rustc, jit_run_traced, run_default_multi,
 };
 
 const SOURCE: &str = r#"
@@ -92,6 +92,42 @@ fn compute_cpu_oracle_default_run_matches_aot_meaning() {
     assert_eq!(
         stdout,
         "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nmse_profile:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"
+    );
+}
+
+#[test]
+fn compute_set_requires_mutable_binding_before_codegen() {
+    let immutable = include_str!("ui/compute_set_immutable.jet");
+    let diagnostics = compile_source("compute_set_immutable", immutable)
+        .expect_err("an immutable tensor passed to compute.set must be rejected");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0111")
+        .unwrap_or_else(|| panic!("missing E0111: {diagnostics:?}"));
+    assert_eq!(
+        diagnostic.what,
+        "`tensor` was made with `::`, so it can't be changed"
+    );
+    assert_eq!(
+        diagnostic.why,
+        "`compute.set` will change this value, so it must be mutable (`:=`)"
+    );
+    assert_eq!(diagnostic.fix, "Declare it with `tensor := ...`");
+    assert!(diagnostic.span.is_some(), "{diagnostic:?}");
+
+    let mutable = r#"
+use core.compute as compute
+
+fn run() {
+    tensor := compute.zeros([2, 2]) ?? panic("zeros")
+    compute.set(&tensor, [0, 1], 3.0) ?? panic("set")
+    print("values:{compute.to_list(tensor)}")
+}
+"#;
+    assert_tiers_agree(
+        "compute_set_mutable",
+        mutable,
+        "values:[0.0, 3.0, 0.0, 0.0]\n",
     );
 }
 
